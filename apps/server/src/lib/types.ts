@@ -42,6 +42,7 @@ export interface StoredSessionSummary extends SessionSummary {
 
 export interface CleanupOptions {
   ttlMs: number;
+  diskTtlMs: number;
   now?: number;
 }
 
@@ -50,6 +51,7 @@ export interface ServerEnv {
   dataDir: string;
   cleanupIntervalMs: number;
   sessionTtlMs: number;
+  diskTtlMs: number;
   allowedOrigins: string[];
 }
 

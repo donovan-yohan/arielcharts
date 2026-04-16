@@ -161,6 +161,7 @@ describe('SessionWebSocketServer', () => {
 
     const removed = await app.manager.cleanupExpiredSessions({
       ttlMs: 0,
+      diskTtlMs: Infinity,
       now: Date.now() + 1,
     });
     expect(removed).toEqual([sessionId]);

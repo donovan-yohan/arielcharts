@@ -38,6 +38,10 @@ export class SessionStore {
     return records.sort((left, right) => right.updatedAt - left.updatedAt);
   }
 
+  async delete(sessionId: string): Promise<void> {
+    await this.db.del(this.key(sessionId));
+  }
+
   async close(): Promise<void> {
     await this.db.close();
   }

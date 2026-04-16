@@ -64,6 +64,7 @@ describe('SessionManager cleanup and persistence', () => {
     const baseline = session.lastAccessedAt;
     const removed = await manager.cleanupExpiredSessions({
       ttlMs: 10,
+      diskTtlMs: Infinity,
       now: baseline + 11,
     });
 
@@ -82,6 +83,7 @@ describe('SessionManager cleanup and persistence', () => {
 
     const removed = await manager.cleanupExpiredSessions({
       ttlMs: 10,
+      diskTtlMs: Infinity,
       now: session.lastAccessedAt + 100,
     });
 

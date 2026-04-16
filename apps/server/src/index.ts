@@ -16,7 +16,7 @@ export function createApp(env = loadServerEnv()) {
   const websocketServer = new SessionWebSocketServer(manager);
 
   const cleanupTimer = setInterval(() => {
-    void manager.cleanupExpiredSessions({ ttlMs: env.sessionTtlMs }).catch((error) => {
+    void manager.cleanupExpiredSessions({ ttlMs: env.sessionTtlMs, diskTtlMs: env.diskTtlMs }).catch((error) => {
       console.error('Failed to clean up expired sessions:', error);
     });
   }, env.cleanupIntervalMs);

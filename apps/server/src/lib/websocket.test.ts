@@ -125,6 +125,7 @@ describe('SessionWebSocketServer', () => {
       dataDir,
       cleanupIntervalMs: 60_000,
       sessionTtlMs: 60_000,
+      diskTtlMs: Infinity,
       allowedOrigins: ['http://allowed.test'],
     };
     app = createApp(env);

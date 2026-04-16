@@ -544,8 +544,8 @@ export function DiagramCanvas({
     setAnimateTransform(false);
     setViewport((current) => ({
       ...current,
-      panX: dragStateRef.current?.startPanX ?? current.panX + dx,
-      panY: dragStateRef.current?.startPanY ?? current.panY + dy,
+      panX: (dragStateRef.current?.startPanX ?? current.panX) + dx,
+      panY: (dragStateRef.current?.startPanY ?? current.panY) + dy,
     }));
   }, [hitMap, viewport.panX, viewport.panY, viewport.zoom]);
 

@@ -153,6 +153,11 @@ function getParticipantAvatarText(participant: Participant): string {
   return compact.slice(0, 2).toUpperCase() || '??';
 }
 
+function isFlowchartSyntax(text: string): boolean {
+  const trimmed = text.trimStart();
+  return trimmed.startsWith('flowchart') || trimmed.startsWith('graph');
+}
+
 function stripParticipantTabSuffix(name: string): string {
   return name.replace(/-[a-z0-9]{2}$/i, '');
 }
@@ -238,6 +243,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const addActivityRef = useRef<((action: ActivityEvent['action'], detail?: string) => void) | null>(null);
   const hitMapMeasureRef = useRef<HTMLDivElement | null>(null);
   const mutationQueueRef = useRef<MutationQueue | null>(null);
+  const renameCancelledRef = useRef(false);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
@@ -246,7 +252,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [lastValidSvg, setLastValidSvg] = useState('');
   const [renderError, setRenderError] = useState<string | null>(null);
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [shareCopyState, setShareCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [sessionIdCopyState, setSessionIdCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [promptCopyState, setPromptCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [shareUrl, setShareUrl] = useState(() => getSessionPath(sessionId));
   const [showConnectModal, setShowConnectModal] = useState(false);
@@ -477,8 +484,15 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
       try {
         await mermaid.parse(mermaidText);
-        const snapshot = parseFlowchartSnapshot(mermaidText);
         const { svg } = await mermaid.render(`arielcharts-${sessionId}-${renderId}`, mermaidText);
+        let snapshot: FlowchartSnapshot | null = null;
+        if (isFlowchartSyntax(mermaidText)) {
+          try {
+            snapshot = parseFlowchartSnapshot(mermaidText);
+          } catch {
+            // Non-flowchart or unparseable — leave snapshot null
+          }
+        }
         if (!isCancelled) {
           setLastValidSvg(svg);
           setFlowchartSnapshot(snapshot);
@@ -523,18 +537,32 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [lastValidSvg]);
 
   useEffect(() => {
-    if (copyState === 'idle') {
+    if (shareCopyState === 'idle') {
       return;
     }
 
     const timeout = window.setTimeout(() => {
-      setCopyState('idle');
+      setShareCopyState('idle');
     }, 1_500);
 
     return () => {
       window.clearTimeout(timeout);
     };
-  }, [copyState]);
+  }, [shareCopyState]);
+
+  useEffect(() => {
+    if (sessionIdCopyState === 'idle') {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setSessionIdCopyState('idle');
+    }, 1_500);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [sessionIdCopyState]);
 
   useEffect(() => {
     if (promptCopyState === 'idle') {
@@ -553,18 +581,18 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const handleCopyShareUrl = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
-      setCopyState('copied');
+      setShareCopyState('copied');
     } catch {
-      setCopyState('error');
+      setShareCopyState('error');
     }
   };
 
   const handleCopySessionId = async () => {
     try {
       await navigator.clipboard.writeText(sessionId);
-      setCopyState('copied');
+      setSessionIdCopyState('copied');
     } catch {
-      setCopyState('error');
+      setSessionIdCopyState('error');
     }
   };
 
@@ -605,10 +633,16 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const connectedAgentCount = countConnectedAgents(participants);
   const editorStatusLabel = getCompactConnectionLabel(connectionState);
   const activityStatusLabel = `${activeParticipantCount} collaborator${activeParticipantCount === 1 ? '' : 's'}`;
-  const shareButtonLabel = copyState === 'copied' ? 'copied' : copyState === 'error' ? 'copy failed' : 'share';
+  const shareButtonLabel = shareCopyState === 'copied' ? 'copied' : shareCopyState === 'error' ? 'copy failed' : 'share';
+  const sessionIdCopyLabel = sessionIdCopyState === 'copied' ? 'copied' : sessionIdCopyState === 'error' ? 'copy failed' : 'copy';
   const promptCopyLabel = promptCopyState === 'copied' ? 'copied' : promptCopyState === 'error' ? 'copy failed' : 'copy';
 
   const commitDisplayName = useCallback(() => {
+    if (renameCancelledRef.current) {
+      renameCancelledRef.current = false;
+      return;
+    }
+
     const currentIdentity = currentIdentityRef.current;
     if (!currentIdentity || !collaboration) {
       setRenamingParticipantName(null);
@@ -645,7 +679,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
               type="button"
               onClick={handleCopySessionId}
             >
-              copy
+              {sessionIdCopyLabel}
             </button>
           </div>
           {connectedAgentCount > 0 ? (
@@ -699,6 +733,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
                                 commitDisplayName();
                               }
                               if (event.key === 'Escape') {
+                                renameCancelledRef.current = true;
                                 setDisplayNameDraft(getParticipantDisplayName(participant));
                                 setRenamingParticipantName(null);
                               }
@@ -762,7 +797,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             graph={flowchartSnapshot}
             hitMap={hitMap}
             interactionMode={interactionMode}
-            isFlowchart={mermaidText.trimStart().startsWith('flowchart')}
+            isFlowchart={isFlowchartSyntax(mermaidText)}
             onAddEdge={(source, target, label, type) => mutationQueueRef.current?.addEdge(source, target, { label, type })}
             onAddNode={(label, shape) => mutationQueueRef.current?.addNode(label, { shape })}
             onChangeNodeShape={(nodeId, shape) => mutationQueueRef.current?.changeNodeShape(nodeId, shape)}
@@ -830,9 +865,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
       {showConnectModal ? (
         <div className="modal-backdrop" onClick={() => { setShowConnectModal(false); }}>
-          <div className="modal-dialog" onClick={(event) => { event.stopPropagation(); }}>
+          <div className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="connect-agent-title" onClick={(event) => { event.stopPropagation(); }}>
             <div className="modal-header">
-              <span className="modal-title">Connect your agent</span>
+              <span className="modal-title" id="connect-agent-title">Connect your agent</span>
               <button className="modal-close" type="button" onClick={() => { setShowConnectModal(false); }} aria-label="Close">
                 &times;
               </button>

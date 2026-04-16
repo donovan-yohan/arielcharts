@@ -1,0 +1,33 @@
+apps/server/src/lib/session-manager.ts
+  82a8265a6923f15f 233-243
+apps/web/src/components/diagram-canvas.tsx
+  82a8265a6923f15f 547-548
+apps/server/src/lib/websocket.test.ts
+  82a8265a6923f15f 128
+apps/server/src/lib/session-manager.test.ts
+  82a8265a6923f15f 93-122
+apps/server/src/index.test.ts
+  82a8265a6923f15f 23
+apps/web/src/components/session-workspace.tsx
+  82a8265a6923f15f 156-160,246,255-256,488-495,540-554,559,565,584,586,593,595,636-637,641-645,682,736,800,868,870
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "4cc4f12a9923bdd39ad76fb809bdaab452fd48aa",
+  "prompts": {
+    "82a8265a6923f15f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "409ba542-2a76-49e5-bdf2-9480ce07142f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Donovan Yohan",
+      "messages": [],
+      "total_additions": 93,
+      "total_deletions": 24,
+      "accepted_lines": 812,
+      "overriden_lines": 0
+    }
+  }
+}

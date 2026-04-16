@@ -4,6 +4,6 @@ export function healthResponse() {
   return {
     name: APP_NAME,
     status: 'ok' as const,
-    phase: 'scaffold' as const,
+    phase: 'server-foundation' as const,
   };
 }

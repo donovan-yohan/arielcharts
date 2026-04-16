@@ -1,0 +1,25 @@
+README.md
+  beecb793b04ae5d6 55
+apps/server/src/lib/http.ts
+  beecb793b04ae5d6 53-54,56,60,62-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "d51a18f32b8298154792b90586881b1ff60d36c1",
+  "prompts": {
+    "beecb793b04ae5d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "60427526-396c-4ef4-ba78-847e76f541ec",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Donovan Yohan",
+      "messages": [],
+      "total_additions": 11,
+      "total_deletions": 9,
+      "accepted_lines": 73,
+      "overriden_lines": 0
+    }
+  }
+}

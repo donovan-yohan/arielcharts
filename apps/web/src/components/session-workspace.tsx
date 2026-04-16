@@ -4,8 +4,7 @@ import type { ActivityEvent, AwarenessState, Participant } from '@mermaidflow/sh
 import { APP_NAME } from '@mermaidflow/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
-import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
@@ -131,19 +130,63 @@ function formatTimestamp(timestamp: number): string {
   }).format(timestamp);
 }
 
-function describeActivity(event: ActivityEvent): string {
+function getParticipantAvatarText(participant: Participant): string {
+  if (participant.type === 'agent') {
+    return 'AI';
+  }
+
+  const words = participant.name
+    .trim()
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean);
+
+  if (words.length >= 2) {
+    return `${words[0]?.[0] ?? ''}${words[1]?.[0] ?? ''}`.toUpperCase();
+  }
+
+  const compact = participant.name.replace(/[^a-zA-Z0-9]/g, '');
+  return compact.slice(0, 2).toUpperCase() || '??';
+}
+
+function getParticipantBorderStyle(type: Participant['type']): 'solid' | 'dashed' {
+  return type === 'agent' ? 'dashed' : 'solid';
+}
+
+function countConnectedAgents(participants: Participant[]): number {
+  return participants.filter((participant) => participant.type === 'agent').length;
+}
+
+function describeActivityCompact(event: ActivityEvent): string {
   switch (event.action) {
     case 'joined':
-      return event.detail ? `joined · ${event.detail}` : 'joined the session';
+      return 'joined';
     case 'left':
-      return event.detail ? `left · ${event.detail}` : 'left the session';
+      return 'left';
     case 'edited':
-      return event.detail ? `edited · ${event.detail}` : 'edited the diagram';
+      return 'edited diagram';
     case 'replaced':
-      return event.detail ? `replaced · ${event.detail}` : 'replaced the diagram';
+      return 'updated diagram';
     default:
-      return event.detail ?? event.action;
+      return event.action;
   }
+}
+
+function getCompactConnectionLabel(connectionState: ConnectionState): string {
+  switch (connectionState) {
+    case 'connected':
+      return 'synced';
+    case 'connecting':
+      return 'connecting';
+    case 'reconnecting':
+      return 'reconnecting';
+    case 'disconnected':
+      return 'offline';
+  }
+}
+
+function getActivityColor(event: ActivityEvent, participants: Participant[]): string {
+  const actorParticipant = participants.find((participant) => participant.name === event.actor.name);
+  return actorParticipant?.color ?? (event.actor.type === 'agent' ? '#3fb950' : '#58a6ff');
 }
 
 function upsertActivity(activityArray: Y.Array<ActivityEvent>, event: ActivityEvent) {
@@ -166,20 +209,20 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
-  const [identity, setIdentity] = useState<LocalIdentity | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [mermaidText, setMermaidText] = useState('');
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [lastValidSvg, setLastValidSvg] = useState('');
   const [renderError, setRenderError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [shareUrl, setShareUrl] = useState(() => getSessionPath(sessionId));
 
-  const shareUrl = useMemo(() => {
-    if (typeof window === 'undefined') {
-      return getSessionPath(sessionId);
+  useEffect(() => {
+    setShareUrl(getSessionPath(sessionId));
+
+    if (typeof window !== 'undefined') {
+      setShareUrl(new URL(getSessionPath(sessionId), window.location.origin).toString());
     }
-
-    return new URL(getSessionPath(sessionId), window.location.origin).toString();
   }, [sessionId]);
 
   useEffect(() => {
@@ -197,7 +240,6 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     const activityArray = doc.getArray<ActivityEvent>(ACTIVITY_KEY);
     const localIdentity = getOrCreateIdentity();
     currentIdentityRef.current = localIdentity;
-    setIdentity(localIdentity);
     awareness.setLocalState({ user: localIdentity });
 
     const syncText = () => {
@@ -431,133 +473,125 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   };
 
   const activeParticipantCount = participants.length;
+  const connectedAgentCount = countConnectedAgents(participants);
+  const editorStatusLabel = getCompactConnectionLabel(connectionState);
+  const activityStatusLabel = `${activeParticipantCount} collaborator${activeParticipantCount === 1 ? '' : 's'}`;
+  const shareButtonLabel = copyState === 'copied' ? 'copied' : copyState === 'error' ? 'copy failed' : 'share';
 
   return (
-    <main className="session-shell">
-      <header className="session-topbar card">
-        <div className="topbar-title-group">
-          <div>
-            <p className="eyebrow">{APP_NAME}</p>
-            <h1 data-testid="session-id-header">Session {sessionId}</h1>
+    <main className="workspace-shell">
+      <header className="workspace-topbar">
+        <div className="workspace-topbar-left">
+          <span className="workspace-logo">{APP_NAME}</span>
+          <div data-testid="share-url-control" className="workspace-session-chip">
+            <span className="workspace-session-url monospace">{shareUrl}</span>
+            <button
+              className="workspace-copy-button"
+              data-testid="copy-share-url-button"
+              type="button"
+              onClick={handleCopyShareUrl}
+            >
+              copy
+            </button>
           </div>
-          <Link className="ghost-link" href="/">
-            New session
-          </Link>
-        </div>
-
-        <div className="topbar-meta">
-          <span data-testid="connection-status-badge" className={`status-badge ${connectionState}`}>{connectionLabels[connectionState]}</span>
-          <div className="meta-chip">
-            <span className="meta-label">Active</span>
-            <strong>{activeParticipantCount}</strong>
-          </div>
-          {identity ? (
-            <div className="meta-chip">
-              <span className="presence-dot" style={{ backgroundColor: identity.color }} />
-              <strong>{identity.name}</strong>
+          {connectedAgentCount > 0 ? (
+            <div className="workspace-mcp-status" aria-label={`MCP: ${connectedAgentCount} agents connected`}>
+              <span className="workspace-mcp-dot" />
+              <span>{`MCP: ${connectedAgentCount} agent${connectedAgentCount === 1 ? '' : 's'} connected`}</span>
             </div>
           ) : null}
         </div>
-      </header>
 
-      <section className="card share-card">
-        <div>
-          <h2>Share URL</h2>
-          <p>Invite another tab or teammate to this exact collaborative session.</p>
-        </div>
-        <div className="share-row">
-          <code data-testid="share-url-control" className="share-url">{shareUrl}</code>
-          <button data-testid="copy-share-url-button" className="secondary-button" type="button" onClick={handleCopyShareUrl}>
-            {copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy link'}
+        <div className="workspace-topbar-right">
+          <div data-testid="presence-bar" className="workspace-presence-avatars" aria-label="Session presence">
+            {participants.length > 0 ? (
+              participants.map((participant, index) => (
+                <div
+                  className={`workspace-avatar workspace-avatar-${participant.type}`}
+                  key={`${participant.name}-${participant.type}`}
+                  style={{
+                    backgroundColor: participant.type === 'agent' ? '#0d1117' : participant.color,
+                    borderColor: participant.type === 'agent' ? '#3fb950' : '#0d1117',
+                    borderStyle: getParticipantBorderStyle(participant.type),
+                    zIndex: participants.length - index,
+                  }}
+                  title={participant.name}
+                >
+                  {getParticipantAvatarText(participant)}
+                </div>
+              ))
+            ) : (
+              <div className="workspace-avatar workspace-avatar-empty">--</div>
+            )}
+          </div>
+          <button className="workspace-share-button" type="button" onClick={handleCopyShareUrl}>
+            {shareButtonLabel}
           </button>
         </div>
-      </section>
+      </header>
 
-      <section data-testid="presence-bar" className="presence-strip card" aria-label="Session presence">
-        <div>
-          <h2>Presence</h2>
-          <p>{activeParticipantCount > 0 ? 'Live awareness updates from Yjs' : 'Waiting for collaborators to join.'}</p>
-        </div>
-        <div className="presence-list">
-          {participants.length > 0 ? (
-            participants.map((participant) => (
-              <div className="presence-pill" key={`${participant.name}-${participant.type}`}>
-                <span className="presence-dot" style={{ backgroundColor: participant.color }} />
-                <span>{participant.name}</span>
-                <span className="presence-type">{participant.type}</span>
-              </div>
-            ))
-          ) : (
-            <span className="empty-inline">No active collaborators yet</span>
-          )}
-        </div>
-      </section>
-
-      <section className="workspace-grid">
-        <article data-testid="editor-root" className="card panel editor-panel">
-          <div className="panel-header">
-            <div>
-              <h2>Collaborative editor</h2>
-              <p>CodeMirror 6 + Yjs keeps the canonical Mermaid text synchronized across tabs.</p>
-            </div>
-            <span className="meta-chip monospace">{mermaidText.length} chars</span>
+      <section className="workspace-main">
+        <article data-testid="editor-root" className="workspace-pane workspace-editor-pane">
+          <div className="workspace-pane-header">
+            <span>mermaid source</span>
+            <span data-testid="connection-status-badge">{editorStatusLabel}</span>
           </div>
           <div className="editor-host" ref={editorHostRef} />
         </article>
 
-        <div className="panel-stack">
-          <article data-testid="preview-root" className="card panel preview-panel">
-            <div className="panel-header">
-              <div>
-                <h2>Mermaid preview</h2>
-                <p>Renders from canonical text and preserves the last valid SVG if parsing fails.</p>
-              </div>
+        <article data-testid="preview-root" className="workspace-pane workspace-diagram-pane">
+          <div className="workspace-pane-header">
+            <span>preview</span>
+            <span>live</span>
+          </div>
+
+          {renderError ? (
+            <div data-testid="parse-error-banner" className="error-banner" role="status">
+              <strong>preview kept on last valid diagram</strong>
+              <span>{renderError}</span>
             </div>
+          ) : null}
 
-            {renderError ? (
-              <div data-testid="parse-error-banner" className="error-banner" role="status">
-                <strong>Preview kept on last valid diagram.</strong>
-                <span>{renderError}</span>
-              </div>
-            ) : null}
-
-            <div className="preview-surface">
-              {lastValidSvg ? (
-                <div dangerouslySetInnerHTML={{ __html: lastValidSvg }} />
-              ) : mermaidText.trim() ? (
-                <div className="empty-state">Rendering preview…</div>
-              ) : (
-                <div className="empty-state">Start typing Mermaid syntax to render a diagram.</div>
-              )}
-            </div>
-          </article>
-
-          <article data-testid="activity-feed" className="card panel activity-panel">
-            <div className="panel-header">
-              <div>
-                <h2>Activity feed</h2>
-                <p>Events are read directly from the shared Yjs activity array.</p>
-              </div>
-            </div>
-
-            {activity.length > 0 ? (
-              <ol className="activity-list">
-                {activity.map((event) => (
-                  <li className="activity-item" key={event.id}>
-                    <div className="activity-heading">
-                      <strong>{event.actor.name}</strong>
-                      <span className="presence-type">{event.actor.type}</span>
-                    </div>
-                    <p>{describeActivity(event)}</p>
-                    <time dateTime={new Date(event.timestamp).toISOString()}>{formatTimestamp(event.timestamp)}</time>
-                  </li>
-                ))}
-              </ol>
+          <div className="preview-surface">
+            {lastValidSvg ? (
+              <div dangerouslySetInnerHTML={{ __html: lastValidSvg }} />
+            ) : mermaidText.trim() ? (
+              <div className="empty-state">rendering preview…</div>
             ) : (
-              <div className="empty-state small">No activity yet. Join, edit, or let an agent write via MCP.</div>
+              <div className="empty-state">start typing mermaid syntax</div>
             )}
-          </article>
+          </div>
+        </article>
+      </section>
+
+      <section data-testid="activity-feed" className="workspace-pane workspace-activity-pane">
+        <div className="workspace-pane-header">
+          <span>activity</span>
+          <span>{activityStatusLabel}</span>
         </div>
+
+        {activity.length > 0 ? (
+          <ol className="activity-list">
+            {activity.map((event) => (
+              <li className="activity-item" key={event.id}>
+                <time className="activity-time" dateTime={new Date(event.timestamp).toISOString()}>
+                  {formatTimestamp(event.timestamp)}
+                </time>
+                <span className="activity-dot" style={{ backgroundColor: getActivityColor(event, participants) }} />
+                <span className="activity-text">
+                  {event.actor.type === 'agent' ? (
+                    <span className="activity-agent-badge">{event.actor.name}</span>
+                  ) : (
+                    <strong>{event.actor.name}</strong>
+                  )}{' '}
+                  {describeActivityCompact(event)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="empty-inline">no activity yet</div>
+        )}
       </section>
     </main>
   );

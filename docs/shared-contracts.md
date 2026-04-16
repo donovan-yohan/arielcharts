@@ -95,6 +95,9 @@ Validation and transport rules:
 - disallowed origin returns `403`
 - `write_diagram` accepts empty `mermaid_text`
 - when `participants` are omitted on `write_diagram`, the backend synthesizes an actor participant for awareness attribution
+- browser-facing `/mcp` responses emit `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, and `Access-Control-Allow-Headers`
+- `OPTIONS /mcp` returns `204` for allowed preflight requests and advertises `POST, OPTIONS`
+- when `ALLOWED_ORIGINS` is empty or contains `*`, `/mcp` responds with `Access-Control-Allow-Origin: *`; otherwise it echoes the allowed request origin
 
 ### Websocket contract
 - Endpoint: `/ws/:roomId`

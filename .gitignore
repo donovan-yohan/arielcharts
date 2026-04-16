@@ -140,3 +140,5 @@ vite.config.ts.timestamp-*
 
 # MermaidFlow local server data
 apps/server/.data/
+.vercel
+.env*.local

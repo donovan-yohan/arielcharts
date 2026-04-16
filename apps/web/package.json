@@ -19,7 +19,7 @@
     "@mermaidflow/shared": "workspace:*",
     "codemirror": "6.0.2",
     "mermaid": "11.12.0",
-    "next": "15.5.0",
+    "next": "16.2.4",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "y-codemirror.next": "0.3.5",

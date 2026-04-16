@@ -1,0 +1,38 @@
+apps/web/src/app/globals.css
+  68f05f5688d79761 369-388,682-762
+apps/web/src/components/session-workspace.tsx
+  68f05f5688d79761 7,218,220,468-481,491-532,538,545-551,553,556,558,662-682
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "eb47570820dfd6b8c3e5d528701e207106a5eb78",
+  "prompts": {
+    "68f05f5688d79761": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9f2eea79-4376-4159-8e6a-06f86d3969ee",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Donovan Yohan",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 278,
+      "overriden_lines": 0
+    },
+    "beecb793b04ae5d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "60427526-396c-4ef4-ba78-847e76f541ec",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Donovan Yohan",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 14,
+      "overriden_lines": 0
+    }
+  }
+}

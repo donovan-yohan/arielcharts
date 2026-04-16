@@ -4,7 +4,7 @@ import type { ActivityEvent, AwarenessState, Participant } from '@arielcharts/sh
 import { APP_NAME } from '@arielcharts/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
@@ -215,7 +215,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [lastValidSvg, setLastValidSvg] = useState('');
   const [renderError, setRenderError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [promptCopyState, setPromptCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [shareUrl, setShareUrl] = useState(() => getSessionPath(sessionId));
+  const [showConnectModal, setShowConnectModal] = useState(false);
 
   useEffect(() => {
     setShareUrl(getSessionPath(sessionId));
@@ -463,6 +465,20 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     };
   }, [copyState]);
 
+  useEffect(() => {
+    if (promptCopyState === 'idle') {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setPromptCopyState('idle');
+    }, 1_500);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [promptCopyState]);
+
   const handleCopyShareUrl = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
@@ -472,24 +488,74 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     }
   };
 
+  const handleCopySessionId = async () => {
+    try {
+      await navigator.clipboard.writeText(sessionId);
+      setCopyState('copied');
+    } catch {
+      setCopyState('error');
+    }
+  };
+
+  const getAgentPrompt = useCallback(() => {
+    const mcpUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}/mcp`
+      : 'https://arielcharts.donovanyohan.com/mcp';
+    return `Connect to my ArielCharts session "${sessionId}" using the MCP server at ${mcpUrl}. You can read and write Mermaid diagrams collaboratively in real-time. Look up your docs for how to add an MCP server globally.`;
+  }, [sessionId]);
+
+  const handleCopyAgentPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(getAgentPrompt());
+      setPromptCopyState('copied');
+    } catch {
+      setPromptCopyState('error');
+    }
+  };
+
+  useEffect(() => {
+    if (!showConnectModal) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowConnectModal(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showConnectModal]);
+
   const activeParticipantCount = participants.length;
   const connectedAgentCount = countConnectedAgents(participants);
   const editorStatusLabel = getCompactConnectionLabel(connectionState);
   const activityStatusLabel = `${activeParticipantCount} collaborator${activeParticipantCount === 1 ? '' : 's'}`;
   const shareButtonLabel = copyState === 'copied' ? 'copied' : copyState === 'error' ? 'copy failed' : 'share';
+  const promptCopyLabel = promptCopyState === 'copied' ? 'copied' : promptCopyState === 'error' ? 'copy failed' : 'copy';
 
   return (
     <main className="workspace-shell">
       <header className="workspace-topbar">
         <div className="workspace-topbar-left">
           <span className="workspace-logo">{APP_NAME}</span>
+          <button
+            className="workspace-connect-button"
+            type="button"
+            onClick={() => { setShowConnectModal(true); }}
+          >
+            connect my agent
+          </button>
           <div data-testid="share-url-control" className="workspace-session-chip">
-            <span className="workspace-session-url monospace">{shareUrl}</span>
+            <span className="workspace-session-url monospace">{sessionId}</span>
             <button
               className="workspace-copy-button"
-              data-testid="copy-share-url-button"
+              data-testid="copy-session-id-button"
               type="button"
-              onClick={handleCopyShareUrl}
+              onClick={handleCopySessionId}
             >
               copy
             </button>
@@ -593,6 +659,27 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
           <div className="empty-inline">no activity yet</div>
         )}
       </section>
+
+      {showConnectModal ? (
+        <div className="modal-backdrop" onClick={() => { setShowConnectModal(false); }}>
+          <div className="modal-dialog" onClick={(event) => { event.stopPropagation(); }}>
+            <div className="modal-header">
+              <span className="modal-title">Connect your agent</span>
+              <button className="modal-close" type="button" onClick={() => { setShowConnectModal(false); }} aria-label="Close">
+                &times;
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="modal-prompt-block">
+                <pre className="modal-prompt-text">{getAgentPrompt()}</pre>
+                <button className="workspace-copy-button modal-prompt-copy" type="button" onClick={handleCopyAgentPrompt}>
+                  {promptCopyLabel}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

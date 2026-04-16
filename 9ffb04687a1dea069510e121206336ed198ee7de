@@ -1,0 +1,29 @@
+apps/server/src/lib/http.ts
+  beecb793b04ae5d6 3-4,7,10-15,26-31,34-40,43-75
+apps/server/src/index.ts
+  beecb793b04ae5d6 2,4,18-20,31,37-65,107
+apps/server/src/lib/websocket.ts
+  beecb793b04ae5d6 55-58,62-65,67-68,71,113-115
+apps/server/src/lib/session-manager.ts
+  beecb793b04ae5d6 168,181,310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "9ffb04687a1dea069510e121206336ed198ee7de",
+  "prompts": {
+    "beecb793b04ae5d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "60427526-396c-4ef4-ba78-847e76f541ec",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Donovan Yohan",
+      "messages": [],
+      "total_additions": 183,
+      "total_deletions": 34,
+      "accepted_lines": 171,
+      "overriden_lines": 0
+    }
+  }
+}

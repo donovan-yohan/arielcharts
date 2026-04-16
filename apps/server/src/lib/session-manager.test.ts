@@ -64,6 +64,7 @@ describe('SessionManager cleanup and persistence', () => {
     const baseline = session.lastAccessedAt;
     const removed = await manager.cleanupExpiredSessions({
       ttlMs: 10,
+      diskTtlMs: Infinity,
       now: baseline + 11,
     });
 
@@ -82,10 +83,41 @@ describe('SessionManager cleanup and persistence', () => {
 
     const removed = await manager.cleanupExpiredSessions({
       ttlMs: 10,
+      diskTtlMs: Infinity,
       now: session.lastAccessedAt + 100,
     });
 
     expect(removed).toEqual([]);
+  });
+
+  it('deletes persisted sessions older than diskTtlMs', async () => {
+    await manager.getOrCreateSession('old-session');
+    await manager.writeDiagram(
+      'old-session',
+      'graph TD\n  X-->Y',
+      createActivityEvent({ action: 'replaced', actorName: 'agent', actorType: 'agent' }),
+      [{ name: 'agent', color: '#00aaff', type: 'agent' }],
+    );
+
+    // Evict from memory first so only the persisted record remains
+    const session = await manager.getOrCreateSession('old-session');
+    const evicted = await manager.cleanupExpiredSessions({
+      ttlMs: 0,
+      diskTtlMs: Infinity,
+      now: session.lastAccessedAt + 1,
+    });
+    expect(evicted).toEqual(['old-session']);
+
+    // Now run cleanup with a small diskTtlMs to expire the persisted record
+    const removed = await manager.cleanupExpiredSessions({
+      ttlMs: 10,
+      diskTtlMs: 100,
+      now: session.lastAccessedAt + 200,
+    });
+    expect(removed).toEqual(['old-session']);
+
+    // The persisted record should be gone
+    await expect(manager.readSession('old-session')).resolves.toBeNull();
   });
 
   it('reloads persisted diagram state and removes transient websocket awareness on shutdown', async () => {

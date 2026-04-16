@@ -366,6 +366,26 @@ code {
   padding: 4px 8px;
 }
 
+.workspace-connect-button {
+  flex: none;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #f0f6fc;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: lowercase;
+  transition: opacity 0.15s ease;
+}
+
+.workspace-connect-button:hover {
+  opacity: 0.85;
+}
+
 .workspace-share-button {
   flex: none;
   border: 1px solid #2f6f3e;
@@ -397,6 +417,12 @@ code {
   padding-left: 6px;
 }
 
+.workspace-avatar-stack-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .workspace-avatar {
   width: 24px;
   height: 24px;
@@ -411,6 +437,45 @@ code {
   font-size: 10px;
   font-weight: 700;
   font-family: var(--font-mono);
+}
+
+.workspace-avatar-button {
+  padding: 0;
+  background: transparent;
+}
+
+.workspace-avatar-button:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+.workspace-avatar-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  min-width: 140px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  box-shadow: 0 12px 32px rgba(2, 6, 23, 0.45);
+}
+
+.workspace-avatar-input {
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-size: 12px;
+}
+
+.workspace-avatar-input:focus {
+  outline: 1px solid #38bdf8;
+  border-color: #38bdf8;
 }
 
 .workspace-avatar:first-child {
@@ -449,6 +514,7 @@ code {
 }
 
 .workspace-diagram-pane {
+  position: relative;
   flex: 1 1 60%;
 }
 
@@ -491,6 +557,23 @@ code {
 .preview-surface svg {
   width: 100%;
   height: auto;
+}
+
+.diagram-canvas {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  background: #0d1117;
+}
+
+.diagram-canvas:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.8);
+  outline-offset: -2px;
+}
+
+.diagram-canvas .empty-state {
+  color: #8b949e;
 }
 
 .activity-list {
@@ -659,4 +742,85 @@ code {
     min-height: 100vh;
     height: auto;
   }
+
+  .workspace-connect-button {
+    display: none;
+  }
+}
+
+/* Connect agent modal */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.modal-dialog {
+  width: min(480px, calc(100vw - 2rem));
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #30363d;
+}
+
+.modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.modal-close:hover {
+  color: #e6edf3;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.modal-prompt-block {
+  position: relative;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.modal-prompt-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: #c9d1d9;
+}
+
+.modal-prompt-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
 }

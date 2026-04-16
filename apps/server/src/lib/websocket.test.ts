@@ -125,6 +125,7 @@ describe('SessionWebSocketServer', () => {
       dataDir,
       cleanupIntervalMs: 60_000,
       sessionTtlMs: 60_000,
+      diskTtlMs: Infinity,
       allowedOrigins: ['http://allowed.test'],
     };
     app = createApp(env);
@@ -161,6 +162,7 @@ describe('SessionWebSocketServer', () => {
 
     const removed = await app.manager.cleanupExpiredSessions({
       ttlMs: 0,
+      diskTtlMs: Infinity,
       now: Date.now() + 1,
     });
     expect(removed).toEqual([sessionId]);

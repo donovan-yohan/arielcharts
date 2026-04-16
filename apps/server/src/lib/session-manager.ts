@@ -230,6 +230,20 @@ export class SessionManager {
       removed.push(sessionId);
     }
 
+    if (Number.isFinite(options.diskTtlMs)) {
+      const persisted = await this.store.list();
+      for (const record of persisted) {
+        if (this.sessions.has(record.id)) {
+          continue;
+        }
+
+        if (now - record.updatedAt >= options.diskTtlMs) {
+          await this.store.delete(record.id);
+          removed.push(record.id);
+        }
+      }
+    }
+
     return removed;
   }
 

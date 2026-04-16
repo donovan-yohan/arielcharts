@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ArielCharts - Collaborative Diagram Editor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Top Bar */
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #161b22; border-bottom: 1px solid #30363d; height: 48px; flex: none; }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 14px; font-weight: 700; color: #58a6ff; }
+  .connect-btn { flex: none; border: 1px solid rgba(56, 189, 248, 0.3); background: linear-gradient(135deg, #38bdf8, #818cf8); color: #f0f6fc; padding: 6px 12px; border-radius: 6px; font-size: 11px; font-family: inherit; cursor: pointer; font-weight: 600; line-height: 1; }
+  .connect-btn:hover { opacity: 0.85; }
+  .session-chip { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 4px 10px; font-size: 11px; color: #8b949e; display: inline-flex; align-items: center; gap: 8px; }
+  .session-chip .session-id { color: #c9d1d9; }
+  .copy-btn { background: none; border: 1px solid #30363d; color: #8b949e; padding: 2px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; font-family: inherit; }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .presence { display: flex; align-items: center; }
+  .avatar { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #0d1117; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; margin-left: -6px; cursor: default; }
+  .avatar:first-child { margin-left: 0; }
+  .avatar.human1 { background: #da3633; z-index: 3; }
+  .avatar.human2 { background: #a371f7; z-index: 2; }
+  .avatar.agent { background: #0d1117; z-index: 1; border: 2px dashed #3fb950; color: #3fb950; }
+  .share-btn { flex: none; border: 1px solid #2f6f3e; background: #238636; color: #f0f6fc; padding: 6px 12px; border-radius: 6px; font-size: 11px; cursor: pointer; font-family: inherit; font-weight: 600; line-height: 1; }
+  .mcp-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #3fb950; white-space: nowrap; }
+  .mcp-dot { width: 6px; height: 6px; border-radius: 999px; background: #3fb950; }
+
+  /* Main Content */
+  .main { flex: 1; display: flex; overflow: hidden; }
+
+  /* Editor Pane */
+  .editor-pane { width: 40%; border-right: 1px solid #30363d; display: flex; flex-direction: column; }
+  .pane-header { padding: 8px 12px; background: #161b22; border-bottom: 1px solid #30363d; font-size: 11px; color: #8b949e; display: flex; justify-content: space-between; }
+  .editor-content { flex: 1; padding: 12px; font-size: 13px; line-height: 1.6; overflow-y: auto; }
+  .line { display: flex; }
+  .line-num { color: #484f58; min-width: 30px; text-align: right; margin-right: 12px; user-select: none; }
+  .line-text { flex: 1; }
+  .keyword { color: #ff7b72; }
+  .string { color: #a5d6ff; }
+  .comment { color: #8b949e; font-style: italic; }
+  .cursor-remote { border-left: 2px solid #a371f7; margin-left: -2px; animation: blink 1s ease-in-out infinite; }
+  .cursor-label { background: #a371f7; color: #fff; font-size: 9px; padding: 1px 4px; border-radius: 2px; position: relative; top: -2px; }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* Diagram Pane */
+  .diagram-pane { flex: 1; display: flex; flex-direction: column; }
+  .diagram-content { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; background: #0d1117; overflow: hidden; }
+
+  /* Mermaid-like diagram mockup */
+  .mock-diagram { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .node { background: #1f2020; border: 1px solid #ccc; border-radius: 4px; padding: 10px 20px; font-size: 12px; color: #ccc; text-align: center; position: relative; min-width: 100px; }
+  .node.diamond { transform: rotate(45deg); padding: 14px; min-width: 0; border-radius: 2px; }
+  .node.diamond .diamond-text { display: block; transform: rotate(-45deg); white-space: nowrap; }
+  .node.selected { border: 2px solid #38bdf8; box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.25); border-radius: 12px; }
+  .node.agent-editing { border-color: #3fb950; box-shadow: 0 0 8px rgba(63, 185, 80, 0.3); }
+  .node-label { font-size: 9px; color: #8b949e; margin-top: 2px; }
+  .arrow { width: 2px; height: 28px; background: lightgrey; position: relative; }
+  .arrow::after { content: ''; position: absolute; bottom: 0; left: -4px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid lightgrey; }
+  .arrow-fork { display: flex; position: relative; width: 200px; height: 28px; }
+  .arrow-fork::before { content: ''; position: absolute; top: 0; left: 50%; width: 2px; height: 12px; background: lightgrey; transform: translateX(-1px); }
+  .arrow-fork-left, .arrow-fork-right { position: absolute; top: 12px; width: 2px; height: 16px; background: lightgrey; }
+  .arrow-fork-left { left: 25%; }
+  .arrow-fork-left::before { content: 'Yes'; position: absolute; top: -4px; right: 8px; font-size: 9px; color: #8b949e; }
+  .arrow-fork-left::after { content: ''; position: absolute; bottom: 0; left: -4px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid lightgrey; }
+  .arrow-fork-right { right: 25%; }
+  .arrow-fork-right::before { content: 'No'; position: absolute; top: -4px; left: 8px; font-size: 9px; color: #8b949e; }
+  .arrow-fork-right::after { content: ''; position: absolute; bottom: 0; left: -4px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid lightgrey; }
+  .arrow-fork-bar { position: absolute; top: 12px; left: 25%; right: 25%; height: 2px; background: lightgrey; }
+  .row { display: flex; gap: 40px; align-items: flex-start; justify-content: center; }
+
+  /* Contextual Toolbar */
+  .ctx-toolbar { display: inline-flex; align-items: center; gap: 6px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 4px 6px; box-shadow: 0 12px 32px rgba(2, 6, 23, 0.45); margin-bottom: 8px; }
+  .ctx-btn { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 4px; color: #8b949e; font-size: 14px; cursor: pointer; }
+  .ctx-btn:hover { background: #30363d; color: #e2e8f0; }
+
+  /* Zoom Controls */
+  .zoom-controls { position: absolute; bottom: 12px; right: 12px; display: inline-flex; align-items: center; gap: 6px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 4px 6px; }
+  .zoom-btn { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 4px; color: #8b949e; font-size: 14px; cursor: pointer; }
+  .zoom-pct { font-size: 11px; color: #8b949e; min-width: 44px; text-align: center; }
+
+  /* Activity Feed */
+  .activity-pane { width: 100%; border-top: 1px solid #30363d; background: #161b22; flex: none; }
+  .activity-content { padding: 8px 12px; max-height: 120px; overflow-y: auto; }
+  .activity-item { font-size: 11px; padding: 3px 0; display: flex; gap: 8px; align-items: center; }
+  .activity-time { color: #484f58; min-width: 45px; }
+  .activity-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .activity-dot.red { background: #da3633; }
+  .activity-dot.purple { background: #a371f7; }
+  .activity-dot.green { background: #3fb950; }
+  .activity-text { color: #8b949e; }
+  .activity-text strong { color: #c9d1d9; font-weight: 600; }
+  .activity-text .agent-badge { background: #1a3a2a; color: #3fb950; padding: 1px 5px; border-radius: 3px; font-size: 10px; border: 1px solid #238636; }
+
+  /* Connect Agent Modal */
+  .modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: none; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
+  .modal-backdrop.open { display: flex; }
+  .modal-dialog { width: min(480px, calc(100vw - 2rem)); background: #161b22; border: 1px solid #30363d; border-radius: 12px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4); }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #30363d; }
+  .modal-title { font-size: 14px; font-weight: 600; color: #e6edf3; }
+  .modal-close { background: none; border: none; color: #8b949e; font-size: 20px; line-height: 1; cursor: pointer; font-family: inherit; }
+  .modal-close:hover { color: #e6edf3; }
+  .modal-body { padding: 20px; }
+  .modal-prompt-block { position: relative; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+  .modal-prompt-text { margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: inherit; font-size: 12px; line-height: 1.6; color: #c9d1d9; }
+  .modal-prompt-copy { position: absolute; top: 8px; right: 8px; }
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="topbar">
+  <div class="topbar-left">
+    <span class="logo">ArielCharts</span>
+    <button class="connect-btn" onclick="document.getElementById('modal').classList.add('open')">connect my agent</button>
+    <div class="session-chip">
+      <span class="session-id">a7x9k2mn</span>
+      <button class="copy-btn">copy</button>
+    </div>
+    <div class="mcp-status">
+      <span class="mcp-dot"></span>
+      MCP: 1 agent connected
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="presence">
+      <div class="avatar human1">DY</div>
+      <div class="avatar human2">SK</div>
+      <div class="avatar agent">AI</div>
+    </div>
+    <button class="share-btn">share</button>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <!-- Editor Pane -->
+  <div class="editor-pane">
+    <div class="pane-header">
+      <span>mermaid source</span>
+      <span>synced</span>
+    </div>
+    <div class="editor-content">
+      <div class="line"><span class="line-num">1</span><span class="line-text"><span class="keyword">flowchart</span> TD</span></div>
+      <div class="line"><span class="line-num">2</span><span class="line-text">    A[<span class="string">Client App</span>] --> B[<span class="string">API Gateway</span>]</span></div>
+      <div class="line"><span class="line-num">3</span><span class="line-text">    B --> C[<span class="string">Auth Service</span>]</span></div>
+      <div class="line"><span class="line-num">4</span><span class="line-text">    B --> D{<span class="string">Decision?</span>}<span class="cursor-remote"></span><span class="cursor-label">Sarah</span></span></div>
+      <div class="line"><span class="line-num">5</span><span class="line-text">    D -->|<span class="string">Yes</span>| E[<span class="string">Process</span>]</span></div>
+      <div class="line"><span class="line-num">6</span><span class="line-text">    D -->|<span class="string">No</span>| F[<span class="string">Skip</span>]</span></div>
+      <div class="line"><span class="line-num">7</span><span class="line-text">    <span class="comment">%% Agent added: logging step</span></span></div>
+      <div class="line"><span class="line-num">8</span><span class="line-text">    E --> G[<span class="string">Log Result</span>]</span></div>
+    </div>
+  </div>
+
+  <!-- Diagram Pane -->
+  <div class="diagram-pane">
+    <div class="pane-header">
+      <span>preview</span>
+      <span>live</span>
+    </div>
+    <div class="diagram-content">
+      <div class="mock-diagram">
+        <!-- Toolbar above selected node -->
+        <div class="ctx-toolbar">
+          <button class="ctx-btn" title="Edit label">&#9998;</button>
+          <button class="ctx-btn" title="Change shape">&#11049;</button>
+          <button class="ctx-btn" title="Connect">&#10132;</button>
+          <button class="ctx-btn" title="Delete">&#128465;</button>
+          <button class="ctx-btn" title="Add node">+</button>
+        </div>
+        <div class="node selected">Client App</div>
+        <div class="arrow"></div>
+        <div class="node">API Gateway</div>
+        <div class="arrow"></div>
+        <div class="node">Auth Service</div>
+        <div style="height: 8px;"></div>
+        <div class="node diamond">
+          <span class="diamond-text">Decision?</span>
+          <div class="node-label" style="transform: rotate(-45deg); position: absolute; bottom: -16px; left: 50%;">Sarah editing</div>
+        </div>
+        <div style="height: 12px;"></div>
+        <div class="row">
+          <div style="display:flex;flex-direction:column;align-items:center">
+            <div class="node">Process</div>
+            <div class="arrow"></div>
+            <div class="node agent-editing">Log Result
+              <div class="node-label" style="color:#3fb950">Agent added</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center">
+            <div class="node">Skip</div>
+          </div>
+        </div>
+      </div>
+      <!-- Zoom controls -->
+      <div class="zoom-controls">
+        <button class="zoom-btn" title="Zoom out">&minus;</button>
+        <span class="zoom-pct">100%</span>
+        <button class="zoom-btn" title="Zoom in">+</button>
+        <button class="zoom-btn" title="Fit diagram">&#8978;</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Activity Feed -->
+<div class="activity-pane">
+  <div class="pane-header">
+    <span>activity</span>
+    <span>3 collaborators</span>
+  </div>
+  <div class="activity-content">
+    <div class="activity-item">
+      <span class="activity-time">17:28</span>
+      <span class="activity-dot green"></span>
+      <span class="activity-text"><span class="agent-badge">claude-code</span> connected via MCP</span>
+    </div>
+    <div class="activity-item">
+      <span class="activity-time">17:29</span>
+      <span class="activity-dot green"></span>
+      <span class="activity-text"><span class="agent-badge">claude-code</span> added node: <strong>Log Result</strong></span>
+    </div>
+    <div class="activity-item">
+      <span class="activity-time">17:30</span>
+      <span class="activity-dot purple"></span>
+      <span class="activity-text"><strong>Sarah</strong> is editing <strong>Decision?</strong></span>
+    </div>
+    <div class="activity-item">
+      <span class="activity-time">17:31</span>
+      <span class="activity-dot red"></span>
+      <span class="activity-text"><strong>Donovan</strong> shared session link</span>
+    </div>
+  </div>
+</div>
+
+<!-- Connect Agent Modal -->
+<div class="modal-backdrop" id="modal" onclick="this.classList.remove('open')">
+  <div class="modal-dialog" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <span class="modal-title">Connect your agent</span>
+      <button class="modal-close" onclick="document.getElementById('modal').classList.remove('open')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-prompt-block">
+        <pre class="modal-prompt-text">Connect to my ArielCharts session "a7x9k2mn" using the MCP server at https://arielcharts.donovanyohan.com/mcp. You can read and write Mermaid diagrams collaboratively in real-time. Look up your docs for how to add an MCP server globally.</pre>
+        <button class="copy-btn modal-prompt-copy">copy</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

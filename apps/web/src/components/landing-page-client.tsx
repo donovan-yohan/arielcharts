@@ -36,17 +36,17 @@ export function LandingPageClient() {
         </p>
 
         <div className="landing-actions">
-          <button className="primary-button" type="button" onClick={handleCreate}>
+          <button data-testid="create-session-cta" className="primary-button" type="button" onClick={handleCreate}>
             Create new session
           </button>
-          <a className="secondary-button" href={getSessionPath(suggestedSessionId)}>
+          <a data-testid="open-suggested-session-cta" className="secondary-button" href={getSessionPath(suggestedSessionId)}>
             Open suggested session
           </a>
         </div>
 
         <div className="landing-hint">
           <span>Suggested ID</span>
-          <code>{suggestedSessionId}</code>
+          <code data-testid="suggested-session-id">{suggestedSessionId}</code>
         </div>
       </section>
 
@@ -61,6 +61,7 @@ export function LandingPageClient() {
             Session ID
           </label>
           <input
+            data-testid="join-session-input"
             id="session-id-input"
             autoCapitalize="none"
             autoComplete="off"
@@ -77,7 +78,7 @@ export function LandingPageClient() {
           <p className={`field-help${joinIdIsValid ? '' : ' error-text'}`}>
             Use 6-32 lowercase letters, digits, <code>_</code>, or <code>-</code>.
           </p>
-          <button className="primary-button" disabled={!isValidSessionId(normalizedJoinId)} type="submit">
+          <button data-testid="join-session-button" className="primary-button" disabled={!isValidSessionId(normalizedJoinId)} type="submit">
             Join session
           </button>
         </form>

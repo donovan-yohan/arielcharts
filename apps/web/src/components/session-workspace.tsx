@@ -183,7 +183,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [sessionId]);
 
   useEffect(() => {
-    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
   }, []);
 
   useEffect(() => {
@@ -438,7 +438,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
         <div className="topbar-title-group">
           <div>
             <p className="eyebrow">{APP_NAME}</p>
-            <h1>Session {sessionId}</h1>
+            <h1 data-testid="session-id-header">Session {sessionId}</h1>
           </div>
           <Link className="ghost-link" href="/">
             New session
@@ -446,7 +446,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
         </div>
 
         <div className="topbar-meta">
-          <span className={`status-badge ${connectionState}`}>{connectionLabels[connectionState]}</span>
+          <span data-testid="connection-status-badge" className={`status-badge ${connectionState}`}>{connectionLabels[connectionState]}</span>
           <div className="meta-chip">
             <span className="meta-label">Active</span>
             <strong>{activeParticipantCount}</strong>
@@ -466,14 +466,14 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
           <p>Invite another tab or teammate to this exact collaborative session.</p>
         </div>
         <div className="share-row">
-          <code className="share-url">{shareUrl}</code>
-          <button className="secondary-button" type="button" onClick={handleCopyShareUrl}>
+          <code data-testid="share-url-control" className="share-url">{shareUrl}</code>
+          <button data-testid="copy-share-url-button" className="secondary-button" type="button" onClick={handleCopyShareUrl}>
             {copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy link'}
           </button>
         </div>
       </section>
 
-      <section className="presence-strip card" aria-label="Session presence">
+      <section data-testid="presence-bar" className="presence-strip card" aria-label="Session presence">
         <div>
           <h2>Presence</h2>
           <p>{activeParticipantCount > 0 ? 'Live awareness updates from Yjs' : 'Waiting for collaborators to join.'}</p>
@@ -494,7 +494,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       </section>
 
       <section className="workspace-grid">
-        <article className="card panel editor-panel">
+        <article data-testid="editor-root" className="card panel editor-panel">
           <div className="panel-header">
             <div>
               <h2>Collaborative editor</h2>
@@ -506,7 +506,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
         </article>
 
         <div className="panel-stack">
-          <article className="card panel preview-panel">
+          <article data-testid="preview-root" className="card panel preview-panel">
             <div className="panel-header">
               <div>
                 <h2>Mermaid preview</h2>
@@ -515,7 +515,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             </div>
 
             {renderError ? (
-              <div className="error-banner" role="status">
+              <div data-testid="parse-error-banner" className="error-banner" role="status">
                 <strong>Preview kept on last valid diagram.</strong>
                 <span>{renderError}</span>
               </div>
@@ -532,7 +532,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             </div>
           </article>
 
-          <article className="card panel activity-panel">
+          <article data-testid="activity-feed" className="card panel activity-panel">
             <div className="panel-header">
               <div>
                 <h2>Activity feed</h2>

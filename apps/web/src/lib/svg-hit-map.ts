@@ -34,13 +34,15 @@ const MERMAID_EDGE_SELECTOR = 'g.edgePath';
 const MERMAID_SUBGRAPH_SELECTOR = 'g.cluster';
 
 export function buildSvgHitMap(svg: SVGSVGElement): SvgHitMap {
+  const viewBox = getSvgViewBox(svg);
+
   const nodes = new Map<string, SvgBounds>();
   const edges = new Map<string, SvgEdgeHit>();
   const subgraphs = new Map<string, SvgBounds>();
 
   svg.querySelectorAll<SVGGElement>(MERMAID_NODE_SELECTOR).forEach((element) => {
     const nodeId = extractMermaidEntityId(element.id);
-    const bounds = getSvgBounds(element);
+    const bounds = getTransformedBounds(element);
 
     if (!nodeId || !bounds) {
       return;
@@ -51,7 +53,7 @@ export function buildSvgHitMap(svg: SVGSVGElement): SvgHitMap {
 
   svg.querySelectorAll<SVGGElement>(MERMAID_EDGE_SELECTOR).forEach((element, index) => {
     const path = element.querySelector<SVGPathElement>('path');
-    const bounds = getSvgBounds(path ?? element);
+    const bounds = getTransformedBounds(path ?? element);
     if (!path || !bounds) {
       return;
     }
@@ -64,7 +66,7 @@ export function buildSvgHitMap(svg: SVGSVGElement): SvgHitMap {
 
   svg.querySelectorAll<SVGGElement>(MERMAID_SUBGRAPH_SELECTOR).forEach((element, index) => {
     const subgraphId = extractMermaidEntityId(element.id) ?? element.getAttribute('data-id') ?? `subgraph-${index}`;
-    const bounds = getSvgBounds(element);
+    const bounds = getTransformedBounds(element);
 
     if (!bounds) {
       return;
@@ -77,7 +79,7 @@ export function buildSvgHitMap(svg: SVGSVGElement): SvgHitMap {
     edges,
     nodes,
     subgraphs,
-    viewBox: getSvgViewBox(svg),
+    viewBox,
   };
 }
 
@@ -111,6 +113,44 @@ export function getSvgBounds(element: SVGGraphicsElement | null): SvgBounds | nu
       width: box.width,
       x: box.x,
       y: box.y,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getTransformedBounds(element: SVGGraphicsElement | null): SvgBounds | null {
+  if (!element) {
+    return null;
+  }
+
+  try {
+    const box = element.getBBox();
+    const ctm = element.getCTM();
+    if (!ctm) {
+      return null;
+    }
+
+    const corners = [
+      { x: box.x, y: box.y },
+      { x: box.x + box.width, y: box.y },
+      { x: box.x, y: box.y + box.height },
+      { x: box.x + box.width, y: box.y + box.height },
+    ];
+
+    const transformed = corners.map((c) => ({
+      x: (ctm.a * c.x) + (ctm.c * c.y) + ctm.e,
+      y: (ctm.b * c.x) + (ctm.d * c.y) + ctm.f,
+    }));
+
+    const xs = transformed.map((p) => p.x);
+    const ys = transformed.map((p) => p.y);
+
+    return {
+      height: Math.max(...ys) - Math.min(...ys),
+      width: Math.max(...xs) - Math.min(...xs),
+      x: Math.min(...xs),
+      y: Math.min(...ys),
     };
   } catch {
     return null;

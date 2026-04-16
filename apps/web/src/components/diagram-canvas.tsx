@@ -14,6 +14,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
 import {
+  buildSvgHitMap,
   getBoundsCenter,
   getBoundsUnion,
   getNodePortPosition,
@@ -26,7 +27,6 @@ export interface DiagramCanvasProps {
   className?: string;
   emptyMessage?: string;
   graph: FlowchartSnapshot | null;
-  hitMap: SvgHitMap | null;
   interactionMode?: 'select' | 'connect';
   isFlowchart?: boolean;
   readOnly?: boolean;
@@ -98,7 +98,6 @@ export function DiagramCanvas({
   className,
   emptyMessage = 'start typing mermaid syntax',
   graph,
-  hitMap,
   interactionMode,
   isFlowchart = true,
   onAddEdge,
@@ -115,7 +114,9 @@ export function DiagramCanvas({
   svg,
 }: DiagramCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const svgContainerRef = useRef<HTMLDivElement | null>(null);
   const nodeButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
   const dragStateRef = useRef<{ originX: number; originY: number; startPanX: number; startPanY: number } | null>(null);
   const isControlledSelection = selectedNodeIds !== undefined;
   const [internalSelection, setInternalSelection] = useState<string[]>(selectedNodeIds ?? []);
@@ -373,6 +374,28 @@ export function DiagramCanvas({
       setInternalMode(interactionMode);
     }
   }, [interactionMode]);
+
+  useEffect(() => {
+    if (!svg || !svgContainerRef.current) {
+      setHitMap(null);
+      return;
+    }
+
+    let frameId = 0;
+    frameId = window.requestAnimationFrame(() => {
+      const svgElement = svgContainerRef.current?.querySelector('svg');
+      if (!svgElement) {
+        setHitMap(null);
+        return;
+      }
+
+      setHitMap(buildSvgHitMap(svgElement));
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [svg]);
 
   useEffect(() => {
     if (selection.length === 0) {
@@ -646,6 +669,11 @@ export function DiagramCanvas({
     <div
       aria-label="Interactive diagram canvas"
       className={className}
+      onClick={(event) => {
+        if (!(event.target instanceof Element)) return;
+        if (event.target.closest('button, input, select, [role="button"]')) return;
+        handleCanvasClick();
+      }}
       onDoubleClick={(event) => {
         if (event.target === containerRef.current) {
           fitToDiagram(true);
@@ -679,6 +707,7 @@ export function DiagramCanvas({
             aria-hidden="true"
             className="diagram-canvas-svg"
             dangerouslySetInnerHTML={{ __html: svg }}
+            ref={svgContainerRef}
             style={{ pointerEvents: 'none' }}
           />
         ) : null}
@@ -826,11 +855,7 @@ export function DiagramCanvas({
         ) : null}
       </div>
 
-      <div onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          handleCanvasClick();
-        }
-      }} style={{ inset: 0, position: 'absolute' }}>
+      <div onClick={(event) => { event.stopPropagation(); }} style={{ inset: 0, pointerEvents: 'none', position: 'absolute' }}>
         {(!hasGraphNodes && isFlowchart && !readOnly) ? (
           <div
             style={{

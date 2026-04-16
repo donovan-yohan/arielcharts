@@ -14,7 +14,6 @@ import * as Y from 'yjs';
 import { DiagramCanvas } from './diagram-canvas';
 import { MutationQueue, parseFlowchartSnapshot, type FlowchartSnapshot } from '../lib/diagram-mutations';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
-import { buildSvgHitMap, type SvgHitMap } from '../lib/svg-hit-map';
 
 const MERMAID_TEXT_KEY = 'mermaid';
 const ACTIVITY_KEY = 'activity';
@@ -241,7 +240,6 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const editDebounceRef = useRef<number | null>(null);
   const currentIdentityRef = useRef<LocalIdentity | null>(null);
   const addActivityRef = useRef<((action: ActivityEvent['action'], detail?: string) => void) | null>(null);
-  const hitMapMeasureRef = useRef<HTMLDivElement | null>(null);
   const mutationQueueRef = useRef<MutationQueue | null>(null);
   const renameCancelledRef = useRef(false);
 
@@ -258,7 +256,6 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [shareUrl, setShareUrl] = useState(() => getSessionPath(sessionId));
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [flowchartSnapshot, setFlowchartSnapshot] = useState<FlowchartSnapshot | null>(null);
-  const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [interactionMode, setInteractionMode] = useState<'select' | 'connect'>('select');
   const [renamingParticipantName, setRenamingParticipantName] = useState<string | null>(null);
@@ -475,7 +472,6 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
           setRenderError(null);
           setLastValidSvg('');
           setFlowchartSnapshot(null);
-          setHitMap(null);
           setSelectedNodeIds([]);
           setInteractionMode('select');
         }
@@ -511,30 +507,6 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       isCancelled = true;
     };
   }, [mermaidText, sessionId]);
-
-  useEffect(() => {
-    if (!lastValidSvg || !hitMapMeasureRef.current) {
-      if (!lastValidSvg) {
-        setHitMap(null);
-      }
-      return;
-    }
-
-    let frameId = 0;
-    frameId = window.requestAnimationFrame(() => {
-      const svgElement = hitMapMeasureRef.current?.querySelector('svg');
-      if (!svgElement) {
-        setHitMap(null);
-        return;
-      }
-
-      setHitMap(buildSvgHitMap(svgElement));
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [lastValidSvg]);
 
   useEffect(() => {
     if (shareCopyState === 'idle') {
@@ -795,7 +767,6 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             className="diagram-canvas"
             emptyMessage={mermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
             graph={flowchartSnapshot}
-            hitMap={hitMap}
             interactionMode={interactionMode}
             isFlowchart={isFlowchartSyntax(mermaidText)}
             onAddEdge={(source, target, label, type) => mutationQueueRef.current?.addEdge(source, target, { label, type })}
@@ -815,21 +786,6 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             svg={lastValidSvg}
           />
 
-          <div
-            aria-hidden="true"
-            dangerouslySetInnerHTML={{ __html: lastValidSvg }}
-            ref={hitMapMeasureRef}
-            style={{
-              height: 0,
-              inset: 0,
-              opacity: 0,
-              overflow: 'hidden',
-              pointerEvents: 'none',
-              position: 'absolute',
-              visibility: 'hidden',
-              width: 0,
-            }}
-          />
         </article>
       </section>
 

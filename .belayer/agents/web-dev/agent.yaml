@@ -1,0 +1,9 @@
+schema_version: "1"
+description: "Web implementer — Next.js 16 + React 19 + CodeMirror + Yjs + mermaid for ArielCharts apps/web"
+vendor: claude
+model: sonnet
+max_turns: 100
+max_duration: "2h"
+ephemeral: false
+workspace: inherit
+belayer_tools: []

@@ -147,3 +147,6 @@ apps/server/.data/
 .belayer/runs/
 .belayer/artifacts/
 .hermes/
+
+# macOS
+.DS_Store

@@ -1,0 +1,9 @@
+schema_version: "1"
+description: "QA — runs the ArielCharts app, hits MCP and WS endpoints, exercises the UI in a browser"
+vendor: claude
+model: sonnet
+max_turns: 30
+max_duration: "30m"
+ephemeral: true
+workspace: inherit
+belayer_tools: []

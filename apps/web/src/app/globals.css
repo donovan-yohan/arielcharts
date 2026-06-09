@@ -1,3 +1,5 @@
+@import '@xyflow/react/dist/style.css';
+
 :root {
   color-scheme: dark;
   --background: #08101f;
@@ -574,6 +576,104 @@ code {
 
 .diagram-canvas .empty-state {
   color: #8b949e;
+}
+
+.diagram-canvas-svg--reactflow svg g.node,
+.diagram-canvas-svg--reactflow svg g.edgeLabel,
+.diagram-canvas-svg--reactflow svg g.edgePath {
+  opacity: 0;
+}
+
+.diagram-reactflow-layer {
+  inset: 0;
+  position: absolute;
+}
+
+.diagram-reactflow-layer .react-flow,
+.diagram-reactflow-layer .react-flow__renderer,
+.diagram-reactflow-layer .react-flow__pane {
+  background: transparent;
+}
+
+.diagram-reactflow-layer .react-flow__node {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.diagram-reactflow-layer .react-flow__handle {
+  background: #38bdf8;
+  border: 1px solid #0d1117;
+  height: 8px;
+  width: 8px;
+}
+
+.mermaid-flow-node {
+  align-items: center;
+  background: #161b22;
+  border: 1px solid #30363d;
+  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.35);
+  color: #e2e8f0;
+  display: flex;
+  font-size: 13px;
+  font-weight: 600;
+  height: 100%;
+  justify-content: center;
+  line-height: 1.25;
+  min-height: 28px;
+  min-width: 48px;
+  padding: 8px 12px;
+  position: relative;
+  text-align: center;
+  width: 100%;
+}
+
+.mermaid-flow-node.is-selected {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.25), 0 10px 28px rgba(2, 6, 23, 0.35);
+}
+
+.mermaid-flow-node--round,
+.mermaid-flow-node--stadium {
+  border-radius: 999px;
+}
+
+.mermaid-flow-node--circle,
+.mermaid-flow-node--doublecircle,
+.mermaid-flow-node--ellipse {
+  border-radius: 50%;
+}
+
+.mermaid-flow-node--diamond {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  padding: 14px;
+}
+
+.mermaid-flow-node--hexagon {
+  clip-path: polygon(18% 0, 82% 0, 100% 50%, 82% 100%, 18% 100%, 0 50%);
+}
+
+.mermaid-flow-node--trapezoid {
+  clip-path: polygon(12% 0, 88% 0, 100% 100%, 0 100%);
+}
+
+.mermaid-flow-node--subroutine::before,
+.mermaid-flow-node--subroutine::after {
+  background: #30363d;
+  content: '';
+  height: 100%;
+  position: absolute;
+  top: 0;
+  width: 1px;
+}
+
+.mermaid-flow-node--subroutine::before {
+  left: 10px;
+}
+
+.mermaid-flow-node--subroutine::after {
+  right: 10px;
 }
 
 .activity-list {

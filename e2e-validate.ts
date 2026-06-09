@@ -4,20 +4,21 @@ async function validate() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const results: Array<{ test: string; pass: boolean }> = [];
+  const sessionName = `e2e-diag-${Date.now()}`;
 
   page.on('console', (msg) => {
     if (msg.type() === 'error') console.log(`[console.error] ${msg.text()}`);
   });
 
   console.log('1. Loading page...');
-  await page.goto('http://localhost:3003/s/e2e-diag01', { waitUntil: 'load', timeout: 30000 });
+  await page.goto(`http://localhost:3003/s/${sessionName}`, { waitUntil: 'load', timeout: 30000 });
   await page.waitForSelector('.cm-content', { timeout: 15000 });
   await page.waitForTimeout(2000);
 
   console.log('2. Typing flowchart...');
   const editor = page.locator('.cm-content');
   await editor.click();
-  await page.keyboard.press('Meta+a');
+  await page.keyboard.press('Control+A');
   await page.keyboard.type(`flowchart TD
     A[Start] --> B{Bug?}
     B -->|Yes| C[Fix]
@@ -31,7 +32,7 @@ async function validate() {
     if (!svg) return { error: 'no svg' };
 
     const nodes = svg.querySelectorAll('g.node');
-    const overlays = document.querySelectorAll('.diagram-node-target');
+    const overlays = document.querySelectorAll('.react-flow__node, .diagram-node-target');
 
     const matches: Array<{ nodeId: string; svgCenter: string; overlayCenter: string; offsetPx: number }> = [];
     nodes.forEach((n, i) => {
@@ -75,7 +76,7 @@ async function validate() {
 
   // --- Test: node click / toolbar ---
   console.log('\n5. Testing node click...');
-  const firstOverlay = page.locator('.diagram-node-target').first();
+  const firstOverlay = page.locator('.react-flow__node, .diagram-node-target').first();
   await firstOverlay.click({ timeout: 5000 });
   await page.waitForTimeout(300);
   const toolbarVisible = await page.evaluate(() => {
@@ -85,17 +86,68 @@ async function validate() {
   console.log(`   Toolbar appeared: ${toolbarVisible} — ${toolbarVisible ? 'PASS' : 'FAIL'}`);
   await page.screenshot({ path: '/tmp/arielcharts-click.png' });
 
+  // --- Test: React Flow drag + reset layout ---
+  console.log('\n6. Testing React Flow drag/reset...');
+  const dragTarget = page.locator('.react-flow__node, .diagram-node-target').first();
+  const beforeDrag = await dragTarget.boundingBox();
+  if (beforeDrag) {
+    await page.mouse.move(beforeDrag.x + beforeDrag.width / 2, beforeDrag.y + beforeDrag.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(beforeDrag.x + beforeDrag.width / 2 + 90, beforeDrag.y + beforeDrag.height / 2 + 40, { steps: 8 });
+    await page.mouse.up();
+  }
+  await page.waitForTimeout(500);
+  const afterDrag = await dragTarget.boundingBox();
+  const dragMoved = !!beforeDrag && !!afterDrag && Math.abs(afterDrag.x - beforeDrag.x) > 20;
+  results.push({ test: 'reactflow drag nodes', pass: dragMoved });
+  console.log(`   Node moved: ${dragMoved} — ${dragMoved ? 'PASS' : 'FAIL'}`);
+
+  await page.locator('button[aria-label="Reset dragged node layout to Mermaid"]').click({ timeout: 5000 });
+  await page.waitForTimeout(500);
+  const afterReset = await dragTarget.boundingBox();
+  const resetPass = !!beforeDrag && !!afterReset && Math.abs(afterReset.x - beforeDrag.x) <= 5;
+  results.push({ test: 'reactflow reset layout', pass: resetPass });
+  console.log(`   Node reset: ${resetPass} — ${resetPass ? 'PASS' : 'FAIL'}`);
+
+  // --- Test: fixed add-node toolbar ---
+  console.log('\n7. Testing fixed add-node toolbar...');
+  const toolbarCountBefore = await page.locator('.react-flow__node, .diagram-node-target').count();
+  await page.locator('input[aria-label="New node label"]').fill('UI Node');
+  await page.locator('select[aria-label="New node shape"]').selectOption('round');
+  await page.locator('button[aria-label="Add node to Mermaid text"]').click({ timeout: 5000 });
+  await page.waitForTimeout(3000);
+  const toolbarCountAfter = await page.locator('.react-flow__node, .diagram-node-target').count();
+  const toolbarEditorText = await page.locator('.cm-content').textContent();
+  const fixedToolbarPass = toolbarCountAfter > toolbarCountBefore && (toolbarEditorText?.includes('UI Node') ?? false);
+  results.push({ test: 'fixed add-node toolbar', pass: fixedToolbarPass });
+  console.log(`   Nodes before/after: ${toolbarCountBefore}/${toolbarCountAfter}`);
+  console.log(`   Editor contains "UI Node": ${toolbarEditorText?.includes('UI Node') ?? false}`);
+  console.log(`   Fixed toolbar added node: ${fixedToolbarPass} — ${fixedToolbarPass ? 'PASS' : 'FAIL'}`);
+
+  // --- Test: node label edit syncs to Mermaid text ---
+  console.log('\n8. Testing node label edit sync...');
+  await page.locator('.react-flow__node, .diagram-node-target').first().click({ timeout: 5000 });
+  await page.locator('button[aria-label="Edit label"]').click({ timeout: 5000 });
+  await page.locator('input[placeholder="node label"]').fill('Launch');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(2000);
+  const editedText = await page.locator('.cm-content').textContent();
+  const editSyncPass = editedText?.includes('Launch') ?? false;
+  results.push({ test: 'node label edit sync', pass: editSyncPass });
+  console.log(`   Editor contains edited label: ${editSyncPass} — ${editSyncPass ? 'PASS' : 'FAIL'}`);
+
   // --- Test: add node ---
-  console.log('\n6. Testing add node...');
-  const nodeCountBefore = await page.locator('.diagram-node-target').count();
+  console.log('\n9. Testing add node...');
+  const nodeCountBefore = await page.locator('.react-flow__node, .diagram-node-target').count();
   console.log(`   Nodes before: ${nodeCountBefore}`);
 
-  // Click "Add node" button on the toolbar
+  // Click "Add node" button on the node toolbar
+  await page.locator('.react-flow__node, .diagram-node-target').first().click({ timeout: 5000 });
   await page.locator('button[aria-label="Add node"]').click({ timeout: 5000 });
   // Wait for mermaid to re-render with the new node
   await page.waitForTimeout(3000);
 
-  const nodeCountAfter = await page.locator('.diagram-node-target').count();
+  const nodeCountAfter = await page.locator('.react-flow__node, .diagram-node-target').count();
   console.log(`   Nodes after: ${nodeCountAfter}`);
 
   // Verify the editor text now contains the new node
@@ -109,13 +161,13 @@ async function validate() {
   await page.screenshot({ path: '/tmp/arielcharts-addnode.png' });
 
   // --- Test: new node overlay alignment ---
-  console.log('\n7. Checking new node overlay alignment...');
+  console.log('\n10. Checking new node overlay alignment...');
   const newAlignment = await page.evaluate(() => {
     const svg = document.querySelector('.diagram-canvas-svg svg') as SVGSVGElement | null;
     if (!svg) return { error: 'no svg' };
 
     const nodes = svg.querySelectorAll('g.node');
-    const overlays = document.querySelectorAll('.diagram-node-target');
+    const overlays = document.querySelectorAll('.react-flow__node, .diagram-node-target');
 
     const matches: Array<{ nodeId: string; offsetPx: number }> = [];
     nodes.forEach((n, i) => {

@@ -1,13 +1,11 @@
 'use client';
 
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   Handle,
-  MarkerType,
   Position,
   ReactFlow,
   type Connection,
-  type Edge,
   type Node,
   type NodeChange,
   type NodeProps,
@@ -24,7 +22,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
 import {
   buildSvgHitMap,
@@ -72,19 +70,26 @@ interface PendingEdge {
 }
 
 interface MermaidFlowNodeData extends Record<string, unknown> {
+  ariaLabel: string;
   label: string;
   shape: DiagramNodeShape;
 }
 
 type MermaidFlowNode = Node<MermaidFlowNodeData, 'mermaidFlowNode'>;
-type MermaidFlowEdge = Edge;
+
+interface FlowNodeInteractionContextValue {
+  focusedNodeId: string | null;
+  onFocus: (nodeId: string) => void;
+  onKeyDown: (nodeId: string, event: ReactKeyboardEvent<HTMLElement>) => void;
+  registerNodeElement: (nodeId: string, element: HTMLElement | null) => void;
+}
 
 const FLOW_NODE_TYPES: NodeTypes = {
   mermaidFlowNode: MermaidReactFlowNode,
 };
-const FLOW_DEFAULT_EDGE_OPTIONS = { type: 'smoothstep' as const };
 const FLOW_DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 1 };
 const FLOW_PRO_OPTIONS = { hideAttribution: true };
+const FlowNodeInteractionContext = createContext<FlowNodeInteractionContextValue | null>(null);
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
@@ -145,7 +150,7 @@ export function DiagramCanvas({
 }: DiagramCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgContainerRef = useRef<HTMLDivElement | null>(null);
-  const nodeButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  const nodeButtonRefs = useRef(new Map<string, HTMLElement | null>());
   const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
   const [manualNodePositions, setManualNodePositions] = useState<Record<string, SvgPoint>>({});
   const dragStateRef = useRef<{ originX: number; originY: number; startPanX: number; startPanY: number } | null>(null);
@@ -255,9 +260,13 @@ export function DiagramCanvas({
         return;
       }
 
+      const nodeLabel = getNodeText(node);
+      const ariaLabel = getNodeAriaLabel(node.shape, nodeLabel);
       nextNodes.push({
+        ariaLabel,
         data: {
-          label: getNodeText(node),
+          ariaLabel,
+          label: nodeLabel,
           shape: node.shape,
         },
         draggable: !readOnly,
@@ -275,22 +284,6 @@ export function DiagramCanvas({
 
     return nextNodes;
   }, [graph, interactiveNodeBounds, readOnly, selection]);
-
-  const flowEdges = useMemo<MermaidFlowEdge[]>(() => {
-    if (!graph) {
-      return [];
-    }
-
-    return graph.links.map((link, index) => ({
-      id: `${link.source}-${link.target}-${index}`,
-      label: getLinkText(link),
-      markerEnd: { color: '#38bdf8', type: MarkerType.ArrowClosed },
-      source: link.source,
-      style: { stroke: '#38bdf8', strokeWidth: 1.6 },
-      target: link.target,
-      type: 'smoothstep',
-    }));
-  }, [graph]);
 
   const manualLayoutActive = Object.keys(manualNodePositions).length > 0;
   const useReactFlowRenderer = isFlowchart && flowNodes.length > 0;
@@ -813,6 +806,58 @@ export function DiagramCanvas({
     setEditingLabel(getNodeText(node));
   }, []);
 
+  const registerNodeElement = useCallback((nodeId: string, element: HTMLElement | null) => {
+    if (element) {
+      nodeButtonRefs.current.set(nodeId, element);
+      return;
+    }
+
+    nodeButtonRefs.current.delete(nodeId);
+  }, []);
+
+  const handleNodeKeyDown = useCallback((nodeId: string, event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      moveFocus(nodeId, 'up');
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      moveFocus(nodeId, 'down');
+    }
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      moveFocus(nodeId, 'left');
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      moveFocus(nodeId, 'right');
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setSelection([nodeId]);
+      setToolbarOpen(true);
+    }
+    if (event.key === 'F2') {
+      event.preventDefault();
+      const node = nodeById.get(nodeId);
+      if (node && !readOnly) {
+        openNodeEditor(node);
+      }
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setToolbarOpen(false);
+      containerRef.current?.focus();
+    }
+  }, [moveFocus, nodeById, openNodeEditor, readOnly, setSelection]);
+
+  const flowNodeInteraction = useMemo<FlowNodeInteractionContextValue>(() => ({
+    focusedNodeId,
+    onFocus: setFocusedNodeId,
+    onKeyDown: handleNodeKeyDown,
+    registerNodeElement,
+  }), [focusedNodeId, handleNodeKeyDown, registerNodeElement]);
+
   const transformStyle: CSSProperties = {
     inset: 0,
     position: 'absolute',
@@ -873,39 +918,39 @@ export function DiagramCanvas({
 
         {useReactFlowRenderer ? (
           <div className="diagram-reactflow-layer">
-            <ReactFlow
-              colorMode="dark"
-              connectOnClick={false}
-              defaultEdgeOptions={FLOW_DEFAULT_EDGE_OPTIONS}
-              defaultViewport={FLOW_DEFAULT_VIEWPORT}
-              edges={flowEdges}
-              maxZoom={1}
-              minZoom={1}
-              nodes={flowNodes}
-              nodesConnectable={!readOnly}
-              nodesDraggable={!readOnly}
-              nodeTypes={FLOW_NODE_TYPES}
-              onConnect={handleFlowConnect}
-              onNodeClick={(event, node) => {
-                event.stopPropagation();
-                handleNodeClick(node.id, event.shiftKey);
-              }}
-              onNodeDoubleClick={(event, node) => {
-                event.stopPropagation();
-                const diagramNode = nodeById.get(node.id);
-                if (diagramNode && !readOnly) {
-                  openNodeEditor(diagramNode);
-                }
-              }}
-              onNodesChange={handleFlowNodesChange}
-              panOnDrag={false}
-              preventScrolling={false}
-              proOptions={FLOW_PRO_OPTIONS}
-              selectionOnDrag={false}
-              zoomOnDoubleClick={false}
-              zoomOnPinch={false}
-              zoomOnScroll={false}
-            />
+            <FlowNodeInteractionContext.Provider value={flowNodeInteraction}>
+              <ReactFlow
+                colorMode="dark"
+                connectOnClick={false}
+                defaultViewport={FLOW_DEFAULT_VIEWPORT}
+                maxZoom={1}
+                minZoom={1}
+                nodes={flowNodes}
+                nodesConnectable={!readOnly}
+                nodesDraggable={!readOnly}
+                nodeTypes={FLOW_NODE_TYPES}
+                onConnect={handleFlowConnect}
+                onNodeClick={(event, node) => {
+                  event.stopPropagation();
+                  handleNodeClick(node.id, event.shiftKey);
+                }}
+                onNodeDoubleClick={(event, node) => {
+                  event.stopPropagation();
+                  const diagramNode = nodeById.get(node.id);
+                  if (diagramNode && !readOnly) {
+                    openNodeEditor(diagramNode);
+                  }
+                }}
+                onNodesChange={handleFlowNodesChange}
+                panOnDrag={false}
+                preventScrolling={false}
+                proOptions={FLOW_PRO_OPTIONS}
+                selectionOnDrag={false}
+                zoomOnDoubleClick={false}
+                zoomOnPinch={false}
+                zoomOnScroll={false}
+              />
+            </FlowNodeInteractionContext.Provider>
           </div>
         ) : null}
 
@@ -915,7 +960,7 @@ export function DiagramCanvas({
               const node = nodeById.get(nodeId) ?? null;
               const selected = selection.includes(nodeId);
               const focused = focusedNodeId === nodeId;
-              const ariaLabel = `${node?.shape ?? 'node'}: ${node ? getNodeText(node) : nodeId}`;
+              const ariaLabel = node ? getNodeAriaLabel(node.shape, getNodeText(node)) : getNodeAriaLabel('node', nodeId);
 
               return (
                 <button
@@ -934,37 +979,8 @@ export function DiagramCanvas({
                     }
                     openNodeEditor(node);
                   }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'ArrowUp') {
-                      event.preventDefault();
-                      moveFocus(nodeId, 'up');
-                    }
-                    if (event.key === 'ArrowDown') {
-                      event.preventDefault();
-                      moveFocus(nodeId, 'down');
-                    }
-                    if (event.key === 'ArrowLeft') {
-                      event.preventDefault();
-                      moveFocus(nodeId, 'left');
-                    }
-                    if (event.key === 'ArrowRight') {
-                      event.preventDefault();
-                      moveFocus(nodeId, 'right');
-                    }
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setSelection([nodeId]);
-                      setToolbarOpen(true);
-                    }
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      setToolbarOpen(false);
-                      containerRef.current?.focus();
-                    }
-                  }}
-                  ref={(element) => {
-                    nodeButtonRefs.current.set(nodeId, element);
-                  }}
+                  onKeyDown={(event) => { handleNodeKeyDown(nodeId, event); }}
+                  ref={(element) => { registerNodeElement(nodeId, element); }}
                   role="button"
                   style={{
                     background: selected ? 'rgba(56, 189, 248, 0.08)' : focused ? 'rgba(148, 163, 184, 0.06)' : 'rgba(255, 255, 255, 0.01)',
@@ -1441,9 +1457,22 @@ export function DiagramCanvas({
   );
 }
 
-function MermaidReactFlowNode({ data, selected }: NodeProps<MermaidFlowNode>) {
+function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>) {
+  const interaction = useContext(FlowNodeInteractionContext);
+  const focused = interaction?.focusedNodeId === id;
+  const label = data.ariaLabel;
+
   return (
-    <div className={`mermaid-flow-node mermaid-flow-node--${getShapeClassName(data.shape)}${selected ? ' is-selected' : ''}`}>
+    <div
+      aria-label={label}
+      aria-pressed={selected}
+      className={`mermaid-flow-node mermaid-flow-node--${getShapeClassName(data.shape)}${selected ? ' is-selected' : ''}${focused ? ' is-focused' : ''}`}
+      onFocus={() => { interaction?.onFocus(id); }}
+      onKeyDown={(event) => { interaction?.onKeyDown(id, event); }}
+      ref={(element) => { interaction?.registerNodeElement(id, element); }}
+      role="button"
+      tabIndex={focused ? 0 : -1}
+    >
       <Handle position={Position.Left} type="target" />
       <span>{data.label}</span>
       <Handle position={Position.Right} type="source" />
@@ -1469,6 +1498,10 @@ function getLinkText(link: { text?: string | { text?: string } }): string | unde
   }
 
   return link.text?.text;
+}
+
+function getNodeAriaLabel(shape: string, label: string): string {
+  return `${shape}: ${label}`;
 }
 
 function getShapeClassName(shape: DiagramNodeShape): string {

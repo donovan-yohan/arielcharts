@@ -578,9 +578,7 @@ code {
   color: #8b949e;
 }
 
-.diagram-canvas-svg--reactflow svg g.node,
-.diagram-canvas-svg--reactflow svg g.edgeLabel,
-.diagram-canvas-svg--reactflow svg g.edgePath {
+.diagram-canvas-svg--reactflow svg g.node {
   opacity: 0;
 }
 
@@ -634,6 +632,16 @@ code {
   box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.25), 0 10px 28px rgba(2, 6, 23, 0.35);
 }
 
+.mermaid-flow-node.is-focused {
+  outline: 2px solid rgba(56, 189, 248, 0.85);
+  outline-offset: 3px;
+}
+
+.mermaid-flow-node > span {
+  position: relative;
+  z-index: 1;
+}
+
 .mermaid-flow-node--round,
 .mermaid-flow-node--stadium {
   border-radius: 999px;
@@ -656,6 +664,50 @@ code {
 
 .mermaid-flow-node--trapezoid {
   clip-path: polygon(12% 0, 88% 0, 100% 100%, 0 100%);
+}
+
+.mermaid-flow-node--inv_trapezoid {
+  clip-path: polygon(0 0, 100% 0, 88% 100%, 12% 100%);
+}
+
+.mermaid-flow-node--lean_right {
+  clip-path: polygon(12% 0, 100% 0, 88% 100%, 0 100%);
+}
+
+.mermaid-flow-node--lean_left {
+  clip-path: polygon(0 0, 88% 0, 100% 100%, 12% 100%);
+}
+
+.mermaid-flow-node--odd {
+  clip-path: polygon(0 0, 88% 0, 100% 50%, 88% 100%, 0 100%);
+}
+
+.mermaid-flow-node--cylinder {
+  border-bottom-color: transparent;
+  border-radius: 50% / 14%;
+  padding-top: 12px;
+}
+
+.mermaid-flow-node--cylinder::before,
+.mermaid-flow-node--cylinder::after {
+  border: 1px solid #30363d;
+  border-radius: 50%;
+  content: '';
+  height: 22%;
+  left: -1px;
+  pointer-events: none;
+  position: absolute;
+  right: -1px;
+}
+
+.mermaid-flow-node--cylinder::before {
+  background: rgba(13, 17, 23, 0.18);
+  top: -1px;
+}
+
+.mermaid-flow-node--cylinder::after {
+  border-top-color: transparent;
+  bottom: -1px;
 }
 
 .mermaid-flow-node--subroutine::before,

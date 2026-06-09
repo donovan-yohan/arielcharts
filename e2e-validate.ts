@@ -1,5 +1,13 @@
 import { chromium } from '@playwright/test';
 
+interface SemanticState {
+  cylinderAria: string | null;
+  cylinderPseudoRadius: string;
+  edgeOpacity: string | null;
+  edgePaths: number;
+  reactFlowEdges: number;
+}
+
 async function validate() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
@@ -63,6 +71,52 @@ async function validate() {
   const alignPass = maxOffset <= 5;
   results.push({ test: 'overlay alignment', pass: alignPass });
   console.log(`   Max offset: ${maxOffset}px — ${alignPass ? 'PASS' : 'FAIL'}`);
+
+  // --- Test: canonical Mermaid edge semantics + React Flow shape fidelity ---
+  console.log('\n3b. Checking Mermaid semantics in React Flow mode...');
+  await editor.click();
+  await page.keyboard.press('Control+A');
+  await page.keyboard.type(`flowchart TD
+    A[(Database)] --> B{Decision}
+    B -.-> C[Retry]
+    B ==>|thick| D[Done]
+    A --o E((Circle))
+    E --x F[/Trap/]`, { delay: 10 });
+  await page.waitForTimeout(3000);
+
+  const semanticState = await page.evaluate<SemanticState>(() => {
+    const svg = document.querySelector('.diagram-canvas-svg--reactflow svg') as SVGSVGElement | null;
+    const edgePath = svg?.querySelector('path.flowchart-link') as SVGPathElement | null;
+    const cylinder = document.querySelector('.mermaid-flow-node--cylinder') as HTMLElement | null;
+
+    return {
+      cylinderAria: cylinder?.getAttribute('aria-label') ?? null,
+      cylinderPseudoRadius: cylinder ? window.getComputedStyle(cylinder, '::before').borderRadius : '',
+      edgeOpacity: edgePath ? window.getComputedStyle(edgePath).opacity : null,
+      edgePaths: svg?.querySelectorAll('path.flowchart-link').length ?? 0,
+      reactFlowEdges: document.querySelectorAll('.react-flow__edge').length,
+    };
+  });
+  const edgeSemanticsPass = semanticState.edgePaths >= 5
+    && semanticState.edgeOpacity !== '0'
+    && semanticState.reactFlowEdges === 0;
+  results.push({ test: 'canonical mermaid edge semantics visible', pass: edgeSemanticsPass });
+  console.log(`   Mermaid edge paths: ${semanticState.edgePaths}, React Flow edges: ${semanticState.reactFlowEdges}, opacity: ${semanticState.edgeOpacity} — ${edgeSemanticsPass ? 'PASS' : 'FAIL'}`);
+
+  const shapeFidelityPass = typeof semanticState.cylinderAria === 'string'
+    && semanticState.cylinderAria.includes('cylinder:')
+    && semanticState.cylinderPseudoRadius.includes('%');
+  results.push({ test: 'reactflow cylinder shape fidelity', pass: shapeFidelityPass });
+  console.log(`   Cylinder aria: ${semanticState.cylinderAria}, pseudo radius: ${semanticState.cylinderPseudoRadius} — ${shapeFidelityPass ? 'PASS' : 'FAIL'}`);
+
+  const firstFlowNode = page.locator('.mermaid-flow-node[role="button"]').first();
+  await firstFlowNode.focus({ timeout: 5000 });
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  const keyboardToolbarVisible = await page.locator('button[aria-label="Edit label"]').count();
+  const keyboardPass = keyboardToolbarVisible > 0;
+  results.push({ test: 'reactflow node keyboard selection', pass: keyboardPass });
+  console.log(`   Keyboard opened toolbar: ${keyboardPass} — ${keyboardPass ? 'PASS' : 'FAIL'}`);
 
   // --- Test: fit-to-diagram ---
   console.log('\n4. Testing fit-to-diagram...');

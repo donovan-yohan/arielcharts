@@ -582,6 +582,14 @@ code {
   opacity: 0;
 }
 
+.diagram-canvas-svg--manual-layout svg .edgePaths,
+.diagram-canvas-svg--manual-layout svg .edgeLabels,
+.diagram-canvas-svg--manual-layout svg g.edgePath,
+.diagram-canvas-svg--manual-layout svg g.edgeLabel,
+.diagram-canvas-svg--manual-layout svg path.flowchart-link {
+  opacity: 0;
+}
+
 .diagram-reactflow-layer {
   inset: 0;
   position: absolute;
@@ -598,6 +606,21 @@ code {
   border: none;
   box-shadow: none;
   padding: 0;
+}
+
+.diagram-reactflow-layer .react-flow__edge-path {
+  stroke: #e2e8f0;
+  stroke-width: 1.8;
+}
+
+.diagram-reactflow-layer .react-flow__edge-textbg {
+  fill: #0d1117;
+}
+
+.diagram-reactflow-layer .react-flow__edge-text {
+  fill: #e2e8f0;
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .diagram-reactflow-layer .react-flow__handle {

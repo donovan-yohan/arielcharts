@@ -3,9 +3,11 @@
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   Handle,
+  MarkerType,
   Position,
   ReactFlow,
   type Connection,
+  type Edge,
   type Node,
   type NodeChange,
   type NodeProps,
@@ -305,6 +307,25 @@ export function DiagramCanvas({
   }, [graph, interactiveNodeBounds, readOnly, selection]);
 
   const manualLayoutActive = Object.keys(manualNodePositions).length > 0;
+
+  const flowEdges = useMemo<Edge[]>(() => {
+    if (!graph || !manualLayoutActive) {
+      return [];
+    }
+
+    return graph.links
+      .filter((link) => nodeById.has(link.source) && nodeById.has(link.target))
+      .map((link, index) => ({
+        animated: false,
+        id: `${link.source}->${link.target}-${index}`,
+        label: getLinkText(link),
+        markerEnd: { type: MarkerType.ArrowClosed },
+        source: link.source,
+        target: link.target,
+        type: 'smoothstep',
+      }));
+  }, [graph, manualLayoutActive, nodeById]);
+
   const useReactFlowRenderer = isFlowchart && flowNodes.length > 0;
 
   const screenSelectionBounds = useMemo(() => {
@@ -930,7 +951,9 @@ export function DiagramCanvas({
         {svg ? (
           <div
             aria-hidden="true"
-            className={useReactFlowRenderer ? 'diagram-canvas-svg diagram-canvas-svg--reactflow' : 'diagram-canvas-svg'}
+            className={useReactFlowRenderer
+              ? `diagram-canvas-svg diagram-canvas-svg--reactflow${manualLayoutActive ? ' diagram-canvas-svg--manual-layout' : ''}`
+              : 'diagram-canvas-svg'}
             dangerouslySetInnerHTML={{ __html: svg }}
             ref={svgContainerRef}
             style={{ pointerEvents: 'none' }}
@@ -944,6 +967,8 @@ export function DiagramCanvas({
                 colorMode="dark"
                 connectOnClick={false}
                 defaultViewport={FLOW_DEFAULT_VIEWPORT}
+                edges={flowEdges}
+                fitView={false}
                 maxZoom={1}
                 minZoom={1}
                 nodes={flowNodes}

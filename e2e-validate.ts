@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 
 interface SemanticState {
@@ -8,8 +9,16 @@ interface SemanticState {
   reactFlowEdges: number;
 }
 
+interface ManualLayoutEdgeState {
+  mermaidEdgeOpacity: string | null;
+  reactFlowEdgeHeight: number;
+  reactFlowEdges: number;
+  reactFlowEdgeWidth: number;
+}
+
 async function validate() {
-  const browser = await chromium.launch({ headless: true });
+  const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
+  const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const results: Array<{ test: string; pass: boolean }> = [];
   const sessionName = `e2e-diag-${Date.now()}`;
@@ -19,7 +28,7 @@ async function validate() {
   });
 
   console.log('1. Loading page...');
-  await page.goto(`http://localhost:3003/s/${sessionName}`, { waitUntil: 'load', timeout: 30000 });
+  await page.goto(`http://localhost:3003/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForSelector('.cm-content', { timeout: 15000 });
   await page.waitForTimeout(2000);
   const editor = page.locator('.cm-content');
@@ -174,6 +183,24 @@ async function validate() {
   console.log(`   Node moved: ${dragMoved} — ${dragMoved ? 'PASS' : 'FAIL'}`);
   console.log(`   Mermaid text unchanged by drag: ${dragKeptMermaidText} — ${dragKeptMermaidText ? 'PASS' : 'FAIL'}`);
 
+  const manualEdgeState = await page.evaluate<ManualLayoutEdgeState>(() => {
+    const mermaidEdgePath = document.querySelector('.diagram-canvas-svg--manual-layout path.flowchart-link') as SVGPathElement | null;
+    const reactFlowEdgePath = document.querySelector('.react-flow__edge path.react-flow__edge-path') as SVGPathElement | null;
+    const reactFlowEdgeBounds = reactFlowEdgePath?.getBoundingClientRect();
+
+    return {
+      mermaidEdgeOpacity: mermaidEdgePath ? window.getComputedStyle(mermaidEdgePath).opacity : null,
+      reactFlowEdgeHeight: Math.round(reactFlowEdgeBounds?.height ?? 0),
+      reactFlowEdges: document.querySelectorAll('.react-flow__edge').length,
+      reactFlowEdgeWidth: Math.round(reactFlowEdgeBounds?.width ?? 0),
+    };
+  });
+  const manualEdgesPass = manualEdgeState.mermaidEdgeOpacity === '0'
+    && manualEdgeState.reactFlowEdges > 0
+    && (manualEdgeState.reactFlowEdgeWidth > 0 || manualEdgeState.reactFlowEdgeHeight > 0);
+  results.push({ test: 'manual layout edges follow React Flow nodes', pass: manualEdgesPass });
+  console.log(`   Manual layout edges: RF=${manualEdgeState.reactFlowEdges}, Mermaid opacity=${manualEdgeState.mermaidEdgeOpacity}, bbox=${manualEdgeState.reactFlowEdgeWidth}x${manualEdgeState.reactFlowEdgeHeight} — ${manualEdgesPass ? 'PASS' : 'FAIL'}`);
+
   await page.locator('button[aria-label="Clean layout to Mermaid"]').click({ timeout: 5000 });
   await page.waitForTimeout(500);
   const afterReset = await dragTarget.boundingBox();
@@ -278,6 +305,10 @@ async function validate() {
   console.log(allPassed ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED');
 
   await browser.close();
+
+  if (!allPassed) {
+    process.exit(1);
+  }
 }
 
 validate().catch((error) => {

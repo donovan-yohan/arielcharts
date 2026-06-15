@@ -34,12 +34,15 @@ import {
   type SvgPoint,
 } from '../lib/svg-hit-map';
 
+export type DiagramNodePositions = Record<string, SvgPoint>;
+
 export interface DiagramCanvasProps {
   className?: string;
   emptyMessage?: string;
   graph: FlowchartSnapshot | null;
   interactionMode?: 'select' | 'connect';
   isFlowchart?: boolean;
+  nodePositions?: DiagramNodePositions;
   readOnly?: boolean;
   selectedNodeIds?: string[];
   svg: string;
@@ -51,6 +54,7 @@ export interface DiagramCanvasProps {
   onEditNodeLabel?: (nodeId: string, newLabel: string) => void;
   onGroupNodes?: (nodeIds: string[], label: string) => void;
   onInteractionModeChange?: (mode: 'select' | 'connect') => void;
+  onNodePositionsChange?: (positions: DiagramNodePositions) => void;
   onSelectedNodeIdsChange?: (nodeIds: string[]) => void;
   onUngroupNodes?: (subgraphId: string) => void;
 }
@@ -135,6 +139,7 @@ export function DiagramCanvas({
   graph,
   interactionMode,
   isFlowchart = true,
+  nodePositions,
   onAddEdge,
   onAddNode,
   onChangeNodeShape,
@@ -142,6 +147,7 @@ export function DiagramCanvas({
   onEditNodeLabel,
   onGroupNodes,
   onInteractionModeChange,
+  onNodePositionsChange,
   onSelectedNodeIdsChange,
   onUngroupNodes,
   readOnly = false,
@@ -152,7 +158,8 @@ export function DiagramCanvas({
   const svgContainerRef = useRef<HTMLDivElement | null>(null);
   const nodeButtonRefs = useRef(new Map<string, HTMLElement | null>());
   const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
-  const [manualNodePositions, setManualNodePositions] = useState<Record<string, SvgPoint>>({});
+  const [uncontrolledNodePositions, setUncontrolledNodePositions] = useState<DiagramNodePositions>({});
+  const manualNodePositions = nodePositions ?? uncontrolledNodePositions;
   const dragStateRef = useRef<{ originX: number; originY: number; startPanX: number; startPanY: number } | null>(null);
   const isControlledSelection = selectedNodeIds !== undefined;
   const [internalSelection, setInternalSelection] = useState<string[]>(selectedNodeIds ?? []);
@@ -177,6 +184,18 @@ export function DiagramCanvas({
   const [selectedConnectionType, setSelectedConnectionType] = useState<DiagramLinkType>('arrow_point');
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [toolbarOpen, setToolbarOpen] = useState(false);
+
+  const setNodePositions = useCallback((update: (current: DiagramNodePositions) => DiagramNodePositions) => {
+    const next = update(manualNodePositions);
+    if (next === manualNodePositions) {
+      return;
+    }
+
+    if (nodePositions === undefined) {
+      setUncontrolledNodePositions(next);
+    }
+    onNodePositionsChange?.(next);
+  }, [manualNodePositions, nodePositions, onNodePositionsChange]);
 
   const interactiveNodeBounds = useMemo(() => {
     if (!hitMap) {
@@ -501,19 +520,21 @@ export function DiagramCanvas({
 
   useEffect(() => {
     if (!graph) {
-      setManualNodePositions({});
+      if (Object.keys(manualNodePositions).length > 0) {
+        setNodePositions(() => ({}));
+      }
       return;
     }
 
     const currentNodeIds = new Set(graph.nodes.map((node) => node.id));
-    setManualNodePositions((current) => {
+    setNodePositions((current) => {
       const next = Object.fromEntries(
         Object.entries(current).filter(([nodeId]) => currentNodeIds.has(nodeId)),
       );
 
       return Object.keys(next).length === Object.keys(current).length ? current : next;
     });
-  }, [graph]);
+  }, [graph, manualNodePositions, setNodePositions]);
 
   useEffect(() => {
     if (selection.length === 0) {
@@ -772,7 +793,7 @@ export function DiagramCanvas({
       return;
     }
 
-    setManualNodePositions((current) => {
+    setNodePositions((current) => {
       const next = { ...current };
       movedNodes.forEach((change) => {
         if (change.type === 'position' && change.position) {
@@ -781,7 +802,7 @@ export function DiagramCanvas({
       });
       return next;
     });
-  }, []);
+  }, [setNodePositions]);
 
   const handleFlowConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) {
@@ -1271,7 +1292,7 @@ export function DiagramCanvas({
             }}
           >
             {manualLayoutActive ? (
-              <ToolbarButton label="Reset dragged node layout to Mermaid" onClick={() => { setManualNodePositions({}); }}>
+              <ToolbarButton label="Clean layout to Mermaid" onClick={() => { setNodePositions(() => ({})); }}>
                 <RotateCcw size={16} />
               </ToolbarButton>
             ) : null}

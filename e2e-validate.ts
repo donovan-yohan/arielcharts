@@ -22,9 +22,22 @@ async function validate() {
   await page.goto(`http://localhost:3003/s/${sessionName}`, { waitUntil: 'load', timeout: 30000 });
   await page.waitForSelector('.cm-content', { timeout: 15000 });
   await page.waitForTimeout(2000);
-
-  console.log('2. Typing flowchart...');
   const editor = page.locator('.cm-content');
+
+  console.log('2. Checking empty-canvas builder...');
+  const emptyBuilderVisible = await page.locator('button', { hasText: 'Add your first node' }).isVisible({ timeout: 5000 });
+  results.push({ test: 'empty canvas shows first-node builder', pass: emptyBuilderVisible });
+  console.log(`   Empty first-node builder visible: ${emptyBuilderVisible} — ${emptyBuilderVisible ? 'PASS' : 'FAIL'}`);
+  await page.locator('button', { hasText: 'Add your first node' }).click({ timeout: 5000 });
+  await page.waitForTimeout(3000);
+  const emptyBuilderEditorText = await editor.textContent();
+  const emptyBuilderCreated = (emptyBuilderEditorText?.includes('flowchart') ?? false)
+    && (emptyBuilderEditorText?.includes('New Node') ?? false)
+    && (await page.locator('.react-flow__node, .diagram-node-target').count()) > 0;
+  results.push({ test: 'empty canvas first node creates mermaid text', pass: emptyBuilderCreated });
+  console.log(`   Empty builder created Mermaid text: ${emptyBuilderCreated} — ${emptyBuilderCreated ? 'PASS' : 'FAIL'}`);
+
+  console.log('2b. Typing flowchart...');
   await editor.click();
   await page.keyboard.press('Control+A');
   await page.keyboard.type(`flowchart TD
@@ -143,6 +156,7 @@ async function validate() {
   // --- Test: React Flow drag + reset layout ---
   console.log('\n6. Testing React Flow drag/reset...');
   const dragTarget = page.locator('.react-flow__node, .diagram-node-target').first();
+  const beforeDragEditorText = await editor.textContent();
   const beforeDrag = await dragTarget.boundingBox();
   if (beforeDrag) {
     await page.mouse.move(beforeDrag.x + beforeDrag.width / 2, beforeDrag.y + beforeDrag.height / 2);
@@ -152,11 +166,15 @@ async function validate() {
   }
   await page.waitForTimeout(500);
   const afterDrag = await dragTarget.boundingBox();
+  const afterDragEditorText = await editor.textContent();
   const dragMoved = !!beforeDrag && !!afterDrag && Math.abs(afterDrag.x - beforeDrag.x) > 20;
+  const dragKeptMermaidText = afterDragEditorText === beforeDragEditorText;
   results.push({ test: 'reactflow drag nodes', pass: dragMoved });
+  results.push({ test: 'reactflow drag keeps mermaid text canonical', pass: dragKeptMermaidText });
   console.log(`   Node moved: ${dragMoved} — ${dragMoved ? 'PASS' : 'FAIL'}`);
+  console.log(`   Mermaid text unchanged by drag: ${dragKeptMermaidText} — ${dragKeptMermaidText ? 'PASS' : 'FAIL'}`);
 
-  await page.locator('button[aria-label="Reset dragged node layout to Mermaid"]').click({ timeout: 5000 });
+  await page.locator('button[aria-label="Clean layout to Mermaid"]').click({ timeout: 5000 });
   await page.waitForTimeout(500);
   const afterReset = await dragTarget.boundingBox();
   const resetPass = !!beforeDrag && !!afterReset && Math.abs(afterReset.x - beforeDrag.x) <= 5;
@@ -262,4 +280,7 @@ async function validate() {
   await browser.close();
 }
 
-validate().catch(console.error);
+validate().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

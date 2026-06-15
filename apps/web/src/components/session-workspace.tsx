@@ -11,11 +11,12 @@ import { EditorView, keymap } from '@codemirror/view';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
-import { DiagramCanvas } from './diagram-canvas';
+import { DiagramCanvas, type DiagramNodePositions } from './diagram-canvas';
 import { MutationQueue, parseFlowchartSnapshot, type FlowchartSnapshot } from '../lib/diagram-mutations';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
 
 const MERMAID_TEXT_KEY = 'mermaid';
+const NODE_POSITIONS_KEY = 'nodePositions';
 const ACTIVITY_KEY = 'activity';
 const MAX_ACTIVITY_EVENTS = 100;
 const EDIT_ACTIVITY_DEBOUNCE_MS = 900;
@@ -36,9 +37,12 @@ type CollaborationState = {
   activityArray: Y.Array<ActivityEvent>;
   awareness: AwarenessLike;
   doc: Y.Doc;
+  nodePositionsMap: Y.Map<NodePosition>;
   provider: WebsocketProvider;
   yText: Y.Text;
 };
+
+type NodePosition = { x: number; y: number };
 
 type AwarenessLike = {
   getStates: () => Map<number, unknown>;
@@ -157,6 +161,32 @@ function isFlowchartSyntax(text: string): boolean {
   return trimmed.startsWith('flowchart') || trimmed.startsWith('graph');
 }
 
+function canBuildFlowchartFromCanvas(text: string): boolean {
+  return text.trim().length === 0 || isFlowchartSyntax(text);
+}
+
+function isNodePosition(value: unknown): value is NodePosition {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const position = value as Partial<NodePosition>;
+  return typeof position.x === 'number'
+    && Number.isFinite(position.x)
+    && typeof position.y === 'number'
+    && Number.isFinite(position.y);
+}
+
+function readNodePositions(positionMap: Y.Map<NodePosition>): DiagramNodePositions {
+  const positions: DiagramNodePositions = {};
+  for (const [nodeId, position] of positionMap.entries()) {
+    if (isNodePosition(position)) {
+      positions[nodeId] = { x: position.x, y: position.y };
+    }
+  }
+  return positions;
+}
+
 function stripParticipantTabSuffix(name: string): string {
   return name.replace(/-[a-z0-9]{2}$/i, '');
 }
@@ -256,6 +286,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [shareUrl, setShareUrl] = useState(() => getSessionPath(sessionId));
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [flowchartSnapshot, setFlowchartSnapshot] = useState<FlowchartSnapshot | null>(null);
+  const [nodePositions, setNodePositions] = useState<DiagramNodePositions>({});
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [interactionMode, setInteractionMode] = useState<'select' | 'connect'>('select');
   const [renamingParticipantName, setRenamingParticipantName] = useState<string | null>(null);
@@ -281,6 +312,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     });
     const awareness = provider.awareness as AwarenessLike;
     const yText = doc.getText(MERMAID_TEXT_KEY);
+    const nodePositionsMap = doc.getMap<NodePosition>(NODE_POSITIONS_KEY);
     const queue = new MutationQueue(yText, { transactionOrigin: 'visual' });
     mutationQueueRef.current = queue;
     const activityArray = doc.getArray<ActivityEvent>(ACTIVITY_KEY);
@@ -294,6 +326,10 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
     const syncActivity = () => {
       setActivity(activityArray.toArray().slice().reverse());
+    };
+
+    const syncNodePositions = () => {
+      setNodePositions(readNodePositions(nodePositionsMap));
     };
 
     const syncParticipants = () => {
@@ -342,10 +378,12 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
     syncText();
     syncActivity();
+    syncNodePositions();
     syncParticipants();
 
     yText.observe(syncText);
     activityArray.observe(syncActivity);
+    nodePositionsMap.observe(syncNodePositions);
     awareness.on('change', syncParticipants);
     provider.on('status', handleStatus);
     provider.on('connection-close', handleReconnectSignal);
@@ -357,7 +395,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       }
     });
 
-    setCollaboration({ activityArray, awareness, doc, provider, yText });
+    setCollaboration({ activityArray, awareness, doc, nodePositionsMap, provider, yText });
 
     return () => {
       if (editDebounceRef.current !== null) {
@@ -372,6 +410,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       provider.off('connection-error', handleReconnectSignal);
       yText.unobserve(syncText);
       activityArray.unobserve(syncActivity);
+      nodePositionsMap.unobserve(syncNodePositions);
       awareness.setLocalState(null);
       provider.destroy();
       doc.destroy();
@@ -631,6 +670,26 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     setRenamingParticipantName(null);
   }, [collaboration, displayNameDraft]);
 
+  const handleNodePositionsChange = useCallback((positions: DiagramNodePositions) => {
+    setNodePositions(positions);
+
+    if (!collaboration) {
+      return;
+    }
+
+    collaboration.doc.transact(() => {
+      for (const nodeId of collaboration.nodePositionsMap.keys()) {
+        if (!(nodeId in positions)) {
+          collaboration.nodePositionsMap.delete(nodeId);
+        }
+      }
+
+      for (const [nodeId, position] of Object.entries(positions)) {
+        collaboration.nodePositionsMap.set(nodeId, { x: position.x, y: position.y });
+      }
+    }, 'visual-layout');
+  }, [collaboration]);
+
   return (
     <main className="workspace-shell">
       <header className="workspace-topbar">
@@ -768,7 +827,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             emptyMessage={mermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
             graph={flowchartSnapshot}
             interactionMode={interactionMode}
-            isFlowchart={isFlowchartSyntax(mermaidText)}
+            isFlowchart={canBuildFlowchartFromCanvas(mermaidText)}
+            nodePositions={nodePositions}
             onAddEdge={(source, target, label, type) => mutationQueueRef.current?.addEdge(source, target, { label, type })}
             onAddNode={(label, shape) => mutationQueueRef.current?.addNode(label, { shape })}
             onChangeNodeShape={(nodeId, shape) => mutationQueueRef.current?.changeNodeShape(nodeId, shape)}
@@ -780,6 +840,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             onEditNodeLabel={(nodeId, label) => mutationQueueRef.current?.editNodeLabel(nodeId, label)}
             onGroupNodes={(ids, label) => mutationQueueRef.current?.groupNodes(ids, label)}
             onInteractionModeChange={setInteractionMode}
+            onNodePositionsChange={handleNodePositionsChange}
             onSelectedNodeIdsChange={setSelectedNodeIds}
             onUngroupNodes={(id) => mutationQueueRef.current?.ungroupSubgraph(id)}
             selectedNodeIds={selectedNodeIds}

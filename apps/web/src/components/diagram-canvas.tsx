@@ -31,7 +31,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
+import type { DiagramLink, DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
 import {
   buildSvgHitMap,
   getBoundsCenter,
@@ -103,6 +103,9 @@ const FLOW_NODE_TYPES: NodeTypes = {
   mermaidFlowNode: MermaidReactFlowNode,
 };
 const FLOW_PRO_OPTIONS = { hideAttribution: true };
+const FLOW_EDGE_COLOR = '#e2e8f0';
+const FLOW_EDGE_MARKER_CIRCLE_ID = 'arielcharts-flow-edge-circle';
+const FLOW_EDGE_MARKER_CROSS_ID = 'arielcharts-flow-edge-cross';
 const GHOST_NODE_WIDTH = 144;
 const GHOST_NODE_HEIGHT = 56;
 const FlowNodeInteractionContext = createContext<FlowNodeInteractionContextValue | null>(null);
@@ -174,6 +177,7 @@ export function DiagramCanvas({
   const [uncontrolledNodePositions, setUncontrolledNodePositions] = useState<DiagramNodePositions>({});
   const [liveNodePositions, setLiveNodePositions] = useState<DiagramNodePositions>({});
   const persistedNodePositions = nodePositions ?? uncontrolledNodePositions;
+  const persistedNodePositionsRef = useRef<DiagramNodePositions>(persistedNodePositions);
   const visibleNodePositions = useMemo(
     () => ({ ...persistedNodePositions, ...liveNodePositions }),
     [liveNodePositions, persistedNodePositions],
@@ -199,23 +203,29 @@ export function DiagramCanvas({
   const [pendingEdgeLabel, setPendingEdgeLabel] = useState('');
   const [groupPromptValue, setGroupPromptValue] = useState('');
   const [showGroupPrompt, setShowGroupPrompt] = useState(false);
-  const [newNodeLabel, setNewNodeLabel] = useState(DEFAULT_NEW_NODE_LABEL);
+  const [newNodeLabel, setNewNodeLabel] = useState('');
   const [newNodeShape, setNewNodeShape] = useState<DiagramNodeShape>(DEFAULT_NEW_NODE_SHAPE);
   const [selectedConnectionType, setSelectedConnectionType] = useState<DiagramLinkType>('arrow_point');
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [toolbarOpen, setToolbarOpen] = useState(false);
 
   const setNodePositions = useCallback((update: (current: DiagramNodePositions) => DiagramNodePositions) => {
-    const next = update(persistedNodePositions);
-    if (next === persistedNodePositions) {
+    const currentPositions = persistedNodePositionsRef.current;
+    const next = update(currentPositions);
+    if (next === currentPositions) {
       return;
     }
 
+    persistedNodePositionsRef.current = next;
     if (nodePositions === undefined) {
       setUncontrolledNodePositions(next);
     }
     onNodePositionsChange?.(next);
-  }, [persistedNodePositions, nodePositions, onNodePositionsChange]);
+  }, [nodePositions, onNodePositionsChange]);
+
+  useEffect(() => {
+    persistedNodePositionsRef.current = persistedNodePositions;
+  }, [persistedNodePositions]);
 
   const interactiveNodeBounds = useMemo(() => {
     if (!hitMap) {
@@ -329,22 +339,22 @@ export function DiagramCanvas({
   const hasPersistedLayout = Object.keys(persistedNodePositions).length > 0;
 
   const flowEdges = useMemo<Edge[]>(() => {
-    if (!graph) {
+    if (!graph || !interactiveNodeBounds) {
       return [];
     }
 
     return graph.links
-      .filter((link) => nodeById.has(link.source) && nodeById.has(link.target))
+      .filter((link) => interactiveNodeBounds.has(link.source) && interactiveNodeBounds.has(link.target))
       .map((link, index) => ({
         animated: false,
         id: `${link.source}->${link.target}-${index}`,
         label: getLinkText(link),
-        markerEnd: { type: MarkerType.ArrowClosed },
+        ...getFlowEdgePresentation(link),
         source: link.source,
         target: link.target,
         type: 'smoothstep',
       }));
-  }, [graph, nodeById]);
+  }, [graph, interactiveNodeBounds]);
 
   const useReactFlowRenderer = isFlowchart && flowNodes.length > 0;
   const flowViewport = useMemo<Viewport>(() => ({
@@ -579,9 +589,7 @@ export function DiagramCanvas({
 
   useEffect(() => {
     if (!graph) {
-      if (Object.keys(persistedNodePositions).length > 0) {
-        setNodePositions(() => ({}));
-      }
+      setNodePositions((current) => (Object.keys(current).length > 0 ? {} : current));
       setLiveNodePositions({});
       return;
     }
@@ -597,7 +605,7 @@ export function DiagramCanvas({
     setLiveNodePositions((current) => Object.fromEntries(
       Object.entries(current).filter(([nodeId]) => currentNodeIds.has(nodeId)),
     ));
-  }, [graph, persistedNodePositions, setNodePositions]);
+  }, [graph, setNodePositions]);
 
   useEffect(() => {
     if (selection.length === 0) {
@@ -930,7 +938,7 @@ export function DiagramCanvas({
 
   const addNodeFromToolbar = useCallback(() => {
     onAddNode?.(newNodeLabel.trim() || DEFAULT_NEW_NODE_LABEL, newNodeShape);
-    setNewNodeLabel(DEFAULT_NEW_NODE_LABEL);
+    setNewNodeLabel('');
   }, [newNodeLabel, newNodeShape, onAddNode]);
 
   const openNodeEditor = useCallback((node: DiagramNode) => {
@@ -1131,6 +1139,7 @@ export function DiagramCanvas({
 
       {useReactFlowRenderer ? (
         <div className="diagram-reactflow-layer">
+          <FlowEdgeMarkers />
           <FlowNodeInteractionContext.Provider value={flowNodeInteraction}>
             <ReactFlow
               colorMode="dark"
@@ -1623,6 +1632,39 @@ export function DiagramCanvas({
   );
 }
 
+function FlowEdgeMarkers() {
+  return (
+    <svg aria-hidden="true" focusable="false" style={{ height: 0, position: 'absolute', width: 0 }}>
+      <defs>
+        <marker
+          id={FLOW_EDGE_MARKER_CIRCLE_ID}
+          markerHeight="10"
+          markerUnits="strokeWidth"
+          markerWidth="10"
+          orient="auto"
+          refX="9"
+          refY="5"
+          viewBox="0 0 10 10"
+        >
+          <circle cx="5" cy="5" fill="#0d1117" r="3" stroke={FLOW_EDGE_COLOR} strokeWidth="1.6" />
+        </marker>
+        <marker
+          id={FLOW_EDGE_MARKER_CROSS_ID}
+          markerHeight="10"
+          markerUnits="strokeWidth"
+          markerWidth="10"
+          orient="auto"
+          refX="9"
+          refY="5"
+          viewBox="0 0 10 10"
+        >
+          <path d="M3 3 L7 7 M7 3 L3 7" fill="none" stroke={FLOW_EDGE_COLOR} strokeLinecap="round" strokeWidth="1.8" />
+        </marker>
+      </defs>
+    </svg>
+  );
+}
+
 function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>) {
   const interaction = useContext(FlowNodeInteractionContext);
   const focused = interaction?.focusedNodeId === id;
@@ -1666,12 +1708,34 @@ function getLinkText(link: { text?: string | { text?: string } }): string | unde
   return link.text?.text;
 }
 
-function getNodeAriaLabel(shape: string, label: string): string {
-  return `${shape}: ${label}`;
+function getFlowEdgePresentation(link: DiagramLink): Pick<Edge, 'markerEnd' | 'style'> {
+  const strokeWidth = link.stroke === 'thick' ? 3 : 1.8;
+  const strokeDasharray = link.stroke === 'dotted' ? '5 5' : undefined;
+  const style: CSSProperties = {
+    stroke: FLOW_EDGE_COLOR,
+    strokeDasharray,
+    strokeWidth,
+  };
+
+  switch (link.type) {
+    case 'arrow_open':
+      return { markerEnd: { color: FLOW_EDGE_COLOR, type: MarkerType.Arrow }, style };
+    case 'arrow_circle':
+      return { markerEnd: FLOW_EDGE_MARKER_CIRCLE_ID, style };
+    case 'arrow_cross':
+      return { markerEnd: FLOW_EDGE_MARKER_CROSS_ID, style };
+    case 'arrow_point':
+    default:
+      return { markerEnd: { color: FLOW_EDGE_COLOR, type: MarkerType.ArrowClosed }, style };
+  }
 }
 
-function getShapeClassName(shape: DiagramNodeShape): string {
-  return shape.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'rect';
+function getNodeAriaLabel(shape: string | undefined, label: string): string {
+  return `${shape ?? 'node'}: ${label}`;
+}
+
+function getShapeClassName(shape?: DiagramNodeShape): string {
+  return shape?.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'rect';
 }
 
 function isTypingElement(target: EventTarget | null): boolean {

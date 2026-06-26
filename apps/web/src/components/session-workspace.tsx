@@ -186,7 +186,7 @@ function isNodePosition(value: unknown): value is NodePosition {
 }
 
 function readNodePositions(positionMap: Y.Map<NodePosition>): DiagramNodePositions {
-  const positions: DiagramNodePositions = {};
+  const positions = Object.create(null) as DiagramNodePositions;
   for (const [nodeId, position] of positionMap.entries()) {
     if (isNodePosition(position)) {
       positions[nodeId] = { x: position.x, y: position.y };
@@ -687,7 +687,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
     collaboration.doc.transact(() => {
       for (const nodeId of collaboration.nodePositionsMap.keys()) {
-        if (!(nodeId in positions)) {
+        if (!Object.hasOwn(positions, nodeId)) {
           collaboration.nodePositionsMap.delete(nodeId);
         }
       }

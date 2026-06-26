@@ -2,11 +2,16 @@ import { existsSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 
 interface SemanticState {
+  circleMarker: string | null;
+  crossMarker: string | null;
   cylinderAria: string | null;
   cylinderPseudoRadius: string;
+  dottedDasharray: string | null;
   edgeOpacity: string | null;
   edgePaths: number;
+  openMarker: string | null;
   reactFlowEdges: number;
+  thickStrokeWidth: string | null;
 }
 
 interface ManualLayoutEdgeState {
@@ -103,27 +108,51 @@ async function validate() {
     B -.-> C[Retry]
     B ==>|thick| D[Done]
     A --o E((Circle))
-    E --x F[/Trap/]`, { delay: 10 });
+    E --x F[/Trap/]
+    C --- G[Open]`, { delay: 10 });
   await page.waitForTimeout(3000);
 
   const semanticState = await page.evaluate<SemanticState>(() => {
     const svg = document.querySelector('.diagram-canvas-svg--reactflow svg') as SVGSVGElement | null;
     const edgePath = svg?.querySelector('path.flowchart-link') as SVGPathElement | null;
     const cylinder = document.querySelector('.mermaid-flow-node--cylinder') as HTMLElement | null;
+    const reactFlowEdges = [...document.querySelectorAll('.react-flow__edge')];
+    const edgePaths = reactFlowEdges
+      .map((edge) => edge.querySelector('path.react-flow__edge-path') as SVGPathElement | null)
+      .filter((path): path is SVGPathElement => path !== null);
+    const circleEdge = edgePaths.find((path) => path.getAttribute('marker-end')?.includes('circle')) ?? null;
+    const crossEdge = edgePaths.find((path) => path.getAttribute('marker-end')?.includes('cross')) ?? null;
+    const openEdge = edgePaths.find((path) => {
+      const marker = path.getAttribute('marker-end') ?? '';
+      return marker.includes('type=arrow') && !marker.includes('arrowclosed');
+    }) ?? null;
+    const dottedEdge = edgePaths.find((path) => window.getComputedStyle(path).strokeDasharray !== 'none') ?? null;
+    const thickEdge = edgePaths.find((path) => Number.parseFloat(window.getComputedStyle(path).strokeWidth) >= 3) ?? null;
 
     return {
+      circleMarker: circleEdge?.getAttribute('marker-end') ?? null,
+      crossMarker: crossEdge?.getAttribute('marker-end') ?? null,
       cylinderAria: cylinder?.getAttribute('aria-label') ?? null,
       cylinderPseudoRadius: cylinder ? window.getComputedStyle(cylinder, '::before').borderRadius : '',
+      dottedDasharray: dottedEdge ? window.getComputedStyle(dottedEdge).strokeDasharray : null,
       edgeOpacity: edgePath ? window.getComputedStyle(edgePath).opacity : null,
       edgePaths: svg?.querySelectorAll('path.flowchart-link').length ?? 0,
-      reactFlowEdges: document.querySelectorAll('.react-flow__edge').length,
+      openMarker: openEdge?.getAttribute('marker-end') ?? null,
+      reactFlowEdges: reactFlowEdges.length,
+      thickStrokeWidth: thickEdge ? window.getComputedStyle(thickEdge).strokeWidth : null,
     };
   });
-  const edgeSemanticsPass = semanticState.edgePaths >= 5
+  const edgeSemanticsPass = semanticState.edgePaths >= 6
     && semanticState.edgeOpacity === '0'
-    && semanticState.reactFlowEdges >= 5;
-  results.push({ test: 'reactflow edges replace hidden mermaid edge geometry', pass: edgeSemanticsPass });
+    && semanticState.reactFlowEdges >= 6
+    && !!semanticState.circleMarker
+    && !!semanticState.crossMarker
+    && !!semanticState.openMarker
+    && !!semanticState.dottedDasharray
+    && !!semanticState.thickStrokeWidth;
+  results.push({ test: 'reactflow edges preserve mermaid markers and stroke styles', pass: edgeSemanticsPass });
   console.log(`   Mermaid edge paths: ${semanticState.edgePaths}, React Flow edges: ${semanticState.reactFlowEdges}, Mermaid opacity: ${semanticState.edgeOpacity} — ${edgeSemanticsPass ? 'PASS' : 'FAIL'}`);
+  console.log(`   Markers circle/cross/open: ${semanticState.circleMarker}/${semanticState.crossMarker}/${semanticState.openMarker}; dotted=${semanticState.dottedDasharray}; thick=${semanticState.thickStrokeWidth}`);
 
   const shapeFidelityPass = typeof semanticState.cylinderAria === 'string'
     && semanticState.cylinderAria.includes('cylinder:')
@@ -201,10 +230,15 @@ async function validate() {
   results.push({ test: 'manual layout edges follow React Flow nodes', pass: manualEdgesPass });
   console.log(`   Manual layout edges: RF=${manualEdgeState.reactFlowEdges}, Mermaid opacity=${manualEdgeState.mermaidEdgeOpacity}, bbox=${manualEdgeState.reactFlowEdgeWidth}x${manualEdgeState.reactFlowEdgeHeight} — ${manualEdgesPass ? 'PASS' : 'FAIL'}`);
 
-  await page.locator('button[aria-label="Clean layout to Mermaid"]').click({ timeout: 5000 });
-  await page.waitForTimeout(500);
-  const afterReset = await dragTarget.boundingBox();
-  const resetPass = !!beforeDrag && !!afterReset && Math.abs(afterReset.x - beforeDrag.x) <= 5;
+  const resetButton = page.locator('button[aria-label="Clean layout to Mermaid"]');
+  const hasResetButton = await resetButton.count() > 0;
+  let resetPass = false;
+  if (hasResetButton) {
+    await resetButton.click({ timeout: 5000 });
+    await page.waitForTimeout(500);
+    const afterReset = await dragTarget.boundingBox();
+    resetPass = !!beforeDrag && !!afterReset && Math.abs(afterReset.x - beforeDrag.x) <= 5;
+  }
   results.push({ test: 'reactflow reset layout', pass: resetPass });
   console.log(`   Node reset: ${resetPass} — ${resetPass ? 'PASS' : 'FAIL'}`);
 

@@ -616,6 +616,20 @@ code {
   stroke-width: 1.8;
 }
 
+.diagram-reactflow-layer .react-flow__edge.selected .react-flow__edge-path,
+.diagram-reactflow-layer .react-flow__edge:focus .react-flow__edge-path {
+  filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.7));
+  stroke: #38bdf8;
+}
+
+.diagram-reactflow-layer .react-flow__edge:hover .react-flow__edge-path {
+  stroke: #7dd3fc;
+}
+
+.diagram-reactflow-layer .react-flow__edge-interaction {
+  cursor: pointer;
+}
+
 .diagram-reactflow-layer .react-flow__edge-textbg {
   fill: #0d1117;
 }
@@ -631,6 +645,33 @@ code {
   border: 1px solid #0d1117;
   height: 8px;
   width: 8px;
+}
+
+.diagram-reactflow-layer .mermaid-flow-handle--target {
+  opacity: 0;
+  pointer-events: auto;
+}
+
+.diagram-reactflow-layer .mermaid-flow-handle--source {
+  opacity: 0.95;
+  z-index: 2;
+}
+
+.diagram-reactflow-layer .react-flow__node:hover .mermaid-flow-handle--target,
+.diagram-reactflow-layer .react-flow__node.selected .mermaid-flow-handle--target,
+.diagram-reactflow-layer .react-flow__node:hover .mermaid-flow-handle--source,
+.diagram-reactflow-layer .react-flow__node.selected .mermaid-flow-handle--source {
+  opacity: 1;
+}
+
+.diagram-reactflow-layer .mermaid-flow-handle--left,
+.diagram-reactflow-layer .mermaid-flow-handle--right {
+  cursor: ew-resize;
+}
+
+.diagram-reactflow-layer .mermaid-flow-handle--top,
+.diagram-reactflow-layer .mermaid-flow-handle--bottom {
+  cursor: ns-resize;
 }
 
 .mermaid-flow-node {

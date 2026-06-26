@@ -864,6 +864,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
                 void mutationQueueRef.current?.removeNode(id);
               }
             }}
+            onDeleteEdge={(edgeIndex) => mutationQueueRef.current?.removeEdgeAt(edgeIndex)}
+            onEditEdgeLabel={(edgeIndex, label) => mutationQueueRef.current?.editEdgeLabel(edgeIndex, label)}
             onEditNodeLabel={(nodeId, label) => mutationQueueRef.current?.editNodeLabel(nodeId, label)}
             onGroupNodes={(ids, label) => mutationQueueRef.current?.groupNodes(ids, label)}
             onInteractionModeChange={setInteractionMode}

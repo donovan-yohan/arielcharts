@@ -169,6 +169,14 @@ async function validate() {
   results.push({ test: 'reactflow node keyboard selection', pass: keyboardPass });
   console.log(`   Keyboard opened toolbar: ${keyboardPass} — ${keyboardPass ? 'PASS' : 'FAIL'}`);
 
+  const sideHandleState = await page.evaluate(() => ({
+    leftSources: document.querySelectorAll('.mermaid-flow-handle--left.mermaid-flow-handle--source').length,
+    rightSources: document.querySelectorAll('.mermaid-flow-handle--right.mermaid-flow-handle--source').length,
+  }));
+  const sideHandlesPass = sideHandleState.leftSources > 0 && sideHandleState.rightSources > 0;
+  results.push({ test: 'reactflow exposes left/right drag-out handles', pass: sideHandlesPass });
+  console.log(`   Side handles L/R: ${sideHandleState.leftSources}/${sideHandleState.rightSources} — ${sideHandlesPass ? 'PASS' : 'FAIL'}`);
+
   // --- Test: fit-to-diagram ---
   console.log('\n4. Testing fit-to-diagram...');
   await page.locator('button[aria-label="Fit diagram"]').click();
@@ -195,22 +203,27 @@ async function validate() {
   console.log('\n6. Testing React Flow drag/reset...');
   const dragTarget = page.locator('.react-flow__node, .diagram-node-target').first();
   const beforeDragEditorText = await editor.textContent();
+  const beforeDragZoomText = await page.locator('span').filter({ hasText: /^\d+%$/ }).first().textContent();
   const beforeDrag = await dragTarget.boundingBox();
   if (beforeDrag) {
     await page.mouse.move(beforeDrag.x + beforeDrag.width / 2, beforeDrag.y + beforeDrag.height / 2);
     await page.mouse.down();
-    await page.mouse.move(beforeDrag.x + beforeDrag.width / 2 + 90, beforeDrag.y + beforeDrag.height / 2 + 40, { steps: 8 });
+    await page.mouse.move(beforeDrag.x + beforeDrag.width / 2 + 260, beforeDrag.y + beforeDrag.height / 2 + 40, { steps: 16 });
     await page.mouse.up();
   }
   await page.waitForTimeout(500);
   const afterDrag = await dragTarget.boundingBox();
   const afterDragEditorText = await editor.textContent();
+  const afterDragZoomText = await page.locator('span').filter({ hasText: /^\d+%$/ }).first().textContent();
   const dragMoved = !!beforeDrag && !!afterDrag && Math.abs(afterDrag.x - beforeDrag.x) > 20;
   const dragKeptMermaidText = afterDragEditorText === beforeDragEditorText;
+  const dragKeptZoom = afterDragZoomText === beforeDragZoomText;
   results.push({ test: 'reactflow drag nodes', pass: dragMoved });
   results.push({ test: 'reactflow drag keeps mermaid text canonical', pass: dragKeptMermaidText });
+  results.push({ test: 'reactflow drag does not change zoom', pass: dragKeptZoom });
   console.log(`   Node moved: ${dragMoved} — ${dragMoved ? 'PASS' : 'FAIL'}`);
   console.log(`   Mermaid text unchanged by drag: ${dragKeptMermaidText} — ${dragKeptMermaidText ? 'PASS' : 'FAIL'}`);
+  console.log(`   Zoom before/after drag: ${beforeDragZoomText}/${afterDragZoomText} — ${dragKeptZoom ? 'PASS' : 'FAIL'}`);
 
   const manualEdgeState = await page.evaluate<ManualLayoutEdgeState>(() => {
     const mermaidEdgePath = document.querySelector('.diagram-canvas-svg--reactflow path.flowchart-link') as SVGPathElement | null;
@@ -269,6 +282,31 @@ async function validate() {
   results.push({ test: 'node label edit sync', pass: editSyncPass });
   console.log(`   Editor contains edited label: ${editSyncPass} — ${editSyncPass ? 'PASS' : 'FAIL'}`);
 
+  // --- Test: edge select/edit/delete ---
+  console.log('\n8b. Testing edge select/edit/delete...');
+  const edgeCountBeforeEdit = await page.locator('.react-flow__edge').count();
+  const firstEdgePath = page.locator('.react-flow__edge .react-flow__edge-interaction').first();
+  await firstEdgePath.click({ timeout: 5000 });
+  await page.waitForTimeout(300);
+  const edgeToolbarVisible = await page.locator('div[aria-label="Selected edge toolbar"]').isVisible({ timeout: 5000 });
+  if (edgeToolbarVisible) {
+    await page.locator('button[aria-label="Edit edge label"]').click({ timeout: 5000 });
+    await page.locator('input[aria-label="Edge label"]').fill('Critical');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(2000);
+  }
+  const edgeLabelText = await page.locator('.cm-content').textContent();
+  const edgeLabelPass = edgeToolbarVisible && (edgeLabelText?.includes('Critical') ?? false);
+  results.push({ test: 'edge label edit sync', pass: edgeLabelPass });
+  console.log(`   Edge toolbar visible: ${edgeToolbarVisible}, editor contains Critical: ${edgeLabelText?.includes('Critical') ?? false} — ${edgeLabelPass ? 'PASS' : 'FAIL'}`);
+
+  await page.locator('button[aria-label="Delete selected edge"]').click({ timeout: 5000 });
+  await page.waitForTimeout(2000);
+  const edgeCountAfterDelete = await page.locator('.react-flow__edge').count();
+  const edgeDeletePass = edgeCountAfterDelete < edgeCountBeforeEdit;
+  results.push({ test: 'edge click delete', pass: edgeDeletePass });
+  console.log(`   Edges before/after delete: ${edgeCountBeforeEdit}/${edgeCountAfterDelete} — ${edgeDeletePass ? 'PASS' : 'FAIL'}`);
+
   // --- Test: add node ---
   console.log('\n9. Testing add node...');
   const nodeCountBefore = await page.locator('.react-flow__node, .diagram-node-target').count();
@@ -297,7 +335,7 @@ async function validate() {
   console.log('\n9b. Testing drag-out connected node creation...');
   const connectedNodeCountBefore = await page.locator('.react-flow__node').count();
   const connectedEdgeCountBefore = await page.locator('.react-flow__edge').count();
-  const sourceHandle = page.locator('.react-flow__handle.source').first();
+  const sourceHandle = page.locator('.mermaid-flow-handle--right.mermaid-flow-handle--source').first();
   const sourceBox = await sourceHandle.boundingBox();
   if (sourceBox) {
     const startX = sourceBox.x + sourceBox.width / 2;

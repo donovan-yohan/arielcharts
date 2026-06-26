@@ -174,6 +174,18 @@ export class MutationQueue {
     });
   }
 
+  async removeEdgeAt(index: number): Promise<MutationResult> {
+    return this.enqueueFlowchartMutation((chart) => {
+      chart.removeLink(index);
+    });
+  }
+
+  async editEdgeLabel(index: number, label?: string): Promise<MutationResult> {
+    return this.enqueueFlowchartMutation((chart) => {
+      chart.setLinkText(index, label);
+    });
+  }
+
   async groupNodes(nodeIds: string[], label = DEFAULT_SUBGRAPH_LABEL, options: GroupNodesOptions = {}): Promise<MutationResult> {
     return this.enqueueFlowchartMutation((chart) => {
       const subgraphId = ensureUniqueId(chart.subgraphs.map((subgraph) => subgraph.id), options.id ?? createSubgraphId(label));

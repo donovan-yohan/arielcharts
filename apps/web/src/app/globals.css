@@ -578,21 +578,24 @@ code {
   color: #8b949e;
 }
 
-.diagram-canvas-svg--reactflow svg g.node {
-  opacity: 0;
-}
-
-.diagram-canvas-svg--manual-layout svg .edgePaths,
-.diagram-canvas-svg--manual-layout svg .edgeLabels,
-.diagram-canvas-svg--manual-layout svg g.edgePath,
-.diagram-canvas-svg--manual-layout svg g.edgeLabel,
-.diagram-canvas-svg--manual-layout svg path.flowchart-link {
+.diagram-canvas-svg--reactflow svg g.node,
+.diagram-canvas-svg--reactflow svg .edgePaths,
+.diagram-canvas-svg--reactflow svg .edgeLabels,
+.diagram-canvas-svg--reactflow svg g.edgePath,
+.diagram-canvas-svg--reactflow svg g.edgeLabel,
+.diagram-canvas-svg--reactflow svg path.flowchart-link {
   opacity: 0;
 }
 
 .diagram-reactflow-layer {
   inset: 0;
   position: absolute;
+  z-index: 5;
+}
+
+.diagram-reactflow-layer .react-flow {
+  height: 100%;
+  width: 100%;
 }
 
 .diagram-reactflow-layer .react-flow,

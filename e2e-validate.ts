@@ -120,10 +120,10 @@ async function validate() {
     };
   });
   const edgeSemanticsPass = semanticState.edgePaths >= 5
-    && semanticState.edgeOpacity !== '0'
-    && semanticState.reactFlowEdges === 0;
-  results.push({ test: 'canonical mermaid edge semantics visible', pass: edgeSemanticsPass });
-  console.log(`   Mermaid edge paths: ${semanticState.edgePaths}, React Flow edges: ${semanticState.reactFlowEdges}, opacity: ${semanticState.edgeOpacity} — ${edgeSemanticsPass ? 'PASS' : 'FAIL'}`);
+    && semanticState.edgeOpacity === '0'
+    && semanticState.reactFlowEdges >= 5;
+  results.push({ test: 'reactflow edges replace hidden mermaid edge geometry', pass: edgeSemanticsPass });
+  console.log(`   Mermaid edge paths: ${semanticState.edgePaths}, React Flow edges: ${semanticState.reactFlowEdges}, Mermaid opacity: ${semanticState.edgeOpacity} — ${edgeSemanticsPass ? 'PASS' : 'FAIL'}`);
 
   const shapeFidelityPass = typeof semanticState.cylinderAria === 'string'
     && semanticState.cylinderAria.includes('cylinder:')
@@ -184,7 +184,7 @@ async function validate() {
   console.log(`   Mermaid text unchanged by drag: ${dragKeptMermaidText} — ${dragKeptMermaidText ? 'PASS' : 'FAIL'}`);
 
   const manualEdgeState = await page.evaluate<ManualLayoutEdgeState>(() => {
-    const mermaidEdgePath = document.querySelector('.diagram-canvas-svg--manual-layout path.flowchart-link') as SVGPathElement | null;
+    const mermaidEdgePath = document.querySelector('.diagram-canvas-svg--reactflow path.flowchart-link') as SVGPathElement | null;
     const reactFlowEdgePath = document.querySelector('.react-flow__edge path.react-flow__edge-path') as SVGPathElement | null;
     const reactFlowEdgeBounds = reactFlowEdgePath?.getBoundingClientRect();
 
@@ -258,6 +258,31 @@ async function validate() {
   results.push({ test: 'add node', pass: addNodePass });
   console.log(`   ${addNodePass ? 'PASS' : 'FAIL'}`);
   await page.screenshot({ path: '/tmp/arielcharts-addnode.png' });
+
+  // --- Test: drag connector to create connected node ---
+  console.log('\n9b. Testing drag-out connected node creation...');
+  const connectedNodeCountBefore = await page.locator('.react-flow__node').count();
+  const connectedEdgeCountBefore = await page.locator('.react-flow__edge').count();
+  const sourceHandle = page.locator('.react-flow__handle.source').first();
+  const sourceBox = await sourceHandle.boundingBox();
+  if (sourceBox) {
+    const startX = sourceBox.x + sourceBox.width / 2;
+    const startY = sourceBox.y + sourceBox.height / 2;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 220, startY + 120, { steps: 12 });
+    await page.mouse.up();
+  }
+  await page.waitForTimeout(3000);
+  const connectedNodeCountAfter = await page.locator('.react-flow__node').count();
+  const connectedEdgeCountAfter = await page.locator('.react-flow__edge').count();
+  const dragOutPass = !!sourceBox
+    && connectedNodeCountAfter > connectedNodeCountBefore
+    && connectedEdgeCountAfter > connectedEdgeCountBefore;
+  results.push({ test: 'drag connector creates connected ghost node', pass: dragOutPass });
+  console.log(`   Nodes before/after: ${connectedNodeCountBefore}/${connectedNodeCountAfter}`);
+  console.log(`   Edges before/after: ${connectedEdgeCountBefore}/${connectedEdgeCountAfter}`);
+  console.log(`   Drag-out connected node: ${dragOutPass ? 'PASS' : 'FAIL'}`);
 
   // --- Test: new node overlay alignment ---
   console.log('\n10. Checking new node overlay alignment...');

@@ -2,16 +2,22 @@
 
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
+  ConnectionLineType,
   Handle,
   MarkerType,
   Position,
   ReactFlow,
   type Connection,
   type Edge,
+  type FinalConnectionState,
   type Node,
   type NodeChange,
   type NodeProps,
   type NodeTypes,
+  type OnConnectEnd,
+  type OnConnectStart,
+  type OnNodeDrag,
+  type Viewport,
 } from '@xyflow/react';
 import {
   ArrowRightFromLine,
@@ -50,6 +56,7 @@ export interface DiagramCanvasProps {
   svg: string;
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
+  onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
   onDeleteEdge?: (edgeKey: string) => void;
   onDeleteNodes?: (nodeIds: string[]) => void;
@@ -79,6 +86,8 @@ interface MermaidFlowNodeData extends Record<string, unknown> {
   ariaLabel: string;
   label: string;
   shape: DiagramNodeShape;
+  sourcePosition: Position;
+  targetPosition: Position;
 }
 
 type MermaidFlowNode = Node<MermaidFlowNodeData, 'mermaidFlowNode'>;
@@ -93,8 +102,9 @@ interface FlowNodeInteractionContextValue {
 const FLOW_NODE_TYPES: NodeTypes = {
   mermaidFlowNode: MermaidReactFlowNode,
 };
-const FLOW_DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 1 };
 const FLOW_PRO_OPTIONS = { hideAttribution: true };
+const GHOST_NODE_WIDTH = 144;
+const GHOST_NODE_HEIGHT = 56;
 const FlowNodeInteractionContext = createContext<FlowNodeInteractionContextValue | null>(null);
 
 const MIN_ZOOM = 0.1;
@@ -144,6 +154,7 @@ export function DiagramCanvas({
   nodePositions,
   onAddEdge,
   onAddNode,
+  onAddConnectedNode,
   onChangeNodeShape,
   onDeleteNodes,
   onEditNodeLabel,
@@ -161,8 +172,14 @@ export function DiagramCanvas({
   const nodeButtonRefs = useRef(new Map<string, HTMLElement | null>());
   const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
   const [uncontrolledNodePositions, setUncontrolledNodePositions] = useState<DiagramNodePositions>({});
-  const manualNodePositions = nodePositions ?? uncontrolledNodePositions;
+  const [liveNodePositions, setLiveNodePositions] = useState<DiagramNodePositions>({});
+  const persistedNodePositions = nodePositions ?? uncontrolledNodePositions;
+  const visibleNodePositions = useMemo(
+    () => ({ ...persistedNodePositions, ...liveNodePositions }),
+    [liveNodePositions, persistedNodePositions],
+  );
   const dragStateRef = useRef<{ originX: number; originY: number; startPanX: number; startPanY: number } | null>(null);
+  const connectionStartNodeIdRef = useRef<string | null>(null);
   const isControlledSelection = selectedNodeIds !== undefined;
   const [internalSelection, setInternalSelection] = useState<string[]>(selectedNodeIds ?? []);
   const selection = isControlledSelection ? selectedNodeIds : internalSelection;
@@ -176,6 +193,7 @@ export function DiagramCanvas({
   const [editingLabel, setEditingLabel] = useState('');
   const [shapePickerOpen, setShapePickerOpen] = useState(false);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
+  const [connectionPreviewSourceId, setConnectionPreviewSourceId] = useState<string | null>(null);
   const [cursorPoint, setCursorPoint] = useState<SvgPoint | null>(null);
   const [pendingEdge, setPendingEdge] = useState<PendingEdge | null>(null);
   const [pendingEdgeLabel, setPendingEdgeLabel] = useState('');
@@ -188,8 +206,8 @@ export function DiagramCanvas({
   const [toolbarOpen, setToolbarOpen] = useState(false);
 
   const setNodePositions = useCallback((update: (current: DiagramNodePositions) => DiagramNodePositions) => {
-    const next = update(manualNodePositions);
-    if (next === manualNodePositions) {
+    const next = update(persistedNodePositions);
+    if (next === persistedNodePositions) {
       return;
     }
 
@@ -197,7 +215,7 @@ export function DiagramCanvas({
       setUncontrolledNodePositions(next);
     }
     onNodePositionsChange?.(next);
-  }, [manualNodePositions, nodePositions, onNodePositionsChange]);
+  }, [persistedNodePositions, nodePositions, onNodePositionsChange]);
 
   const interactiveNodeBounds = useMemo(() => {
     if (!hitMap) {
@@ -205,7 +223,7 @@ export function DiagramCanvas({
     }
 
     const boundsByNodeId = new Map(hitMap.nodes);
-    Object.entries(manualNodePositions).forEach(([nodeId, position]) => {
+    Object.entries(visibleNodePositions).forEach(([nodeId, position]) => {
       const bounds = boundsByNodeId.get(nodeId);
       if (!bounds) {
         return;
@@ -219,7 +237,7 @@ export function DiagramCanvas({
     });
 
     return boundsByNodeId;
-  }, [hitMap, manualNodePositions]);
+  }, [hitMap, visibleNodePositions]);
 
   const orderedNodeIds = useMemo(() => {
     if (graph?.nodes.length) {
@@ -260,20 +278,20 @@ export function DiagramCanvas({
       return null;
     }
 
-    const allBounds = [
-      ...hitMap.nodes.values(),
-      ...hitMap.subgraphs.values(),
-      ...[...hitMap.edges.values()].map((edge) => edge.bounds),
-    ];
+    const nodeBounds = interactiveNodeBounds ? [...interactiveNodeBounds.values()] : [...hitMap.nodes.values()];
+    const allBounds = nodeBounds.length > 0
+      ? [...nodeBounds, ...hitMap.subgraphs.values()]
+      : [...hitMap.subgraphs.values(), ...[...hitMap.edges.values()].map((edge) => edge.bounds)];
 
     return getBoundsUnion(allBounds);
-  }, [hitMap]);
+  }, [hitMap, interactiveNodeBounds]);
 
   const flowNodes = useMemo<MermaidFlowNode[]>(() => {
     if (!graph || !interactiveNodeBounds) {
       return [];
     }
 
+    const portPositions = getFlowPortPositions(graph.direction);
     const nextNodes: MermaidFlowNode[] = [];
     graph.nodes.forEach((node) => {
       const bounds = interactiveNodeBounds.get(node.id);
@@ -289,6 +307,8 @@ export function DiagramCanvas({
           ariaLabel,
           label: nodeLabel,
           shape: node.shape,
+          sourcePosition: portPositions.source,
+          targetPosition: portPositions.target,
         },
         draggable: !readOnly,
         id: node.id,
@@ -306,10 +326,10 @@ export function DiagramCanvas({
     return nextNodes;
   }, [graph, interactiveNodeBounds, readOnly, selection]);
 
-  const manualLayoutActive = Object.keys(manualNodePositions).length > 0;
+  const hasPersistedLayout = Object.keys(persistedNodePositions).length > 0;
 
   const flowEdges = useMemo<Edge[]>(() => {
-    if (!graph || !manualLayoutActive) {
+    if (!graph) {
       return [];
     }
 
@@ -324,9 +344,14 @@ export function DiagramCanvas({
         target: link.target,
         type: 'smoothstep',
       }));
-  }, [graph, manualLayoutActive, nodeById]);
+  }, [graph, nodeById]);
 
   const useReactFlowRenderer = isFlowchart && flowNodes.length > 0;
+  const flowViewport = useMemo<Viewport>(() => ({
+    x: viewport.panX,
+    y: viewport.panY,
+    zoom: viewport.zoom,
+  }), [viewport.panX, viewport.panY, viewport.zoom]);
 
   const screenSelectionBounds = useMemo(() => {
     if (!selectedBounds) {
@@ -379,6 +404,19 @@ export function DiagramCanvas({
       to: toScreenPoint(cursorPoint, viewport),
     };
   }, [connectSourcePort, cursorPoint, viewport]);
+
+  const connectionGhostRect = useMemo(() => {
+    if (!connectionPreviewSourceId || !cursorPoint || readOnly) {
+      return null;
+    }
+
+    return toScreenRect({
+      height: GHOST_NODE_HEIGHT,
+      width: GHOST_NODE_WIDTH,
+      x: cursorPoint.x - (GHOST_NODE_WIDTH / 2),
+      y: cursorPoint.y - (GHOST_NODE_HEIGHT / 2),
+    }, viewport);
+  }, [connectionPreviewSourceId, cursorPoint, readOnly, viewport]);
 
   const displayedToolbarRect = screenSelectionBounds ?? { height: 0, width: 0, x: 16, y: 16 };
   const toolbarStyle: CSSProperties = {
@@ -541,9 +579,10 @@ export function DiagramCanvas({
 
   useEffect(() => {
     if (!graph) {
-      if (Object.keys(manualNodePositions).length > 0) {
+      if (Object.keys(persistedNodePositions).length > 0) {
         setNodePositions(() => ({}));
       }
+      setLiveNodePositions({});
       return;
     }
 
@@ -555,7 +594,10 @@ export function DiagramCanvas({
 
       return Object.keys(next).length === Object.keys(current).length ? current : next;
     });
-  }, [graph, manualNodePositions, setNodePositions]);
+    setLiveNodePositions((current) => Object.fromEntries(
+      Object.entries(current).filter(([nodeId]) => currentNodeIds.has(nodeId)),
+    ));
+  }, [graph, persistedNodePositions, setNodePositions]);
 
   useEffect(() => {
     if (selection.length === 0) {
@@ -617,6 +659,8 @@ export function DiagramCanvas({
         setPendingEdgeLabel('');
         setShowGroupPrompt(false);
         setConnectSourceId(null);
+        connectionStartNodeIdRef.current = null;
+        setConnectionPreviewSourceId(null);
         setCursorPoint(null);
         setToolbarOpen(false);
         setMode('select');
@@ -814,7 +858,7 @@ export function DiagramCanvas({
       return;
     }
 
-    setNodePositions((current) => {
+    setLiveNodePositions((current) => {
       const next = { ...current };
       movedNodes.forEach((change) => {
         if (change.type === 'position' && change.position) {
@@ -823,9 +867,56 @@ export function DiagramCanvas({
       });
       return next;
     });
+  }, []);
+
+  const handleFlowNodeDragStop = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node) => {
+    setNodePositions((current) => ({
+      ...current,
+      [node.id]: node.position,
+    }));
+    setLiveNodePositions((current) => {
+      const next = { ...current };
+      delete next[node.id];
+      return next;
+    });
   }, [setNodePositions]);
 
+  const handleFlowConnectStart = useCallback<OnConnectStart>((_event, params) => {
+    connectionStartNodeIdRef.current = params.nodeId ?? null;
+    setConnectionPreviewSourceId(params.nodeId ?? null);
+    setToolbarOpen(false);
+  }, []);
+
+  const handleFlowConnectEnd = useCallback<OnConnectEnd>((event, connectionState: FinalConnectionState) => {
+    const sourceNodeId = connectionStartNodeIdRef.current;
+    connectionStartNodeIdRef.current = null;
+    setConnectionPreviewSourceId(null);
+
+    if (!sourceNodeId || readOnly || connectionState.isValid) {
+      return;
+    }
+
+    const clientPoint = getClientPoint(event);
+    if (!clientPoint || !containerRef.current) {
+      return;
+    }
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const dropPoint = {
+      x: (clientPoint.x - rect.left - viewport.panX) / viewport.zoom,
+      y: (clientPoint.y - rect.top - viewport.panY) / viewport.zoom,
+    };
+    const nodePosition = {
+      x: dropPoint.x - (GHOST_NODE_WIDTH / 2),
+      y: dropPoint.y - (GHOST_NODE_HEIGHT / 2),
+    };
+
+    onAddConnectedNode?.(sourceNodeId, DEFAULT_NEW_NODE_LABEL, DEFAULT_NEW_NODE_SHAPE, nodePosition, selectedConnectionType);
+  }, [onAddConnectedNode, readOnly, selectedConnectionType, viewport.panX, viewport.panY, viewport.zoom]);
+
   const handleFlowConnect = useCallback((connection: Connection) => {
+    connectionStartNodeIdRef.current = null;
+    setConnectionPreviewSourceId(null);
     if (!connection.source || !connection.target || connection.source === connection.target) {
       return;
     }
@@ -952,52 +1043,12 @@ export function DiagramCanvas({
           <div
             aria-hidden="true"
             className={useReactFlowRenderer
-              ? `diagram-canvas-svg diagram-canvas-svg--reactflow${manualLayoutActive ? ' diagram-canvas-svg--manual-layout' : ''}`
+              ? 'diagram-canvas-svg diagram-canvas-svg--reactflow'
               : 'diagram-canvas-svg'}
             dangerouslySetInnerHTML={{ __html: svg }}
             ref={svgContainerRef}
             style={{ pointerEvents: 'none' }}
           />
-        ) : null}
-
-        {useReactFlowRenderer ? (
-          <div className="diagram-reactflow-layer">
-            <FlowNodeInteractionContext.Provider value={flowNodeInteraction}>
-              <ReactFlow
-                colorMode="dark"
-                connectOnClick={false}
-                defaultViewport={FLOW_DEFAULT_VIEWPORT}
-                edges={flowEdges}
-                fitView={false}
-                maxZoom={1}
-                minZoom={1}
-                nodes={flowNodes}
-                nodesConnectable={!readOnly}
-                nodesDraggable={!readOnly}
-                nodeTypes={FLOW_NODE_TYPES}
-                onConnect={handleFlowConnect}
-                onNodeClick={(event, node) => {
-                  event.stopPropagation();
-                  handleNodeClick(node.id, event.shiftKey);
-                }}
-                onNodeDoubleClick={(event, node) => {
-                  event.stopPropagation();
-                  const diagramNode = nodeById.get(node.id);
-                  if (diagramNode && !readOnly) {
-                    openNodeEditor(diagramNode);
-                  }
-                }}
-                onNodesChange={handleFlowNodesChange}
-                panOnDrag={false}
-                preventScrolling={false}
-                proOptions={FLOW_PRO_OPTIONS}
-                selectionOnDrag={false}
-                zoomOnDoubleClick={false}
-                zoomOnPinch={false}
-                zoomOnScroll={false}
-              />
-            </FlowNodeInteractionContext.Provider>
-          </div>
         ) : null}
 
         {isFlowchart && hitMap && !useReactFlowRenderer ? (
@@ -1078,7 +1129,53 @@ export function DiagramCanvas({
         ) : null}
       </div>
 
-      <div aria-hidden="true" style={{ inset: 0, pointerEvents: 'none', position: 'absolute' }}>
+      {useReactFlowRenderer ? (
+        <div className="diagram-reactflow-layer">
+          <FlowNodeInteractionContext.Provider value={flowNodeInteraction}>
+            <ReactFlow
+              colorMode="dark"
+              connectOnClick={false}
+              connectionLineStyle={{ stroke: '#38bdf8', strokeWidth: 2 }}
+              connectionLineType={ConnectionLineType.SmoothStep}
+              edges={flowEdges}
+              fitView={false}
+              maxZoom={MAX_ZOOM}
+              minZoom={MIN_ZOOM}
+              nodes={flowNodes}
+              nodesConnectable={!readOnly}
+              nodesDraggable={!readOnly}
+              nodeTypes={FLOW_NODE_TYPES}
+              onConnect={handleFlowConnect}
+              onConnectEnd={handleFlowConnectEnd}
+              onConnectStart={handleFlowConnectStart}
+              onNodeClick={(event, node) => {
+                event.stopPropagation();
+                handleNodeClick(node.id, event.shiftKey);
+              }}
+              onNodeDoubleClick={(event, node) => {
+                event.stopPropagation();
+                const diagramNode = nodeById.get(node.id);
+                if (diagramNode && !readOnly) {
+                  openNodeEditor(diagramNode);
+                }
+              }}
+              onNodeDragStop={handleFlowNodeDragStop}
+              onNodesChange={handleFlowNodesChange}
+              onPaneClick={handleCanvasClick}
+              panOnDrag={false}
+              preventScrolling={false}
+              proOptions={FLOW_PRO_OPTIONS}
+              selectionOnDrag={false}
+              viewport={flowViewport}
+              zoomOnDoubleClick={false}
+              zoomOnPinch={false}
+              zoomOnScroll={false}
+            />
+          </FlowNodeInteractionContext.Provider>
+        </div>
+      ) : null}
+
+      <div aria-hidden="true" style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 10 }}>
         {rubberBandPoints ? (
           <svg style={{ height: '100%', width: '100%' }}>
             <line
@@ -1091,6 +1188,29 @@ export function DiagramCanvas({
               y2={rubberBandPoints.to.y}
             />
           </svg>
+        ) : null}
+
+        {connectionGhostRect ? (
+          <div
+            style={{
+              alignItems: 'center',
+              background: 'rgba(22, 27, 34, 0.72)',
+              border: '1px dashed #38bdf8',
+              borderRadius: 10,
+              color: '#e2e8f0',
+              display: 'flex',
+              fontSize: 13,
+              fontWeight: 600,
+              height: connectionGhostRect.height,
+              justifyContent: 'center',
+              left: connectionGhostRect.x,
+              position: 'absolute',
+              top: connectionGhostRect.y,
+              width: connectionGhostRect.width,
+            }}
+          >
+            {DEFAULT_NEW_NODE_LABEL}
+          </div>
         ) : null}
 
         {mode === 'connect' ? (
@@ -1114,7 +1234,7 @@ export function DiagramCanvas({
         ) : null}
       </div>
 
-      <div onClick={(event) => { event.stopPropagation(); }} style={{ inset: 0, pointerEvents: 'none', position: 'absolute' }}>
+      <div onClick={(event) => { event.stopPropagation(); }} style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 20 }}>
         {isFlowchart && !readOnly ? (
           <form
             aria-label="Add Mermaid node"
@@ -1316,7 +1436,7 @@ export function DiagramCanvas({
               right: 12,
             }}
           >
-            {manualLayoutActive ? (
+            {hasPersistedLayout ? (
               <ToolbarButton label="Clean layout to Mermaid" onClick={() => { setNodePositions(() => ({})); }}>
                 <RotateCcw size={16} />
               </ToolbarButton>
@@ -1519,9 +1639,9 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
       role="button"
       tabIndex={focused ? 0 : -1}
     >
-      <Handle position={Position.Left} type="target" />
+      <Handle position={data.targetPosition} type="target" />
       <span>{data.label}</span>
-      <Handle position={Position.Right} type="source" />
+      <Handle position={data.sourcePosition} type="source" />
     </div>
   );
 }
@@ -1610,6 +1730,29 @@ function renderShape(shape: DiagramNodeShape) {
     default:
       return <rect height="12" rx="2" width="22" x="3" y="3" {...common} />;
   }
+}
+
+function getFlowPortPositions(direction: FlowchartSnapshot['direction']): { source: Position; target: Position } {
+  switch (direction) {
+    case 'BT':
+      return { source: Position.Top, target: Position.Bottom };
+    case 'LR':
+      return { source: Position.Right, target: Position.Left };
+    case 'RL':
+      return { source: Position.Left, target: Position.Right };
+    case 'TD':
+    default:
+      return { source: Position.Bottom, target: Position.Top };
+  }
+}
+
+function getClientPoint(event: MouseEvent | TouchEvent): SvgPoint | null {
+  if ('changedTouches' in event) {
+    const touch = event.changedTouches[0];
+    return touch ? { x: touch.clientX, y: touch.clientY } : null;
+  }
+
+  return { x: event.clientX, y: event.clientY };
 }
 
 function toScreenRect(bounds: SvgBounds, viewport: ViewportState): ScreenRect {

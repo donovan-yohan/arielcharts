@@ -12,7 +12,15 @@ import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
 import { DiagramCanvas, type DiagramNodePositions } from './diagram-canvas';
-import { MutationQueue, parseFlowchartSnapshot, type FlowchartSnapshot } from '../lib/diagram-mutations';
+import {
+  MutationQueue,
+  createNodeId,
+  ensureUniqueId,
+  parseFlowchartSnapshot,
+  type DiagramLinkType,
+  type DiagramNodeShape,
+  type FlowchartSnapshot,
+} from '../lib/diagram-mutations';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
 
 const MERMAID_TEXT_KEY = 'mermaid';
@@ -690,6 +698,24 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     }, 'visual-layout');
   }, [collaboration]);
 
+  const handleAddConnectedNode = useCallback((source: string, label: string, shape: DiagramNodeShape, position: NodePosition, type: DiagramLinkType) => {
+    const queue = mutationQueueRef.current;
+    if (!queue || !flowchartSnapshot) {
+      return;
+    }
+
+    const nodeId = ensureUniqueId(flowchartSnapshot.nodeIds, createNodeId(label));
+    void queue.addNode(label, { id: nodeId, shape })
+      .then(() => queue.addEdge(source, nodeId, { type }))
+      .then(() => {
+        handleNodePositionsChange({
+          ...nodePositions,
+          [nodeId]: position,
+        });
+        setSelectedNodeIds([nodeId]);
+      });
+  }, [flowchartSnapshot, handleNodePositionsChange, nodePositions]);
+
   return (
     <main className="workspace-shell">
       <header className="workspace-topbar">
@@ -831,6 +857,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             nodePositions={nodePositions}
             onAddEdge={(source, target, label, type) => mutationQueueRef.current?.addEdge(source, target, { label, type })}
             onAddNode={(label, shape) => mutationQueueRef.current?.addNode(label, { shape })}
+            onAddConnectedNode={handleAddConnectedNode}
             onChangeNodeShape={(nodeId, shape) => mutationQueueRef.current?.changeNodeShape(nodeId, shape)}
             onDeleteNodes={(ids) => {
               for (const id of ids) {

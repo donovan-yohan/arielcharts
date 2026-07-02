@@ -26,6 +26,7 @@ async function validate() {
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const results: Array<{ test: string; pass: boolean }> = [];
+  const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
   const sessionName = `e2e-diag-${Date.now()}`;
 
   page.on('console', (msg) => {
@@ -33,7 +34,7 @@ async function validate() {
   });
 
   console.log('1. Loading page...');
-  await page.goto(`http://localhost:3003/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(`${baseUrl}/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForSelector('.cm-content', { timeout: 15000 });
   await page.waitForTimeout(2000);
   const editor = page.locator('.cm-content');
@@ -160,14 +161,40 @@ async function validate() {
   results.push({ test: 'reactflow cylinder shape fidelity', pass: shapeFidelityPass });
   console.log(`   Cylinder aria: ${semanticState.cylinderAria}, pseudo radius: ${semanticState.cylinderPseudoRadius} — ${shapeFidelityPass ? 'PASS' : 'FAIL'}`);
 
-  const firstFlowNode = page.locator('.mermaid-flow-node[role="button"]').first();
-  await firstFlowNode.focus({ timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await editor.focus();
+  let keyboardFocusState: {
+    activeLabel: string | null;
+    activeRole: string | null;
+    focusedInner: boolean;
+    focusedWrapper: boolean;
+  } | null = null;
+  for (let index = 0; index < 24; index += 1) {
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(50);
+    const state = await page.evaluate(() => {
+      const activeElement = document.activeElement as HTMLElement | null;
+
+      return {
+        activeLabel: activeElement?.getAttribute('aria-label') ?? null,
+        activeRole: activeElement?.getAttribute('role') ?? null,
+        focusedInner: activeElement?.matches('.mermaid-flow-node[role="button"]') ?? false,
+        focusedWrapper: activeElement?.classList.contains('react-flow__node') ?? false,
+      };
+    });
+    if (state.activeLabel?.includes('Database')) {
+      keyboardFocusState = state;
+      break;
+    }
+  }
   await page.keyboard.press('Enter');
   await page.waitForTimeout(300);
   const keyboardToolbarVisible = await page.locator('button[aria-label="Edit label"]').count();
-  const keyboardPass = keyboardToolbarVisible > 0;
+  const keyboardPass = keyboardToolbarVisible > 0
+    && keyboardFocusState?.focusedInner === true
+    && keyboardFocusState.focusedWrapper === false;
   results.push({ test: 'reactflow node keyboard selection', pass: keyboardPass });
-  console.log(`   Keyboard opened toolbar: ${keyboardPass} — ${keyboardPass ? 'PASS' : 'FAIL'}`);
+  console.log(`   Keyboard focus ${keyboardFocusState?.activeRole}/${keyboardFocusState?.activeLabel}, toolbar opened: ${keyboardToolbarVisible > 0} — ${keyboardPass ? 'PASS' : 'FAIL'}`);
 
   const sideHandleState = await page.evaluate(() => ({
     leftSources: document.querySelectorAll('.mermaid-flow-handle--left.mermaid-flow-handle--source').length,

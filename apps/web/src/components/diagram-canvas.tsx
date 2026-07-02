@@ -324,6 +324,7 @@ export function DiagramCanvas({
           shape: node.shape,
         },
         draggable: !readOnly,
+        focusable: false,
         id: node.id,
         position: { x: bounds.x, y: bounds.y },
         selectable: true,

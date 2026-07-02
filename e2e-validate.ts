@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { chromium } from '@playwright/test';
+import { chromium, type Locator, type Page } from '@playwright/test';
 
 interface SemanticState {
   circleMarker: string | null;
@@ -19,6 +19,53 @@ interface ManualLayoutEdgeState {
   reactFlowEdgeHeight: number;
   reactFlowEdges: number;
   reactFlowEdgeWidth: number;
+}
+
+function nodeTargetLocator(page: Page): Locator {
+  return page.locator('.mermaid-flow-node[role="button"], .diagram-node-target');
+}
+
+async function clickFirstNodeTarget(page: Page) {
+  await nodeTargetLocator(page).first().click({ timeout: 5000 });
+}
+
+async function clickFirstVisibleEdge(page: Page): Promise<boolean> {
+  const point = await page.evaluate(() => {
+    const edges = Array.from(document.querySelectorAll('.react-flow__edge'));
+
+    for (const edge of edges) {
+      const path = edge.querySelector('.react-flow__edge-interaction, .react-flow__edge-path') as SVGGeometryElement | null;
+      const matrix = path?.getScreenCTM();
+      const totalLength = path && 'getTotalLength' in path ? path.getTotalLength() : 0;
+
+      if (path && matrix && totalLength > 0) {
+        for (const ratio of [0.2, 0.35, 0.65, 0.8, 0.5]) {
+          const pathPoint = path.getPointAtLength(totalLength * ratio);
+          const x = (pathPoint.x * matrix.a) + (pathPoint.y * matrix.c) + matrix.e;
+          const y = (pathPoint.x * matrix.b) + (pathPoint.y * matrix.d) + matrix.f;
+          const hit = document.elementFromPoint(x, y);
+
+          if (hit?.closest('.react-flow__edge') === edge) {
+            return { x, y };
+          }
+        }
+      }
+
+      const bounds = edge.getBoundingClientRect();
+      if (bounds.width > 0 || bounds.height > 0) {
+        return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+      }
+    }
+
+    return null;
+  });
+
+  if (!point) {
+    return false;
+  }
+
+  await page.mouse.click(point.x, point.y);
+  return true;
 }
 
 async function validate() {
@@ -117,7 +164,7 @@ async function validate() {
     const svg = document.querySelector('.diagram-canvas-svg--reactflow svg') as SVGSVGElement | null;
     const edgePath = svg?.querySelector('path.flowchart-link') as SVGPathElement | null;
     const cylinder = document.querySelector('.mermaid-flow-node--cylinder') as HTMLElement | null;
-    const reactFlowEdges = [...document.querySelectorAll('.react-flow__edge')];
+    const reactFlowEdges = Array.from(document.querySelectorAll('.react-flow__edge'));
     const edgePaths = reactFlowEdges
       .map((edge) => edge.querySelector('path.react-flow__edge-path') as SVGPathElement | null)
       .filter((path): path is SVGPathElement => path !== null);
@@ -216,8 +263,7 @@ async function validate() {
 
   // --- Test: node click / toolbar ---
   console.log('\n5. Testing node click...');
-  const firstOverlay = page.locator('.react-flow__node, .diagram-node-target').first();
-  await firstOverlay.click({ timeout: 5000 });
+  await clickFirstNodeTarget(page);
   await page.waitForTimeout(300);
   const toolbarVisible = await page.evaluate(() => {
     return document.querySelectorAll('button[aria-label="Edit label"]').length > 0;
@@ -228,7 +274,7 @@ async function validate() {
 
   // --- Test: React Flow drag + reset layout ---
   console.log('\n6. Testing React Flow drag/reset...');
-  const dragTarget = page.locator('.react-flow__node, .diagram-node-target').first();
+  const dragTarget = nodeTargetLocator(page).first();
   const beforeDragEditorText = await editor.textContent();
   const beforeDragZoomText = await page.locator('span').filter({ hasText: /^\d+%$/ }).first().textContent();
   const beforeDrag = await dragTarget.boundingBox();
@@ -270,7 +316,7 @@ async function validate() {
   results.push({ test: 'manual layout edges follow React Flow nodes', pass: manualEdgesPass });
   console.log(`   Manual layout edges: RF=${manualEdgeState.reactFlowEdges}, Mermaid opacity=${manualEdgeState.mermaidEdgeOpacity}, bbox=${manualEdgeState.reactFlowEdgeWidth}x${manualEdgeState.reactFlowEdgeHeight} — ${manualEdgesPass ? 'PASS' : 'FAIL'}`);
 
-  const resetButton = page.locator('button[aria-label="Clean layout to Mermaid"]');
+  const resetButton = page.locator('button[aria-label="Reset shared layout to Mermaid"]');
   const hasResetButton = await resetButton.count() > 0;
   let resetPass = false;
   if (hasResetButton) {
@@ -284,12 +330,12 @@ async function validate() {
 
   // --- Test: fixed add-node toolbar ---
   console.log('\n7. Testing fixed add-node toolbar...');
-  const toolbarCountBefore = await page.locator('.react-flow__node, .diagram-node-target').count();
+  const toolbarCountBefore = await nodeTargetLocator(page).count();
   await page.locator('input[aria-label="New node label"]').fill('UI Node');
   await page.locator('select[aria-label="New node shape"]').selectOption('round');
   await page.locator('button[aria-label="Add node to Mermaid text"]').click({ timeout: 5000 });
   await page.waitForTimeout(3000);
-  const toolbarCountAfter = await page.locator('.react-flow__node, .diagram-node-target').count();
+  const toolbarCountAfter = await nodeTargetLocator(page).count();
   const toolbarEditorText = await page.locator('.cm-content').textContent();
   const fixedToolbarPass = toolbarCountAfter > toolbarCountBefore && (toolbarEditorText?.includes('UI Node') ?? false);
   results.push({ test: 'fixed add-node toolbar', pass: fixedToolbarPass });
@@ -299,7 +345,7 @@ async function validate() {
 
   // --- Test: node label edit syncs to Mermaid text ---
   console.log('\n8. Testing node label edit sync...');
-  await page.locator('.react-flow__node, .diagram-node-target').first().click({ timeout: 5000 });
+  await clickFirstNodeTarget(page);
   await page.locator('button[aria-label="Edit label"]').click({ timeout: 5000 });
   await page.locator('input[placeholder="node label"]').fill('Launch');
   await page.keyboard.press('Enter');
@@ -312,10 +358,9 @@ async function validate() {
   // --- Test: edge select/edit/delete ---
   console.log('\n8b. Testing edge select/edit/delete...');
   const edgeCountBeforeEdit = await page.locator('.react-flow__edge').count();
-  const firstEdgePath = page.locator('.react-flow__edge .react-flow__edge-interaction').first();
-  await firstEdgePath.click({ timeout: 5000 });
+  const edgeClicked = await clickFirstVisibleEdge(page);
   await page.waitForTimeout(300);
-  const edgeToolbarVisible = await page.locator('div[aria-label="Selected edge toolbar"]').isVisible({ timeout: 5000 });
+  const edgeToolbarVisible = edgeClicked && await page.locator('div[aria-label="Selected edge toolbar"]').isVisible({ timeout: 5000 });
   if (edgeToolbarVisible) {
     await page.locator('button[aria-label="Edit edge label"]').click({ timeout: 5000 });
     await page.locator('input[aria-label="Edge label"]').fill('Critical');
@@ -336,16 +381,16 @@ async function validate() {
 
   // --- Test: add node ---
   console.log('\n9. Testing add node...');
-  const nodeCountBefore = await page.locator('.react-flow__node, .diagram-node-target').count();
+  const nodeCountBefore = await nodeTargetLocator(page).count();
   console.log(`   Nodes before: ${nodeCountBefore}`);
 
   // Click "Add node" button on the node toolbar
-  await page.locator('.react-flow__node, .diagram-node-target').first().click({ timeout: 5000 });
+  await clickFirstNodeTarget(page);
   await page.locator('button[aria-label="Add node"]').click({ timeout: 5000 });
   // Wait for mermaid to re-render with the new node
   await page.waitForTimeout(3000);
 
-  const nodeCountAfter = await page.locator('.react-flow__node, .diagram-node-target').count();
+  const nodeCountAfter = await nodeTargetLocator(page).count();
   console.log(`   Nodes after: ${nodeCountAfter}`);
 
   // Verify the editor text now contains the new node

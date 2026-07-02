@@ -33,6 +33,7 @@ import {
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { DiagramEdgeIdentity, DiagramLink, DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
 import { getDiagramEdgeIdentity, resolveDiagramEdgeIndex } from '../lib/diagram-mutations';
+import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
 import {
   buildSvgHitMap,
@@ -365,15 +366,14 @@ export function DiagramCanvas({
       return [];
     }
 
-    return graph.links
-      .filter((link) => interactiveNodeBounds.has(link.source) && interactiveNodeBounds.has(link.target))
-      .map((link, index) => ({
+    return getVisibleDiagramLinks(graph.links, interactiveNodeBounds)
+      .map(({ graphIndex, link }) => ({
         animated: false,
-        data: { index },
-        id: getFlowEdgeId(index),
+        data: { index: graphIndex },
+        id: getFlowEdgeId(graphIndex),
         label: getLinkText(link),
         selectable: true,
-        selected: selectedEdgeIndex === index,
+        selected: selectedEdgeIndex === graphIndex,
         ...getFlowEdgeHandles(link, interactiveNodeBounds, graph.direction),
         ...getFlowEdgePresentation(link),
         source: link.source,
@@ -1269,23 +1269,20 @@ export function DiagramCanvas({
               onConnectStart={handleFlowConnectStart}
               onEdgeClick={(event, edge) => {
                 event.stopPropagation();
-                const edgeIndex = getFlowEdgeIndex(edge.id);
-                const diagramEdge = edgeIndex === null ? null : graph?.links[edgeIndex];
-                if (edgeIndex === null || !diagramEdge) {
+                const edgeIdentity = graph ? getDiagramEdgeIdentityForFlowEdge(graph.links, edge.id) : null;
+                if (!edgeIdentity) {
                   return;
                 }
                 setSelection([]);
                 setToolbarOpen(false);
                 setShapePickerOpen(false);
                 setEditingNodeId(null);
-                setSelectedEdgeIdentity(getDiagramEdgeIdentity(diagramEdge, edgeIndex));
+                setSelectedEdgeIdentity(edgeIdentity);
               }}
               onEdgeDoubleClick={(event, edge) => {
                 event.stopPropagation();
-                const edgeIndex = getFlowEdgeIndex(edge.id);
-                const diagramEdge = edgeIndex === null ? null : graph?.links[edgeIndex];
-                if (edgeIndex !== null && diagramEdge) {
-                  const edgeIdentity = getDiagramEdgeIdentity(diagramEdge, edgeIndex);
+                const edgeIdentity = graph ? getDiagramEdgeIdentityForFlowEdge(graph.links, edge.id) : null;
+                if (edgeIdentity) {
                   setSelectedEdgeIdentity(edgeIdentity);
                   openEdgeEditor(edgeIdentity);
                 }
@@ -2027,10 +2024,6 @@ function renderShape(shape: DiagramNodeShape) {
   }
 }
 
-function getFlowEdgeId(index: number): string {
-  return `edge-${index}`;
-}
-
 function getEdgeMidpoint(edge: Pick<DiagramLink, 'source' | 'target'>, nodeBounds: Map<string, SvgBounds>): SvgPoint | null {
   const sourceBounds = nodeBounds.get(edge.source);
   const targetBounds = nodeBounds.get(edge.target);
@@ -2044,15 +2037,6 @@ function getEdgeMidpoint(edge: Pick<DiagramLink, 'source' | 'target'>, nodeBound
     x: (sourceCenter.x + targetCenter.x) / 2,
     y: (sourceCenter.y + targetCenter.y) / 2,
   };
-}
-
-function getFlowEdgeIndex(edgeId: string): number | null {
-  const match = /^edge-(\d+)$/.exec(edgeId);
-  if (!match) {
-    return null;
-  }
-
-  return Number.parseInt(match[1]!, 10);
 }
 
 function getFlowHandleId(type: 'source' | 'target', position: Position): string {

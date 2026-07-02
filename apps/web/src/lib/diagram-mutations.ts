@@ -24,6 +24,17 @@ export interface FlowchartSnapshot {
   subgraphs: FlowchartSubgraph[];
 }
 
+export interface DiagramEdgeIdentity {
+  id?: string;
+  index: number;
+  label?: string;
+  length: number;
+  source: string;
+  stroke: FlowchartLink['stroke'];
+  target: string;
+  type: FlowchartLinkType;
+}
+
 export interface MutationResult {
   nextText: string;
   previousText: string;
@@ -77,6 +88,47 @@ export function getFlowchartSnapshot(chart: Flowchart): FlowchartSnapshot {
 
 export function parseFlowchartSnapshot(text: string): FlowchartSnapshot {
   return getFlowchartSnapshot(Flowchart.parse(text));
+}
+
+export function getDiagramEdgeIdentity(link: FlowchartLink, index: number): DiagramEdgeIdentity {
+  return {
+    id: link.id,
+    index,
+    label: link.text?.text,
+    length: link.length,
+    source: link.source,
+    stroke: link.stroke,
+    target: link.target,
+    type: link.type,
+  };
+}
+
+export function isSameDiagramEdge(link: FlowchartLink, identity: DiagramEdgeIdentity, options: { includeLabel?: boolean } = {}): boolean {
+  const includeLabel = options.includeLabel ?? true;
+  return link.id === identity.id
+    && link.source === identity.source
+    && link.target === identity.target
+    && (!includeLabel || link.text?.text === identity.label)
+    && link.stroke === identity.stroke
+    && link.type === identity.type
+    && link.length === identity.length;
+}
+
+export function resolveDiagramEdgeIndex(
+  links: readonly FlowchartLink[],
+  identity: DiagramEdgeIdentity,
+  options: { includeLabel?: boolean } = {},
+): number | null {
+  const indexedLink = links[identity.index];
+  if (indexedLink && isSameDiagramEdge(indexedLink, identity, options)) {
+    return identity.index;
+  }
+
+  const matches = links
+    .map((link, index) => ({ index, link }))
+    .filter(({ link }) => isSameDiagramEdge(link, identity, options));
+
+  return matches.length === 1 ? matches[0]?.index ?? null : null;
 }
 
 export function applyDiff(yText: Y.Text, newText: string, oldText = yText.toString()): void {
@@ -174,14 +226,24 @@ export class MutationQueue {
     });
   }
 
-  async removeEdgeAt(index: number): Promise<MutationResult> {
+  async removeEdgeByIdentity(edge: DiagramEdgeIdentity): Promise<MutationResult> {
     return this.enqueueFlowchartMutation((chart) => {
+      const index = resolveDiagramEdgeIndex(chart.links, edge);
+      if (index === null) {
+        throw new Error('Cannot delete edge because the selected edge changed.');
+      }
+
       chart.removeLink(index);
     });
   }
 
-  async editEdgeLabel(index: number, label?: string): Promise<MutationResult> {
+  async editEdgeLabelByIdentity(edge: DiagramEdgeIdentity, label?: string): Promise<MutationResult> {
     return this.enqueueFlowchartMutation((chart) => {
+      const index = resolveDiagramEdgeIndex(chart.links, edge);
+      if (index === null) {
+        throw new Error('Cannot edit edge because the selected edge changed.');
+      }
+
       chart.setLinkText(index, label);
     });
   }

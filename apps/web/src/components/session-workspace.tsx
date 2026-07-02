@@ -11,7 +11,7 @@ import { EditorView, keymap } from '@codemirror/view';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
-import { DiagramCanvas, type DiagramNodePositions } from './diagram-canvas';
+import { DiagramCanvas } from './diagram-canvas';
 import {
   MutationQueue,
   createNodeId,
@@ -21,6 +21,13 @@ import {
   type DiagramNodeShape,
   type FlowchartSnapshot,
 } from '../lib/diagram-mutations';
+import {
+  readNodePositions,
+  writeNodePositions,
+  type DiagramNodePosition,
+  type DiagramNodePositions,
+  type NodePositionsSyncMode,
+} from '../lib/diagram-layout';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
 
 const MERMAID_TEXT_KEY = 'mermaid';
@@ -50,7 +57,7 @@ type CollaborationState = {
   yText: Y.Text;
 };
 
-type NodePosition = { x: number; y: number };
+type NodePosition = DiagramNodePosition;
 
 type AwarenessLike = {
   getStates: () => Map<number, unknown>;
@@ -171,28 +178,6 @@ function isFlowchartSyntax(text: string): boolean {
 
 function canBuildFlowchartFromCanvas(text: string): boolean {
   return text.trim().length === 0 || isFlowchartSyntax(text);
-}
-
-function isNodePosition(value: unknown): value is NodePosition {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const position = value as Partial<NodePosition>;
-  return typeof position.x === 'number'
-    && Number.isFinite(position.x)
-    && typeof position.y === 'number'
-    && Number.isFinite(position.y);
-}
-
-function readNodePositions(positionMap: Y.Map<NodePosition>): DiagramNodePositions {
-  const positions = Object.create(null) as DiagramNodePositions;
-  for (const [nodeId, position] of positionMap.entries()) {
-    if (isNodePosition(position)) {
-      positions[nodeId] = { x: position.x, y: position.y };
-    }
-  }
-  return positions;
 }
 
 function stripParticipantTabSuffix(name: string): string {
@@ -678,25 +663,23 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     setRenamingParticipantName(null);
   }, [collaboration, displayNameDraft]);
 
-  const handleNodePositionsChange = useCallback((positions: DiagramNodePositions) => {
-    setNodePositions(positions);
+  const handleNodePositionsChange = useCallback((positions: DiagramNodePositions, mode: NodePositionsSyncMode = 'merge') => {
+    setNodePositions((current) => (
+      mode === 'replace' ? positions : { ...current, ...positions }
+    ));
 
     if (!collaboration) {
       return;
     }
 
     collaboration.doc.transact(() => {
-      for (const nodeId of collaboration.nodePositionsMap.keys()) {
-        if (!Object.hasOwn(positions, nodeId)) {
-          collaboration.nodePositionsMap.delete(nodeId);
-        }
-      }
-
-      for (const [nodeId, position] of Object.entries(positions)) {
-        collaboration.nodePositionsMap.set(nodeId, { x: position.x, y: position.y });
-      }
+      writeNodePositions(collaboration.nodePositionsMap, positions, mode);
     }, 'visual-layout');
   }, [collaboration]);
+
+  const handleSingleNodePositionChange = useCallback((nodeId: string, position: NodePosition) => {
+    handleNodePositionsChange({ [nodeId]: position }, 'merge');
+  }, [handleNodePositionsChange]);
 
   const handleAddConnectedNode = useCallback((source: string, label: string, shape: DiagramNodeShape, position: NodePosition, type: DiagramLinkType) => {
     const queue = mutationQueueRef.current;
@@ -708,13 +691,10 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     void queue.addNode(label, { id: nodeId, shape })
       .then(() => queue.addEdge(source, nodeId, { type }))
       .then(() => {
-        handleNodePositionsChange({
-          ...nodePositions,
-          [nodeId]: position,
-        });
+        handleSingleNodePositionChange(nodeId, position);
         setSelectedNodeIds([nodeId]);
       });
-  }, [flowchartSnapshot, handleNodePositionsChange, nodePositions]);
+  }, [flowchartSnapshot, handleSingleNodePositionChange]);
 
   return (
     <main className="workspace-shell">
@@ -864,8 +844,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
                 void mutationQueueRef.current?.removeNode(id);
               }
             }}
-            onDeleteEdge={(edgeIndex) => mutationQueueRef.current?.removeEdgeAt(edgeIndex)}
-            onEditEdgeLabel={(edgeIndex, label) => mutationQueueRef.current?.editEdgeLabel(edgeIndex, label)}
+            onDeleteEdge={(edge) => mutationQueueRef.current?.removeEdgeByIdentity(edge)}
+            onEditEdgeLabel={(edge, label) => mutationQueueRef.current?.editEdgeLabelByIdentity(edge, label)}
             onEditNodeLabel={(nodeId, label) => mutationQueueRef.current?.editNodeLabel(nodeId, label)}
             onGroupNodes={(ids, label) => mutationQueueRef.current?.groupNodes(ids, label)}
             onInteractionModeChange={setInteractionMode}

@@ -31,7 +31,9 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { DiagramLink, DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
+import type { DiagramEdgeIdentity, DiagramLink, DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
+import { getDiagramEdgeIdentity, resolveDiagramEdgeIndex } from '../lib/diagram-mutations';
+import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
 import {
   buildSvgHitMap,
   getBoundsCenter,
@@ -41,8 +43,6 @@ import {
   type SvgHitMap,
   type SvgPoint,
 } from '../lib/svg-hit-map';
-
-export type DiagramNodePositions = Record<string, SvgPoint>;
 
 export interface DiagramCanvasProps {
   className?: string;
@@ -58,13 +58,13 @@ export interface DiagramCanvasProps {
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
-  onDeleteEdge?: (edgeIndex: number) => void;
+  onDeleteEdge?: (edge: DiagramEdgeIdentity) => void;
   onDeleteNodes?: (nodeIds: string[]) => void;
-  onEditEdgeLabel?: (edgeIndex: number, label?: string) => void;
+  onEditEdgeLabel?: (edge: DiagramEdgeIdentity, label?: string) => void;
   onEditNodeLabel?: (nodeId: string, newLabel: string) => void;
   onGroupNodes?: (nodeIds: string[], label: string) => void;
   onInteractionModeChange?: (mode: 'select' | 'connect') => void;
-  onNodePositionsChange?: (positions: DiagramNodePositions) => void;
+  onNodePositionsChange?: (positions: DiagramNodePositions, mode?: NodePositionsSyncMode) => void;
   onSelectedNodeIdsChange?: (nodeIds: string[]) => void;
   onUngroupNodes?: (subgraphId: string) => void;
 }
@@ -198,8 +198,8 @@ export function DiagramCanvas({
   const [spacePressed, setSpacePressed] = useState(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
-  const [selectedEdgeIndex, setSelectedEdgeIndex] = useState<number | null>(null);
-  const [editingEdgeIndex, setEditingEdgeIndex] = useState<number | null>(null);
+  const [selectedEdgeIdentity, setSelectedEdgeIdentity] = useState<DiagramEdgeIdentity | null>(null);
+  const [editingEdgeIdentity, setEditingEdgeIdentity] = useState<DiagramEdgeIdentity | null>(null);
   const [editingEdgeLabel, setEditingEdgeLabel] = useState('');
   const [shapePickerOpen, setShapePickerOpen] = useState(false);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
@@ -215,7 +215,11 @@ export function DiagramCanvas({
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [toolbarOpen, setToolbarOpen] = useState(false);
 
-  const setNodePositions = useCallback((update: (current: DiagramNodePositions) => DiagramNodePositions) => {
+  const setNodePositions = useCallback((
+    update: (current: DiagramNodePositions) => DiagramNodePositions,
+    mode: NodePositionsSyncMode = 'replace',
+    syncPositions?: DiagramNodePositions,
+  ) => {
     const currentPositions = persistedNodePositionsRef.current;
     const next = update(currentPositions);
     if (next === currentPositions) {
@@ -226,7 +230,7 @@ export function DiagramCanvas({
     if (nodePositions === undefined) {
       setUncontrolledNodePositions(next);
     }
-    onNodePositionsChange?.(next);
+    onNodePositionsChange?.(syncPositions ?? next, mode);
   }, [nodePositions, onNodePositionsChange]);
 
   useEffect(() => {
@@ -276,6 +280,20 @@ export function DiagramCanvas({
   }, [graph?.links]);
 
   const nodeById = useMemo(() => new Map(graph?.nodes.map((node) => [node.id, node]) ?? []), [graph?.nodes]);
+  const selectedEdgeIndex = useMemo(() => (
+    graph && selectedEdgeIdentity ? resolveDiagramEdgeIndex(graph.links, selectedEdgeIdentity, { includeLabel: false }) : null
+  ), [graph, selectedEdgeIdentity]);
+  const editingEdgeIndex = useMemo(() => (
+    graph && editingEdgeIdentity ? resolveDiagramEdgeIndex(graph.links, editingEdgeIdentity, { includeLabel: false }) : null
+  ), [editingEdgeIdentity, graph]);
+  const selectedCurrentEdgeIdentity = useMemo(() => {
+    if (!graph || selectedEdgeIndex === null) {
+      return null;
+    }
+
+    const edge = graph.links[selectedEdgeIndex];
+    return edge ? getDiagramEdgeIdentity(edge, selectedEdgeIndex) : null;
+  }, [graph, selectedEdgeIndex]);
 
   const selectedBounds = useMemo(() => {
     if (!hitMap || selection.length === 0) {
@@ -649,11 +667,14 @@ export function DiagramCanvas({
   }, [focusedNodeId, selection]);
 
   useEffect(() => {
-    if (selectedEdgeIndex !== null && selectedEdgeIndex >= (graph?.links.length ?? 0)) {
-      setSelectedEdgeIndex(null);
-      setEditingEdgeIndex(null);
+    if (selectedEdgeIdentity && selectedEdgeIndex === null) {
+      setSelectedEdgeIdentity(null);
     }
-  }, [graph?.links.length, selectedEdgeIndex]);
+    if (editingEdgeIdentity && editingEdgeIndex === null) {
+      setEditingEdgeIdentity(null);
+      setEditingEdgeLabel('');
+    }
+  }, [editingEdgeIdentity, editingEdgeIndex, selectedEdgeIdentity, selectedEdgeIndex]);
 
   useEffect(() => {
     if (orderedNodeIds.length === 0 && graph) {
@@ -715,8 +736,8 @@ export function DiagramCanvas({
         setConnectionPreviewSourceId(null);
         setCursorPoint(null);
         setToolbarOpen(false);
-        setSelectedEdgeIndex(null);
-        setEditingEdgeIndex(null);
+        setSelectedEdgeIdentity(null);
+        setEditingEdgeIdentity(null);
         setEditingEdgeLabel('');
         setMode('select');
         containerRef.current?.focus();
@@ -744,10 +765,10 @@ export function DiagramCanvas({
           return;
         }
 
-        if (selectedEdgeIndex !== null) {
+        if (selectedCurrentEdgeIdentity) {
           event.preventDefault();
-          onDeleteEdge?.(selectedEdgeIndex);
-          setSelectedEdgeIndex(null);
+          onDeleteEdge?.(selectedCurrentEdgeIdentity);
+          setSelectedEdgeIdentity(null);
         }
       }
     };
@@ -765,7 +786,7 @@ export function DiagramCanvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [editingNodeId, graph, onDeleteEdge, onDeleteNodes, onUngroupNodes, readOnly, selectedEdgeIndex, selection, setMode]);
+  }, [editingNodeId, graph, onDeleteEdge, onDeleteNodes, onUngroupNodes, readOnly, selectedCurrentEdgeIdentity, selection, setMode]);
 
   useEffect(() => {
     if (viewport.zoom >= EDITOR_MIN_ZOOM) {
@@ -851,8 +872,8 @@ export function DiagramCanvas({
     }
 
     setSelection([]);
-    setSelectedEdgeIndex(null);
-    setEditingEdgeIndex(null);
+    setSelectedEdgeIdentity(null);
+    setEditingEdgeIdentity(null);
     setToolbarOpen(false);
     setShapePickerOpen(false);
     setEditingNodeId(null);
@@ -860,8 +881,8 @@ export function DiagramCanvas({
 
   const handleNodeClick = useCallback((nodeId: string, shiftKey: boolean) => {
     setShapePickerOpen(false);
-    setSelectedEdgeIndex(null);
-    setEditingEdgeIndex(null);
+    setSelectedEdgeIdentity(null);
+    setEditingEdgeIdentity(null);
     setFocusedNodeId(nodeId);
     setToolbarOpen(true);
 
@@ -910,24 +931,25 @@ export function DiagramCanvas({
   }, [editingLabel, editingNodeId, onEditNodeLabel]);
 
   const commitEdgeEdit = useCallback(() => {
-    if (editingEdgeIndex === null) {
+    if (!editingEdgeIdentity) {
       return;
     }
 
-    onEditEdgeLabel?.(editingEdgeIndex, editingEdgeLabel.trim() || undefined);
-    setEditingEdgeIndex(null);
+    onEditEdgeLabel?.(editingEdgeIdentity, editingEdgeLabel.trim() || undefined);
+    setEditingEdgeIdentity(null);
     setEditingEdgeLabel('');
-  }, [editingEdgeIndex, editingEdgeLabel, onEditEdgeLabel]);
+  }, [editingEdgeIdentity, editingEdgeLabel, onEditEdgeLabel]);
 
-  const openEdgeEditor = useCallback((edgeIndex: number) => {
-    const edge = graph?.links[edgeIndex];
-    if (!edge || readOnly) {
+  const openEdgeEditor = useCallback((edge: DiagramEdgeIdentity) => {
+    const edgeIndex = graph ? resolveDiagramEdgeIndex(graph.links, edge, { includeLabel: false }) : null;
+    const currentEdge = edgeIndex === null ? null : graph?.links[edgeIndex];
+    if (!currentEdge || readOnly) {
       return;
     }
 
-    setEditingEdgeIndex(edgeIndex);
-    setEditingEdgeLabel(getLinkText(edge) ?? '');
-  }, [graph?.links, readOnly]);
+    setEditingEdgeIdentity(edge);
+    setEditingEdgeLabel(getLinkText(currentEdge) ?? '');
+  }, [graph, readOnly]);
 
   const commitPendingEdge = useCallback((label?: string) => {
     if (!pendingEdge) {
@@ -961,7 +983,7 @@ export function DiagramCanvas({
     setNodePositions((current) => ({
       ...current,
       [node.id]: node.position,
-    }));
+    }), 'merge', { [node.id]: node.position });
     setLiveNodePositions((current) => {
       const next = { ...current };
       delete next[node.id];
@@ -1248,21 +1270,24 @@ export function DiagramCanvas({
               onEdgeClick={(event, edge) => {
                 event.stopPropagation();
                 const edgeIndex = getFlowEdgeIndex(edge.id);
-                if (edgeIndex === null) {
+                const diagramEdge = edgeIndex === null ? null : graph?.links[edgeIndex];
+                if (edgeIndex === null || !diagramEdge) {
                   return;
                 }
                 setSelection([]);
                 setToolbarOpen(false);
                 setShapePickerOpen(false);
                 setEditingNodeId(null);
-                setSelectedEdgeIndex(edgeIndex);
+                setSelectedEdgeIdentity(getDiagramEdgeIdentity(diagramEdge, edgeIndex));
               }}
               onEdgeDoubleClick={(event, edge) => {
                 event.stopPropagation();
                 const edgeIndex = getFlowEdgeIndex(edge.id);
-                if (edgeIndex !== null) {
-                  setSelectedEdgeIndex(edgeIndex);
-                  openEdgeEditor(edgeIndex);
+                const diagramEdge = edgeIndex === null ? null : graph?.links[edgeIndex];
+                if (edgeIndex !== null && diagramEdge) {
+                  const edgeIdentity = getDiagramEdgeIdentity(diagramEdge, edgeIndex);
+                  setSelectedEdgeIdentity(edgeIdentity);
+                  openEdgeEditor(edgeIdentity);
                 }
               }}
               onNodeClick={(event, node) => {
@@ -1544,7 +1569,7 @@ export function DiagramCanvas({
           </div>
         ) : null}
 
-        {isFlowchart && !readOnly && selectedEdgeIndex !== null && selectedEdgeMidpoint ? (
+        {isFlowchart && !readOnly && selectedCurrentEdgeIdentity && selectedEdgeMidpoint ? (
           <div
             aria-label="Selected edge toolbar"
             style={{
@@ -1563,12 +1588,12 @@ export function DiagramCanvas({
               zIndex: 30,
             }}
           >
-            <ToolbarButton label="Edit edge label" onClick={() => { openEdgeEditor(selectedEdgeIndex); }}>
+            <ToolbarButton label="Edit edge label" onClick={() => { openEdgeEditor(selectedCurrentEdgeIdentity); }}>
               <Pencil size={16} />
             </ToolbarButton>
             <ToolbarButton label="Delete selected edge" onClick={() => {
-              onDeleteEdge?.(selectedEdgeIndex);
-              setSelectedEdgeIndex(null);
+              onDeleteEdge?.(selectedCurrentEdgeIdentity);
+              setSelectedEdgeIdentity(null);
             }}>
               <Trash2 size={16} />
             </ToolbarButton>
@@ -1676,7 +1701,7 @@ export function DiagramCanvas({
                   commitEdgeEdit();
                 }
                 if (event.key === 'Escape') {
-                  setEditingEdgeIndex(null);
+                  setEditingEdgeIdentity(null);
                   setEditingEdgeLabel('');
                 }
               }}

@@ -664,9 +664,21 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [collaboration, displayNameDraft]);
 
   const handleNodePositionsChange = useCallback((positions: DiagramNodePositions, mode: NodePositionsSyncMode = 'merge') => {
-    setNodePositions((current) => (
-      mode === 'replace' ? positions : { ...current, ...positions }
-    ));
+    setNodePositions((current) => {
+      if (mode === 'replace') {
+        return positions;
+      }
+
+      if (mode === 'remove') {
+        const next = { ...current };
+        for (const nodeId of Object.keys(positions)) {
+          delete next[nodeId];
+        }
+        return next;
+      }
+
+      return { ...current, ...positions };
+    });
 
     if (!collaboration) {
       return;

@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 
 export type DiagramNodePosition = { x: number; y: number };
 export type DiagramNodePositions = Record<string, DiagramNodePosition>;
-export type NodePositionsSyncMode = 'merge' | 'replace';
+export type NodePositionsSyncMode = 'merge' | 'remove' | 'replace';
 
 export function isNodePosition(value: unknown): value is DiagramNodePosition {
   if (!value || typeof value !== 'object') {
@@ -31,6 +31,14 @@ export function writeNodePositions(
   positions: DiagramNodePositions,
   mode: NodePositionsSyncMode = 'merge',
 ): void {
+  if (mode === 'remove') {
+    for (const nodeId of Object.keys(positions)) {
+      positionMap.delete(nodeId);
+    }
+
+    return;
+  }
+
   if (mode === 'replace') {
     for (const nodeId of Array.from(positionMap.keys())) {
       if (!Object.prototype.hasOwnProperty.call(positions, nodeId)) {

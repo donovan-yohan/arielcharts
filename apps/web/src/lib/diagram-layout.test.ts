@@ -30,4 +30,19 @@ describe('collaborative node position writes', () => {
       A: { x: 10, y: 20 },
     });
   });
+
+  it('removes only scoped deleted-node positions while preserving stale-local collaborator positions', () => {
+    const doc = new Y.Doc();
+    const positions = doc.getMap<{ x: number; y: number }>('nodePositions');
+    positions.set('deleted', { x: 1, y: 2 });
+    positions.set('local-existing', { x: 3, y: 4 });
+    positions.set('collaborator-existing', { x: 5, y: 6 });
+
+    writeNodePositions(positions, { deleted: { x: 1, y: 2 } }, 'remove');
+
+    expect(readNodePositions(positions)).toEqual({
+      'local-existing': { x: 3, y: 4 },
+      'collaborator-existing': { x: 5, y: 6 },
+    });
+  });
 });

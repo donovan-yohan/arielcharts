@@ -218,8 +218,8 @@ export function DiagramCanvas({
 
   const setNodePositions = useCallback((
     update: (current: DiagramNodePositions) => DiagramNodePositions,
-    mode: NodePositionsSyncMode = 'replace',
-    syncPositions?: DiagramNodePositions,
+    mode: NodePositionsSyncMode = 'merge',
+    syncPositions?: DiagramNodePositions | null,
   ) => {
     const currentPositions = persistedNodePositionsRef.current;
     const next = update(currentPositions);
@@ -231,7 +231,9 @@ export function DiagramCanvas({
     if (nodePositions === undefined) {
       setUncontrolledNodePositions(next);
     }
-    onNodePositionsChange?.(syncPositions ?? next, mode);
+    if (syncPositions !== null) {
+      onNodePositionsChange?.(syncPositions ?? (mode === 'remove' ? {} : next), mode);
+    }
   }, [nodePositions, onNodePositionsChange]);
 
   useEffect(() => {
@@ -637,19 +639,25 @@ export function DiagramCanvas({
 
   useEffect(() => {
     if (!graph) {
-      setNodePositions((current) => (Object.keys(current).length > 0 ? {} : current));
+      setNodePositions((current) => (Object.keys(current).length > 0 ? {} : current), 'merge', null);
       setLiveNodePositions({});
       return;
     }
 
     const currentNodeIds = new Set(graph.nodes.map((node) => node.id));
+    const removedPositions: DiagramNodePositions = {};
     setNodePositions((current) => {
-      const next = Object.fromEntries(
-        Object.entries(current).filter(([nodeId]) => currentNodeIds.has(nodeId)),
-      );
+      const next: DiagramNodePositions = {};
+      for (const [nodeId, position] of Object.entries(current)) {
+        if (currentNodeIds.has(nodeId)) {
+          next[nodeId] = position;
+        } else {
+          removedPositions[nodeId] = position;
+        }
+      }
 
       return Object.keys(next).length === Object.keys(current).length ? current : next;
-    });
+    }, 'remove', removedPositions);
     setLiveNodePositions((current) => Object.fromEntries(
       Object.entries(current).filter(([nodeId]) => currentNodeIds.has(nodeId)),
     ));
@@ -1615,7 +1623,7 @@ export function DiagramCanvas({
             }}
           >
             {hasPersistedLayout ? (
-              <ToolbarButton label="Clean layout to Mermaid" onClick={() => { setNodePositions(() => ({})); }}>
+              <ToolbarButton label="Reset shared layout to Mermaid" onClick={() => { setNodePositions(() => ({}), 'replace'); }}>
                 <RotateCcw size={16} />
               </ToolbarButton>
             ) : null}

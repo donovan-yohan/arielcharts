@@ -33,9 +33,9 @@ import {
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { DiagramEdgeIdentity, DiagramLink, DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
 import { getDiagramEdgeIdentity, resolveDiagramEdgeIndex } from '../lib/diagram-mutations';
+import { getConnectNodeActivation } from '../lib/diagram-connect-state';
 import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
-import { getConnectNodeActivation } from '../lib/diagram-connect-state';
 import {
   buildSvgHitMap,
   getBoundsCenter,
@@ -901,11 +901,9 @@ export function DiagramCanvas({
         setConnectSourceId(activation.nodeId);
         return;
       }
-
       if (activation.kind === 'noop') {
         return;
       }
-
       setPendingEdge(activation.edge);
       setPendingEdgeLabel('');
       setConnectSourceId(null);

@@ -1,6 +1,7 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from 'node:http';
 
 const MAX_BODY_BYTES = 1_048_576; // 1 MB
+const MCP_CORS_HEADERS = ['content-type', 'mcp-protocol-version', 'mcp-method', 'mcp-name'];
 
 export async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -60,9 +61,14 @@ export function createCorsHeaders(
 ): OutgoingHttpHeaders {
   const isWildcard = allowedOrigins.length === 0 || allowedOrigins.includes('*');
   const allowOrigin = isWildcard ? '*' : origin;
+  const requested = requestedHeaders
+    ?.split(',')
+    .map((header) => header.trim().toLowerCase())
+    .filter(Boolean) ?? [];
+  const allowedHeaders = [...new Set([...MCP_CORS_HEADERS, ...requested])];
 
   const headers: OutgoingHttpHeaders = {
-    'access-control-allow-headers': requestedHeaders?.trim() ? requestedHeaders : 'content-type',
+    'access-control-allow-headers': allowedHeaders.join(', '),
     'access-control-allow-methods': 'POST, OPTIONS',
     'access-control-max-age': '86400',
     vary: isWildcard ? 'Access-Control-Request-Headers' : 'Origin, Access-Control-Request-Headers',

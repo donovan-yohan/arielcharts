@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { APP_NAME } from './lib/constants.js';
 import { healthResponse } from './lib/health.js';
 import { createCorsHeaders, sendEmpty, sendJson } from './lib/http.js';
-import { handleMcpStreamableHttpRequest } from './lib/mcp-server.js';
+import { createModernMcpRequestHandler, handleModernMcpRequest } from './lib/mcp-server.js';
 import { isOriginAllowed } from './lib/origin.js';
 import { SessionStore } from './lib/persistence.js';
 import { SessionManager } from './lib/session-manager.js';
@@ -14,6 +14,7 @@ export function createApp(env = loadServerEnv()) {
   const store = new SessionStore(env.dataDir);
   const manager = new SessionManager(store);
   const websocketServer = new SessionWebSocketServer(manager);
+  const mcpRequestHandler = createModernMcpRequestHandler(manager);
 
   const cleanupTimer = setInterval(() => {
     void manager.cleanupExpiredSessions({ ttlMs: env.sessionTtlMs, diskTtlMs: env.diskTtlMs }).catch((error) => {
@@ -56,7 +57,7 @@ export function createApp(env = loadServerEnv()) {
         }
 
         try {
-          await handleMcpStreamableHttpRequest({ manager, request, response });
+          await handleModernMcpRequest(mcpRequestHandler, request, response);
         } catch (error) {
           sendJson(
             response,
@@ -112,6 +113,7 @@ export function createApp(env = loadServerEnv()) {
 
   async function close(): Promise<void> {
     clearInterval(cleanupTimer);
+    await mcpRequestHandler.close();
     await websocketServer.close();
     await manager.close();
     await new Promise<void>((resolve, reject) => {

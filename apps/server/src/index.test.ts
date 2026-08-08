@@ -2,11 +2,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from './index.js';
 import type { ServerEnv } from './lib/types.js';
+
+const MCP_PROTOCOL_VERSION = '2026-07-28';
 
 describe('server integration', () => {
   let dataDir: string;
@@ -37,6 +37,40 @@ describe('server integration', () => {
     await rm(dataDir, { recursive: true, force: true });
   });
 
+  async function mcpRequest(options: {
+    headerMethod?: string;
+    headerName?: string;
+    id: number;
+    method: string;
+    params?: Record<string, unknown>;
+    toolName?: string;
+  }) {
+    const { id, method, params = {}, toolName, headerMethod = method, headerName = toolName } = options;
+    return fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'mcp-method': headerMethod,
+        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+        origin: 'http://allowed.test',
+        ...(headerName === undefined ? {} : { 'mcp-name': headerName }),
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method,
+        params: {
+          ...params,
+          _meta: {
+            'io.modelcontextprotocol/clientCapabilities': {},
+            'io.modelcontextprotocol/clientInfo': { name: 'arielcharts-server-test', version: '1.0.0' },
+            'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION,
+          },
+        },
+      }),
+    });
+  }
+
   it('rejects disallowed origins for the MCP endpoint', async () => {
     const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
       method: 'POST',
@@ -44,28 +78,19 @@ describe('server integration', () => {
         'content-type': 'application/json',
         origin: 'http://blocked.test',
       },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-06-18',
-          capabilities: {},
-          clientInfo: { name: 'blocked-client', version: '1.0.0' },
-        },
-      }),
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} }),
     });
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: 'Origin not allowed.' });
   });
 
-  it('handles allowed MCP preflight requests', async () => {
+  it('handles MCP 2026 preflight requests with every required routing header', async () => {
     const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
       method: 'OPTIONS',
       headers: {
         origin: 'http://allowed.test',
-        'access-control-request-headers': 'content-type,mcp-protocol-version',
+        'access-control-request-headers': 'content-type,mcp-protocol-version,mcp-method,mcp-name',
       },
     });
 
@@ -73,81 +98,172 @@ describe('server integration', () => {
     expect(await response.text()).toBe('');
     expect(response.headers.get('access-control-allow-origin')).toBe('http://allowed.test');
     expect(response.headers.get('access-control-allow-methods')).toBe('POST, OPTIONS');
-    expect(response.headers.get('access-control-allow-headers')).toBe('content-type,mcp-protocol-version');
+    expect(response.headers.get('access-control-allow-headers')).toBe('content-type, mcp-protocol-version, mcp-method, mcp-name');
     expect(response.headers.get('access-control-max-age')).toBe('86400');
   });
 
-  it('supports MCP initialize, tools/list, and tools/call flows over streamable HTTP', async () => {
-    const client = new Client({
-      name: 'arielcharts-server-test',
-      version: '1.0.0',
-    });
+  it('serves every public modern tool without an MCP transport session', async () => {
+    await app.manager.getOrCreateSession('abc123de');
 
-    const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
-      requestInit: {
-        headers: {
-          origin: 'http://allowed.test',
+    const discover = await mcpRequest({ id: 1, method: 'server/discover' });
+    expect(discover.status).toBe(200);
+    expect(discover.headers.get('mcp-session-id')).toBeNull();
+
+    const toolsResponse = await mcpRequest({ id: 2, method: 'tools/list' });
+    expect(toolsResponse.status).toBe(200);
+    const toolsPayload = await toolsResponse.json() as { result: { tools: Array<{ name: string }> } };
+    expect(toolsPayload.result.tools.map((tool) => tool.name)).toEqual([
+      'listSessions',
+      'getSession',
+      'createDiagram',
+      'readDiagram',
+      'writeDiagram',
+      'renameDiagram',
+      'deleteDiagram',
+    ]);
+
+    const promptsResponse = await mcpRequest({ id: 3, method: 'prompts/list' });
+    expect(promptsResponse.status).toBe(200);
+    const promptsPayload = await promptsResponse.json() as { result: { prompts: Array<{ name: string }> } };
+    expect(promptsPayload.result.prompts.map((prompt) => prompt.name)).toEqual(['diagrammingWorkflow']);
+
+    const listResponse = await mcpRequest({ id: 4, method: 'tools/call', toolName: 'listSessions', params: { name: 'listSessions', arguments: {} } });
+    expect(listResponse.status).toBe(200);
+    await expect(listResponse.json()).resolves.toMatchObject({ result: { structuredContent: { sessions: [{ id: 'abc123de' }] } } });
+
+    const sessionResponse = await mcpRequest({
+      id: 5,
+      method: 'tools/call',
+      toolName: 'getSession',
+      params: { arguments: { sessionId: 'abc123de' }, name: 'getSession' },
+    });
+    expect(sessionResponse.status).toBe(200);
+    const sessionPayload = await sessionResponse.json() as { result: { structuredContent: { revision: string } } };
+    const sessionRevision = sessionPayload.result.structuredContent.revision;
+    expect(sessionRevision).toEqual(expect.any(String));
+
+    const createResponse = await mcpRequest({
+      id: 6,
+      method: 'tools/call',
+      toolName: 'createDiagram',
+      params: {
+        name: 'createDiagram',
+        arguments: {
+          sessionId: 'abc123de',
+          name: 'Checkout API flow',
+          mermaidText: 'sequenceDiagram\n  Browser->>API: POST /checkout',
+          expectedRevision: sessionRevision,
         },
       },
     });
+    expect(createResponse.status).toBe(200);
+    const createPayload = await createResponse.json() as {
+      result: { structuredContent: { diagram: { id: string; mermaidText: string; revision: string } } };
+    };
+    expect(createPayload.result.structuredContent.diagram.mermaidText).toContain('sequenceDiagram');
 
-    await client.connect(transport);
+    const readResponse = await mcpRequest({
+      id: 7,
+      method: 'tools/call',
+      toolName: 'readDiagram',
+      params: { name: 'readDiagram', arguments: { sessionId: 'abc123de', diagramId: createPayload.result.structuredContent.diagram.id } },
+    });
+    expect(readResponse.status).toBe(200);
+    const readPayload = await readResponse.json() as { result: { structuredContent: { diagram: { revision: string; mermaidText: string } } } };
+    expect(readPayload.result.structuredContent.diagram.mermaidText).toContain('POST /checkout');
 
-    expect(client.getServerVersion()).toEqual({ name: 'ArielCharts', version: '0.1.0' });
-    expect(client.getServerCapabilities()).toMatchObject({ tools: {} });
-
-    const tools = await client.listTools();
-    expect(tools.tools.map((tool) => tool.name)).toEqual(['read_diagram', 'write_diagram', 'list_sessions']);
-
-    const writeResult = await client.callTool({
-      name: 'write_diagram',
-      arguments: {
-        session_id: 'abc123de',
-        mermaid_text: 'graph TD\n  Browser-->Server',
-        actor_name: 'claude-code',
-        actor_type: 'agent',
-        detail: 'updated over MCP',
+    const writeResponse = await mcpRequest({
+      id: 8,
+      method: 'tools/call',
+      toolName: 'writeDiagram',
+      params: {
+        name: 'writeDiagram',
+        arguments: {
+          sessionId: 'abc123de',
+          diagramId: createPayload.result.structuredContent.diagram.id,
+          mermaidText: 'sequenceDiagram\n  Browser->>API: GET /health',
+          expectedRevision: readPayload.result.structuredContent.diagram.revision,
+        },
       },
     });
+    expect(writeResponse.status).toBe(200);
+    const writePayload = await writeResponse.json() as { result: { structuredContent: { diagram: { mermaidText: string; revision: string } } } };
+    expect(writePayload.result.structuredContent.diagram.mermaidText).toContain('GET /health');
 
-    expect(writeResult.isError).toBeUndefined();
-    expect(writeResult.structuredContent).toEqual({ success: true });
+    const staleWrite = await mcpRequest({
+      id: 9,
+      method: 'tools/call',
+      toolName: 'writeDiagram',
+      params: { name: 'writeDiagram', arguments: {
+        sessionId: 'abc123de',
+        diagramId: createPayload.result.structuredContent.diagram.id,
+        mermaidText: 'sequenceDiagram\n  Browser->>API: overwrite',
+        expectedRevision: readPayload.result.structuredContent.diagram.revision,
+      } },
+    });
+    expect(staleWrite.status).toBe(200);
+    await expect(staleWrite.json()).resolves.toMatchObject({ result: { isError: true } });
 
-    const readResult = await client.callTool({
-      name: 'read_diagram',
-      arguments: {
-        session_id: 'abc123de',
-      },
+    const renamedResponse = await mcpRequest({
+      id: 10,
+      method: 'tools/call',
+      toolName: 'renameDiagram',
+      params: { name: 'renameDiagram', arguments: {
+        sessionId: 'abc123de', diagramId: createPayload.result.structuredContent.diagram.id,
+        name: 'Health flow', expectedRevision: writePayload.result.structuredContent.diagram.revision,
+      } },
+    });
+    expect(renamedResponse.status).toBe(200);
+    const renamedPayload = await renamedResponse.json() as { result: { structuredContent: { diagram: { revision: string; name: string } } } };
+    expect(renamedPayload.result.structuredContent.diagram.name).toBe('Health flow');
+
+    const canonicalRead = await mcpRequest({
+      id: 11,
+      method: 'tools/call',
+      toolName: 'readDiagram',
+      params: { name: 'readDiagram', arguments: { sessionId: 'abc123de', diagramId: createPayload.result.structuredContent.diagram.id } },
+    });
+    await expect(canonicalRead.json()).resolves.toMatchObject({ result: { structuredContent: { diagram: { mermaidText: expect.stringContaining('GET /health') } } } });
+
+    const deleteResponse = await mcpRequest({
+      id: 12,
+      method: 'tools/call',
+      toolName: 'deleteDiagram',
+      params: { name: 'deleteDiagram', arguments: {
+        sessionId: 'abc123de', diagramId: createPayload.result.structuredContent.diagram.id,
+        expectedRevision: renamedPayload.result.structuredContent.diagram.revision,
+      } },
+    });
+    expect(deleteResponse.status).toBe(200);
+    await expect(deleteResponse.json()).resolves.toMatchObject({ result: { structuredContent: { deleted: { id: createPayload.result.structuredContent.diagram.id } } } });
+  });
+
+  it('rejects routing headers that disagree with the modern JSON-RPC request', async () => {
+    const methodMismatch = await mcpRequest({ id: 1, method: 'tools/list', headerMethod: 'prompts/list' });
+    expect(methodMismatch.status).toBeGreaterThanOrEqual(400);
+
+    const nameMismatch = await mcpRequest({
+      id: 2,
+      method: 'tools/call',
+      toolName: 'listSessions',
+      headerName: 'getSession',
+      params: { name: 'listSessions', arguments: {} },
+    });
+    expect(nameMismatch.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('rejects the retired initialize lifecycle', async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://allowed.test' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'legacy', version: '1.0.0' } },
+      }),
     });
 
-    expect(readResult.isError).toBeUndefined();
-    expect(readResult.structuredContent).toEqual({
-      mermaid_text: 'graph TD\n  Browser-->Server',
-      participants: [
-        {
-          name: 'claude-code',
-          color: '#7c3aed',
-          type: 'agent',
-        },
-      ],
-    });
-
-    const sessionsResult = await client.callTool({
-      name: 'list_sessions',
-      arguments: {},
-    });
-
-    expect(sessionsResult.isError).toBeUndefined();
-    expect(sessionsResult.structuredContent).toEqual({
-      sessions: [
-        {
-          id: 'abc123de',
-          title: 'graph TD',
-          participants: 1,
-        },
-      ],
-    });
-
-    await transport.close();
+    expect(response.status).toBeGreaterThanOrEqual(400);
   });
 });

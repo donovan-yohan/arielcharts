@@ -12,10 +12,25 @@ import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
 import { DiagramCanvas } from './diagram-canvas';
-import { MutationQueue, parseFlowchartSnapshot, type FlowchartSnapshot } from '../lib/diagram-mutations';
+import {
+  MutationQueue,
+  observeMutationFailure,
+  parseFlowchartSnapshot,
+  type DiagramLinkType,
+  type DiagramNodeShape,
+  type FlowchartSnapshot,
+} from '../lib/diagram-mutations';
+import {
+  readNodePositions,
+  writeNodePositions,
+  type DiagramNodePosition,
+  type DiagramNodePositions,
+  type NodePositionsSyncMode,
+} from '../lib/diagram-layout';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
 
 const MERMAID_TEXT_KEY = 'mermaid';
+const NODE_POSITIONS_KEY = 'nodePositions';
 const ACTIVITY_KEY = 'activity';
 const MAX_ACTIVITY_EVENTS = 100;
 const EDIT_ACTIVITY_DEBOUNCE_MS = 900;
@@ -36,9 +51,12 @@ type CollaborationState = {
   activityArray: Y.Array<ActivityEvent>;
   awareness: AwarenessLike;
   doc: Y.Doc;
+  nodePositionsMap: Y.Map<NodePosition>;
   provider: WebsocketProvider;
   yText: Y.Text;
 };
+
+type NodePosition = DiagramNodePosition;
 
 type AwarenessLike = {
   getStates: () => Map<number, unknown>;
@@ -157,6 +175,10 @@ function isFlowchartSyntax(text: string): boolean {
   return trimmed.startsWith('flowchart') || trimmed.startsWith('graph');
 }
 
+function canBuildFlowchartFromCanvas(text: string): boolean {
+  return text.trim().length === 0 || isFlowchartSyntax(text);
+}
+
 function stripParticipantTabSuffix(name: string): string {
   return name.replace(/-[a-z0-9]{2}$/i, '');
 }
@@ -250,12 +272,14 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [lastValidSvg, setLastValidSvg] = useState('');
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [shareCopyState, setShareCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [sessionIdCopyState, setSessionIdCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [promptCopyState, setPromptCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [shareUrl, setShareUrl] = useState(() => getSessionPath(sessionId));
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [flowchartSnapshot, setFlowchartSnapshot] = useState<FlowchartSnapshot | null>(null);
+  const [nodePositions, setNodePositions] = useState<DiagramNodePositions>({});
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [interactionMode, setInteractionMode] = useState<'select' | 'connect'>('select');
   const [renamingParticipantName, setRenamingParticipantName] = useState<string | null>(null);
@@ -281,6 +305,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     });
     const awareness = provider.awareness as AwarenessLike;
     const yText = doc.getText(MERMAID_TEXT_KEY);
+    const nodePositionsMap = doc.getMap<NodePosition>(NODE_POSITIONS_KEY);
     const queue = new MutationQueue(yText, { transactionOrigin: 'visual' });
     mutationQueueRef.current = queue;
     const activityArray = doc.getArray<ActivityEvent>(ACTIVITY_KEY);
@@ -294,6 +319,10 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
     const syncActivity = () => {
       setActivity(activityArray.toArray().slice().reverse());
+    };
+
+    const syncNodePositions = () => {
+      setNodePositions(readNodePositions(nodePositionsMap));
     };
 
     const syncParticipants = () => {
@@ -342,10 +371,12 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
     syncText();
     syncActivity();
+    syncNodePositions();
     syncParticipants();
 
     yText.observe(syncText);
     activityArray.observe(syncActivity);
+    nodePositionsMap.observe(syncNodePositions);
     awareness.on('change', syncParticipants);
     provider.on('status', handleStatus);
     provider.on('connection-close', handleReconnectSignal);
@@ -357,7 +388,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       }
     });
 
-    setCollaboration({ activityArray, awareness, doc, provider, yText });
+    setCollaboration({ activityArray, awareness, doc, nodePositionsMap, provider, yText });
 
     return () => {
       if (editDebounceRef.current !== null) {
@@ -372,6 +403,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       provider.off('connection-error', handleReconnectSignal);
       yText.unobserve(syncText);
       activityArray.unobserve(syncActivity);
+      nodePositionsMap.unobserve(syncNodePositions);
       awareness.setLocalState(null);
       provider.destroy();
       doc.destroy();
@@ -631,6 +663,59 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     setRenamingParticipantName(null);
   }, [collaboration, displayNameDraft]);
 
+  const handleNodePositionsChange = useCallback((positions: DiagramNodePositions, mode: NodePositionsSyncMode = 'merge') => {
+    setNodePositions((current) => {
+      if (mode === 'replace') {
+        return positions;
+      }
+
+      if (mode === 'remove') {
+        const next = { ...current };
+        for (const nodeId of Object.keys(positions)) {
+          delete next[nodeId];
+        }
+        return next;
+      }
+
+      return { ...current, ...positions };
+    });
+
+    if (!collaboration) {
+      return;
+    }
+
+    collaboration.doc.transact(() => {
+      writeNodePositions(collaboration.nodePositionsMap, positions, mode);
+    }, 'visual-layout');
+  }, [collaboration]);
+
+  const handleSingleNodePositionChange = useCallback((nodeId: string, position: NodePosition) => {
+    handleNodePositionsChange({ [nodeId]: position }, 'merge');
+  }, [handleNodePositionsChange]);
+
+  const runMutation = useCallback((mutation: Promise<unknown>) => {
+    setMutationError(null);
+    observeMutationFailure(mutation, (error) => {
+      setMutationError(error instanceof Error ? error.message : 'The diagram update could not be applied.');
+    });
+  }, []);
+
+  const handleAddConnectedNode = useCallback((source: string, label: string, shape: DiagramNodeShape, position: NodePosition, type: DiagramLinkType) => {
+    const queue = mutationQueueRef.current;
+    if (!queue) {
+      return;
+    }
+
+    runMutation(queue.addConnectedNode(source, label, { shape, type })
+      .then(({ nodeId }) => {
+        if (!nodeId) {
+          return;
+        }
+        handleSingleNodePositionChange(nodeId, position);
+        setSelectedNodeIds([nodeId]);
+      }));
+  }, [handleSingleNodePositionChange, runMutation]);
+
   return (
     <main className="workspace-shell">
       <header className="workspace-topbar">
@@ -763,23 +848,45 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             </div>
           ) : null}
 
+          {mutationError ? (
+            <div data-testid="mutation-error-banner" className="error-banner" role="status">
+              <strong>diagram update not applied</strong>
+              <span>{mutationError}</span>
+            </div>
+          ) : null}
+
           <DiagramCanvas
             className="diagram-canvas"
             emptyMessage={mermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
             graph={flowchartSnapshot}
             interactionMode={interactionMode}
-            isFlowchart={isFlowchartSyntax(mermaidText)}
+            isFlowchart={canBuildFlowchartFromCanvas(mermaidText)}
+            nodePositions={nodePositions}
             onAddEdge={(source, target, label, type) => mutationQueueRef.current?.addEdge(source, target, { label, type })}
             onAddNode={(label, shape) => mutationQueueRef.current?.addNode(label, { shape })}
+            onAddConnectedNode={handleAddConnectedNode}
             onChangeNodeShape={(nodeId, shape) => mutationQueueRef.current?.changeNodeShape(nodeId, shape)}
             onDeleteNodes={(ids) => {
               for (const id of ids) {
                 void mutationQueueRef.current?.removeNode(id);
               }
             }}
+            onDeleteEdge={(edge) => {
+              const queue = mutationQueueRef.current;
+              if (queue) {
+                runMutation(queue.removeEdgeByIdentity(edge));
+              }
+            }}
+            onEditEdgeLabel={(edge, label) => {
+              const queue = mutationQueueRef.current;
+              if (queue) {
+                runMutation(queue.editEdgeLabelByIdentity(edge, label));
+              }
+            }}
             onEditNodeLabel={(nodeId, label) => mutationQueueRef.current?.editNodeLabel(nodeId, label)}
             onGroupNodes={(ids, label) => mutationQueueRef.current?.groupNodes(ids, label)}
             onInteractionModeChange={setInteractionMode}
+            onNodePositionsChange={handleNodePositionsChange}
             onSelectedNodeIdsChange={setSelectedNodeIds}
             onUngroupNodes={(id) => mutationQueueRef.current?.ungroupSubgraph(id)}
             selectedNodeIds={selectedNodeIds}

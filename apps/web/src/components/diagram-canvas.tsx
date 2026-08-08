@@ -1,18 +1,41 @@
 'use client';
 
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import {
+  ConnectionLineType,
+  Handle,
+  MarkerType,
+  Position,
+  ReactFlow,
+  type Connection,
+  type Edge,
+  type FinalConnectionState,
+  type Node,
+  type NodeChange,
+  type NodeProps,
+  type NodeTypes,
+  type OnConnectEnd,
+  type OnConnectStart,
+  type OnNodeDrag,
+  type Viewport,
+} from '@xyflow/react';
 import {
   ArrowRightFromLine,
   Pencil,
   Plus,
+  RotateCcw,
   ScanSearch,
   Shapes,
   Trash2,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import type { DiagramEdgeIdentity, DiagramLink, DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
+import { getDiagramEdgeIdentity, resolveDiagramEdgeIndex } from '../lib/diagram-mutations';
+import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
+import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
+import { getConnectNodeActivation } from '../lib/diagram-connect-state';
 import {
   buildSvgHitMap,
   getBoundsCenter,
@@ -29,17 +52,21 @@ export interface DiagramCanvasProps {
   graph: FlowchartSnapshot | null;
   interactionMode?: 'select' | 'connect';
   isFlowchart?: boolean;
+  nodePositions?: DiagramNodePositions;
   readOnly?: boolean;
   selectedNodeIds?: string[];
   svg: string;
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
+  onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
-  onDeleteEdge?: (edgeKey: string) => void;
+  onDeleteEdge?: (edge: DiagramEdgeIdentity) => void;
   onDeleteNodes?: (nodeIds: string[]) => void;
+  onEditEdgeLabel?: (edge: DiagramEdgeIdentity, label?: string) => void;
   onEditNodeLabel?: (nodeId: string, newLabel: string) => void;
   onGroupNodes?: (nodeIds: string[], label: string) => void;
   onInteractionModeChange?: (mode: 'select' | 'connect') => void;
+  onNodePositionsChange?: (positions: DiagramNodePositions, mode?: NodePositionsSyncMode) => void;
   onSelectedNodeIdsChange?: (nodeIds: string[]) => void;
   onUngroupNodes?: (subgraphId: string) => void;
 }
@@ -58,10 +85,39 @@ interface PendingEdge {
   target: string;
 }
 
+interface MermaidFlowNodeData extends Record<string, unknown> {
+  ariaLabel: string;
+  label: string;
+  shape: DiagramNodeShape;
+}
+
+type MermaidFlowNode = Node<MermaidFlowNodeData, 'mermaidFlowNode'>;
+
+interface FlowNodeInteractionContextValue {
+  focusedNodeId: string | null;
+  onFocus: (nodeId: string) => void;
+  onKeyDown: (nodeId: string, event: ReactKeyboardEvent<HTMLElement>) => void;
+  registerNodeElement: (nodeId: string, element: HTMLElement | null) => void;
+}
+
+const FLOW_NODE_TYPES: NodeTypes = {
+  mermaidFlowNode: MermaidReactFlowNode,
+};
+const FLOW_PRO_OPTIONS = { hideAttribution: true };
+const FLOW_EDGE_COLOR = '#e2e8f0';
+const FLOW_EDGE_MARKER_CIRCLE_ID = 'arielcharts-flow-edge-circle';
+const FLOW_EDGE_MARKER_CROSS_ID = 'arielcharts-flow-edge-cross';
+const FLOW_HANDLE_POSITIONS = [Position.Top, Position.Right, Position.Bottom, Position.Left] as const;
+const GHOST_NODE_WIDTH = 144;
+const GHOST_NODE_HEIGHT = 56;
+const FlowNodeInteractionContext = createContext<FlowNodeInteractionContextValue | null>(null);
+
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
 const EDITOR_MIN_ZOOM = 0.4;
 const FIT_PADDING = 64;
+const DEFAULT_NEW_NODE_LABEL = 'New Node';
+const DEFAULT_NEW_NODE_SHAPE: DiagramNodeShape = 'rect';
 const SHAPE_OPTIONS: Array<{ label: string; value: DiagramNodeShape }> = [
   { label: 'rect', value: 'rect' },
   { label: 'round', value: 'round' },
@@ -100,13 +156,18 @@ export function DiagramCanvas({
   graph,
   interactionMode,
   isFlowchart = true,
+  nodePositions,
   onAddEdge,
   onAddNode,
+  onAddConnectedNode,
   onChangeNodeShape,
+  onDeleteEdge,
   onDeleteNodes,
+  onEditEdgeLabel,
   onEditNodeLabel,
   onGroupNodes,
   onInteractionModeChange,
+  onNodePositionsChange,
   onSelectedNodeIdsChange,
   onUngroupNodes,
   readOnly = false,
@@ -115,9 +176,19 @@ export function DiagramCanvas({
 }: DiagramCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgContainerRef = useRef<HTMLDivElement | null>(null);
-  const nodeButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  const nodeButtonRefs = useRef(new Map<string, HTMLElement | null>());
   const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
+  const [uncontrolledNodePositions, setUncontrolledNodePositions] = useState<DiagramNodePositions>({});
+  const [liveNodePositions, setLiveNodePositions] = useState<DiagramNodePositions>({});
+  const persistedNodePositions = nodePositions ?? uncontrolledNodePositions;
+  const persistedNodePositionsRef = useRef<DiagramNodePositions>(persistedNodePositions);
+  const hasAutoFitInitialRenderRef = useRef(false);
+  const visibleNodePositions = useMemo(
+    () => ({ ...persistedNodePositions, ...liveNodePositions }),
+    [liveNodePositions, persistedNodePositions],
+  );
   const dragStateRef = useRef<{ originX: number; originY: number; startPanX: number; startPanY: number } | null>(null);
+  const connectionStartNodeIdRef = useRef<string | null>(null);
   const isControlledSelection = selectedNodeIds !== undefined;
   const [internalSelection, setInternalSelection] = useState<string[]>(selectedNodeIds ?? []);
   const selection = isControlledSelection ? selectedNodeIds : internalSelection;
@@ -129,24 +200,76 @@ export function DiagramCanvas({
   const [spacePressed, setSpacePressed] = useState(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
+  const [selectedEdgeIdentity, setSelectedEdgeIdentity] = useState<DiagramEdgeIdentity | null>(null);
+  const [editingEdgeIdentity, setEditingEdgeIdentity] = useState<DiagramEdgeIdentity | null>(null);
+  const [editingEdgeLabel, setEditingEdgeLabel] = useState('');
   const [shapePickerOpen, setShapePickerOpen] = useState(false);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
+  const [connectionPreviewSourceId, setConnectionPreviewSourceId] = useState<string | null>(null);
   const [cursorPoint, setCursorPoint] = useState<SvgPoint | null>(null);
   const [pendingEdge, setPendingEdge] = useState<PendingEdge | null>(null);
   const [pendingEdgeLabel, setPendingEdgeLabel] = useState('');
   const [groupPromptValue, setGroupPromptValue] = useState('');
   const [showGroupPrompt, setShowGroupPrompt] = useState(false);
+  const [newNodeLabel, setNewNodeLabel] = useState('');
+  const [newNodeShape, setNewNodeShape] = useState<DiagramNodeShape>(DEFAULT_NEW_NODE_SHAPE);
   const [selectedConnectionType, setSelectedConnectionType] = useState<DiagramLinkType>('arrow_point');
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [toolbarOpen, setToolbarOpen] = useState(false);
 
-  const orderedNodeIds = useMemo(() => {
-    if (graph?.nodes.length) {
-      return graph.nodes.map((node) => node.id).filter((nodeId) => hitMap?.nodes.has(nodeId) ?? false);
+  const setNodePositions = useCallback((
+    update: (current: DiagramNodePositions) => DiagramNodePositions,
+    mode: NodePositionsSyncMode = 'merge',
+    syncPositions?: DiagramNodePositions | null,
+  ) => {
+    const currentPositions = persistedNodePositionsRef.current;
+    const next = update(currentPositions);
+    if (next === currentPositions) {
+      return;
     }
 
-    return hitMap ? [...hitMap.nodes.keys()] : [];
-  }, [graph?.nodes, hitMap]);
+    persistedNodePositionsRef.current = next;
+    if (nodePositions === undefined) {
+      setUncontrolledNodePositions(next);
+    }
+    if (syncPositions !== null) {
+      onNodePositionsChange?.(syncPositions ?? (mode === 'remove' ? {} : next), mode);
+    }
+  }, [nodePositions, onNodePositionsChange]);
+
+  useEffect(() => {
+    persistedNodePositionsRef.current = persistedNodePositions;
+  }, [persistedNodePositions]);
+
+  const interactiveNodeBounds = useMemo(() => {
+    if (!hitMap) {
+      return null;
+    }
+
+    const boundsByNodeId = new Map(hitMap.nodes);
+    Object.entries(visibleNodePositions).forEach(([nodeId, position]) => {
+      const bounds = boundsByNodeId.get(nodeId);
+      if (!bounds) {
+        return;
+      }
+
+      boundsByNodeId.set(nodeId, {
+        ...bounds,
+        x: position.x,
+        y: position.y,
+      });
+    });
+
+    return boundsByNodeId;
+  }, [hitMap, visibleNodePositions]);
+
+  const orderedNodeIds = useMemo(() => {
+    if (graph?.nodes.length) {
+      return graph.nodes.map((node) => node.id).filter((nodeId) => interactiveNodeBounds?.has(nodeId) ?? false);
+    }
+
+    return interactiveNodeBounds ? [...interactiveNodeBounds.keys()] : [];
+  }, [graph?.nodes, interactiveNodeBounds]);
 
   const connectionMap = useMemo(() => {
     const incoming = new Map<string, string[]>();
@@ -160,31 +283,114 @@ export function DiagramCanvas({
     return { incoming, outgoing };
   }, [graph?.links]);
 
+  const nodeById = useMemo(() => new Map(graph?.nodes.map((node) => [node.id, node]) ?? []), [graph?.nodes]);
+  const selectedEdgeIndex = useMemo(() => (
+    graph && selectedEdgeIdentity ? resolveDiagramEdgeIndex(graph.links, selectedEdgeIdentity, { includeLabel: false }) : null
+  ), [graph, selectedEdgeIdentity]);
+  const editingEdgeIndex = useMemo(() => (
+    graph && editingEdgeIdentity ? resolveDiagramEdgeIndex(graph.links, editingEdgeIdentity, { includeLabel: false }) : null
+  ), [editingEdgeIdentity, graph]);
+  const selectedCurrentEdgeIdentity = useMemo(() => {
+    if (!graph || selectedEdgeIndex === null) {
+      return null;
+    }
+
+    const edge = graph.links[selectedEdgeIndex];
+    return edge ? getDiagramEdgeIdentity(edge, selectedEdgeIndex) : null;
+  }, [graph, selectedEdgeIndex]);
+
   const selectedBounds = useMemo(() => {
     if (!hitMap || selection.length === 0) {
       return null;
     }
 
     const boundsList = selection
-      .map((nodeId) => hitMap.nodes.get(nodeId))
+      .map((nodeId) => interactiveNodeBounds?.get(nodeId))
       .filter((bounds): bounds is SvgBounds => bounds !== undefined);
 
     return getBoundsUnion(boundsList);
-  }, [hitMap, selection]);
+  }, [hitMap, interactiveNodeBounds, selection]);
 
   const graphBounds = useMemo(() => {
     if (!hitMap) {
       return null;
     }
 
-    const allBounds = [
-      ...hitMap.nodes.values(),
-      ...hitMap.subgraphs.values(),
-      ...[...hitMap.edges.values()].map((edge) => edge.bounds),
-    ];
+    const nodeBounds = interactiveNodeBounds ? [...interactiveNodeBounds.values()] : [...hitMap.nodes.values()];
+    const allBounds = nodeBounds.length > 0
+      ? [...nodeBounds, ...hitMap.subgraphs.values()]
+      : [...hitMap.subgraphs.values(), ...[...hitMap.edges.values()].map((edge) => edge.bounds)];
 
     return getBoundsUnion(allBounds);
-  }, [hitMap]);
+  }, [hitMap, interactiveNodeBounds]);
+
+  const flowNodes = useMemo<MermaidFlowNode[]>(() => {
+    if (!graph || !interactiveNodeBounds) {
+      return [];
+    }
+
+    const nextNodes: MermaidFlowNode[] = [];
+    graph.nodes.forEach((node) => {
+      const bounds = interactiveNodeBounds.get(node.id);
+      if (!bounds) {
+        return;
+      }
+
+      const nodeLabel = getNodeText(node);
+      const ariaLabel = getNodeAriaLabel(node.shape, nodeLabel);
+      nextNodes.push({
+        ariaLabel,
+        data: {
+          ariaLabel,
+          label: nodeLabel,
+          shape: node.shape,
+        },
+        draggable: !readOnly,
+        focusable: false,
+        id: node.id,
+        position: { x: bounds.x, y: bounds.y },
+        selectable: true,
+        selected: selection.includes(node.id),
+        style: {
+          height: bounds.height,
+          width: bounds.width,
+        },
+        type: 'mermaidFlowNode',
+      });
+    });
+
+    return nextNodes;
+  }, [graph, interactiveNodeBounds, readOnly, selection]);
+
+  const hasPersistedLayout = Object.keys(persistedNodePositions).length > 0;
+
+  const flowEdges = useMemo<Edge[]>(() => {
+    if (!graph || !interactiveNodeBounds) {
+      return [];
+    }
+
+    return getVisibleDiagramLinks(graph.links, interactiveNodeBounds)
+      .map(({ graphIndex, link }) => ({
+        animated: false,
+        data: { index: graphIndex },
+        id: getFlowEdgeId(graphIndex),
+        label: getLinkText(link),
+        selectable: true,
+        selected: selectedEdgeIndex === graphIndex,
+        ...getFlowEdgeHandles(link, interactiveNodeBounds, graph.direction),
+        ...getFlowEdgePresentation(link),
+        source: link.source,
+        target: link.target,
+        type: 'smoothstep',
+      }));
+  }, [graph, interactiveNodeBounds, selectedEdgeIndex]);
+
+  const useReactFlowRenderer = isFlowchart && flowNodes.length > 0;
+  const flowViewport = useMemo<Viewport>(() => ({
+    x: viewport.panX,
+    y: viewport.panY,
+    zoom: viewport.zoom,
+  }), [viewport.panX, viewport.panY, viewport.zoom]);
 
   const screenSelectionBounds = useMemo(() => {
     if (!selectedBounds) {
@@ -199,25 +405,39 @@ export function DiagramCanvas({
       return null;
     }
 
-    return graph.nodes.find((node) => node.id === editingNodeId) ?? null;
-  }, [editingNodeId, graph]);
+    return nodeById.get(editingNodeId) ?? null;
+  }, [editingNodeId, graph, nodeById]);
 
   const editingNodeBounds = useMemo(() => {
     if (!hitMap || !editingNodeId) {
       return null;
     }
 
-    const bounds = hitMap.nodes.get(editingNodeId);
+    const bounds = interactiveNodeBounds?.get(editingNodeId);
     return bounds ? toScreenRect(bounds, viewport) : null;
-  }, [editingNodeId, hitMap, viewport]);
+  }, [editingNodeId, hitMap, interactiveNodeBounds, viewport]);
 
-  const connectSourceBounds = useMemo(() => {
-    if (!connectSourceId || !hitMap) {
+  const selectedEdge = selectedEdgeIndex === null ? null : graph?.links[selectedEdgeIndex] ?? null;
+  const selectedEdgeMidpoint = useMemo(() => (
+    selectedEdge && interactiveNodeBounds ? getEdgeMidpoint(selectedEdge, interactiveNodeBounds) : null
+  ), [interactiveNodeBounds, selectedEdge]);
+
+  const editingEdgeMidpoint = useMemo(() => {
+    if (editingEdgeIndex === null || !graph || !interactiveNodeBounds) {
       return null;
     }
 
-    return hitMap.nodes.get(connectSourceId) ?? null;
-  }, [connectSourceId, hitMap]);
+    const edge = graph.links[editingEdgeIndex];
+    return edge ? getEdgeMidpoint(edge, interactiveNodeBounds) : null;
+  }, [editingEdgeIndex, graph, interactiveNodeBounds]);
+
+  const connectSourceBounds = useMemo(() => {
+    if (!connectSourceId || !interactiveNodeBounds) {
+      return null;
+    }
+
+    return interactiveNodeBounds.get(connectSourceId) ?? null;
+  }, [connectSourceId, interactiveNodeBounds]);
 
   const connectSourcePort = useMemo(() => {
     if (!connectSourceBounds) {
@@ -237,6 +457,19 @@ export function DiagramCanvas({
       to: toScreenPoint(cursorPoint, viewport),
     };
   }, [connectSourcePort, cursorPoint, viewport]);
+
+  const connectionGhostRect = useMemo(() => {
+    if (!connectionPreviewSourceId || !cursorPoint || readOnly) {
+      return null;
+    }
+
+    return toScreenRect({
+      height: GHOST_NODE_HEIGHT,
+      width: GHOST_NODE_WIDTH,
+      x: cursorPoint.x - (GHOST_NODE_WIDTH / 2),
+      y: cursorPoint.y - (GHOST_NODE_HEIGHT / 2),
+    }, viewport);
+  }, [connectionPreviewSourceId, cursorPoint, readOnly, viewport]);
 
   const displayedToolbarRect = screenSelectionBounds ?? { height: 0, width: 0, x: 16, y: 16 };
   const toolbarStyle: CSSProperties = {
@@ -269,26 +502,34 @@ export function DiagramCanvas({
     }
   }, [interactionMode, onInteractionModeChange]);
 
-  const fitToDiagram = useCallback((animated: boolean) => {
+  const fitBoundsToViewport = useCallback((bounds: SvgBounds, animated: boolean) => {
     const container = containerRef.current;
-    if (!container || !graphBounds) {
+    if (!container) {
       return;
     }
 
     const availableWidth = Math.max(1, container.clientWidth - (FIT_PADDING * 2));
     const availableHeight = Math.max(1, container.clientHeight - (FIT_PADDING * 2));
     const zoom = clamp(
-      Math.min(availableWidth / Math.max(graphBounds.width, 1), availableHeight / Math.max(graphBounds.height, 1)),
+      Math.min(availableWidth / Math.max(bounds.width, 1), availableHeight / Math.max(bounds.height, 1)),
       MIN_ZOOM,
       MAX_ZOOM,
     );
 
-    const panX = ((container.clientWidth - (graphBounds.width * zoom)) / 2) - (graphBounds.x * zoom);
-    const panY = ((container.clientHeight - (graphBounds.height * zoom)) / 2) - (graphBounds.y * zoom);
+    const panX = ((container.clientWidth - (bounds.width * zoom)) / 2) - (bounds.x * zoom);
+    const panY = ((container.clientHeight - (bounds.height * zoom)) / 2) - (bounds.y * zoom);
 
     setAnimateTransform(animated);
     setViewport({ panX, panY, zoom });
-  }, [graphBounds]);
+  }, []);
+
+  const fitToDiagram = useCallback((animated: boolean) => {
+    if (!graphBounds) {
+      return;
+    }
+
+    fitBoundsToViewport(graphBounds, animated);
+  }, [fitBoundsToViewport, graphBounds]);
 
   const focusNode = useCallback((nodeId: string | null) => {
     if (!nodeId) {
@@ -302,11 +543,11 @@ export function DiagramCanvas({
   }, []);
 
   const moveFocus = useCallback((currentNodeId: string, direction: 'up' | 'down' | 'left' | 'right') => {
-    if (!hitMap) {
+    if (!interactiveNodeBounds) {
       return;
     }
 
-    const currentBounds = hitMap.nodes.get(currentNodeId);
+    const currentBounds = interactiveNodeBounds.get(currentNodeId);
     if (!currentBounds) {
       return;
     }
@@ -319,11 +560,11 @@ export function DiagramCanvas({
       ...directionalCandidates,
       ...(connectionMap.incoming.get(currentNodeId) ?? []),
       ...(connectionMap.outgoing.get(currentNodeId) ?? []),
-    ])).filter((candidateId) => candidateId !== currentNodeId && hitMap.nodes.has(candidateId));
+    ])).filter((candidateId) => candidateId !== currentNodeId && interactiveNodeBounds.has(candidateId));
 
     const ranked = connectedCandidates
       .map((candidateId) => {
-        const bounds = hitMap.nodes.get(candidateId);
+        const bounds = interactiveNodeBounds.get(candidateId);
         if (!bounds) {
           return null;
         }
@@ -359,7 +600,7 @@ export function DiagramCanvas({
       });
 
     focusNode(ranked[0]?.candidateId ?? null);
-  }, [connectionMap.incoming, connectionMap.outgoing, focusNode, hitMap]);
+  }, [connectionMap.incoming, connectionMap.outgoing, focusNode, interactiveNodeBounds]);
 
   useEffect(() => {
     if (!selectedNodeIds) {
@@ -398,6 +639,32 @@ export function DiagramCanvas({
   }, [svg]);
 
   useEffect(() => {
+    if (!graph) {
+      setNodePositions((current) => (Object.keys(current).length > 0 ? {} : current), 'merge', null);
+      setLiveNodePositions({});
+      return;
+    }
+
+    const currentNodeIds = new Set(graph.nodes.map((node) => node.id));
+    const removedPositions: DiagramNodePositions = {};
+    setNodePositions((current) => {
+      const next: DiagramNodePositions = {};
+      for (const [nodeId, position] of Object.entries(current)) {
+        if (currentNodeIds.has(nodeId)) {
+          next[nodeId] = position;
+        } else {
+          removedPositions[nodeId] = position;
+        }
+      }
+
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    }, 'remove', removedPositions);
+    setLiveNodePositions((current) => Object.fromEntries(
+      Object.entries(current).filter(([nodeId]) => currentNodeIds.has(nodeId)),
+    ));
+  }, [graph, setNodePositions]);
+
+  useEffect(() => {
     if (selection.length === 0) {
       setToolbarOpen(false);
       return;
@@ -407,6 +674,22 @@ export function DiagramCanvas({
       setFocusedNodeId(selection[0] ?? null);
     }
   }, [focusedNodeId, selection]);
+
+  useEffect(() => {
+    if (selectedEdgeIdentity && selectedEdgeIndex === null) {
+      setSelectedEdgeIdentity(null);
+    }
+    if (editingEdgeIdentity && editingEdgeIndex === null) {
+      setEditingEdgeIdentity(null);
+      setEditingEdgeLabel('');
+    }
+  }, [editingEdgeIdentity, editingEdgeIndex, selectedEdgeIdentity, selectedEdgeIndex]);
+
+  useEffect(() => {
+    if (orderedNodeIds.length === 0 && graph) {
+      hasAutoFitInitialRenderRef.current = false;
+    }
+  }, [graph, orderedNodeIds.length]);
 
   useEffect(() => {
     if (!orderedNodeIds.length) {
@@ -420,12 +703,13 @@ export function DiagramCanvas({
   }, [focusedNodeId, orderedNodeIds]);
 
   useEffect(() => {
-    if (!graphBounds || !svg) {
+    if (!graphBounds || !svg || hasAutoFitInitialRenderRef.current) {
       return;
     }
 
-    fitToDiagram(false);
-  }, [fitToDiagram, graphBounds, svg]);
+    hasAutoFitInitialRenderRef.current = true;
+    fitBoundsToViewport(graphBounds, false);
+  }, [fitBoundsToViewport, graphBounds, svg]);
 
   useEffect(() => {
     if (!animateTransform) {
@@ -457,8 +741,13 @@ export function DiagramCanvas({
         setPendingEdgeLabel('');
         setShowGroupPrompt(false);
         setConnectSourceId(null);
+        connectionStartNodeIdRef.current = null;
+        setConnectionPreviewSourceId(null);
         setCursorPoint(null);
         setToolbarOpen(false);
+        setSelectedEdgeIdentity(null);
+        setEditingEdgeIdentity(null);
+        setEditingEdgeLabel('');
         setMode('select');
         containerRef.current?.focus();
       }
@@ -478,9 +767,18 @@ export function DiagramCanvas({
         setShowGroupPrompt(true);
       }
 
-      if ((event.key === 'Delete' || event.key === 'Backspace') && selection.length > 0 && !readOnly) {
-        event.preventDefault();
-        onDeleteNodes?.(selection);
+      if ((event.key === 'Delete' || event.key === 'Backspace') && !readOnly) {
+        if (selection.length > 0) {
+          event.preventDefault();
+          onDeleteNodes?.(selection);
+          return;
+        }
+
+        if (selectedCurrentEdgeIdentity) {
+          event.preventDefault();
+          onDeleteEdge?.(selectedCurrentEdgeIdentity);
+          setSelectedEdgeIdentity(null);
+        }
       }
     };
 
@@ -497,7 +795,7 @@ export function DiagramCanvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [editingNodeId, graph, onDeleteNodes, onUngroupNodes, readOnly, selection, setMode]);
+  }, [editingNodeId, graph, onDeleteEdge, onDeleteNodes, onUngroupNodes, readOnly, selectedCurrentEdgeIdentity, selection, setMode]);
 
   useEffect(() => {
     if (viewport.zoom >= EDITOR_MIN_ZOOM) {
@@ -583,6 +881,8 @@ export function DiagramCanvas({
     }
 
     setSelection([]);
+    setSelectedEdgeIdentity(null);
+    setEditingEdgeIdentity(null);
     setToolbarOpen(false);
     setShapePickerOpen(false);
     setEditingNodeId(null);
@@ -590,29 +890,23 @@ export function DiagramCanvas({
 
   const handleNodeClick = useCallback((nodeId: string, shiftKey: boolean) => {
     setShapePickerOpen(false);
+    setSelectedEdgeIdentity(null);
+    setEditingEdgeIdentity(null);
     setFocusedNodeId(nodeId);
     setToolbarOpen(true);
 
     if (mode === 'connect') {
-      if (!connectSourceId) {
-        setConnectSourceId(nodeId);
+      const activation = getConnectNodeActivation(nodeId, connectSourceId, interactiveNodeBounds);
+      if (activation.kind === 'choose-source') {
+        setConnectSourceId(activation.nodeId);
         return;
       }
 
-      if (connectSourceId === nodeId) {
+      if (activation.kind === 'noop') {
         return;
       }
 
-      const sourceBounds = hitMap?.nodes.get(connectSourceId);
-      const targetBounds = hitMap?.nodes.get(nodeId);
-      const midpoint = sourceBounds && targetBounds
-        ? {
-            x: (getBoundsCenter(sourceBounds).x + getBoundsCenter(targetBounds).x) / 2,
-            y: (getBoundsCenter(sourceBounds).y + getBoundsCenter(targetBounds).y) / 2,
-          }
-        : { x: 0, y: 0 };
-
-      setPendingEdge({ midpoint, source: connectSourceId, target: nodeId });
+      setPendingEdge(activation.edge);
       setPendingEdgeLabel('');
       setConnectSourceId(null);
       return;
@@ -626,7 +920,7 @@ export function DiagramCanvas({
     }
 
     setSelection([nodeId]);
-  }, [connectSourceId, hitMap?.nodes, mode, selection, setSelection]);
+  }, [connectSourceId, interactiveNodeBounds, mode, selection, setSelection]);
 
   const commitNodeEdit = useCallback(() => {
     if (!editingNodeId) {
@@ -636,6 +930,27 @@ export function DiagramCanvas({
     onEditNodeLabel?.(editingNodeId, editingLabel.trim() || editingNodeId);
     setEditingNodeId(null);
   }, [editingLabel, editingNodeId, onEditNodeLabel]);
+
+  const commitEdgeEdit = useCallback(() => {
+    if (!editingEdgeIdentity) {
+      return;
+    }
+
+    onEditEdgeLabel?.(editingEdgeIdentity, editingEdgeLabel.trim() || undefined);
+    setEditingEdgeIdentity(null);
+    setEditingEdgeLabel('');
+  }, [editingEdgeIdentity, editingEdgeLabel, onEditEdgeLabel]);
+
+  const openEdgeEditor = useCallback((edge: DiagramEdgeIdentity) => {
+    const edgeIndex = graph ? resolveDiagramEdgeIndex(graph.links, edge, { includeLabel: false }) : null;
+    const currentEdge = edgeIndex === null ? null : graph?.links[edgeIndex];
+    if (!currentEdge || readOnly) {
+      return;
+    }
+
+    setEditingEdgeIdentity(edge);
+    setEditingEdgeLabel(getLinkText(currentEdge) ?? '');
+  }, [graph, readOnly]);
 
   const commitPendingEdge = useCallback((label?: string) => {
     if (!pendingEdge) {
@@ -648,11 +963,149 @@ export function DiagramCanvas({
     setMode('select');
   }, [onAddEdge, pendingEdge, selectedConnectionType, setMode]);
 
+  const handleFlowNodesChange = useCallback((changes: NodeChange<MermaidFlowNode>[]) => {
+    const movedNodes = changes.filter((change) => change.type === 'position' && change.position);
+    if (movedNodes.length === 0) {
+      return;
+    }
+
+    setLiveNodePositions((current) => {
+      const next = { ...current };
+      movedNodes.forEach((change) => {
+        if (change.type === 'position' && change.position) {
+          next[change.id] = change.position;
+        }
+      });
+      return next;
+    });
+  }, []);
+
+  const handleFlowNodeDragStop = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node) => {
+    setNodePositions((current) => ({
+      ...current,
+      [node.id]: node.position,
+    }), 'merge', { [node.id]: node.position });
+    setLiveNodePositions((current) => {
+      const next = { ...current };
+      delete next[node.id];
+      return next;
+    });
+  }, [setNodePositions]);
+
+  const handleFlowConnectStart = useCallback<OnConnectStart>((_event, params) => {
+    connectionStartNodeIdRef.current = params.nodeId ?? null;
+    setConnectionPreviewSourceId(params.nodeId ?? null);
+    setToolbarOpen(false);
+  }, []);
+
+  const handleFlowConnectEnd = useCallback<OnConnectEnd>((event, connectionState: FinalConnectionState) => {
+    const sourceNodeId = connectionStartNodeIdRef.current;
+    connectionStartNodeIdRef.current = null;
+    setConnectionPreviewSourceId(null);
+
+    if (!sourceNodeId || readOnly || connectionState.isValid) {
+      return;
+    }
+
+    const clientPoint = getClientPoint(event);
+    if (!clientPoint || !containerRef.current) {
+      return;
+    }
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const dropPoint = {
+      x: (clientPoint.x - rect.left - viewport.panX) / viewport.zoom,
+      y: (clientPoint.y - rect.top - viewport.panY) / viewport.zoom,
+    };
+    const nodePosition = {
+      x: dropPoint.x - (GHOST_NODE_WIDTH / 2),
+      y: dropPoint.y - (GHOST_NODE_HEIGHT / 2),
+    };
+
+    onAddConnectedNode?.(sourceNodeId, DEFAULT_NEW_NODE_LABEL, DEFAULT_NEW_NODE_SHAPE, nodePosition, selectedConnectionType);
+  }, [onAddConnectedNode, readOnly, selectedConnectionType, viewport.panX, viewport.panY, viewport.zoom]);
+
+  const handleFlowConnect = useCallback((connection: Connection) => {
+    connectionStartNodeIdRef.current = null;
+    setConnectionPreviewSourceId(null);
+    if (!connection.source || !connection.target || connection.source === connection.target || !interactiveNodeBounds) {
+      return;
+    }
+
+    const midpoint = getEdgeMidpoint({
+      source: connection.source,
+      target: connection.target,
+    }, interactiveNodeBounds) ?? { x: 0, y: 0 };
+
+    setPendingEdge({ midpoint, source: connection.source, target: connection.target });
+    setPendingEdgeLabel('');
+  }, [interactiveNodeBounds]);
+
+  const addDefaultNode = useCallback(() => {
+    onAddNode?.(DEFAULT_NEW_NODE_LABEL, DEFAULT_NEW_NODE_SHAPE);
+  }, [onAddNode]);
+
+  const addNodeFromToolbar = useCallback(() => {
+    onAddNode?.(newNodeLabel.trim() || DEFAULT_NEW_NODE_LABEL, newNodeShape);
+    setNewNodeLabel('');
+  }, [newNodeLabel, newNodeShape, onAddNode]);
+
   const openNodeEditor = useCallback((node: DiagramNode) => {
     setToolbarOpen(false);
     setEditingNodeId(node.id);
     setEditingLabel(getNodeText(node));
   }, []);
+
+  const registerNodeElement = useCallback((nodeId: string, element: HTMLElement | null) => {
+    if (element) {
+      nodeButtonRefs.current.set(nodeId, element);
+      return;
+    }
+
+    nodeButtonRefs.current.delete(nodeId);
+  }, []);
+
+  const handleNodeKeyDown = useCallback((nodeId: string, event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      moveFocus(nodeId, 'up');
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      moveFocus(nodeId, 'down');
+    }
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      moveFocus(nodeId, 'left');
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      moveFocus(nodeId, 'right');
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleNodeClick(nodeId, false);
+    }
+    if (event.key === 'F2') {
+      event.preventDefault();
+      const node = nodeById.get(nodeId);
+      if (node && !readOnly) {
+        openNodeEditor(node);
+      }
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setToolbarOpen(false);
+      containerRef.current?.focus();
+    }
+  }, [handleNodeClick, moveFocus, nodeById, openNodeEditor, readOnly]);
+
+  const flowNodeInteraction = useMemo<FlowNodeInteractionContextValue>(() => ({
+    focusedNodeId,
+    onFocus: setFocusedNodeId,
+    onKeyDown: handleNodeKeyDown,
+    registerNodeElement,
+  }), [focusedNodeId, handleNodeKeyDown, registerNodeElement]);
 
   const transformStyle: CSSProperties = {
     inset: 0,
@@ -705,20 +1158,22 @@ export function DiagramCanvas({
         {svg ? (
           <div
             aria-hidden="true"
-            className="diagram-canvas-svg"
+            className={useReactFlowRenderer
+              ? 'diagram-canvas-svg diagram-canvas-svg--reactflow'
+              : 'diagram-canvas-svg'}
             dangerouslySetInnerHTML={{ __html: svg }}
             ref={svgContainerRef}
             style={{ pointerEvents: 'none' }}
           />
         ) : null}
 
-        {isFlowchart && hitMap ? (
+        {isFlowchart && hitMap && !useReactFlowRenderer ? (
           <div style={{ inset: 0, position: 'absolute' }}>
             {[...hitMap.nodes.entries()].map(([nodeId, bounds]) => {
-              const node = graph?.nodes.find((candidate) => candidate.id === nodeId) ?? null;
+              const node = nodeById.get(nodeId) ?? null;
               const selected = selection.includes(nodeId);
               const focused = focusedNodeId === nodeId;
-              const ariaLabel = `${node?.shape ?? 'node'}: ${node ? getNodeText(node) : nodeId}`;
+              const ariaLabel = node ? getNodeAriaLabel(node.shape, getNodeText(node)) : getNodeAriaLabel('node', nodeId);
 
               return (
                 <button
@@ -737,37 +1192,8 @@ export function DiagramCanvas({
                     }
                     openNodeEditor(node);
                   }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'ArrowUp') {
-                      event.preventDefault();
-                      moveFocus(nodeId, 'up');
-                    }
-                    if (event.key === 'ArrowDown') {
-                      event.preventDefault();
-                      moveFocus(nodeId, 'down');
-                    }
-                    if (event.key === 'ArrowLeft') {
-                      event.preventDefault();
-                      moveFocus(nodeId, 'left');
-                    }
-                    if (event.key === 'ArrowRight') {
-                      event.preventDefault();
-                      moveFocus(nodeId, 'right');
-                    }
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setSelection([nodeId]);
-                      setToolbarOpen(true);
-                    }
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      setToolbarOpen(false);
-                      containerRef.current?.focus();
-                    }
-                  }}
-                  ref={(element) => {
-                    nodeButtonRefs.current.set(nodeId, element);
-                  }}
+                  onKeyDown={(event) => { handleNodeKeyDown(nodeId, event); }}
+                  ref={(element) => { registerNodeElement(nodeId, element); }}
                   role="button"
                   style={{
                     background: selected ? 'rgba(56, 189, 248, 0.08)' : focused ? 'rgba(148, 163, 184, 0.06)' : 'rgba(255, 255, 255, 0.01)',
@@ -819,7 +1245,84 @@ export function DiagramCanvas({
         ) : null}
       </div>
 
-      <div aria-hidden="true" style={{ inset: 0, pointerEvents: 'none', position: 'absolute' }}>
+      {useReactFlowRenderer ? (
+        <div className="diagram-reactflow-layer">
+          <FlowEdgeMarkers />
+          <FlowNodeInteractionContext.Provider value={flowNodeInteraction}>
+            <ReactFlow
+              colorMode="dark"
+              autoPanOnConnect
+              autoPanOnNodeDrag
+              connectOnClick={false}
+              connectionLineStyle={{ stroke: '#38bdf8', strokeWidth: 2 }}
+              connectionLineType={ConnectionLineType.SmoothStep}
+              edges={flowEdges}
+              fitView={false}
+              maxZoom={MAX_ZOOM}
+              minZoom={MIN_ZOOM}
+              nodes={flowNodes}
+              nodesConnectable={!readOnly}
+              nodesDraggable={!readOnly}
+              nodeTypes={FLOW_NODE_TYPES}
+              onConnect={handleFlowConnect}
+              onConnectEnd={handleFlowConnectEnd}
+              onConnectStart={handleFlowConnectStart}
+              onEdgeClick={(event, edge) => {
+                event.stopPropagation();
+                const edgeIdentity = graph ? getDiagramEdgeIdentityForFlowEdge(graph.links, edge.id) : null;
+                if (!edgeIdentity) {
+                  return;
+                }
+                setSelection([]);
+                setToolbarOpen(false);
+                setShapePickerOpen(false);
+                setEditingNodeId(null);
+                setSelectedEdgeIdentity(edgeIdentity);
+              }}
+              onEdgeDoubleClick={(event, edge) => {
+                event.stopPropagation();
+                const edgeIdentity = graph ? getDiagramEdgeIdentityForFlowEdge(graph.links, edge.id) : null;
+                if (edgeIdentity) {
+                  setSelectedEdgeIdentity(edgeIdentity);
+                  openEdgeEditor(edgeIdentity);
+                }
+              }}
+              onNodeClick={(event, node) => {
+                event.stopPropagation();
+                handleNodeClick(node.id, event.shiftKey);
+              }}
+              onNodeDoubleClick={(event, node) => {
+                event.stopPropagation();
+                const diagramNode = nodeById.get(node.id);
+                if (diagramNode && !readOnly) {
+                  openNodeEditor(diagramNode);
+                }
+              }}
+              onNodeDragStop={handleFlowNodeDragStop}
+              onNodesChange={handleFlowNodesChange}
+              onMove={(_event, nextViewport) => {
+                setAnimateTransform(false);
+                setViewport((current) => ({
+                  panX: nextViewport.x,
+                  panY: nextViewport.y,
+                  zoom: current.zoom,
+                }));
+              }}
+              onPaneClick={handleCanvasClick}
+              panOnDrag={false}
+              preventScrolling={false}
+              proOptions={FLOW_PRO_OPTIONS}
+              selectionOnDrag={false}
+              viewport={flowViewport}
+              zoomOnDoubleClick={false}
+              zoomOnPinch={false}
+              zoomOnScroll={false}
+            />
+          </FlowNodeInteractionContext.Provider>
+        </div>
+      ) : null}
+
+      <div aria-hidden="true" style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 10 }}>
         {rubberBandPoints ? (
           <svg style={{ height: '100%', width: '100%' }}>
             <line
@@ -832,6 +1335,29 @@ export function DiagramCanvas({
               y2={rubberBandPoints.to.y}
             />
           </svg>
+        ) : null}
+
+        {connectionGhostRect ? (
+          <div
+            style={{
+              alignItems: 'center',
+              background: 'rgba(22, 27, 34, 0.72)',
+              border: '1px dashed #38bdf8',
+              borderRadius: 10,
+              color: '#e2e8f0',
+              display: 'flex',
+              fontSize: 13,
+              fontWeight: 600,
+              height: connectionGhostRect.height,
+              justifyContent: 'center',
+              left: connectionGhostRect.x,
+              position: 'absolute',
+              top: connectionGhostRect.y,
+              width: connectionGhostRect.width,
+            }}
+          >
+            {DEFAULT_NEW_NODE_LABEL}
+          </div>
         ) : null}
 
         {mode === 'connect' ? (
@@ -855,7 +1381,73 @@ export function DiagramCanvas({
         ) : null}
       </div>
 
-      <div onClick={(event) => { event.stopPropagation(); }} style={{ inset: 0, pointerEvents: 'none', position: 'absolute' }}>
+      <div onClick={(event) => { event.stopPropagation(); }} style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 20 }}>
+        {isFlowchart && !readOnly ? (
+          <form
+            aria-label="Add Mermaid node"
+            onSubmit={(event) => {
+              event.preventDefault();
+              addNodeFromToolbar();
+            }}
+            style={{
+              alignItems: 'center',
+              background: '#161b22',
+              border: '1px solid #30363d',
+              borderRadius: 10,
+              boxShadow: '0 12px 32px rgba(2, 6, 23, 0.35)',
+              color: '#8b949e',
+              display: 'flex',
+              gap: 8,
+              left: 12,
+              padding: '8px 10px',
+              pointerEvents: 'auto',
+              position: 'absolute',
+              bottom: 12,
+              zIndex: 20,
+            }}
+          >
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>add node</span>
+            <input
+              aria-label="New node label"
+              onChange={(event) => { setNewNodeLabel(event.target.value); }}
+              placeholder="label"
+              style={{
+                background: '#0d1117',
+                border: '1px solid #30363d',
+                borderRadius: 6,
+                color: '#c9d1d9',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                outline: 'none',
+                padding: '5px 7px',
+                width: 140,
+              }}
+              value={newNodeLabel}
+            />
+            <select
+              aria-label="New node shape"
+              onChange={(event) => { setNewNodeShape(event.target.value as DiagramNodeShape); }}
+              style={{
+                background: '#0d1117',
+                border: '1px solid #30363d',
+                borderRadius: 6,
+                color: '#c9d1d9',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                padding: '5px 7px',
+              }}
+              value={newNodeShape}
+            >
+              {SHAPE_OPTIONS.map((shape) => (
+                <option key={shape.value} value={shape.value}>{shape.label}</option>
+              ))}
+            </select>
+            <ToolbarButton label="Add node to Mermaid text" onClick={addNodeFromToolbar}>
+              <Plus size={16} />
+            </ToolbarButton>
+          </form>
+        ) : null}
+
         {(!hasGraphNodes && isFlowchart && !readOnly) ? (
           <div
             style={{
@@ -867,7 +1459,7 @@ export function DiagramCanvas({
             }}
           >
             <button
-              onClick={() => { onAddNode?.('New Node', 'rect'); }}
+              onClick={addDefaultNode}
               style={{
                 background: '#161b22',
                 border: '1px solid #30363d',
@@ -891,7 +1483,7 @@ export function DiagramCanvas({
           <div style={toolbarStyle}>
             {selection.length === 1 ? (
               <ToolbarButton label="Edit label" onClick={() => {
-                const selectedNode = graph?.nodes.find((node) => node.id === selection[0]);
+                const selectedNode = selection[0] ? nodeById.get(selection[0]) : undefined;
                 if (selectedNode) {
                   openNodeEditor(selectedNode);
                 }
@@ -918,7 +1510,7 @@ export function DiagramCanvas({
                 <Trash2 size={16} />
               </ToolbarButton>
             ) : null}
-            <ToolbarButton label="Add node" onClick={() => { onAddNode?.('New Node', 'rect'); }}>
+            <ToolbarButton label="Add node" onClick={addDefaultNode}>
               <Plus size={16} />
             </ToolbarButton>
 
@@ -940,7 +1532,7 @@ export function DiagramCanvas({
                 }}
               >
                 {SHAPE_OPTIONS.map((shape) => {
-                  const currentNode = graph?.nodes.find((node) => node.id === selection[0]);
+                  const currentNode = selection[0] ? nodeById.get(selection[0]) : undefined;
                   const active = currentNode?.shape === shape.value;
 
                   return (
@@ -974,6 +1566,37 @@ export function DiagramCanvas({
           </div>
         ) : null}
 
+        {isFlowchart && !readOnly && selectedCurrentEdgeIdentity && selectedEdgeMidpoint ? (
+          <div
+            aria-label="Selected edge toolbar"
+            style={{
+              alignItems: 'center',
+              background: '#161b22',
+              border: '1px solid #30363d',
+              borderRadius: 8,
+              boxShadow: '0 12px 32px rgba(2, 6, 23, 0.45)',
+              display: 'inline-flex',
+              gap: 6,
+              left: toScreenPoint(selectedEdgeMidpoint, viewport).x - 42,
+              padding: '4px 6px',
+              pointerEvents: 'auto',
+              position: 'absolute',
+              top: toScreenPoint(selectedEdgeMidpoint, viewport).y - 40,
+              zIndex: 30,
+            }}
+          >
+            <ToolbarButton label="Edit edge label" onClick={() => { openEdgeEditor(selectedCurrentEdgeIdentity); }}>
+              <Pencil size={16} />
+            </ToolbarButton>
+            <ToolbarButton label="Delete selected edge" onClick={() => {
+              onDeleteEdge?.(selectedCurrentEdgeIdentity);
+              setSelectedEdgeIdentity(null);
+            }}>
+              <Trash2 size={16} />
+            </ToolbarButton>
+          </div>
+        ) : null}
+
         {!readOnly ? (
           <div
             style={{
@@ -991,6 +1614,11 @@ export function DiagramCanvas({
               right: 12,
             }}
           >
+            {hasPersistedLayout ? (
+              <ToolbarButton label="Reset shared layout to Mermaid" onClick={() => { setNodePositions(() => ({}), 'replace'); }}>
+                <RotateCcw size={16} />
+              </ToolbarButton>
+            ) : null}
             <ToolbarButton label="Zoom out" onClick={() => {
               setViewport((current) => ({ ...current, zoom: clamp(current.zoom * 0.9, MIN_ZOOM, MAX_ZOOM) }));
             }}>
@@ -1045,6 +1673,49 @@ export function DiagramCanvas({
                 width: '100%',
               }}
               value={editingLabel}
+            />
+          </div>
+        ) : null}
+
+        {editingEdgeIndex !== null && editingEdgeMidpoint ? (
+          <div
+            style={{
+              left: toScreenPoint(editingEdgeMidpoint, viewport).x - 90,
+              pointerEvents: 'auto',
+              position: 'absolute',
+              top: toScreenPoint(editingEdgeMidpoint, viewport).y - 18,
+              width: 180,
+            }}
+          >
+            <input
+              aria-label="Edge label"
+              autoFocus
+              onBlur={commitEdgeEdit}
+              onChange={(event) => { setEditingEdgeLabel(event.target.value); }}
+              onFocus={(event) => { event.currentTarget.select(); }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  commitEdgeEdit();
+                }
+                if (event.key === 'Escape') {
+                  setEditingEdgeIdentity(null);
+                  setEditingEdgeLabel('');
+                }
+              }}
+              placeholder="edge label"
+              style={{
+                background: '#0d1117',
+                border: '1px solid #30363d',
+                borderBottomColor: '#38bdf8',
+                borderRadius: 8,
+                color: '#c9d1d9',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                outline: 'none',
+                padding: '8px 10px',
+                width: '100%',
+              }}
+              value={editingEdgeLabel}
             />
           </div>
         ) : null}
@@ -1173,7 +1844,79 @@ export function DiagramCanvas({
   );
 }
 
-function ToolbarButton({ children, label, onClick }: { children: React.ReactNode; label: string; onClick: () => void }) {
+function FlowEdgeMarkers() {
+  return (
+    <svg aria-hidden="true" focusable="false" style={{ height: 0, position: 'absolute', width: 0 }}>
+      <defs>
+        <marker
+          id={FLOW_EDGE_MARKER_CIRCLE_ID}
+          markerHeight="10"
+          markerUnits="strokeWidth"
+          markerWidth="10"
+          orient="auto"
+          refX="9"
+          refY="5"
+          viewBox="0 0 10 10"
+        >
+          <circle cx="5" cy="5" fill="#0d1117" r="3" stroke={FLOW_EDGE_COLOR} strokeWidth="1.6" />
+        </marker>
+        <marker
+          id={FLOW_EDGE_MARKER_CROSS_ID}
+          markerHeight="10"
+          markerUnits="strokeWidth"
+          markerWidth="10"
+          orient="auto"
+          refX="9"
+          refY="5"
+          viewBox="0 0 10 10"
+        >
+          <path d="M3 3 L7 7 M7 3 L3 7" fill="none" stroke={FLOW_EDGE_COLOR} strokeLinecap="round" strokeWidth="1.8" />
+        </marker>
+      </defs>
+    </svg>
+  );
+}
+
+function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>) {
+  const interaction = useContext(FlowNodeInteractionContext);
+  const focused = interaction?.focusedNodeId === id;
+  const label = data.ariaLabel;
+
+  return (
+    <div
+      aria-label={label}
+      aria-pressed={selected}
+      className={`mermaid-flow-node mermaid-flow-node--${getShapeClassName(data.shape)}${selected ? ' is-selected' : ''}${focused ? ' is-focused' : ''}`}
+      onFocus={() => { interaction?.onFocus(id); }}
+      onKeyDown={(event) => { interaction?.onKeyDown(id, event); }}
+      ref={(element) => { interaction?.registerNodeElement(id, element); }}
+      role="button"
+      tabIndex={focused ? 0 : -1}
+    >
+      {FLOW_HANDLE_POSITIONS.map((position) => (
+        <Handle
+          className={`mermaid-flow-handle mermaid-flow-handle--${position} mermaid-flow-handle--target`}
+          id={getFlowHandleId('target', position)}
+          key={`target-${position}`}
+          position={position}
+          type="target"
+        />
+      ))}
+      <span>{data.label}</span>
+      {FLOW_HANDLE_POSITIONS.map((position) => (
+        <Handle
+          className={`mermaid-flow-handle mermaid-flow-handle--${position} mermaid-flow-handle--source`}
+          id={getFlowHandleId('source', position)}
+          key={`source-${position}`}
+          position={position}
+          type="source"
+        />
+      ))}
+    </div>
+  );
+}
+
+function ToolbarButton({ children, label, onClick }: { children: ReactNode; label: string; onClick: () => void }) {
   return (
     <button aria-label={label} onClick={onClick} style={TOOLBAR_BUTTON_STYLE} title={label} type="button">
       {children}
@@ -1183,6 +1926,44 @@ function ToolbarButton({ children, label, onClick }: { children: React.ReactNode
 
 function getNodeText(node: DiagramNode): string {
   return typeof node.text === 'string' ? node.text : node.text?.text ?? node.id;
+}
+
+function getLinkText(link: { text?: string | { text?: string } }): string | undefined {
+  if (typeof link.text === 'string') {
+    return link.text;
+  }
+
+  return link.text?.text;
+}
+
+function getFlowEdgePresentation(link: DiagramLink): Pick<Edge, 'markerEnd' | 'style'> {
+  const strokeWidth = link.stroke === 'thick' ? 3 : 1.8;
+  const strokeDasharray = link.stroke === 'dotted' ? '5 5' : undefined;
+  const style: CSSProperties = {
+    stroke: FLOW_EDGE_COLOR,
+    strokeDasharray,
+    strokeWidth,
+  };
+
+  switch (link.type) {
+    case 'arrow_open':
+      return { markerEnd: { color: FLOW_EDGE_COLOR, type: MarkerType.Arrow }, style };
+    case 'arrow_circle':
+      return { markerEnd: FLOW_EDGE_MARKER_CIRCLE_ID, style };
+    case 'arrow_cross':
+      return { markerEnd: FLOW_EDGE_MARKER_CROSS_ID, style };
+    case 'arrow_point':
+    default:
+      return { markerEnd: { color: FLOW_EDGE_COLOR, type: MarkerType.ArrowClosed }, style };
+  }
+}
+
+function getNodeAriaLabel(shape: string | undefined, label: string): string {
+  return `${shape ?? 'node'}: ${label}`;
+}
+
+function getShapeClassName(shape?: DiagramNodeShape): string {
+  return shape?.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'rect';
 }
 
 function isTypingElement(target: EventTarget | null): boolean {
@@ -1241,6 +2022,83 @@ function renderShape(shape: DiagramNodeShape) {
     default:
       return <rect height="12" rx="2" width="22" x="3" y="3" {...common} />;
   }
+}
+
+function getEdgeMidpoint(edge: Pick<DiagramLink, 'source' | 'target'>, nodeBounds: Map<string, SvgBounds>): SvgPoint | null {
+  const sourceBounds = nodeBounds.get(edge.source);
+  const targetBounds = nodeBounds.get(edge.target);
+  if (!sourceBounds || !targetBounds) {
+    return null;
+  }
+
+  const sourceCenter = getBoundsCenter(sourceBounds);
+  const targetCenter = getBoundsCenter(targetBounds);
+  return {
+    x: (sourceCenter.x + targetCenter.x) / 2,
+    y: (sourceCenter.y + targetCenter.y) / 2,
+  };
+}
+
+function getFlowHandleId(type: 'source' | 'target', position: Position): string {
+  return `${type}-${position}`;
+}
+
+function getFlowEdgeHandles(
+  link: DiagramLink,
+  nodeBounds: Map<string, SvgBounds>,
+  direction: FlowchartSnapshot['direction'],
+): Pick<Edge, 'sourceHandle' | 'targetHandle'> {
+  const sourceBounds = nodeBounds.get(link.source);
+  const targetBounds = nodeBounds.get(link.target);
+  let sourcePosition: Position;
+  let targetPosition: Position;
+
+  if (sourceBounds && targetBounds) {
+    const sourceCenter = getBoundsCenter(sourceBounds);
+    const targetCenter = getBoundsCenter(targetBounds);
+    const dx = targetCenter.x - sourceCenter.x;
+    const dy = targetCenter.y - sourceCenter.y;
+
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      sourcePosition = dx >= 0 ? Position.Right : Position.Left;
+      targetPosition = dx >= 0 ? Position.Left : Position.Right;
+    } else {
+      sourcePosition = dy >= 0 ? Position.Bottom : Position.Top;
+      targetPosition = dy >= 0 ? Position.Top : Position.Bottom;
+    }
+  } else {
+    const fallback = getFlowPortPositions(direction);
+    sourcePosition = fallback.source;
+    targetPosition = fallback.target;
+  }
+
+  return {
+    sourceHandle: getFlowHandleId('source', sourcePosition),
+    targetHandle: getFlowHandleId('target', targetPosition),
+  };
+}
+
+function getFlowPortPositions(direction: FlowchartSnapshot['direction']): { source: Position; target: Position } {
+  switch (direction) {
+    case 'BT':
+      return { source: Position.Top, target: Position.Bottom };
+    case 'LR':
+      return { source: Position.Right, target: Position.Left };
+    case 'RL':
+      return { source: Position.Left, target: Position.Right };
+    case 'TD':
+    default:
+      return { source: Position.Bottom, target: Position.Top };
+  }
+}
+
+function getClientPoint(event: MouseEvent | TouchEvent): SvgPoint | null {
+  if ('changedTouches' in event) {
+    const touch = event.changedTouches[0];
+    return touch ? { x: touch.clientX, y: touch.clientY } : null;
+  }
+
+  return { x: event.clientX, y: event.clientY };
 }
 
 function toScreenRect(bounds: SvgBounds, viewport: ViewportState): ScreenRect {

@@ -31,6 +31,7 @@ interface WorkspaceFlyoutsProps {
   restoreError: string | null;
   restorePending: boolean;
   restoreConfirmRef: RefObject<HTMLButtonElement | null>;
+  sourceError: string | null;
 }
 
 function getRevisionLabel(revision: DiagramRevisionSummary): string {
@@ -71,6 +72,7 @@ export function WorkspaceFlyouts({
   restoreError,
   restorePending,
   restoreConfirmRef,
+  sourceError,
 }: WorkspaceFlyoutsProps) {
   return (
     <>
@@ -78,12 +80,18 @@ export function WorkspaceFlyouts({
         <aside aria-label="Mermaid source" className="workspace-flyout" data-testid="source-flyout" id="source-flyout">
           <header className="workspace-flyout-header">
             <div><Code2 aria-hidden="true" size={16} /><span>Mermaid source</span></div>
-            <button aria-label="Close source panel" className="workspace-icon-button" onClick={closeFlyout} type="button"><X aria-hidden="true" size={16} /></button>
+            <button aria-label="Close source panel" className="workspace-icon-button workspace-touch-label" data-touch-label="Close" onClick={closeFlyout} type="button"><X aria-hidden="true" size={16} /></button>
           </header>
           <div className="workspace-flyout-meta">
             <span>{activeDiagramName}</span>
             <span data-testid="connection-status-badge">{editorStatusLabel}</span>
           </div>
+          {sourceError ? (
+            <div aria-live="polite" className="workspace-source-status" data-testid="source-parse-status" role="status">
+              <strong>Preview kept on last valid diagram</strong>
+              <span>{sourceError}</span>
+            </div>
+          ) : null}
           <div className="editor-host workspace-flyout-editor" data-testid="editor-root" ref={editorHostRef} />
         </aside>
       ) : null}
@@ -92,7 +100,7 @@ export function WorkspaceFlyouts({
         <aside aria-label="Activity and history" className="workspace-flyout workspace-activity-flyout" data-testid="activity-flyout" id="activity-flyout">
           <header className="workspace-flyout-header">
             <div><History aria-hidden="true" size={16} /><span>Activity &amp; history</span></div>
-            <button aria-label="Close activity and history" className="workspace-icon-button" onClick={closeFlyout} ref={activityCloseRef} type="button"><X aria-hidden="true" size={16} /></button>
+            <button aria-label="Close activity and history" className="workspace-icon-button workspace-touch-label" data-touch-label="Close" onClick={closeFlyout} ref={activityCloseRef} type="button"><X aria-hidden="true" size={16} /></button>
           </header>
           <div aria-label="Activity and history view" className="workspace-flyout-switch" role="group">
             <button aria-pressed={historyView === 'history'} className={historyView === 'history' ? 'is-active' : ''} onClick={() => { onHistoryViewChange('history'); }} type="button">History</button>

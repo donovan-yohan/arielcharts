@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { getDefaultMermaidText, isValidSessionId, randomSessionId } from './session';
-import { getActiveDiagramName, getAgentWorkflowPrompt, getTemplateDiagramCreation, getTemplateDiagramName } from '../components/session-workspace';
+import {
+  getActiveDiagramName,
+  getAgentCountLabel,
+  getAgentWorkflowPrompt,
+  getModalWrappedFocusIndex,
+  getTemplateDiagramCreation,
+  getTemplateDiagramName,
+} from '../components/session-workspace';
 
 describe('session helpers', () => {
   it('creates session ids in the expected shape', () => {
@@ -50,5 +57,18 @@ describe('session helpers', () => {
       '  api sequence cdef  ',
       'API sequence 90abcdef',
     ])).toBe('API sequence diagram_1234567890abcdef');
+  });
+
+  it('reports the exact current MCP agent count', () => {
+    expect(getAgentCountLabel(0)).toBe('0 MCP agents connected');
+    expect(getAgentCountLabel(1)).toBe('1 MCP agent connected');
+    expect(getAgentCountLabel(2)).toBe('2 MCP agents connected');
+  });
+
+  it('wraps modal focus only at its two boundaries', () => {
+    expect(getModalWrappedFocusIndex(0, 2, true)).toBe(1);
+    expect(getModalWrappedFocusIndex(1, 2, false)).toBe(0);
+    expect(getModalWrappedFocusIndex(0, 2, false)).toBeNull();
+    expect(getModalWrappedFocusIndex(-1, 2, false)).toBeNull();
   });
 });

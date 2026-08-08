@@ -109,6 +109,22 @@ export async function openTemplateMenu(page: Page): Promise<Locator> {
   return menu;
 }
 
+export async function openWorkspaceSettings(page: Page): Promise<Locator> {
+  const trigger = page.getByTestId('workspace-settings-trigger');
+  if (await trigger.getAttribute('aria-expanded') !== 'true') {
+    await trigger.click();
+  }
+  const dialog = page.getByTestId('workspace-settings-dialog');
+  await dialog.waitFor({ state: 'visible', timeout: 15_000 });
+  return dialog;
+}
+
+export async function selectWorkspaceTheme(page: Page, preference: 'system' | 'light' | 'dark'): Promise<void> {
+  const dialog = await openWorkspaceSettings(page);
+  const label = preference[0]?.toUpperCase() + preference.slice(1);
+  await dialog.getByRole('radio', { name: new RegExp(`^${label}(?:\\s|$)`, 'u') }).check();
+}
+
 export async function selectTemplateByAccessibleName(page: Page, name: string): Promise<void> {
   await openTemplateMenu(page);
   await templateMenuItem(page, name).click();

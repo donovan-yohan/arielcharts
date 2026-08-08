@@ -1,4 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
+import { WebsocketProvider } from 'y-websocket';
+import * as Y from 'yjs';
 import {
   DESKTOP_VIEWPORT,
   MOBILE_VIEWPORT,
@@ -36,6 +38,7 @@ import {
   renameActiveDiagram,
   replaceSource,
   selectTabByName,
+  selectWorkspaceTheme,
   templateMenuItem,
   visitWorkspace,
   waitForCanvas,
@@ -43,6 +46,9 @@ import {
   waitForSource,
   waitForSyncedSource,
 } from './e2e/support/workspace.ts';
+
+const SETTINGS_TRIGGER_TEST_ID = 'workspace-settings-trigger';
+const SETTINGS_DIALOG_TEST_ID = 'workspace-settings-dialog';
 
 const ANCHORS = {
   canvas: '[data-testid="canvas-first-workspace"]',
@@ -62,6 +68,8 @@ const TRANSPARENT_MERMAID_FIXTURE = `flowchart LR
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
+
+type AgentPresence = { destroy: () => void };
 
 function record(results: string[], name: string): void {
   results.push(name);
@@ -118,6 +126,52 @@ async function renderedCanvasTransform(page: Page, label: string): Promise<strin
   return transform;
 }
 
+async function openWorkspaceSettings(page: Page): Promise<Locator> {
+  const trigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
+  if (await trigger.getAttribute('aria-expanded') !== 'true') {
+    await verifiedClick(page, trigger, 'workspace settings trigger');
+  }
+  const dialog = page.getByTestId(SETTINGS_DIALOG_TEST_ID);
+  await dialog.waitFor({ state: 'visible', timeout: 15_000 });
+  return dialog;
+}
+
+async function closeWorkspaceSettings(page: Page): Promise<void> {
+  const dialog = page.getByTestId(SETTINGS_DIALOG_TEST_ID);
+  if (await dialog.count() > 0) {
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'detached', timeout: 15_000 });
+  }
+}
+
+async function selectThemePreference(page: Page, preference: 'system' | 'light' | 'dark'): Promise<void> {
+  await selectWorkspaceTheme(page, preference);
+  const resolvedTheme = preference === 'dark' ? 'dark' : 'light';
+  await page.locator(`html[data-theme="${resolvedTheme}"]`).waitFor({ state: 'attached', timeout: 5_000 });
+  await closeWorkspaceSettings(page);
+}
+
+function connectAgentPresence(mcpUrl: string, sessionId: string): AgentPresence {
+  const endpoint = new URL(mcpUrl);
+  endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:';
+  endpoint.pathname = '/ws';
+  endpoint.search = '';
+  const doc = new Y.Doc();
+  const provider = new WebsocketProvider(endpoint.toString(), sessionId, doc, {
+    maxBackoffTime: 2_500,
+    resyncInterval: 10_000,
+  });
+  provider.awareness.setLocalState({
+    user: { color: '#111111', name: 'E2E agent', type: 'agent' },
+  });
+  return {
+    destroy: () => {
+      provider.destroy();
+      doc.destroy();
+    },
+  };
+}
+
 async function expectTemplateMenu(page: Page): Promise<string> {
   const trigger = page.getByTestId('create-diagram-tab');
   await assertHitTarget(page, trigger, 'always-visible template creation control');
@@ -138,7 +192,7 @@ async function expectTemplateMenu(page: Page): Promise<string> {
   })).filter((item) => item.tabIndex === 0));
   assert(tabStops.length === 1 && tabStops[0]?.text.startsWith('Blank sheet'),
     `Template menu must begin with only Blank sheet in the tab order: ${JSON.stringify(tabStops)}.`);
-  await saveScreenshot(page, 'issue-15-light-template-menu');
+  await saveScreenshot(page, 'issue-28-light-flat-template-menu');
   await blank.press('Tab');
   await menu.waitFor({ state: 'detached', timeout: 15_000 });
   await waitForFocusedTestId(page, 'source-flyout-toggle', 'Tabbing forward out of the template menu');
@@ -161,14 +215,12 @@ async function expectTemplateMenu(page: Page): Promise<string> {
   assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
   assert(await canvasTransform(page) === beforeTransform, 'Opening and closing the template menu changed the canvas camera.');
 
-  await verifiedClick(page, page.getByTestId('theme-control').getByRole('button', { name: 'Dark', exact: true }), 'dark theme control for template menu');
-  await page.locator('html[data-theme="dark"]').waitFor({ state: 'attached', timeout: 5_000 });
+  await selectThemePreference(page, 'dark');
   await openTemplateMenu(page);
-  await saveScreenshot(page, 'issue-15-dark-template-menu');
+  await saveScreenshot(page, 'issue-28-dark-flat-template-menu');
   await page.keyboard.press('Escape');
   await menu.waitFor({ state: 'detached', timeout: 15_000 });
-  await verifiedClick(page, page.getByTestId('theme-control').getByRole('button', { name: 'Light', exact: true }), 'light theme control after template menu screenshots');
-  await page.locator('html[data-theme="light"]').waitFor({ state: 'attached', timeout: 5_000 });
+  await selectThemePreference(page, 'light');
 
   const outsideBefore = await snapshotAnchors(page, ANCHORS);
   const outsideBeforeTransform = await canvasTransform(page);
@@ -328,8 +380,7 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   assertExactColor(sourceOwnedColors.background, 'rgb(255, 236, 153)', 'Mermaid classDef #ffec99 fill');
   assertExactColor(sourceOwnedColors.border, 'rgb(217, 72, 15)', 'Mermaid classDef #d9480f stroke');
   assertExactColor(sourceOwnedColors.text, 'rgb(74, 44, 0)', 'Mermaid classDef #4a2c00 text');
-  await verifiedClick(page, page.getByTestId('theme-control').getByRole('button', { name: 'Dark', exact: true }), 'dark theme control for source-owned colors');
-  await page.locator('html[data-theme="dark"]').waitFor({ state: 'attached', timeout: 5_000 });
+  await selectThemePreference(page, 'dark');
   const afterThemeColors = await coloredNode.evaluate((element) => {
     const style = getComputedStyle(element);
     return { background: style.backgroundColor, border: style.borderTopColor, text: style.color };
@@ -339,8 +390,7 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   assertExactColor(afterThemeColors.text, 'rgb(74, 44, 0)', 'Dark Mermaid classDef #4a2c00 text');
   await closeFlyout(page, 'source');
   await saveScreenshot(page, 'issue-14-dark-canvas');
-  await verifiedClick(page, page.getByTestId('theme-control').getByRole('button', { name: 'Light', exact: true }), 'light theme control after source-owned colors');
-  await page.locator('html[data-theme="light"]').waitFor({ state: 'attached', timeout: 5_000 });
+  await selectThemePreference(page, 'light');
 
   await replaceSource(page, TRANSPARENT_MERMAID_FIXTURE);
   await waitForCanvas(page, 'flowchart');
@@ -400,15 +450,17 @@ async function expectRemoteUpdateWithoutAnchorJump(page: Page, mcp: ModernMcpCli
 }
 
 async function expectThemeContract(page: Page): Promise<void> {
-  const control = page.getByTestId('theme-control');
-  assert(await control.count() === 1, 'Accessible ThemeControl is missing from workspace chrome.');
+  const trigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
+  assert(await trigger.count() === 1, 'Accessible workspace settings trigger is missing from workspace chrome.');
+  await assertHitTarget(page, trigger, 'workspace settings trigger');
+  await assertContainedInViewport(page, trigger, 'workspace settings trigger');
 
-  await verifiedClick(page, control.getByRole('button', { name: 'Light', exact: true }), 'light theme control');
+  await selectThemePreference(page, 'light');
   await page.locator('html[data-theme="light"]').waitFor({ state: 'attached', timeout: 5_000 });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('html[data-theme="light"]').waitFor({ state: 'attached', timeout: 5_000 });
 
-  await verifiedClick(page, control.getByRole('button', { name: 'Dark', exact: true }), 'dark theme control');
+  await selectThemePreference(page, 'dark');
   await page.locator('html[data-theme="dark"]').waitFor({ state: 'attached', timeout: 5_000 });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('html[data-theme="dark"]').waitFor({ state: 'attached', timeout: 5_000 });
@@ -425,7 +477,8 @@ async function expectThemeContract(page: Page): Promise<void> {
     await storagePeer.close();
   }
 
-  await verifiedClick(page, control.getByRole('button', { name: 'System', exact: true }), 'system theme control');
+  await selectThemePreference(page, 'light');
+  await selectThemePreference(page, 'system');
   await page.locator('html[data-theme="light"]').waitFor({ state: 'attached', timeout: 5_000 });
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.locator('html[data-theme="dark"]').waitFor({ state: 'attached', timeout: 5_000 });
@@ -433,11 +486,313 @@ async function expectThemeContract(page: Page): Promise<void> {
   assert(await page.evaluate(() => window.localStorage.getItem('arielcharts.theme.v1')) === 'system', 'System theme preference did not persist across reload.');
 }
 
+async function openAgentConnectionModal(page: Page, actionLabel: 'Connect my agent' | 'Connection details'): Promise<Locator> {
+  const settings = await openWorkspaceSettings(page);
+  await verifiedClick(page, settings.getByRole('button', { name: actionLabel, exact: true }), `settings ${actionLabel} action`);
+  const modal = page.getByRole('dialog', { name: 'Agent connection', exact: true });
+  await modal.waitFor({ state: 'visible', timeout: 15_000 });
+  await waitForFocusedLocator(page, modal.getByRole('button', { name: 'Close', exact: true }), 'Opening agent connection modal');
+  return modal;
+}
+
+async function expectAgentConnectionModal(page: Page, mcpUrl: string, sessionId: string): Promise<void> {
+  await ensureFlyout(page, 'source');
+  const zeroAgentModal = await openAgentConnectionModal(page, 'Connect my agent');
+  const zeroAgentDetails = zeroAgentModal.getByTestId('agent-connection-details');
+  assert(/Session status\s+(Connected|Connecting|Reconnecting|Disconnected)/u.test(await zeroAgentDetails.innerText()),
+    `Agent connection modal omitted the session status: ${JSON.stringify(await zeroAgentDetails.innerText())}.`);
+  assert(/Agents\s+0 MCP agents connected/u.test(await zeroAgentDetails.innerText()),
+    `Agent connection modal omitted the zero-agent detail: ${JSON.stringify(await zeroAgentDetails.innerText())}.`);
+  const prompt = zeroAgentModal.locator('.modal-prompt-text');
+  assert((await prompt.innerText()).includes('First call getSession'), 'Agent connection modal omitted the current-session MCP prompt.');
+  await saveScreenshot(page, 'issue-28-agent-connection-modal');
+  const copyAction = zeroAgentModal.locator('.modal-prompt-copy');
+  await verifiedClick(page, copyAction, 'agent prompt copy action');
+  await page.waitForFunction(() => /^(copied|copy failed)$/iu.test(document.querySelector('.modal-prompt-copy')?.textContent ?? ''), undefined, { timeout: 5_000 });
+  const closeAction = zeroAgentModal.getByRole('button', { name: 'Close', exact: true });
+  await closeAction.press('Shift+Tab');
+  await waitForFocusedLocator(page, copyAction, 'Reverse Tab wrapping in agent connection modal');
+  await copyAction.press('Tab');
+  await waitForFocusedLocator(page, closeAction, 'Forward Tab wrapping in agent connection modal');
+  await page.keyboard.press('Escape');
+  await zeroAgentModal.waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Escaping agent connection modal');
+  await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+
+  const backdropModal = await openAgentConnectionModal(page, 'Connect my agent');
+  await page.locator('.modal-backdrop').click({ position: { x: 4, y: 4 } });
+  await backdropModal.waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Backdrop-closing agent connection modal');
+
+  const closeButtonModal = await openAgentConnectionModal(page, 'Connect my agent');
+  await verifiedClick(page, closeButtonModal.getByRole('button', { name: 'Close', exact: true }), 'close agent connection modal');
+  await closeButtonModal.waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Closing agent connection modal');
+
+  const agent = connectAgentPresence(mcpUrl, sessionId);
+  try {
+    const settings = await openWorkspaceSettings(page);
+    await page.waitForFunction(() => document.querySelector('[data-testid="workspace-agent-status"]')?.textContent?.includes('1 MCP agent working') ?? false, undefined, { timeout: 15_000 });
+    await settings.getByRole('button', { name: 'Connection details', exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
+    await closeWorkspaceSettings(page);
+    const activeAgentModal = await openAgentConnectionModal(page, 'Connection details');
+    const activeAgentDetails = activeAgentModal.getByTestId('agent-connection-details');
+    assert(/Agents\s+1 MCP agent connected/u.test(await activeAgentDetails.innerText()),
+      `Agent connection modal omitted the active-agent detail: ${JSON.stringify(await activeAgentDetails.innerText())}.`);
+    await page.keyboard.press('Escape');
+    await activeAgentModal.waitFor({ state: 'detached', timeout: 15_000 });
+    await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Escaping active-agent connection details');
+  } finally {
+    agent.destroy();
+    await page.waitForFunction(() => !document.querySelector('[data-testid="workspace-agent-status"]')?.textContent?.includes('MCP agent working'), undefined, { timeout: 15_000 });
+  }
+}
+
+async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: string): Promise<void> {
+  const trigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
+  const before = await snapshotAnchors(page, ANCHORS);
+  const beforeTransform = await canvasTransform(page);
+  const dialog = await openWorkspaceSettings(page);
+  await assertContainedInViewport(page, dialog, 'desktop workspace settings dialog');
+  const nameInput = dialog.getByRole('textbox', { name: 'Display name', exact: true });
+  await waitForFocusedLocator(page, nameInput, 'Opening workspace settings');
+  await dialog.getByRole('heading', { name: 'You', exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
+  await dialog.getByRole('heading', { name: /^Agent/u }).waitFor({ state: 'visible', timeout: 5_000 });
+  await dialog.getByRole('group', { name: 'Appearance', exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
+  const status = dialog.getByTestId('workspace-agent-status');
+  await status.waitFor({ state: 'visible', timeout: 5_000 });
+  assert(/ready for agents|connecting session|reconnecting session|session offline|mcp agents? working/iu.test(await status.innerText()),
+    `Workspace settings agent status does not communicate session state: ${JSON.stringify(await status.innerText())}.`);
+  const agentAction = dialog.getByRole('button', { name: /^(Connect my agent|Connection details)$/u });
+  await assertHitTarget(page, agentAction, 'workspace settings agent action');
+  for (const preference of ['System', 'Light', 'Dark']) {
+    await dialog.getByRole('radio', { name: new RegExp(`^${preference}(?:\\s|$)`, 'u') }).waitFor({ state: 'visible', timeout: 5_000 });
+  }
+  await saveScreenshot(page, 'issue-28-light-flat-settings');
+
+  const originalName = await nameInput.inputValue();
+  const savedName = 'Ariel UX E2E';
+  await nameInput.fill(savedName);
+  await verifiedClick(page, dialog.getByRole('button', { name: 'Save name', exact: true }), 'settings save display name');
+  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Saving display name');
+
+  const reopenedAfterSave = await openWorkspaceSettings(page);
+  const savedInput = reopenedAfterSave.getByRole('textbox', { name: 'Display name', exact: true });
+  assert(await savedInput.inputValue() === savedName, 'Saving display name did not retain the edited value.');
+  await savedInput.fill('Discarded by cancel');
+  await verifiedClick(page, reopenedAfterSave.getByRole('button', { name: 'Cancel', exact: true }), 'settings cancel display name');
+  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+
+  const reopenedAfterCancel = await openWorkspaceSettings(page);
+  const escapedInput = reopenedAfterCancel.getByRole('textbox', { name: 'Display name', exact: true });
+  assert(await escapedInput.inputValue() === savedName, 'Cancelling display-name edit changed the saved value.');
+  await escapedInput.fill('Discarded by escape');
+  await page.keyboard.press('Escape');
+  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Closing settings with Escape');
+
+  const reopenedAfterEscape = await openWorkspaceSettings(page);
+  const restoredInput = reopenedAfterEscape.getByRole('textbox', { name: 'Display name', exact: true });
+  await page.waitForFunction((expected) => (document.querySelector('#workspace-display-name') as HTMLInputElement | null)?.value === expected, savedName, { timeout: 5_000 });
+  assert(await restoredInput.inputValue() === savedName, 'Escaping display-name edit changed the saved value.');
+  await restoredInput.fill(originalName);
+  await verifiedClick(page, reopenedAfterEscape.getByRole('button', { name: 'Save name', exact: true }), 'restore display name after settings test');
+  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+
+  await expectAgentConnectionModal(page, mcpUrl, sessionId);
+
+  const backwardBoundary = await openWorkspaceSettings(page);
+  await backwardBoundary.getByRole('button', { name: 'Close', exact: true }).press('Shift+Tab');
+  await backwardBoundary.waitFor({ state: 'detached', timeout: 15_000 });
+  assert(await page.evaluate(() => !document.querySelector('[data-testid="workspace-settings-dialog"]')?.contains(document.activeElement)),
+    'Shift+Tab at the start of settings trapped focus in the dialog.');
+
+  const forwardBoundary = await openWorkspaceSettings(page);
+  const checkedTheme = forwardBoundary.locator('input[type="radio"]:checked');
+  await checkedTheme.press('Tab');
+  await forwardBoundary.waitFor({ state: 'detached', timeout: 15_000 });
+  assert(await page.evaluate(() => !document.querySelector('[data-testid="workspace-settings-dialog"]')?.contains(document.activeElement)),
+    'Tab at the end of settings trapped focus in the dialog.');
+
+  await openWorkspaceSettings(page);
+  await page.locator('.workspace-logo').click();
+  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Outside-closing settings from inert page chrome');
+
+  await openWorkspaceSettings(page);
+  const mainTab = page.getByRole('tab', { name: 'Main', exact: true });
+  await verifiedClick(page, mainTab, 'selecting a tab outside settings');
+  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedLocator(page, mainTab, 'Selecting a tab outside settings');
+  assert(await trigger.evaluate((element) => document.activeElement !== element),
+    'Opening an interactive control outside settings had its focus stolen by the settings trigger.');
+
+  const canvas = page.getByRole('application', { name: 'Interactive diagram canvas', exact: true });
+  await openWorkspaceSettings(page);
+  await canvas.focus();
+  await canvas.click({ position: { x: 4, y: 4 } });
+  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedLocator(page, canvas, 'Closing settings from the interactive canvas');
+  assert(await trigger.evaluate((element) => document.activeElement !== element),
+    'Closing settings from the interactive canvas had its focus stolen by the settings trigger.');
+
+  await ensureFlyout(page, 'source');
+  await openWorkspaceSettings(page);
+  await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+  await closeWorkspaceSettings(page);
+  await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+  await ensureFlyout(page, 'activity');
+  await openWorkspaceSettings(page);
+  await page.getByTestId('activity-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+  await closeWorkspaceSettings(page);
+  await page.getByTestId('activity-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'activity');
+  await openTemplateMenu(page);
+  await openWorkspaceSettings(page);
+  await page.getByRole('menu', { name: 'Starter templates', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
+  await closeWorkspaceSettings(page);
+
+  assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
+  assert(await canvasTransform(page) === beforeTransform, 'Opening and closing workspace settings changed the canvas camera.');
+}
+
+async function assertNoProductShadows(page: Page, selectors: Record<string, string>): Promise<void> {
+  const shadowAudit = await page.evaluate((entries) => Object.fromEntries(entries.map(([label, selector]) => {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (!element) return [label, null];
+    const style = getComputedStyle(element);
+    return [label, { boxShadow: style.boxShadow, filter: style.filter }];
+  })), Object.entries(selectors)) as Record<string, { boxShadow: string; filter: string } | null>;
+  for (const [label, style] of Object.entries(shadowAudit)) {
+    assert(style !== null, `Flat chrome audit could not find ${label}.`);
+    assert(style.boxShadow === 'none', `${label} retained product box-shadow: ${style.boxShadow}.`);
+    assert(!style.filter.includes('drop-shadow'), `${label} retained product drop-shadow filter: ${style.filter}.`);
+  }
+}
+
+async function expectFlatChrome(page: Page): Promise<void> {
+  await ensureFlyout(page, 'source');
+  await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForCanvas(page, 'flowchart');
+  const outerNode = page.locator('.diagram-reactflow-layer .react-flow__node').first();
+  const visibleNode = outerNode.locator('.mermaid-flow-node');
+  const selectedEdge = page.locator('.diagram-reactflow-layer .react-flow__edge').first();
+  const edgePath = selectedEdge.locator('.react-flow__edge-path');
+  const edgeInteraction = selectedEdge.locator('.react-flow__edge-interaction');
+  await outerNode.waitFor({ state: 'visible', timeout: 15_000 });
+  await edgePath.waitFor({ state: 'attached', timeout: 15_000 });
+  await outerNode.hover();
+  await assertNoProductShadows(page, {
+    hoveredOuterNode: '.diagram-reactflow-layer .react-flow__node:hover',
+  });
+  await verifiedClick(page, outerNode, 'outer React Flow node selection for flat chrome audit');
+  await page.waitForFunction((element) => element.classList.contains('is-selected'), await visibleNode.elementHandle(), { timeout: 5_000 });
+  const selectedNodeStyles = await outerNode.evaluate((element) => {
+    const visibleNode = element.querySelector<HTMLElement>('.mermaid-flow-node');
+    if (!visibleNode) throw new Error('Selected outer React Flow node has no visible Mermaid node.');
+    const outerStyle = getComputedStyle(element);
+    const visibleStyle = getComputedStyle(visibleNode);
+    return {
+      background: visibleStyle.backgroundColor,
+      boxShadow: outerStyle.boxShadow,
+      filter: outerStyle.filter,
+      outline: visibleStyle.outlineStyle,
+    };
+  });
+  assert(selectedNodeStyles.boxShadow === 'none' && !selectedNodeStyles.filter.includes('drop-shadow'),
+    `Selected outer React Flow node retained elevation: ${JSON.stringify(selectedNodeStyles)}.`);
+  assert(selectedNodeStyles.outline !== 'none' || selectedNodeStyles.background !== 'rgba(0, 0, 0, 0)',
+    `Selected node has no visible flat selection treatment: ${JSON.stringify(selectedNodeStyles)}.`);
+  const unselectedEdgeStyles = await edgePath.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { stroke: style.stroke, strokeWidth: style.strokeWidth };
+  });
+  await edgeInteraction.evaluate((element) => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, cancelable: true, view: window }));
+  });
+  await page.waitForFunction((element) => element.classList.contains('selected'), await selectedEdge.elementHandle(), { timeout: 5_000 });
+  await selectedEdge.evaluate((element) => {
+    if (!element.classList.contains('selected')) {
+      throw new Error('React Flow edge did not enter its selected state.');
+    }
+  });
+  const selectedEdgeStyles = await selectedEdge.evaluate((element) => {
+    const path = element.querySelector<SVGPathElement>('.react-flow__edge-path');
+    if (!path) throw new Error('Selected React Flow edge has no visible path.');
+    const edgeStyle = getComputedStyle(element);
+    const pathStyle = getComputedStyle(path);
+    return {
+      edgeBoxShadow: edgeStyle.boxShadow,
+      edgeFilter: edgeStyle.filter,
+      pathBoxShadow: pathStyle.boxShadow,
+      pathFilter: pathStyle.filter,
+      stroke: pathStyle.stroke,
+      strokeWidth: pathStyle.strokeWidth,
+    };
+  });
+  assert(selectedEdgeStyles.edgeBoxShadow === 'none' && selectedEdgeStyles.pathBoxShadow === 'none'
+    && !selectedEdgeStyles.edgeFilter.includes('drop-shadow') && !selectedEdgeStyles.pathFilter.includes('drop-shadow'),
+  `Selected React Flow edge retained elevation: ${JSON.stringify(selectedEdgeStyles)}.`);
+  assert(selectedEdgeStyles.stroke !== unselectedEdgeStyles.stroke || selectedEdgeStyles.strokeWidth !== unselectedEdgeStyles.strokeWidth,
+    `Selected edge did not receive a visible flat selection treatment: ${JSON.stringify({ selectedEdgeStyles, unselectedEdgeStyles })}.`);
+  await saveScreenshot(page, 'issue-28-selected-flat-edge');
+  await assertNoProductShadows(page, {
+    canvasToolbar: '[data-testid="canvas-controls-toolbar"]',
+    source: '[data-testid="source-flyout"]',
+  });
+  await closeFlyout(page, 'source');
+  await ensureFlyout(page, 'activity');
+  await assertNoProductShadows(page, {
+    activity: '[data-testid="activity-flyout"]',
+    canvasToolbar: '[data-testid="canvas-controls-toolbar"]',
+  });
+  await closeFlyout(page, 'activity');
+  const templateMenu = await openTemplateMenu(page);
+  await assertNoProductShadows(page, {
+    canvasToolbar: '[data-testid="canvas-controls-toolbar"]',
+    menu: '[role="menu"][aria-label="Starter templates"]',
+    templateCard: '[role="menuitem"]',
+  });
+  const settings = await openWorkspaceSettings(page);
+  await templateMenu.waitFor({ state: 'detached', timeout: 15_000 });
+  await assertNoProductShadows(page, {
+    canvasToolbar: '[data-testid="canvas-controls-toolbar"]',
+    settings: '[data-testid="workspace-settings-dialog"]',
+  });
+  const selectionStyles = await settings.evaluate((dialog) => {
+    const selectedTheme = document.querySelector<HTMLElement>('.workspace-settings-theme-option:has(input:checked)');
+    return {
+      selectedBackground: selectedTheme ? getComputedStyle(selectedTheme).backgroundColor : '',
+      selectedOutline: selectedTheme ? getComputedStyle(selectedTheme).outlineStyle : '',
+    };
+  });
+  assert(selectionStyles.selectedBackground !== 'rgba(0, 0, 0, 0)' || selectionStyles.selectedOutline !== 'none',
+    'Flat chrome removed the visible selected-theme treatment.');
+  await saveScreenshot(page, 'issue-28-dark-flat-chrome');
+  await settings.getByRole('button', { name: 'Close', exact: true }).click();
+  await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Closing settings after flat chrome audit');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  const focusStyles = await page.getByTestId(SETTINGS_TRIGGER_TEST_ID).evaluate((element) => ({
+    isFocusVisible: element.matches(':focus-visible'),
+    outline: getComputedStyle(element).outlineStyle,
+  }));
+  assert(focusStyles.isFocusVisible && focusStyles.outline !== 'none',
+    `Flat chrome removed the visible keyboard focus treatment: ${JSON.stringify(focusStyles)}.`);
+}
+
 async function expectUnstyledNodesUseNeutralThemeColors(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   await page.locator('.mermaid-flow-node').first().waitFor({ state: 'visible', timeout: 15_000 });
   await page.locator('.react-flow__edge-path').first().waitFor({ state: 'attached', timeout: 15_000 });
+  await assertNoProductShadows(page, {
+    edge: '.react-flow__edge-path',
+    node: '.mermaid-flow-node',
+  });
   const node = page.locator('.mermaid-flow-node').filter({ hasText: 'Browser' }).first();
   const colors = async () => page.evaluate(() => {
     const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
@@ -482,12 +837,11 @@ async function expectUnstyledNodesUseNeutralThemeColors(page: Page): Promise<voi
   };
   const light = await colors();
   assertFallbacks('Light', light);
-  await verifiedClick(page, page.getByTestId('theme-control').getByRole('button', { name: 'Dark', exact: true }), 'dark theme control for neutral nodes');
-  await page.locator('html[data-theme="dark"]').waitFor({ state: 'attached', timeout: 5_000 });
+  await selectThemePreference(page, 'dark');
   const dark = await colors();
   assertFallbacks('Dark', dark);
   assert(light.background !== dark.background && light.text !== dark.text, `Unstyled nodes did not adopt theme-neutral colors: light=${JSON.stringify(light)} dark=${JSON.stringify(dark)}.`);
-  await verifiedClick(page, page.getByTestId('theme-control').getByRole('button', { name: 'Light', exact: true }), 'light theme control after neutral nodes');
+  await selectThemePreference(page, 'light');
 }
 
 async function expectContrastRoles(page: Page): Promise<void> {
@@ -556,6 +910,18 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
   await selectTabByName(page, diagramName);
   await waitForCanvas(page, 'flowchart');
+  const settingsTrigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
+  await assertHitTarget(page, settingsTrigger, `${label} workspace settings trigger`);
+  await assertContainedInViewport(page, settingsTrigger, `${label} workspace settings trigger`);
+  if (label.startsWith('mobile')) {
+    const settingsBounds = await settingsTrigger.boundingBox();
+    assert(settingsBounds !== null && settingsBounds.width >= 44 && settingsBounds.height >= 44,
+      `${label} workspace settings trigger must provide a 44px touch target: ${JSON.stringify(settingsBounds)}.`);
+  }
+  const settings = await openWorkspaceSettings(page);
+  await assertContainedInViewport(page, settings, `${label} workspace settings dialog`);
+  await saveScreenshot(page, `issue-28-${label}-settings`);
+  await closeWorkspaceSettings(page);
   await verifiedClick(page, page.getByTestId('source-flyout-toggle'), `${label} source toggle`);
   await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
   await verifiedClick(page, page.getByLabel('Close source panel', { exact: true }), `${label} close source`);
@@ -574,6 +940,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     await assertDocumentHasNoHorizontalOverflow(page);
     for (const [target, targetLabel] of [
       [templateTrigger, 'tab creation control'],
+      [settingsTrigger, 'workspace settings trigger'],
       [page.getByTestId('source-flyout-toggle'), 'source toggle'],
       [page.getByTestId('canvas-add-node-toolbar'), 'add-node toolbar'],
       [page.getByTestId('canvas-controls-toolbar'), 'canvas controls toolbar'],
@@ -609,8 +976,9 @@ async function validateWorkspaceUx(): Promise<void> {
       await visitWorkspace(page, baseUrl, sessionId);
       await expectThemeContract(page);
       record(results, 'system, light, and dark media resolution plus persistence');
-      await verifiedClick(page, page.getByTestId('theme-control').getByRole('button', { name: 'Light', exact: true }), 'light theme control for screenshot matrix');
-      await page.locator('html[data-theme="light"]').waitFor({ state: 'attached', timeout: 5_000 });
+      await selectThemePreference(page, 'light');
+      await expectWorkspaceSettings(page, mcpUrl, sessionId);
+      record(results, 'settings, agent connection, focus boundaries, canvas handoff, overlay coexistence, and stable chrome');
       const blankDiagramName = await expectTemplateMenu(page);
       record(results, 'template menu visibility, keyboard navigation, focus return, stable anchors, and blank creation');
       await expectUnstyledNodesUseNeutralThemeColors(page);
@@ -638,6 +1006,10 @@ async function validateWorkspaceUx(): Promise<void> {
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');
+      await selectThemePreference(page, 'dark');
+      await expectFlatChrome(page);
+      record(results, 'flat monochrome chrome has no product shadows while focus and selection remain visible');
+      await selectThemePreference(page, 'light');
       await expectRendererKindFit(page);
       record(results, 'editable/static renderer transition fits camera');
       await expectRemoteUpdateWithoutAnchorJump(page, mcp, sessionId, diagramName);

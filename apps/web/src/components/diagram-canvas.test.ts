@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { DiagramLink } from '../lib/diagram-mutations';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
-import { getCanonicalSelectionAttribute, getFlowEdgePresentation, getNodeClickSelection } from './diagram-canvas';
+import { getCanonicalSelectionAttribute, getFlowEdgePresentation, getNodeClickSelection, getRendererInteractionMode } from './diagram-canvas';
+
+describe('getRendererInteractionMode', () => {
+  it('leaves camera ownership separate while static previews clear connect mode', () => {
+    expect(getRendererInteractionMode('connect', false)).toBe('select');
+    expect(getRendererInteractionMode('connect', true)).toBe('connect');
+    expect(getRendererInteractionMode('select', false)).toBe('select');
+  });
+});
 
 describe('getCanonicalSelectionAttribute', () => {
   it('keeps one stable app-owned snapshot across preview entry and exit', () => {

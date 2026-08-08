@@ -986,8 +986,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   await selectTabByName(page, diagramName);
   await waitForCanvas(page, 'flowchart');
   const sourceToggle = page.getByTestId('source-flyout-toggle');
-  assert(await sourceToggle.getAttribute('aria-label') === 'Toggle Mermaid source',
-    `${label} source toggle must retain its accessible name when text is hidden.`);
+  await expect(sourceToggle).toHaveAccessibleName(/^(show|hide) source$/i);
   assert(await sourceToggle.getAttribute('title') === 'Mermaid source',
     `${label} source toggle must retain its tooltip when text is hidden.`);
   await assertHitTarget(page, sourceToggle, `${label} source toggle`);
@@ -1290,7 +1289,7 @@ async function expectCrossRendererHistoryPreviewCameraHandoff(
   await verifiedClick(page, genericRevision.getByRole('button', { name: 'Preview', exact: true }), 'cross-renderer historical generic preview');
   await page.getByTestId('history-preview-notice').waitFor({ state: 'visible', timeout: 15_000 });
   await waitForCanvas(page, 'generic');
-  assert(await renderedCanvasCameraTransform(page, 'cross-renderer generic history preview') === beforeCamera,
+  assert(await waitForStableCanvasTransform(page, 'cross-renderer generic history preview camera') === beforeCamera,
     'Cross-renderer history preview changed the active local camera.');
 
   await verifiedClick(page, page.getByRole('button', { name: 'Cancel preview', exact: true }), 'cross-renderer historical preview cancel');
@@ -1489,6 +1488,7 @@ async function expectRevisionHistoryCollaboration(
     const restoredActivityCountBeforeStale = observer.snapshot(target.id).activity.filter((event) => event.action === 'restored').length;
     const staleTracker = observer.trackSnapshot(target.id);
     let routedStaleRestore = false;
+    let headAfterPeerLayout: { mermaidText: string; revision: string } | null = null;
     page.on('request', recordStaleRestoreRequest);
     await page.route(`${serverOrigin}${restorePath}`, async (route) => {
       if (routedStaleRestore) {
@@ -1501,17 +1501,25 @@ async function expectRevisionHistoryCollaboration(
         (current) => Object.hasOwn(current.snapshot(target.id).nodePositions, peerMovedNodeId),
         'the peer layout-only change between restore read and write',
       );
+      const currentHead = await mcp.readDiagram(sessionId, target.id);
+      headAfterPeerLayout = { mermaidText: currentHead.mermaidText, revision: currentHead.revision };
       await route.continue();
     });
     try {
+      const staleRestoreResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.origin === serverOrigin
+          && url.pathname === restorePath
+          && response.request().method() === 'POST';
+      }, { timeout: 15_000 });
       await verifiedClick(page, staleConfirmation.getByRole('button', { name: 'Confirm restore', exact: true }), 'confirm stale layout-only restore');
+      const response = await staleRestoreResponse;
+      assert(response.status() === 409, `Stale restore response was ${response.status()} instead of 409.`);
       await expect.poll(() => staleRestoreRequests.filter((request) => request.path === restorePath && request.method === 'POST').length, {
         message: `Stale restore did not issue one restore POST: ${JSON.stringify(staleRestoreRequests)}.`,
         timeout: 15_000,
       })
         .toBe(1);
-      await expect.poll(async () => (await mcp.readDiagram(sessionId, target.id)).revision !== historical.revision.resultRevision, { timeout: 15_000 })
-        .toBe(true);
     } finally {
       await page.unroute(`${serverOrigin}${restorePath}`);
       page.off('request', recordStaleRestoreRequest);
@@ -1521,6 +1529,11 @@ async function expectRevisionHistoryCollaboration(
       { method: 'GET', path: currentPath },
       { method: 'POST', path: restorePath },
     ]), `Stale restore did not use one fresh GET and one POST: ${JSON.stringify(staleRestoreRequests)}.`);
+    assert(headAfterPeerLayout !== null, 'The peer layout-only update did not provide a current head for stale-restore verification.');
+    const currentAfterStaleRestore = await mcp.readDiagram(sessionId, target.id);
+    assert(currentAfterStaleRestore.revision === headAfterPeerLayout.revision
+      && currentAfterStaleRestore.mermaidText === headAfterPeerLayout.mermaidText,
+    'A stale restore changed the current head after its 409 response.');
     const staleSnapshot = observer.snapshot(target.id);
     assert(staleSnapshot.mermaidText === HISTORY_PREVIOUS_FLOWCHART
       && JSON.stringify(staleSnapshot.nodePositions) !== JSON.stringify(historical.revision.nodePositions),

@@ -545,6 +545,7 @@ export class SessionManager {
     expectedRevision: string,
     event: ActivityEvent,
     participants?: Participant[],
+    origin: Extract<DiagramRevisionOrigin, 'browser' | 'mcp'> = 'mcp',
   ): Promise<RestoreDiagramRevisionResult> {
     const session = await this.getOrCreateSession(sessionId);
     const current = readDiagram(session.doc, diagramId);
@@ -589,7 +590,7 @@ export class SessionManager {
         result_revision: revisionForDiagram(diagram, diagramId),
       });
     }, MANAGED_AWARENESS_ORIGIN);
-    const revisions = await this.afterMutation(session, participants, restoreEvent.id);
+    const revisions = await this.afterMutation(session, participants, restoreEvent.id, origin);
     const revision = revisions.find((candidate) => candidate.activity_id === restoreEvent.id);
     if (!revision) {
       throw new Error('Restore history checkpoint was not persisted.');
@@ -825,6 +826,7 @@ export class SessionManager {
       const unseen = events.filter((event) => !processed.has(event.id));
       let nextSequence = prior?.nextSequence ?? 0;
       let latestRevision = prior?.latestRevision ?? '';
+      const previousFirstRetainedMutation = prior?.firstRetainedMutationSequence ?? 1;
       const captured: DiagramRevision[] = [];
 
       if (!prior) {
@@ -870,16 +872,17 @@ export class SessionManager {
       latestRevision = captured.at(-1)!.result_revision!;
       for (const event of unseen) processed.add(event.id);
       const processedActivityIds = [...processed].slice(-HISTORY_PROCESSED_ACTIVITY_LIMIT);
+      const firstRetainedMutation = Math.max(1, nextSequence - HISTORY_RETAINED_MUTATIONS);
       metadataUpdates.push({
         sessionId,
         diagramId: id,
+        firstRetainedMutationSequence: firstRetainedMutation,
         nextSequence,
         processedActivityIds,
         latestRevision,
       });
 
-      const firstRetainedMutation = Math.max(1, nextSequence - HISTORY_RETAINED_MUTATIONS);
-      for (let sequence = 1; sequence < firstRetainedMutation; sequence += 1) {
+      for (let sequence = previousFirstRetainedMutation; sequence < firstRetainedMutation; sequence += 1) {
         deleteSequences.set(`${sessionId}:${id}:${sequence}`, { sessionId, diagramId: id, sequence });
       }
     }
@@ -958,13 +961,18 @@ export class SessionManager {
     }
   }
 
-  private async afterMutation(session: SessionState, participants?: Participant[], activityId?: string): Promise<DiagramRevision[]> {
+  private async afterMutation(
+    session: SessionState,
+    participants?: Participant[],
+    activityId?: string,
+    origin: Extract<DiagramRevisionOrigin, 'browser' | 'mcp'> = 'mcp',
+  ): Promise<DiagramRevision[]> {
     const now = Date.now();
     session.lastAccessedAt = now;
     session.updatedAt = now;
     if (participants !== undefined) this.setManagedParticipants(session, participants);
     return this.persistSession(session, {
-      activityOrigins: activityId === undefined ? undefined : new Map([[activityId, 'mcp']]),
+      activityOrigins: activityId === undefined ? undefined : new Map([[activityId, origin]]),
     });
   }
 

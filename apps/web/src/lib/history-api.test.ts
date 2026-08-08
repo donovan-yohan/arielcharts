@@ -54,4 +54,20 @@ describe('history api', () => {
       expect.objectContaining<Partial<HistoryApiError>>({ message: 'Revision not found.', status: 404 }),
     );
   });
+
+  it('returns the discriminated stale result from an HTTP 409 restore conflict', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      status: 'stale',
+      current: { id: 'main', name: 'Main', mermaid_text: 'flowchart LR\n  Peer-->Wins', revision: 'head-3' },
+      current_revision: 'head-3',
+    }, 409));
+
+    await expect(restoreDiagramRevision('session', 'main', 'rev-1', 'head-2', { name: 'Ada', type: 'human' })).resolves.toEqual({
+      status: 'stale',
+      current: { id: 'main', name: 'Main', mermaid_text: 'flowchart LR\n  Peer-->Wins', revision: 'head-3' },
+      current_revision: 'head-3',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

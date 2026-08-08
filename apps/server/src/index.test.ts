@@ -391,8 +391,12 @@ describe('server integration', () => {
       body: JSON.stringify({ actor_name: 'Ada', actor_type: 'human', expected_revision: currentPayload.diagram.revision }),
     });
     expect(restored.status).toBe(200);
-    const restoredPayload = await restored.json() as { status: string; diagram: { revision: string }; revision: { restored_from_revision_id?: string } };
-    expect(restoredPayload).toMatchObject({ status: 'restored', revision: { restored_from_revision_id: targetId } });
+    const restoredPayload = await restored.json() as {
+      status: string;
+      diagram: { revision: string };
+      revision: { origin?: string; restored_from_revision_id?: string };
+    };
+    expect(restoredPayload).toMatchObject({ status: 'restored', revision: { origin: 'browser', restored_from_revision_id: targetId } });
 
     const stale = await fetch(`${baseUrl}/history/${encodeURIComponent(targetId)}/restore`, {
       method: 'POST',
@@ -404,6 +408,14 @@ describe('server integration', () => {
       status: 'stale',
       current_revision: restoredPayload.diagram.revision,
     });
+
+    const oversized = await fetch(`${baseUrl}/history/${encodeURIComponent(targetId)}/restore`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: restoredPayload.diagram.revision, detail: 'x'.repeat(1_048_576) }),
+    });
+    expect(oversized.status).toBe(413);
+    await expect(oversized.json()).resolves.toEqual({ error: 'Request body too large.' });
 
     const blocked = await fetch(`${baseUrl}/history`, { headers: { origin: 'http://blocked.test' } });
     expect(blocked.status).toBe(403);
@@ -463,7 +475,7 @@ describe('server integration', () => {
     });
     expect(restored.status).toBe(200);
     await expect(restored.json()).resolves.toMatchObject({
-      result: { structuredContent: { revision: { restoredFromRevisionId: revisionId } } },
+      result: { structuredContent: { revision: { origin: 'mcp', restoredFromRevisionId: revisionId } } },
     });
 
     const stale = await mcpRequest({

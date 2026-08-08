@@ -57,5 +57,12 @@ export async function restoreDiagramRevision(
     headers: { 'content-type': 'application/json' },
     method: 'POST',
   });
+  if (response.status === 409) {
+    const stale = await response.json().catch(() => null) as Partial<RestoreDiagramRevisionResult> | null;
+    if (stale?.status === 'stale' && 'current' in stale && typeof stale.current_revision === 'string') {
+      return stale as Extract<RestoreDiagramRevisionResult, { status: 'stale' }>;
+    }
+    throw new HistoryApiError('Restore conflict did not include the current diagram.', response.status);
+  }
   return readJson<RestoreDiagramRevisionResult>(response);
 }

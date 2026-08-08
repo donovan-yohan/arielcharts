@@ -533,6 +533,14 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     const diagram = state.doc.getMap<Y.Map<unknown>>('diagrams').get('main')!;
     const source = diagram.get('mermaid') as Y.Text;
     const activityArray = state.doc.getArray<ActivityEvent>('activity');
+    const originalPersist = resources.store.persistWithHistory.bind(resources.store);
+    const pruningBatches: number[][] = [];
+    resources.store.persistWithHistory = async (record, history) => {
+      if (history.deleteSequences.length > 0) {
+        pruningBatches.push(history.deleteSequences.map((target) => target.sequence));
+      }
+      await originalPersist(record, history);
+    };
 
     for (let index = 1; index <= 105; index += 1) {
       state.doc.transact(() => {
@@ -548,5 +556,10 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     expect(history.revisions.at(-1)).toMatchObject({ sequence: 0, action: 'baseline' });
     expect(history.revisions.at(-2)).toMatchObject({ sequence: 7 });
     expect(history.revisions[0]).toMatchObject({ sequence: 105 });
+    expect(pruningBatches).toEqual([[1], [2], [3], [4], [5], [6]]);
+    await expect(resources.store.getHistoryMetadata('abc123de', 'main')).resolves.toMatchObject({
+      firstRetainedMutationSequence: 7,
+      nextSequence: 106,
+    });
   });
 });

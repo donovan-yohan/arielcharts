@@ -109,24 +109,28 @@ export function getYjsWebsocketUrl(mcpUrl: string): string {
   return url.toString().replace(/\/$/u, '');
 }
 
-export function readYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessionSnapshot {
-  const diagram = diagramMap(doc, diagramId);
-  if (!diagram) return { activity: activitySnapshot(doc), exists: false, mermaidText: null, nodePositions: {} };
-
-  const mermaid = diagram.get(DIAGRAM_MERMAID_TEXT_KEY);
-  const positions = diagram.get(DIAGRAM_NODE_POSITIONS_KEY);
+export function readYjsNodePositions(doc: Y.Doc, diagramId: string): Record<string, YjsNodePosition> {
+  const positions = diagramMap(doc, diagramId)?.get(DIAGRAM_NODE_POSITIONS_KEY);
   const nodePositions: Record<string, YjsNodePosition> = {};
   if (positions instanceof Y.Map) {
     for (const [nodeId, value] of positions.entries()) {
       if (isNodePosition(value)) nodePositions[nodeId] = { x: value.x, y: value.y };
     }
   }
+  return nodePositions;
+}
+
+export function readYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessionSnapshot {
+  const diagram = diagramMap(doc, diagramId);
+  if (!diagram) return { activity: activitySnapshot(doc), exists: false, mermaidText: null, nodePositions: {} };
+
+  const mermaid = diagram.get(DIAGRAM_MERMAID_TEXT_KEY);
 
   return {
     activity: activitySnapshot(doc),
     exists: true,
     mermaidText: mermaid instanceof Y.Text ? mermaid.toString() : null,
-    nodePositions,
+    nodePositions: readYjsNodePositions(doc, diagramId),
   };
 }
 
@@ -222,7 +226,7 @@ export function trackYjsNodePosition(
   let update = 0;
 
   const recordIfPresent = () => {
-    const position = readYjsSessionSnapshot(doc, diagramId).nodePositions[nodeId];
+    const position = readYjsNodePositions(doc, diagramId)[nodeId];
     if (!position) return;
     const appearance = { position, update };
     appearances.push(appearance);
@@ -336,7 +340,7 @@ export async function openYjsSessionObserver(
       doc.destroy();
     },
     hasNodePosition(diagramId, nodeId) {
-      return Object.hasOwn(readYjsSessionSnapshot(doc, diagramId).nodePositions, nodeId);
+      return Object.hasOwn(readYjsNodePositions(doc, diagramId), nodeId);
     },
     snapshot(diagramId) {
       return readYjsSessionSnapshot(doc, diagramId);

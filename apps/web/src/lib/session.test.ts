@@ -7,10 +7,12 @@ import {
   getActiveDiagramName,
   getAgentCountLabel,
   getAgentWorkflowPrompt,
+  getLatestDiagramCheckpointId,
   getModalWrappedFocusIndex,
-  reconcileSelectionForAcceptedRender,
   getTemplateDiagramCreation,
   getTemplateDiagramName,
+  reconcileSelectionForAcceptedRender,
+  shouldApplyHistoryPreviewResponse,
 } from '../components/session-workspace';
 
 describe('session helpers', () => {
@@ -88,6 +90,25 @@ describe('session helpers', () => {
     expect(reconcileSelectionForAcceptedRender(selected, 'detached-preview', 'invalid')).toBe(selected);
     expect(reconcileSelectionForAcceptedRender(selected, 'live', 'generic')).toEqual([]);
     expect(reconcileSelectionForAcceptedRender(selected, 'live', 'invalid')).toEqual([]);
+  });
+
+  it('derives one stable refresh checkpoint from the latest active-diagram activity', () => {
+    const events: ActivityEvent[] = [
+      { action: 'edited', actor: { name: 'Peer', type: 'human' }, diagram_id: 'other', id: 'other-3', timestamp: 3 },
+      { action: 'edited', actor: { name: 'Ada', type: 'human' }, diagram_id: 'main', id: 'main-2', timestamp: 2 },
+      { action: 'created', actor: { name: 'Ada', type: 'human' }, diagram_id: 'main', id: 'main-1', timestamp: 1 },
+    ];
+
+    expect(getLatestDiagramCheckpointId(events, 'main')).toBe('main-2');
+    expect(getLatestDiagramCheckpointId(events, 'other')).toBe('other-3');
+    expect(getLatestDiagramCheckpointId(events, null)).toBeNull();
+  });
+
+  it('accepts only the latest preview response for the still-active diagram', () => {
+    expect(shouldApplyHistoryPreviewResponse(2, 2, 'main', 'main', 'main')).toBe(true);
+    expect(shouldApplyHistoryPreviewResponse(1, 2, 'main', 'main', 'main')).toBe(false);
+    expect(shouldApplyHistoryPreviewResponse(2, 2, 'main', 'other', 'main')).toBe(false);
+    expect(shouldApplyHistoryPreviewResponse(2, 2, 'main', 'main', 'other')).toBe(false);
   });
 
   it('reads active-tab metadata from the latest diagram catalog without changing its ID', () => {

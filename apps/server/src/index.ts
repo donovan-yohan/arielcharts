@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { APP_NAME } from './lib/constants.js';
 import { createActivityEvent } from './lib/activity.js';
 import { healthResponse } from './lib/health.js';
-import { createCorsHeaders, readJsonBody, sendEmpty, sendJson } from './lib/http.js';
+import { RequestBodyTooLargeError, createCorsHeaders, readJsonBody, sendEmpty, sendJson } from './lib/http.js';
 import { createModernMcpRequestHandler, handleModernMcpRequest } from './lib/mcp-server.js';
 import { isOriginAllowed } from './lib/origin.js';
 import { SessionStore } from './lib/persistence.js';
@@ -64,6 +64,11 @@ function historyErrorStatus(message: string): number {
   if (/^(Session|Diagram|Diagram revision) not found:/.test(message)) return 404;
   if (/^(Expected |Invalid |Unexpected token)/.test(message)) return 400;
   return 500;
+}
+
+function historyErrorStatusFor(error: unknown, message: string): number {
+  if (error instanceof RequestBodyTooLargeError) return 413;
+  return historyErrorStatus(message);
 }
 
 export function createApp(env = loadServerEnv()) {
@@ -137,13 +142,15 @@ export function createApp(env = loadServerEnv()) {
             diagramApiPath.revisionId,
             expectedRevision,
             event,
+            undefined,
+            'browser',
           );
           sendJson(response, result.status === 'stale' ? 409 : 200, result, corsHeaders);
           return;
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid diagram history request.';
-        sendJson(response, historyErrorStatus(message), { error: message }, corsHeaders);
+        sendJson(response, historyErrorStatusFor(error, message), { error: message }, corsHeaders);
         return;
       }
 

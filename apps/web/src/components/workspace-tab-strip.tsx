@@ -107,7 +107,6 @@ export function WorkspaceTabStrip({
       <WorkspaceTemplatePicker onCreateDiagram={onCreateDiagram} templates={starterTemplates} />
       <div className="workspace-diagram-tab-tools">
         <button
-          aria-label="Toggle Mermaid source"
           aria-controls="source-flyout"
           aria-expanded={sourceOpen}
           className={`workspace-source-toggle${sourceOpen ? ' is-active' : ''}`}

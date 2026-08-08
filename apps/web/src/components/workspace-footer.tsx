@@ -38,7 +38,7 @@ export function WorkspaceFooter({
         <button
           aria-controls="activity-flyout"
           aria-expanded={activityOpen}
-          aria-label="Open activity and history"
+          aria-label="Activity and history"
           className={`workspace-footer-toggle${activityOpen ? ' is-active' : ''}`}
           data-testid="activity-flyout-toggle"
           onClick={(event) => { onActivityToggle(event.currentTarget); }}

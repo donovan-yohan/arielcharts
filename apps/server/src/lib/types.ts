@@ -17,6 +17,7 @@ export interface SessionRecord {
 export interface DiagramHistoryMetadata {
   sessionId: string;
   diagramId: string;
+  firstRetainedMutationSequence: number;
   nextSequence: number;
   processedActivityIds: string[];
   latestRevision: string;

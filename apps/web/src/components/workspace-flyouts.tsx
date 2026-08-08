@@ -22,7 +22,7 @@ interface WorkspaceFlyoutsProps {
   onPreviewRevision: (revision: DiagramRevisionSummary) => void;
   onRestoreCancel: () => void;
   onRestoreConfirm: () => void;
-  onRestoreRequest: (revision: DiagramRevisionSummary) => void;
+  onRestoreRequest: (revision: DiagramRevisionSummary, origin: HTMLButtonElement) => void;
   openFlyout: WorkspaceFlyout;
   participants: Participant[];
   previewRevision: DiagramRevision | null;
@@ -30,6 +30,7 @@ interface WorkspaceFlyoutsProps {
   restoreCandidate: DiagramRevisionSummary | null;
   restoreError: string | null;
   restorePending: boolean;
+  restoreConfirmRef: RefObject<HTMLButtonElement | null>;
 }
 
 function getRevisionLabel(revision: DiagramRevisionSummary): string {
@@ -69,6 +70,7 @@ export function WorkspaceFlyouts({
   restoreCandidate,
   restoreError,
   restorePending,
+  restoreConfirmRef,
 }: WorkspaceFlyoutsProps) {
   return (
     <>
@@ -153,8 +155,8 @@ export function WorkspaceFlyouts({
                         <span className="history-item-name">{revision.name}</span>
                         {isCurrentHead ? <span aria-label="Current head" className="history-current-head" data-testid="history-current-head-marker">Current</span> : null}
                         <div className="history-item-actions">
-                          <button aria-pressed={isPreviewing} onClick={() => { onPreviewRevision(revision); }} type="button"><Eye aria-hidden="true" size={14} />{isPreviewing ? 'Previewing' : 'Preview'}</button>
-                          <button disabled={restorePending} onClick={() => { onRestoreRequest(revision); }} type="button"><RotateCcw aria-hidden="true" size={14} />Restore</button>
+                          <button aria-pressed={isPreviewing} onClick={() => { if (isPreviewing) onCancelPreview(); else onPreviewRevision(revision); }} type="button"><Eye aria-hidden="true" size={14} />{isPreviewing ? 'Previewing' : 'Preview'}</button>
+                          <button disabled={restorePending} onClick={(event) => { onRestoreRequest(revision, event.currentTarget); }} type="button"><RotateCcw aria-hidden="true" size={14} />Restore</button>
                         </div>
                       </li>
                     );
@@ -167,7 +169,7 @@ export function WorkspaceFlyouts({
                   <span>This keeps the current diagram name and all later history.</span>
                   {restoreError ? <span className="history-error">{restoreError}</span> : null}
                   <div className="history-item-actions">
-                    <button disabled={restorePending} onClick={onRestoreConfirm} type="button">{restorePending ? 'Checking current head…' : 'Confirm restore'}</button>
+                    <button disabled={restorePending} onClick={onRestoreConfirm} ref={restoreConfirmRef} type="button">{restorePending ? 'Checking current head…' : 'Confirm restore'}</button>
                     <button disabled={restorePending} onClick={onRestoreCancel} type="button">Cancel</button>
                   </div>
                 </div>

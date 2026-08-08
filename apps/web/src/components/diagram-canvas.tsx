@@ -193,6 +193,13 @@ export function getNodeClickSelection(current: readonly string[], nodeId: string
 export function getCanonicalSelectionAttribute(nodeIds: readonly string[]): string {
   return JSON.stringify([...nodeIds].sort((left, right) => left.localeCompare(right)));
 }
+
+export function getRendererInteractionMode(
+  current: 'select' | 'connect',
+  isFlowchart: boolean,
+): 'select' | 'connect' {
+  return isFlowchart ? current : 'select';
+}
 const TOOLBAR_BUTTON_STYLE: CSSProperties = {
   alignItems: 'center',
   background: 'transparent',
@@ -888,11 +895,11 @@ export function DiagramCanvas({
   }, [animateTransform]);
 
   useEffect(() => {
-    if (isFlowchart || preserveCamera) {
+    if (isFlowchart) {
       return;
     }
 
-    setMode('select');
+    setMode(getRendererInteractionMode(mode, isFlowchart));
     setToolbarOpen(false);
     setShapePickerOpen(false);
     setEditingNodeId(null);
@@ -905,7 +912,7 @@ export function DiagramCanvas({
     connectionStartNodeIdRef.current = null;
     setConnectionPreviewSourceId(null);
     setShowGroupPrompt(false);
-  }, [isFlowchart, preserveCamera, setMode]);
+  }, [isFlowchart, mode, setMode]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

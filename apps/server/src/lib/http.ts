@@ -3,6 +3,12 @@ import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from 'node:
 const MAX_BODY_BYTES = 1_048_576; // 1 MB
 const MCP_CORS_HEADERS = ['content-type', 'mcp-protocol-version', 'mcp-method', 'mcp-name'];
 
+export class RequestBodyTooLargeError extends Error {
+  constructor() {
+    super('Request body too large.');
+  }
+}
+
 export async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let totalBytes = 0;
@@ -11,7 +17,7 @@ export async function readJsonBody(request: IncomingMessage): Promise<unknown> {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     totalBytes += buf.length;
     if (totalBytes > MAX_BODY_BYTES) {
-      throw new Error('Request body too large.');
+      throw new RequestBodyTooLargeError();
     }
     chunks.push(buf);
   }

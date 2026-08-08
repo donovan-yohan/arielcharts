@@ -164,7 +164,7 @@ export async function handleMcpToolCall(manager: SessionManager, payload: unknow
       const { sessionId, diagramId, revisionId } = readHistoryTarget(input);
       const expectedRevision = readNonEmptyString(input.expected_revision, 'expected_revision');
       const { meta, event: activityEvent } = event(input, 'restored', diagramId);
-      return manager.restoreDiagramRevision(sessionId, diagramId, revisionId, expectedRevision, activityEvent, meta.participants);
+      return manager.restoreDiagramRevision(sessionId, diagramId, revisionId, expectedRevision, activityEvent, meta.participants, 'mcp');
     }
     case 'list_sessions': {
       const sessions = await manager.listSessions();

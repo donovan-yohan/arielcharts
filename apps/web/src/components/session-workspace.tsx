@@ -217,6 +217,22 @@ export function reconcileSelectionForAcceptedRender(
   return context === 'live' && outcome !== 'flowchart' ? [] : current;
 }
 
+export function getLatestDiagramCheckpointId(activity: readonly ActivityEvent[], diagramId: string | null): string | null {
+  return diagramId ? activity.find((event) => event.diagram_id === diagramId)?.id ?? null : null;
+}
+
+export function shouldApplyHistoryPreviewResponse(
+  requestSequence: number,
+  latestRequestSequence: number,
+  requestedDiagramId: string,
+  activeDiagramId: string | null,
+  responseDiagramId: string,
+): boolean {
+  return requestSequence === latestRequestSequence
+    && requestedDiagramId === activeDiagramId
+    && responseDiagramId === requestedDiagramId;
+}
+
 export function getAgentWorkflowPrompt(sessionId: string, mcpUrl: string): string {
   return `Connect to my ArielCharts session "${sessionId}" using the MCP server at ${mcpUrl}. ${AGENT_WORKFLOW_REQUIREMENTS.join(' ')} Mermaid changes sync collaboratively in real-time. Look up your docs for how to add an MCP server globally.`;
 }
@@ -440,6 +456,10 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const connectModalDialogRef = useRef<HTMLDivElement | null>(null);
   const connectModalReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const historyRequestSequenceRef = useRef(0);
+  const historyPreviewRequestSequenceRef = useRef(0);
+  const historyRefreshCheckpointRef = useRef<string | null>(null);
+  const restoreOriginRef = useRef<HTMLButtonElement | null>(null);
+  const restoreConfirmRef = useRef<HTMLButtonElement | null>(null);
   const activeDiagramIdRef = useRef<string | null>(null);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
@@ -490,6 +510,10 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     ? historyPreviewRender
     : awaitingLivePreviewAfterHistory ? null : preview;
   const renderedNodePositions = historyPreview?.node_positions ?? nodePositions;
+  const latestDiagramCheckpointId = useMemo(
+    () => getLatestDiagramCheckpointId(activity, activeDiagramId),
+    [activeDiagramId, activity],
+  );
 
   const runMutation = useCallback((mutation: Promise<unknown>) => {
     setMutationError(null);
@@ -563,6 +587,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'preview-exited'));
     setRestoreCandidate(null);
     setRestoreError(null);
+    historyPreviewRequestSequenceRef.current += 1;
     setOpenFlyout(null);
   }, [historyPreview]);
 
@@ -583,6 +608,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'preview-exited'));
       setRestoreCandidate(null);
       setRestoreError(null);
+      historyPreviewRequestSequenceRef.current += 1;
     }
     if (flyout === 'activity') {
       setActivityFlyoutView(getActivityFlyoutViewOnOpen(openFlyout, flyout));
@@ -735,6 +761,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [sessionId]);
 
   useEffect(() => {
+    historyPreviewRequestSequenceRef.current += 1;
     setHistoryPreview(null);
     setHistoryPreviewRender(null);
     setHistoryPreviewError(null);
@@ -885,8 +912,24 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     if (openFlyout !== 'activity' || !activeDiagramId) {
       return;
     }
+    historyRefreshCheckpointRef.current = `${activeDiagramId}:${latestDiagramCheckpointId ?? 'none'}`;
     void refreshDiagramHistory();
-  }, [activeDiagramId, activity, openFlyout, refreshDiagramHistory]);
+  }, [activeDiagramId, openFlyout, refreshDiagramHistory]);
+
+  useEffect(() => {
+    if (openFlyout !== 'activity' || !activeDiagramId) {
+      return;
+    }
+    const checkpointKey = `${activeDiagramId}:${latestDiagramCheckpointId ?? 'none'}`;
+    if (historyRefreshCheckpointRef.current === checkpointKey) {
+      return;
+    }
+    historyRefreshCheckpointRef.current = checkpointKey;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    const timeout = window.setTimeout(() => { void refreshDiagramHistory(); }, 180);
+    return () => { window.clearTimeout(timeout); };
+  }, [activeDiagramId, latestDiagramCheckpointId, openFlyout, refreshDiagramHistory]);
 
   useEffect(() => {
     const renderId = renderSequenceRef.current + 1;
@@ -1030,34 +1073,65 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     setHistoryPreviewRender(null);
     setHistoryPreviewError(null);
     setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'preview-exited'));
+    historyPreviewRequestSequenceRef.current += 1;
   }, [historyPreview]);
 
   const previewHistoryRevision = useCallback(async (revision: DiagramRevisionSummary) => {
     if (!activeDiagramId || revision.diagram_id !== activeDiagramId) {
       return;
     }
+    const requestSequence = historyPreviewRequestSequenceRef.current + 1;
+    historyPreviewRequestSequenceRef.current = requestSequence;
+    const requestedDiagramId = activeDiagramId;
     setHistoryPreviewError(null);
     try {
-      const snapshot = await readDiagramRevision(sessionId, activeDiagramId, revision.revision_id);
-      if (snapshot.diagram_id === activeDiagramId && activeDiagramIdRef.current === activeDiagramId) {
+      const snapshot = await readDiagramRevision(sessionId, requestedDiagramId, revision.revision_id);
+      if (shouldApplyHistoryPreviewResponse(
+        requestSequence,
+        historyPreviewRequestSequenceRef.current,
+        requestedDiagramId,
+        activeDiagramIdRef.current,
+        snapshot.diagram_id,
+      )) {
         setAwaitingLivePreviewAfterHistory(false);
         setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'preview-entered'));
         setHistoryPreview(snapshot);
       }
     } catch (error) {
-      setHistoryPreviewError(error instanceof Error ? error.message : 'Could not load that revision preview.');
+      if (requestSequence === historyPreviewRequestSequenceRef.current && activeDiagramIdRef.current === requestedDiagramId) {
+        setHistoryPreviewError(error instanceof Error ? error.message : 'Could not load that revision preview.');
+      }
     }
   }, [activeDiagramId, sessionId]);
 
-  const requestHistoryRestore = useCallback((revision: DiagramRevisionSummary) => {
+  const requestHistoryRestore = useCallback((revision: DiagramRevisionSummary, origin: HTMLButtonElement) => {
+    restoreOriginRef.current = origin;
     setRestoreCandidate(revision);
     setRestoreError(null);
+  }, []);
+
+  const returnFocusToRestoreOrigin = useCallback(() => {
+    const origin = restoreOriginRef.current;
+    window.requestAnimationFrame(() => {
+      if (origin?.isConnected) {
+        origin.focus({ preventScroll: true });
+      }
+    });
   }, []);
 
   const cancelHistoryRestore = useCallback(() => {
     setRestoreCandidate(null);
     setRestoreError(null);
-  }, []);
+    returnFocusToRestoreOrigin();
+  }, [returnFocusToRestoreOrigin]);
+
+  useEffect(() => {
+    if (!restoreCandidate) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => { restoreConfirmRef.current?.focus({ preventScroll: true }); });
+    return () => { window.cancelAnimationFrame(frame); };
+  }, [restoreCandidate]);
 
   const confirmHistoryRestore = useCallback(async () => {
     const actor = currentIdentityRef.current;
@@ -1093,8 +1167,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       await refreshDiagramHistory();
     } finally {
       setRestorePending(false);
+      returnFocusToRestoreOrigin();
     }
-  }, [activeDiagramId, cancelHistoryPreview, refreshDiagramHistory, restoreCandidate, sessionId]);
+  }, [activeDiagramId, cancelHistoryPreview, refreshDiagramHistory, restoreCandidate, returnFocusToRestoreOrigin, sessionId]);
 
   const getAgentPrompt = useCallback(() => {
     const mcpUrl = typeof window !== 'undefined'
@@ -1578,6 +1653,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
           restoreCandidate={restoreCandidate}
           restoreError={restoreError}
           restorePending={restorePending}
+          restoreConfirmRef={restoreConfirmRef}
         />
       </section>
 

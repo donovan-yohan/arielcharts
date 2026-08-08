@@ -613,11 +613,16 @@ code {
   font: 11px var(--font-sans);
 }
 
-.workspace-template-menu-item:hover,
+.workspace-template-menu-item:hover {
+  background: var(--control-surface-hover);
+  color: var(--interactive-hover);
+}
+
 .workspace-template-menu-item:focus-visible {
   background: var(--control-surface-hover);
   color: var(--interactive-hover);
-  outline: none;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .workspace-diagram-tab-add:hover,

@@ -44,4 +44,11 @@ describe('session helpers', () => {
       'Blank 90abcdef',
     ])).toBe('Blank diagram_1234567890abcdef');
   });
+
+  it('normalizes template collision names without depending on the browser locale', () => {
+    expect(getTemplateDiagramName('API   sequence', 'diagram_1234567890abcdef', [
+      '  api sequence cdef  ',
+      'API sequence 90abcdef',
+    ])).toBe('API sequence diagram_1234567890abcdef');
+  });
 });

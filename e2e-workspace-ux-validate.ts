@@ -21,6 +21,7 @@ import {
 } from './e2e/support/interactions.ts';
 import { ModernMcpClient } from './e2e/support/mcp.ts';
 import { withOwnedServices } from './e2e/support/owned-services.ts';
+import { STARTER_TEMPLATES } from './packages/shared/src/starter-templates.js';
 import {
   API_SEQUENCE_FIXTURE,
   FLOWCHART_FIXTURE,
@@ -105,10 +106,16 @@ async function canvasTransform(page: Page): Promise<string | null> {
 }
 
 async function assertTemplateIdentityAbsent(page: Page): Promise<void> {
-  const ordinarySurface = await page.locator('body').innerText();
-  for (const identity of ['service-flowchart', 'api-sequence']) {
-    assert(!ordinarySurface.includes(identity), `Creation-time template identity leaked into the ordinary workspace surface: ${identity}.`);
+  const renderedDocument = await page.locator('html').innerHTML();
+  for (const { id } of STARTER_TEMPLATES) {
+    assert(!renderedDocument.includes(id), `Creation-time template identity leaked into rendered document markup: ${id}.`);
   }
+}
+
+async function renderedCanvasTransform(page: Page, label: string): Promise<string> {
+  const transform = await canvasTransform(page);
+  assert(transform !== null, `${label} requires a rendered canvas camera layer.`);
+  return transform;
 }
 
 async function expectTemplateMenu(page: Page): Promise<string> {
@@ -168,9 +175,19 @@ async function expectTemplateMenu(page: Page): Promise<string> {
   await openTemplateMenu(page);
   await page.locator('.workspace-logo').click();
   await menu.waitFor({ state: 'detached', timeout: 15_000 });
-  await waitForFocusedTestId(page, 'create-diagram-tab', 'Closing template menu with an outside click');
+  await waitForFocusedTestId(page, 'create-diagram-tab', 'Closing template menu from nonfocusable page chrome');
   assertAnchorsStable(outsideBefore, await snapshotAnchors(page, ANCHORS));
   assert(await canvasTransform(page) === outsideBeforeTransform, 'Outside-closing the template menu changed the canvas camera.');
+
+  await openTemplateMenu(page);
+  const sourceToggle = page.getByTestId('source-flyout-toggle');
+  await sourceToggle.click();
+  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+  await waitForFocusedLocator(page, page.locator('.cm-content'), 'Clicking an interactive control outside the template menu');
+  assert(await trigger.evaluate((element) => document.activeElement !== element),
+    'Clicking an interactive control outside the template menu had its focus stolen by the creation trigger.');
+  await closeFlyout(page, 'source');
 
   const blankName = await createDiagramFromTemplate(page, 'Blank sheet');
   await waitForFocusedLocator(page, page.getByRole('tab', { name: blankName, exact: true }), 'Creating a template diagram');
@@ -351,18 +368,17 @@ async function expectRendererKindFit(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   await closeFlyout(page, 'source');
-  const layer = page.locator('.diagram-canvas-svg').locator('..');
-  const beforeZoom = await layer.getAttribute('style');
+  const beforeZoom = await renderedCanvasTransform(page, 'Flowchart zoom verification');
   await verifiedClick(page, page.getByRole('button', { name: 'Zoom in', exact: true }), 'zoom in');
   await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeZoom, { timeout: 5_000 });
-  const zoomed = await layer.getAttribute('style');
+  const zoomed = await renderedCanvasTransform(page, 'Flowchart zoom result');
   await replaceSource(page, API_SEQUENCE_FIXTURE);
   await waitForCanvas(page, 'generic');
   await closeFlyout(page, 'source');
   await page.waitForFunction((previous) => (
     document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous
   ), zoomed, { timeout: 5_000 });
-  const staticTransform = await layer.getAttribute('style');
+  const staticTransform = await renderedCanvasTransform(page, 'Static renderer transition');
   assert(staticTransform !== zoomed, `Editable-to-static renderer transition did not fit the camera: ${zoomed}`);
   await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), 'static renderer fit diagram');
 }
@@ -564,14 +580,13 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     ] as const) {
       await assertContainedInViewport(page, target, `mobile-320 ${targetLabel}`);
     }
-    const layer = page.locator('.diagram-canvas-svg').locator('..');
-    const beforeZoomOut = await layer.getAttribute('style');
+    const beforeZoomOut = await renderedCanvasTransform(page, 'mobile-320 zoom-out verification');
     await verifiedClick(page, page.getByRole('button', { name: 'Zoom out', exact: true }), 'mobile-320 Zoom out');
     await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeZoomOut, { timeout: 5_000 });
-    const beforeZoomIn = await layer.getAttribute('style');
+    const beforeZoomIn = await renderedCanvasTransform(page, 'mobile-320 zoom-in verification');
     await verifiedClick(page, page.getByRole('button', { name: 'Zoom in', exact: true }), 'mobile-320 Zoom in');
     await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeZoomIn, { timeout: 5_000 });
-    const beforeFit = await layer.getAttribute('style');
+    const beforeFit = await renderedCanvasTransform(page, 'mobile-320 fit verification');
     await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), 'mobile-320 Fit diagram');
     await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeFit, { timeout: 5_000 });
     const mobileLabel = page.getByRole('textbox', { name: 'New node label', exact: true });

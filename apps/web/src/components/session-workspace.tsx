@@ -311,17 +311,25 @@ function createDiagramId(): string {
 }
 
 export function getTemplateDiagramName(defaultName: string, diagramId: string, existingNames: readonly string[]): string {
-  const existing = new Set(existingNames.map((name) => name.trim().toLocaleLowerCase()));
+  const existing = new Set(existingNames.map(getDiagramNameKey));
   const suffixes = [diagramId.slice(-4), diagramId.slice(-8), diagramId];
   for (const suffix of suffixes) {
-    const candidate = `${defaultName} ${suffix}`.trim();
-    if (!existing.has(candidate.toLocaleLowerCase())) return candidate;
+    const candidate = normalizeDiagramName(`${defaultName} ${suffix}`);
+    if (!existing.has(getDiagramNameKey(candidate))) return candidate;
   }
   let duplicateIndex = 2;
-  while (existing.has(`${defaultName} ${diagramId} ${duplicateIndex}`.toLocaleLowerCase())) {
+  while (existing.has(getDiagramNameKey(`${defaultName} ${diagramId} ${duplicateIndex}`))) {
     duplicateIndex += 1;
   }
-  return `${defaultName} ${diagramId} ${duplicateIndex}`;
+  return normalizeDiagramName(`${defaultName} ${diagramId} ${duplicateIndex}`);
+}
+
+function normalizeDiagramName(name: string): string {
+  return name.trim().replace(/\s+/gu, ' ');
+}
+
+function getDiagramNameKey(name: string): string {
+  return normalizeDiagramName(name).toLowerCase();
 }
 
 export function getTemplateDiagramCreation(templateId: StarterTemplateId, diagramId: string, existingNames: readonly string[]) {
@@ -1024,9 +1032,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
   const commitDiagramName = useCallback(() => {
     if (!collaboration || !renamingDiagramId) return;
-    const normalizedName = diagramNameDraft.trim().replace(/\s+/gu, ' ');
+    const normalizedName = normalizeDiagramName(diagramNameDraft);
     const current = diagrams.find((diagram) => diagram.id === renamingDiagramId);
-    const isDuplicate = diagrams.some((diagram) => diagram.id !== renamingDiagramId && diagram.name.toLocaleLowerCase() === normalizedName.toLocaleLowerCase());
+    const isDuplicate = diagrams.some((diagram) => diagram.id !== renamingDiagramId && getDiagramNameKey(diagram.name) === getDiagramNameKey(normalizedName));
     if (!normalizedName || isDuplicate || !current) {
       setRenamingDiagramId(null);
       setDiagramNameDraft('');

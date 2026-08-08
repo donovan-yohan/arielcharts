@@ -2,6 +2,8 @@ import type { StarterTemplate, StarterTemplateId } from '@arielcharts/shared';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Plus } from 'lucide-react';
 
+const INTERACTIVE_OUTSIDE_TARGET = 'a[href], button, input, select, textarea, [contenteditable="true"], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [tabindex]:not([tabindex="-1"])';
+
 export function getTemplateMenuOrder(templates: readonly StarterTemplate[]): readonly StarterTemplate[] {
   const blank = templates.find((template) => template.id === 'blank');
   return blank ? [blank, ...templates.filter((template) => template.id !== 'blank')] : [...templates];
@@ -61,7 +63,8 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, templates }: Workspac
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (target instanceof Node && !menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) {
-        closeMenu(true);
+        const interactiveTarget = target instanceof Element && target.closest(INTERACTIVE_OUTSIDE_TARGET);
+        closeMenu(!interactiveTarget);
       }
     };
     document.addEventListener('pointerdown', onPointerDown);

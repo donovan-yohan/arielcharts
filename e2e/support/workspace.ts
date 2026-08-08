@@ -116,7 +116,7 @@ export async function selectTemplateByAccessibleName(page: Page, name: string): 
 }
 
 export async function createDiagramFromTemplate(page: Page, name: string): Promise<string> {
-  const before = await page.getByRole('tab').allTextContents();
+  const before = (await page.getByRole('tab').allTextContents()).map((label) => label.trim());
   await selectTemplateByAccessibleName(page, name);
   await page.waitForFunction((count) => document.querySelectorAll('[role="tab"]').length === count + 1, before.length, { timeout: 15_000 });
   const diagramName = await activeTabName(page);

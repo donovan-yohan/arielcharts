@@ -50,7 +50,12 @@ export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
       }
     };
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === THEME_STORAGE_KEY) {
+      const storage = getBrowserStorage();
+      if (
+        storage
+        && event.storageArea === storage
+        && (event.key === THEME_STORAGE_KEY || event.key === null)
+      ) {
         syncTheme();
       }
     };

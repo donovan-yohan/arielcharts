@@ -17,6 +17,12 @@ export interface CanvasNodePaint {
   color: string;
 }
 
+export interface CanvasEdgeMarker {
+  color: string;
+  id: string;
+  type: 'arrow_circle' | 'arrow_cross';
+}
+
 interface PresentationElement {
   attributes?: Record<string, string | null | undefined>;
   classNames?: string[];
@@ -27,6 +33,11 @@ interface PresentationElement {
 }
 
 const PRESENTATION_PROPERTIES = new Set(['fill', 'stroke', 'stroke-dasharray', 'stroke-width', 'color']);
+
+interface PaintDeclaration {
+  important: boolean;
+  value: string;
+}
 
 /** Projects Mermaid's rendered classDef/style output without making it shared app state. */
 export function extractMermaidPresentation(svg: SVGSVGElement): MermaidPresentation {
@@ -62,26 +73,26 @@ export function getMermaidPresentationFromElement({
   style,
   tagName,
 }: PresentationElement): MermaidItemPresentation {
-  const declarations: Record<string, string> = {};
+  const declarations: Record<string, PaintDeclaration> = {};
   for (const property of PRESENTATION_PROPERTIES) {
     const attribute = attributes[property];
     if (attribute) {
-      declarations[property] = attribute;
+      declarations[property] = { important: false, value: attribute };
     }
   }
   for (const stylesheet of css) {
     for (const rule of getMatchingRules(stylesheet, classNames, rootId, tagName)) {
-      Object.assign(declarations, parseDeclarations(rule));
+      applyDeclarations(declarations, parseDeclarations(rule));
     }
   }
-  Object.assign(declarations, parseDeclarations(style));
+  applyDeclarations(declarations, parseDeclarations(style));
 
   return {
-    fill: normalizePaint(declarations.fill),
-    stroke: normalizePaint(declarations.stroke),
-    strokeDasharray: normalizeValue(declarations['stroke-dasharray']),
-    strokeWidth: normalizeValue(declarations['stroke-width']),
-    text: normalizePaint(declarations.color),
+    fill: normalizePaint(declarations.fill?.value),
+    stroke: normalizePaint(declarations.stroke?.value),
+    strokeDasharray: normalizeValue(declarations['stroke-dasharray']?.value),
+    strokeWidth: normalizeValue(declarations['stroke-width']?.value),
+    text: normalizePaint(declarations.color?.value),
   };
 }
 
@@ -106,6 +117,18 @@ export function getCanvasNodePaint(presentation: MermaidItemPresentation): Canva
 
 export function getCanvasHandlePaint(active: boolean): string {
   return active ? 'var(--selection)' : 'var(--diagram-item-stroke-fallback)';
+}
+
+export function getCanvasEdgeMarker(type: CanvasEdgeMarker['type'], color: string): CanvasEdgeMarker {
+  const encodedColor = [...color]
+    .map((character) => character.codePointAt(0)?.toString(16) ?? '')
+    .join('-');
+
+  return {
+    color,
+    id: `arielcharts-flow-edge-${type === 'arrow_circle' ? 'circle' : 'cross'}-${encodedColor}`,
+    type,
+  };
 }
 
 function getElementPresentation(element: Element, root: SVGGElement, css: string[]): MermaidItemPresentation {
@@ -153,12 +176,24 @@ function selectorMatches(selector: string, classNames: string[], rootId: string 
   return selectorClasses.every((className) => classNames.includes(className));
 }
 
-function parseDeclarations(source: string | null | undefined): Record<string, string> {
+function applyDeclarations(
+  target: Record<string, PaintDeclaration>,
+  declarations: Array<[string, PaintDeclaration]>,
+): void {
+  for (const [property, declaration] of declarations) {
+    const current = target[property];
+    if (!current?.important || declaration.important) {
+      target[property] = declaration;
+    }
+  }
+}
+
+function parseDeclarations(source: string | null | undefined): Array<[string, PaintDeclaration]> {
   if (!source) {
-    return {};
+    return [];
   }
 
-  return Object.fromEntries(source.split(';').flatMap((entry) => {
+  return source.split(';').flatMap((entry): Array<[string, PaintDeclaration]> => {
     const separator = entry.indexOf(':');
     if (separator < 1) {
       return [];
@@ -167,8 +202,13 @@ function parseDeclarations(source: string | null | undefined): Record<string, st
     if (!PRESENTATION_PROPERTIES.has(property)) {
       return [];
     }
-    return [[property, entry.slice(separator + 1).trim().replace(/\s*!important\s*$/i, '')]];
-  }));
+    const rawValue = entry.slice(separator + 1).trim();
+    const important = /\s*!important\s*$/i.test(rawValue);
+    return [[property, {
+      important,
+      value: rawValue.replace(/\s*!important\s*$/i, ''),
+    }]];
+  });
 }
 
 function normalizePaint(value: string | undefined): string | undefined {

@@ -39,6 +39,7 @@ import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLink
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
 import {
   extractMermaidPresentation,
+  getCanvasEdgeMarker,
   getCanvasHandlePaint,
   getCanvasNodePaint,
   type MermaidItemPresentation,
@@ -121,8 +122,6 @@ const FLOW_NODE_TYPES: NodeTypes = {
 };
 const FLOW_PRO_OPTIONS = { hideAttribution: true };
 const FLOW_EDGE_COLOR = 'var(--diagram-item-stroke-fallback)';
-const FLOW_EDGE_MARKER_CIRCLE_ID = 'arielcharts-flow-edge-circle';
-const FLOW_EDGE_MARKER_CROSS_ID = 'arielcharts-flow-edge-cross';
 const FLOW_HANDLE_POSITIONS = [Position.Top, Position.Right, Position.Bottom, Position.Left] as const;
 const GHOST_NODE_WIDTH = 144;
 const GHOST_NODE_HEIGHT = 56;
@@ -422,6 +421,11 @@ export function DiagramCanvas({
       }));
   }, [graph, interactiveNodeBounds, mermaidPresentation.edges, selectedEdgeIndex]);
 
+  const flowEdgeMarkerColors = useMemo(() => [...new Set([
+    FLOW_EDGE_COLOR,
+    ...mermaidPresentation.edges.flatMap((presentation) => presentation.stroke ? [presentation.stroke] : []),
+  ])], [mermaidPresentation.edges]);
+
   const useReactFlowRenderer = isFlowchart && flowNodes.length > 0;
   const flowViewport = useMemo<Viewport>(() => ({
     x: viewport.panX,
@@ -517,6 +521,7 @@ export function DiagramCanvas({
   }, [connectionPreviewSourceId, cursorPoint, readOnly, viewport]);
 
   const displayedToolbarRect = screenSelectionBounds ?? { height: 0, width: 0, x: 16, y: 16 };
+  const canvasViewportBottomOffset = canvasSize.height - (canvasViewport.y + canvasViewport.height);
   const selectedToolbarPosition = getSafeToolbarPosition({
     anchor: {
       x: displayedToolbarRect.x + (displayedToolbarRect.width / 2),
@@ -1405,7 +1410,7 @@ export function DiagramCanvas({
 
       {useReactFlowRenderer ? (
         <div className="diagram-reactflow-layer">
-          <FlowEdgeMarkers />
+          <FlowEdgeMarkers colors={flowEdgeMarkerColors} />
           <FlowNodeInteractionContext.Provider value={flowNodeInteraction}>
             <ReactFlow
               colorMode={theme}
@@ -1564,7 +1569,7 @@ export function DiagramCanvas({
               padding: '8px 10px',
               pointerEvents: 'auto',
               position: 'absolute',
-              bottom: BOTTOM_TOOLBAR_INSET + BOTTOM_CONTROLS_HEIGHT + BOTTOM_TOOLBAR_GAP,
+              bottom: canvasViewportBottomOffset + BOTTOM_TOOLBAR_INSET + BOTTOM_CONTROLS_HEIGHT + BOTTOM_TOOLBAR_GAP,
               zIndex: 20,
             }}
           >
@@ -1771,7 +1776,7 @@ export function DiagramCanvas({
               background: 'var(--control-surface)',
               border: '1px solid var(--control-border)',
               borderRadius: 8,
-              bottom: BOTTOM_TOOLBAR_INSET,
+              bottom: canvasViewportBottomOffset + BOTTOM_TOOLBAR_INSET,
               color: 'var(--ink-muted)',
               display: 'inline-flex',
               gap: 6,
@@ -2012,34 +2017,42 @@ export function DiagramCanvas({
   );
 }
 
-function FlowEdgeMarkers() {
+function FlowEdgeMarkers({ colors }: { colors: string[] }) {
   return (
     <svg aria-hidden="true" focusable="false" style={{ height: 0, position: 'absolute', width: 0 }}>
       <defs>
-        <marker
-          id={FLOW_EDGE_MARKER_CIRCLE_ID}
-          markerHeight="10"
-          markerUnits="strokeWidth"
-          markerWidth="10"
-          orient="auto"
-          refX="9"
-          refY="5"
-          viewBox="0 0 10 10"
-        >
-          <circle cx="5" cy="5" fill="var(--surface-canvas)" r="3" stroke={FLOW_EDGE_COLOR} strokeWidth="1.6" />
-        </marker>
-        <marker
-          id={FLOW_EDGE_MARKER_CROSS_ID}
-          markerHeight="10"
-          markerUnits="strokeWidth"
-          markerWidth="10"
-          orient="auto"
-          refX="9"
-          refY="5"
-          viewBox="0 0 10 10"
-        >
-          <path d="M3 3 L7 7 M7 3 L3 7" fill="none" stroke={FLOW_EDGE_COLOR} strokeLinecap="round" strokeWidth="1.8" />
-        </marker>
+        {colors.flatMap((color) => {
+          const circle = getCanvasEdgeMarker('arrow_circle', color);
+          const cross = getCanvasEdgeMarker('arrow_cross', color);
+          return [
+            <marker
+              id={circle.id}
+              key={circle.id}
+              markerHeight="10"
+              markerUnits="strokeWidth"
+              markerWidth="10"
+              orient="auto"
+              refX="9"
+              refY="5"
+              viewBox="0 0 10 10"
+            >
+              <circle cx="5" cy="5" fill="var(--surface-canvas)" r="3" stroke={circle.color} strokeWidth="1.6" />
+            </marker>,
+            <marker
+              id={cross.id}
+              key={cross.id}
+              markerHeight="10"
+              markerUnits="strokeWidth"
+              markerWidth="10"
+              orient="auto"
+              refX="9"
+              refY="5"
+              viewBox="0 0 10 10"
+            >
+              <path d="M3 3 L7 7 M7 3 L3 7" fill="none" stroke={cross.color} strokeLinecap="round" strokeWidth="1.8" />
+            </marker>,
+          ];
+        })}
       </defs>
     </svg>
   );
@@ -2108,7 +2121,7 @@ function getLinkText(link: { text?: string | { text?: string } }): string | unde
   return link.text?.text;
 }
 
-function getFlowEdgePresentation(link: DiagramLink, presentation: MermaidItemPresentation = {}): Pick<Edge, 'markerEnd' | 'style'> {
+export function getFlowEdgePresentation(link: DiagramLink, presentation: MermaidItemPresentation = {}): Pick<Edge, 'markerEnd' | 'style'> {
   const strokeWidth = link.stroke === 'thick' ? 3 : 1.8;
   const strokeDasharray = link.stroke === 'dotted' ? '5 5' : undefined;
   const style: CSSProperties = {
@@ -2122,9 +2135,9 @@ function getFlowEdgePresentation(link: DiagramLink, presentation: MermaidItemPre
     case 'arrow_open':
       return { markerEnd: { color: markerColor, type: MarkerType.Arrow }, style };
     case 'arrow_circle':
-      return { markerEnd: FLOW_EDGE_MARKER_CIRCLE_ID, style };
+      return { markerEnd: getCanvasEdgeMarker('arrow_circle', markerColor).id, style };
     case 'arrow_cross':
-      return { markerEnd: FLOW_EDGE_MARKER_CROSS_ID, style };
+      return { markerEnd: getCanvasEdgeMarker('arrow_cross', markerColor).id, style };
     case 'arrow_point':
     default:
       return { markerEnd: { color: markerColor, type: MarkerType.ArrowClosed }, style };

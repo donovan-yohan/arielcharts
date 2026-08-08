@@ -127,14 +127,8 @@ async function expectTabKeyboardAndRename(page: Page): Promise<string> {
   assert(await canonicalSource(page) === '', 'A newly created diagram tab was not blank.');
   await closeFlyout(page, 'source');
   const renamed = 'API timing';
-  const current = await activeTabName(page);
-  await verifiedClick(page, page.getByRole('button', { name: `Rename ${current}`, exact: true }), 'rename diagram');
+  await renameActiveDiagram(page, renamed);
   await saveScreenshot(page, 'issue-14-rename');
-  const input = page.getByRole('textbox', { name: 'Diagram name', exact: true });
-  await input.fill(renamed);
-  await input.press('Enter');
-  await page.getByRole('tab', { name: renamed, exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
-  assert(await activeTabName(page) === renamed, `Renamed tab was not active: ${renamed}`);
   const mainTab = page.getByRole('tab', { name: 'Main', exact: true });
   await mainTab.focus();
   await mainTab.press('ArrowRight');
@@ -238,7 +232,9 @@ async function expectRendererKindFit(page: Page): Promise<void> {
   await replaceSource(page, API_SEQUENCE_FIXTURE);
   await waitForCanvas(page, 'generic');
   await closeFlyout(page, 'source');
-  await page.waitForTimeout(250);
+  await page.waitForFunction((previous) => (
+    document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous
+  ), zoomed, { timeout: 5_000 });
   const staticTransform = await layer.getAttribute('style');
   assert(staticTransform !== zoomed, `Editable-to-static renderer transition did not fit the camera: ${zoomed}`);
   await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), 'static renderer fit diagram');
@@ -275,6 +271,17 @@ async function expectThemeContract(page: Page): Promise<void> {
   await page.locator('html[data-theme="dark"]').waitFor({ state: 'attached', timeout: 5_000 });
 
   await page.emulateMedia({ colorScheme: 'light' });
+  const storagePeer = await page.context().newPage();
+  try {
+    await storagePeer.goto(page.url(), { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await storagePeer.evaluate(() => window.localStorage.clear());
+    await page.locator('html[data-theme="light"]').waitFor({ state: 'attached', timeout: 5_000 });
+    assert(await page.evaluate(() => window.localStorage.getItem('arielcharts.theme.v1')) === null,
+      'Clearing theme storage in a peer tab did not reset this tab to the system preference.');
+  } finally {
+    await storagePeer.close();
+  }
+
   await verifiedClick(page, control.getByRole('button', { name: 'System', exact: true }), 'system theme control');
   await page.locator('html[data-theme="light"]').waitFor({ state: 'attached', timeout: 5_000 });
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -398,8 +405,8 @@ async function expectActivityFlyoutFitSafety(page: Page): Promise<void> {
 }
 
 async function expectNoDevelopmentIndicator(page: Page): Promise<void> {
-  const indicator = await page.evaluate(() => document.querySelector('nextjs-portal, [data-nextjs-dev-tools], [data-nextjs-toast]'));
-  assert(!indicator, 'Browser evidence is running with a Next.js development indicator; use the production owned-services mode for screenshots.');
+  const hasIndicator = await page.evaluate(() => !!document.querySelector('nextjs-portal, [data-nextjs-dev-tools], [data-nextjs-toast]'));
+  assert(!hasIndicator, 'Browser evidence is running with a Next.js development indicator; use the production owned-services mode for screenshots.');
 }
 
 async function expectResponsiveControls(page: Page, label: string, diagramName: string): Promise<void> {

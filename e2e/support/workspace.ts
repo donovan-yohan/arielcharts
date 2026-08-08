@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { assert } from './assert.ts';
 
 export const FLOWCHART_FIXTURE = `flowchart LR
@@ -59,7 +59,7 @@ export async function ensureSourceFlyoutOpen(page: Page): Promise<Locator> {
 export async function replaceSource(page: Page, source: string): Promise<void> {
   const editor = await ensureSourceFlyoutOpen(page);
   await editor.click();
-  await page.keyboard.press('Control+A');
+  await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.insertText(source);
 }
 
@@ -72,14 +72,10 @@ export async function canonicalSource(page: Page): Promise<string> {
 }
 
 export async function waitForSource(page: Page, expected: string): Promise<void> {
-  await page.waitForFunction((source) => {
-    const lines = [...document.querySelectorAll('.cm-line')];
-    return lines.map((line) => {
-      const copy = line.cloneNode(true) as HTMLElement;
-      copy.querySelectorAll('.cm-ySelectionCaret, .cm-widgetBuffer').forEach((node) => node.remove());
-      return copy.textContent ?? '';
-    }).join('\n') === source;
-  }, expected, { timeout: 15_000 });
+  await expect.poll(() => canonicalSource(page), {
+    message: 'CodeMirror source did not reach the expected canonical value.',
+    timeout: 15_000,
+  }).toBe(expected);
 }
 
 export async function selectTabByName(page: Page, name: string): Promise<void> {

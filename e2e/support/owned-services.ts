@@ -1,6 +1,7 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -8,6 +9,19 @@ export type E2eEndpoints = { baseUrl: string; mcpUrl: string };
 
 type OwnedProcess = { child: ChildProcess; label: string; output: string[] };
 type FileSnapshot = { bytes: Buffer | null; path: string };
+
+const SERVICE_HEALTH_FETCH_TIMEOUT_MS = 5_000;
+
+function resolveCorepackCommand(): string {
+  const executable = process.platform === 'win32' ? 'corepack.cmd' : 'corepack';
+  const bundledCorepack = join(dirname(process.execPath), executable);
+  if (!existsSync(bundledCorepack)) {
+    throw new Error(`Corepack executable was not found next to the active Node runtime: ${bundledCorepack}`);
+  }
+  return bundledCorepack;
+}
+
+const COREPACK_COMMAND = resolveCorepackCommand();
 
 async function snapshotFile(path: string): Promise<FileSnapshot> {
   try {
@@ -37,7 +51,7 @@ async function waitFor(url: string, label: string): Promise<void> {
   let lastError = 'not started';
   for (let attempt = 0; attempt < 120; attempt += 1) {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: AbortSignal.timeout(SERVICE_HEALTH_FETCH_TIMEOUT_MS) });
       if (response.ok) return;
       lastError = `HTTP ${response.status}`;
     } catch (error) {
@@ -49,7 +63,9 @@ async function waitFor(url: string, label: string): Promise<void> {
 }
 
 function start(label: string, args: string[], env: NodeJS.ProcessEnv): OwnedProcess {
-  const child = spawn('npx', args, {
+  // Corepack reads this repository's packageManager field, pinning the command
+  // to pnpm@10.15.0 without letting npx resolve a network package at runtime.
+  const child = spawn(COREPACK_COMMAND, ['pnpm', ...args], {
     cwd: process.cwd(),
     detached: true,
     env,
@@ -107,8 +123,8 @@ export async function withOwnedServices<T>(run: (endpoints: E2eEndpoints) => Pro
 
   const webPort = portFromEnv('E2E_UX_WEB_PORT', 3303);
   const serverPort = portFromEnv('E2E_UX_SERVER_PORT', 4300);
-  // Next dev accepts localhost by default; using 127.0.0.1 here triggers its
-  // development-origin guard and prevents a deterministic local browser gate.
+  // This owned production stack is loopback-only. Keep one localhost origin in
+  // the browser, server allowlist, and public runtime configuration.
   const baseUrl = `http://localhost:${webPort}`;
   const mcpUrl = `http://localhost:${serverPort}/mcp`;
   const dataDir = await mkdtemp(join(tmpdir(), 'arielcharts-ux-e2e-'));
@@ -130,9 +146,9 @@ export async function withOwnedServices<T>(run: (endpoints: E2eEndpoints) => Pro
   try {
     // Screenshots are product evidence, so build and run production services.
     // This also keeps Next's development indicator out of the captures.
-    await runCommand('production build', ['--yes', 'pnpm@10.15.0', 'build'], webEnv);
-    server = start('server', ['--yes', 'pnpm@10.15.0', '--filter', '@arielcharts/server', 'start'], runtimeEnv);
-    web = start('web', ['--yes', 'pnpm@10.15.0', '--filter', '@arielcharts/web', 'start'], webEnv);
+    await runCommand('production build', ['build'], webEnv);
+    server = start('server', ['--filter', '@arielcharts/server', 'start'], runtimeEnv);
+    web = start('web', ['--filter', '@arielcharts/web', 'start'], webEnv);
     await Promise.all([waitFor(`${baseUrl}/`, 'web'), waitFor(`http://localhost:${serverPort}/health`, 'server')]);
     return await run({ baseUrl, mcpUrl });
   } catch (error) {
@@ -141,7 +157,7 @@ export async function withOwnedServices<T>(run: (endpoints: E2eEndpoints) => Pro
       .filter((process) => process.output.length > 0)
       .map((process) => `${process.label}: ${process.output.join('').slice(-3_000)}`)
       .join('\n');
-    throw new Error(`${error instanceof Error ? error.message : String(error)}${diagnostics ? `\n${diagnostics}` : ''}`);
+    throw new Error(`${error instanceof Error ? error.message : String(error)}${diagnostics ? `\n${diagnostics}` : ''}`, { cause: error });
   } finally {
     await Promise.all([web, server].filter((process): process is OwnedProcess => process !== null).map(stop));
     await rm(dataDir, { force: true, recursive: true });

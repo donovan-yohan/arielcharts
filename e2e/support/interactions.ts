@@ -65,13 +65,29 @@ export async function assertDocumentHasNoHorizontalOverflow(page: Page, toleranc
 type Rgb = { b: number; g: number; r: number };
 
 function parseRgb(value: string, label: string): Rgb {
-  const match = value.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/u);
+  const component = String.raw`(?:\d+(?:\.\d+)?|\.\d+)`;
+  const match = value.trim().match(new RegExp(
+    String.raw`^rgba?\(\s*(${component})(?:\s*,\s*|\s+)(${component})(?:\s*,\s*|\s+)(${component})(?:\s*(?:,|\/)\s*(${component}%?))?\s*\)$`,
+    'u',
+  ));
   if (match) {
-    return { r: Number(match[1]), g: Number(match[2]), b: Number(match[3]) };
+    const channels = match.slice(1, 4).map(Number);
+    assert(channels.every((channel) => Number.isFinite(channel) && channel >= 0 && channel <= 255),
+      `${label} has an RGB channel outside 0-255: ${value}.`);
+    if (match[4] !== undefined) {
+      const alpha = match[4].endsWith('%') ? Number.parseFloat(match[4]) / 100 : Number(match[4]);
+      assert(Number.isFinite(alpha) && alpha === 1,
+        `${label} must be opaque for contrast calculations; received ${value}.`);
+    }
+    return { r: channels[0] ?? 0, g: channels[1] ?? 0, b: channels[2] ?? 0 };
   }
-  const hex = value.trim().match(/^#([\da-f]{3}|[\da-f]{6})$/iu)?.[1];
+  const hex = value.trim().match(/^#([\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/iu)?.[1];
   assert(hex, `${label} is not a resolved RGB or hex color: ${value}.`);
-  const expanded = hex.length === 3 ? [...hex].map((channel) => `${channel}${channel}`).join('') : hex;
+  const expanded = hex.length <= 4 ? [...hex].map((channel) => `${channel}${channel}`).join('') : hex;
+  if (expanded.length === 8) {
+    assert(Number.parseInt(expanded.slice(6, 8), 16) === 255,
+      `${label} must be opaque for contrast calculations; received ${value}.`);
+  }
   return {
     r: Number.parseInt(expanded.slice(0, 2), 16),
     g: Number.parseInt(expanded.slice(2, 4), 16),

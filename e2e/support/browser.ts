@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 export const DESKTOP_VIEWPORT = { width: 1440, height: 960 } as const;
@@ -33,14 +35,17 @@ export async function launchBrowserHarness(): Promise<BrowserHarness> {
       return { context, page };
     },
     async close() {
-      await Promise.all([...contexts].map((context) => context.close()));
-      await browser.close();
+      try {
+        await Promise.allSettled([...contexts].map((context) => context.close()));
+      } finally {
+        await browser.close();
+      }
     },
   };
 }
 
 export async function saveScreenshot(page: Page, name: string): Promise<string> {
-  const path = `/tmp/arielcharts-${name}.png`;
+  const path = join(tmpdir(), `arielcharts-${name}.png`);
   await page.screenshot({ path, fullPage: true });
   return path;
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getCanvasEdgeMarker,
   getCanvasHandlePaint,
   getCanvasNodePaint,
   getMermaidNodePresentation,
@@ -35,6 +36,37 @@ describe('getMermaidPresentationFromElement', () => {
     });
   });
 
+  it('keeps important stylesheet paint ahead of normal inline paint', () => {
+    expect(getMermaidPresentationFromElement({
+      classNames: ['critical'],
+      css: ['.critical { fill: #ffec99 !important; stroke: #d9480f !important; }'],
+      style: 'fill:#ffffff; stroke:#111111',
+    })).toMatchObject({
+      fill: '#ffec99',
+      stroke: '#d9480f',
+    });
+  });
+
+  it('lets later declarations win when cascade priority is equal', () => {
+    expect(getMermaidPresentationFromElement({
+      classNames: ['critical'],
+      css: [
+        '.critical { fill: #eeeeee; stroke: #111111 !important; }',
+        '.critical { fill: #dddddd; stroke: #222222 !important; }',
+      ],
+      style: 'fill:#ffffff; stroke:#333333 !important',
+    })).toMatchObject({
+      fill: '#ffffff',
+      stroke: '#333333',
+    });
+  });
+
+  it('does not let a later normal declaration displace an important declaration in the same block', () => {
+    expect(getMermaidPresentationFromElement({
+      style: 'color:#111111 !important; color:#222222',
+    }).text).toBe('#111111');
+  });
+
   it.each(['none', 'transparent'])('preserves authored fill:%s without substituting a fallback', (fill) => {
     const presentation = getMermaidPresentationFromElement({ style: `fill:${fill}` });
     expect(presentation.fill).toBe(fill);
@@ -44,6 +76,14 @@ describe('getMermaidPresentationFromElement', () => {
   it('keeps unstyled handles neutral until an explicit interaction state', () => {
     expect(getCanvasHandlePaint(false)).toBe('var(--diagram-item-stroke-fallback)');
     expect(getCanvasHandlePaint(true)).toBe('var(--selection)');
+  });
+
+  it.each(['arrow_circle', 'arrow_cross'] as const)('carries authored color into %s markers', (type) => {
+    const marker = getCanvasEdgeMarker(type, '#d9480f');
+
+    expect(marker).toMatchObject({ color: '#d9480f', type });
+    expect(marker.id).toContain(type === 'arrow_circle' ? 'circle' : 'cross');
+    expect(getCanvasEdgeMarker(type, '#111111').id).not.toBe(marker.id);
   });
 
   it('keeps Mermaid-owned text color separate from shape fill across app themes', () => {

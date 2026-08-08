@@ -14,8 +14,7 @@ import * as Y from 'yjs';
 import { DiagramCanvas } from './diagram-canvas';
 import {
   MutationQueue,
-  createNodeId,
-  ensureUniqueId,
+  observeMutationFailure,
   parseFlowchartSnapshot,
   type DiagramLinkType,
   type DiagramNodeShape,
@@ -273,6 +272,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [lastValidSvg, setLastValidSvg] = useState('');
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [shareCopyState, setShareCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [sessionIdCopyState, setSessionIdCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [promptCopyState, setPromptCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
@@ -693,20 +693,28 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     handleNodePositionsChange({ [nodeId]: position }, 'merge');
   }, [handleNodePositionsChange]);
 
+  const runMutation = useCallback((mutation: Promise<unknown>) => {
+    setMutationError(null);
+    observeMutationFailure(mutation, (error) => {
+      setMutationError(error instanceof Error ? error.message : 'The diagram update could not be applied.');
+    });
+  }, []);
+
   const handleAddConnectedNode = useCallback((source: string, label: string, shape: DiagramNodeShape, position: NodePosition, type: DiagramLinkType) => {
     const queue = mutationQueueRef.current;
-    if (!queue || !flowchartSnapshot) {
+    if (!queue) {
       return;
     }
 
-    const nodeId = ensureUniqueId(flowchartSnapshot.nodeIds, createNodeId(label));
-    void queue.addNode(label, { id: nodeId, shape })
-      .then(() => queue.addEdge(source, nodeId, { type }))
-      .then(() => {
+    runMutation(queue.addConnectedNode(source, label, { shape, type })
+      .then(({ nodeId }) => {
+        if (!nodeId) {
+          return;
+        }
         handleSingleNodePositionChange(nodeId, position);
         setSelectedNodeIds([nodeId]);
-      });
-  }, [flowchartSnapshot, handleSingleNodePositionChange]);
+      }));
+  }, [handleSingleNodePositionChange, runMutation]);
 
   return (
     <main className="workspace-shell">
@@ -840,6 +848,13 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             </div>
           ) : null}
 
+          {mutationError ? (
+            <div data-testid="mutation-error-banner" className="error-banner" role="status">
+              <strong>diagram update not applied</strong>
+              <span>{mutationError}</span>
+            </div>
+          ) : null}
+
           <DiagramCanvas
             className="diagram-canvas"
             emptyMessage={mermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
@@ -856,8 +871,18 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
                 void mutationQueueRef.current?.removeNode(id);
               }
             }}
-            onDeleteEdge={(edge) => mutationQueueRef.current?.removeEdgeByIdentity(edge)}
-            onEditEdgeLabel={(edge, label) => mutationQueueRef.current?.editEdgeLabelByIdentity(edge, label)}
+            onDeleteEdge={(edge) => {
+              const queue = mutationQueueRef.current;
+              if (queue) {
+                runMutation(queue.removeEdgeByIdentity(edge));
+              }
+            }}
+            onEditEdgeLabel={(edge, label) => {
+              const queue = mutationQueueRef.current;
+              if (queue) {
+                runMutation(queue.editEdgeLabelByIdentity(edge, label));
+              }
+            }}
             onEditNodeLabel={(nodeId, label) => mutationQueueRef.current?.editNodeLabel(nodeId, label)}
             onGroupNodes={(ids, label) => mutationQueueRef.current?.groupNodes(ids, label)}
             onInteractionModeChange={setInteractionMode}

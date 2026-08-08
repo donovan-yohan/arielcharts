@@ -35,6 +35,7 @@ import type { DiagramEdgeIdentity, DiagramLink, DiagramLinkType, DiagramNode, Di
 import { getDiagramEdgeIdentity, resolveDiagramEdgeIndex } from '../lib/diagram-mutations';
 import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
+import { getConnectNodeActivation } from '../lib/diagram-connect-state';
 import {
   buildSvgHitMap,
   getBoundsCenter,
@@ -895,25 +896,17 @@ export function DiagramCanvas({
     setToolbarOpen(true);
 
     if (mode === 'connect') {
-      if (!connectSourceId) {
-        setConnectSourceId(nodeId);
+      const activation = getConnectNodeActivation(nodeId, connectSourceId, interactiveNodeBounds);
+      if (activation.kind === 'choose-source') {
+        setConnectSourceId(activation.nodeId);
         return;
       }
 
-      if (connectSourceId === nodeId) {
+      if (activation.kind === 'noop') {
         return;
       }
 
-      const sourceBounds = interactiveNodeBounds?.get(connectSourceId);
-      const targetBounds = interactiveNodeBounds?.get(nodeId);
-      const midpoint = sourceBounds && targetBounds
-        ? {
-            x: (getBoundsCenter(sourceBounds).x + getBoundsCenter(targetBounds).x) / 2,
-            y: (getBoundsCenter(sourceBounds).y + getBoundsCenter(targetBounds).y) / 2,
-          }
-        : { x: 0, y: 0 };
-
-      setPendingEdge({ midpoint, source: connectSourceId, target: nodeId });
+      setPendingEdge(activation.edge);
       setPendingEdgeLabel('');
       setConnectSourceId(null);
       return;
@@ -1091,8 +1084,7 @@ export function DiagramCanvas({
     }
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      setSelection([nodeId]);
-      setToolbarOpen(true);
+      handleNodeClick(nodeId, false);
     }
     if (event.key === 'F2') {
       event.preventDefault();
@@ -1106,7 +1098,7 @@ export function DiagramCanvas({
       setToolbarOpen(false);
       containerRef.current?.focus();
     }
-  }, [moveFocus, nodeById, openNodeEditor, readOnly, setSelection]);
+  }, [handleNodeClick, moveFocus, nodeById, openNodeEditor, readOnly]);
 
   const flowNodeInteraction = useMemo<FlowNodeInteractionContextValue>(() => ({
     focusedNodeId,

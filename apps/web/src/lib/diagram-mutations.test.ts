@@ -3,6 +3,7 @@ import * as Y from 'yjs';
 import {
   MutationQueue,
   getDiagramEdgeIdentity,
+  observeMutationFailure,
   parseFlowchartSnapshot,
 } from './diagram-mutations';
 
@@ -43,5 +44,38 @@ describe('collaborative edge mutations', () => {
     expect(links).toHaveLength(2);
     expect(links[1]?.source).toBe('C');
     expect(links[1]?.target).toBe('D');
+  });
+
+  it('reports a stale edge edit rejection to its event boundary', async () => {
+    const doc = new Y.Doc();
+    const yText = doc.getText('mermaid');
+    setText(yText, 'flowchart LR\n  A --> B\n  B --> C\n');
+    const selected = getDiagramEdgeIdentity(parseFlowchartSnapshot(yText.toString()).links[1]!, 1);
+    setText(yText, 'flowchart LR\n  A --> B\n  C --> D\n');
+
+    const queue = new MutationQueue(yText);
+    const failures: unknown[] = [];
+    observeMutationFailure(queue.editEdgeLabelByIdentity(selected, 'safe'), (error) => { failures.push(error); });
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toBeInstanceOf(Error);
+    expect((failures[0] as Error).message).toContain('selected edge changed');
+  });
+
+  it('uses the effective node id when a preferred id is claimed before a connected-node mutation runs', async () => {
+    const doc = new Y.Doc();
+    const yText = doc.getText('mermaid');
+    setText(yText, 'flowchart LR\n  A[Source]\n');
+
+    const queue = new MutationQueue(yText);
+    await queue.addNode('Claimed', { id: 'new_node' });
+    const result = await queue.addConnectedNode('A', 'New Node', { id: 'new_node' });
+
+    expect(result.nodeId).toBe('new_node_2');
+    expect(result.snapshot.nodeIds).toContain('new_node_2');
+    expect(result.snapshot.links).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'A', target: 'new_node_2' }),
+    ]));
   });
 });

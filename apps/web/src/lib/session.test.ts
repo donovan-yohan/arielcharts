@@ -29,9 +29,22 @@ describe('session helpers', () => {
     expect(getDefaultMermaidText()).toContain('flowchart LR');
   });
 
-  it('derives the websocket endpoint for browser and integration clients', () => {
-    expect(getWebsocketServerUrl('http://charts.test')).toBe('ws://charts.test/ws');
-    expect(getWebsocketServerUrl('https://charts.test/base/')).toBe('wss://charts.test/base/ws');
+  it.each([
+    ['http://charts.test', 'ws://charts.test/ws'],
+    ['https://charts.test', 'wss://charts.test/ws'],
+    ['ws://charts.test', 'ws://charts.test/ws'],
+    ['wss://charts.test', 'wss://charts.test/ws'],
+  ])('normalizes the supported %s websocket base without downgrading security', (baseUrl, expected) => {
+    expect(getWebsocketServerUrl(baseUrl)).toBe(expected);
+  });
+
+  it('preserves base paths while normalizing trailing slashes and removing URL-only metadata', () => {
+    expect(getWebsocketServerUrl('wss://charts.test/base/path///?token=secret#fragment')).toBe('wss://charts.test/base/path/ws');
+    expect(getWebsocketServerUrl('ws://charts.test/base')).toBe('ws://charts.test/base/ws');
+  });
+
+  it('rejects protocols that cannot carry the Yjs WebSocket connection', () => {
+    expect(() => getWebsocketServerUrl('ftp://charts.test')).toThrow('Unsupported WebSocket base URL protocol: ftp:');
   });
 
   it('copies a modern MCP prompt that requires a fresh revision before writes', () => {

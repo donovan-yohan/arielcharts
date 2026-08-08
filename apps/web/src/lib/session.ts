@@ -23,9 +23,19 @@ export function getServerHttpUrl(): string {
 
 export function getWebsocketServerUrl(baseUrl = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:4000'): string {
   const endpoint = new URL(baseUrl);
-  endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:';
-  endpoint.pathname = `${endpoint.pathname.replace(/\/$/u, '')}/ws`;
+  const websocketProtocol = {
+    'http:': 'ws:',
+    'https:': 'wss:',
+    'ws:': 'ws:',
+    'wss:': 'wss:',
+  }[endpoint.protocol];
+  if (!websocketProtocol) {
+    throw new TypeError(`Unsupported WebSocket base URL protocol: ${endpoint.protocol}`);
+  }
+  endpoint.protocol = websocketProtocol;
+  endpoint.pathname = `${endpoint.pathname.replace(/\/+$/u, '')}/ws`;
   endpoint.search = '';
+  endpoint.hash = '';
   return endpoint.toString();
 }
 

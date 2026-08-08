@@ -115,7 +115,7 @@ jobs:
               if jq -e '
                 .acme_requested == true
                 and .configured == true
-                and .status == "active"
+                and .status == "Ready"
                 and any(.certificates[]?; .source == "fly" and .status == "active")
               ' <<<"$certificate" >/dev/null; then
                 echo "Fly ACME certificate is active for $hostname."

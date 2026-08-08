@@ -30,6 +30,8 @@ import {
 } from '../lib/diagram-layout';
 import { classifyDiagramCapability } from '../lib/diagram-capabilities';
 import { canUseFlowchartControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
+import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
+import { DragLayoutCommitter } from '../lib/drag-layout';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
 
 const DIAGRAMS_KEY = 'diagrams';
@@ -312,8 +314,10 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const joinedActivityRef = useRef(false);
   const editDebounceRef = useRef<number | null>(null);
   const currentIdentityRef = useRef<LocalIdentity | null>(null);
-  const addActivityRef = useRef<((action: ActivityEvent['action'], detail?: string) => void) | null>(null);
+  const addActivityRef = useRef<((action: ActivityEvent['action'], detail?: string, diagramId?: string) => void) | null>(null);
   const mutationQueueRef = useRef<MutationQueue | null>(null);
+  const undoManagerRef = useRef<Y.UndoManager | null>(null);
+  const dragCommitterRef = useRef<DragLayoutCommitter | null>(null);
   const diagramTabRefs = useRef(new Map<string, HTMLButtonElement>());
   const renameCancelledRef = useRef(false);
 
@@ -428,7 +432,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       }
     };
 
-    addActivityRef.current = (action, detail) => {
+    addActivityRef.current = (action, detail, diagramId) => {
       const actor = currentIdentityRef.current;
       if (!actor) {
         return;
@@ -439,6 +443,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
           action,
           actor: { name: actor.name, type: actor.type },
           detail,
+          diagram_id: diagramId,
           id: `${actor.name}-${Date.now()}-${randomSuffix(4)}`,
           timestamp: Date.now(),
         });
@@ -469,6 +474,10 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       if (editDebounceRef.current !== null) {
         window.clearTimeout(editDebounceRef.current);
       }
+      // This effect owns the provider/doc lifetime. Flush before either can be
+      // destroyed; active-tab cleanup may run before or after this one.
+      dragCommitterRef.current?.destroy();
+      dragCommitterRef.current = null;
       if (joinedActivityRef.current) {
         addActivityRef.current?.('left', 'Closed the session');
       }
@@ -493,6 +502,12 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     if (!activeDiagram) {
+      dragCommitterRef.current?.destroy();
+      dragCommitterRef.current = null;
+      if (undoManagerRef.current) {
+        destroyDiagramUndoManager(undoManagerRef.current);
+        undoManagerRef.current = null;
+      }
       mutationQueueRef.current = null;
       setMermaidText('');
       setNodePositions({});
@@ -515,19 +530,36 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     setRenderError(previewRegistryRef.current.getError(activeDiagram.id));
     setSelectedNodeIds([]);
     setInteractionMode('select');
-    mutationQueueRef.current = new MutationQueue(activeDiagram.yText, { transactionOrigin: 'visual' });
+    const undoManager = createDiagramUndoManager(activeDiagram.yText, activeDiagram.nodePositionsMap);
+    undoManagerRef.current = undoManager;
+    mutationQueueRef.current = new MutationQueue(activeDiagram.yText, { transactionOrigin: collaborationOrigins.visual });
+    const dragCommitter = new DragLayoutCommitter((positions) => {
+      collaboration?.doc.transact(() => {
+        writeNodePositions(activeDiagram.nodePositionsMap, positions, 'merge');
+      }, collaborationOrigins.visualLayout);
+    });
+    dragCommitterRef.current = dragCommitter;
     activeDiagram.yText.observe(syncText);
     activeDiagram.nodePositionsMap.observe(syncNodePositions);
 
     return () => {
       activeDiagram.yText.unobserve(syncText);
       activeDiagram.nodePositionsMap.unobserve(syncNodePositions);
+      dragCommitter.destroy();
+      if (dragCommitterRef.current === dragCommitter) {
+        dragCommitterRef.current = null;
+      }
+      destroyDiagramUndoManager(undoManager);
+      if (undoManagerRef.current === undoManager) {
+        undoManagerRef.current = null;
+      }
       mutationQueueRef.current = null;
     };
-  }, [activeDiagram]);
+  }, [activeDiagram, collaboration]);
 
   useEffect(() => {
-    if (openFlyout !== 'source' || !collaboration || !activeDiagram || !editorHostRef.current) {
+    const undoManager = undoManagerRef.current;
+    if (openFlyout !== 'source' || !collaboration || !activeDiagram || !editorHostRef.current || !undoManager) {
       return;
     }
 
@@ -537,7 +569,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       }
 
       editDebounceRef.current = window.setTimeout(() => {
-        addActivityRef.current?.('edited', 'Updated the diagram');
+        addActivityRef.current?.('edited', 'Updated the diagram', activeDiagram.id);
       }, EDIT_ACTIVITY_DEBOUNCE_MS);
     };
 
@@ -582,7 +614,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
         EditorView.lineWrapping,
         keymap.of(yUndoManagerKeymap),
         editorThemeRef.current.of(editorTheme),
-        yCollab(activeDiagram.yText, collaboration.awareness, { undoManager: new Y.UndoManager(activeDiagram.yText, { trackedOrigins: new Set([null]) }) }),
+        yCollab(activeDiagram.yText, collaboration.awareness, { undoManager }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && update.transactions.some((tr) => tr.isUserEvent('input'))) {
             handleLocalEdit();
@@ -802,12 +834,31 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
     collaboration.doc.transact(() => {
       writeNodePositions(activeDiagram.nodePositionsMap, positions, mode);
-    }, 'visual-layout');
+    }, collaborationOrigins.visualLayout);
   }, [activeDiagram, collaboration]);
 
   const handleSingleNodePositionChange = useCallback((nodeId: string, position: NodePosition) => {
     handleNodePositionsChange({ [nodeId]: position }, 'merge');
   }, [handleNodePositionsChange]);
+
+  const handleNodeDragStart = useCallback(() => {
+    undoManagerRef.current?.stopCapturing();
+  }, []);
+
+  const handleNodeDrag = useCallback((nodeId: string, position: NodePosition) => {
+    dragCommitterRef.current?.update(nodeId, position);
+  }, []);
+
+  const handleNodeDragStop = useCallback((nodeId: string, position: NodePosition) => {
+    const committer = dragCommitterRef.current;
+    if (!committer) {
+      handleSingleNodePositionChange(nodeId, position);
+      return;
+    }
+    committer.update(nodeId, position);
+    committer.flush();
+    undoManagerRef.current?.stopCapturing();
+  }, [handleSingleNodePositionChange]);
 
   const handleAddConnectedNode = useCallback((source: string, label: string, shape: DiagramNodeShape, position: NodePosition, type: DiagramLinkType) => {
     const queue = mutationQueueRef.current;
@@ -857,7 +908,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       collaboration.diagramOrder.push([id]);
     }, 'tab-create');
     setActiveDiagramId(id);
-    addActivityRef.current?.('created', `Created ${name}`);
+    addActivityRef.current?.('created', `Created ${name}`, id);
   }, [collaboration]);
 
   const commitDiagramName = useCallback(() => {
@@ -873,7 +924,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     collaboration.doc.transact(() => {
       collaboration.diagramsMap.get(renamingDiagramId)?.set(DIAGRAM_NAME_KEY, normalizedName);
     }, 'tab-rename');
-    addActivityRef.current?.('renamed', `Renamed ${current.name} to ${normalizedName}`);
+    addActivityRef.current?.('renamed', `Renamed ${current.name} to ${normalizedName}`, renamingDiagramId);
     setRenamingDiagramId(null);
     setDiagramNameDraft('');
   }, [collaboration, diagramNameDraft, diagrams, renamingDiagramId]);
@@ -890,7 +941,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     if (activeDiagramId === diagramId) {
       setActiveDiagramId(diagrams[index + 1]?.id ?? diagrams[index - 1]?.id ?? null);
     }
-    if (deleted) addActivityRef.current?.('deleted', `Deleted ${deleted.name}`);
+    if (deleted) addActivityRef.current?.('deleted', `Deleted ${deleted.name}`, diagramId);
   }, [activeDiagramId, collaboration, diagrams]);
 
   return (
@@ -1113,6 +1164,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             onEditNodeLabel={(nodeId, label) => mutationQueueRef.current?.editNodeLabel(nodeId, label)}
             onGroupNodes={(ids, label) => mutationQueueRef.current?.groupNodes(ids, label)}
             onInteractionModeChange={setInteractionMode}
+            onNodeDrag={handleNodeDrag}
+            onNodeDragStart={handleNodeDragStart}
+            onNodeDragStop={handleNodeDragStop}
             onNodePositionsChange={handleNodePositionsChange}
             onSelectedNodeIdsChange={setSelectedNodeIds}
             onUngroupNodes={(id) => mutationQueueRef.current?.ungroupSubgraph(id)}

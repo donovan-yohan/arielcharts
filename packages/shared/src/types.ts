@@ -26,6 +26,8 @@ export interface ActivityEvent {
   action: 'joined' | 'left' | 'edited' | 'replaced' | 'created' | 'renamed' | 'deleted';
   detail?: string;
   diagram_id?: string;
+  base_revision?: string;
+  result_revision?: string;
 }
 
 export interface DiagramSummary {

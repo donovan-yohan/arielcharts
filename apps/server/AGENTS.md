@@ -11,11 +11,10 @@ the internal tool boundary; `mcp-server.ts` exposes the modern MCP contract;
   A diagram contains `name`, `mermaid` (`Y.Text`), and `nodePositions`
   (`Y.Map`). Preserve this shape or migrate it deliberately with persistence
   coverage.
-- The server initializes exactly one `main`/`Main` diagram before clients can
-  observe a new session. Server and MCP commands retain at least one diagram;
-  raw browser Yjs writes can currently bypass that guard and produce zero.
-  Deterministic name reconciliation is current behavior; zero-tab
-  preservation/reseeding is a #13 invariant and proof target.
+- Catalog repair validates diagram structure, canonicalizes order and names,
+  and reseeds `main`/`Main` only when no valid diagram remains. It runs after
+  raw Yjs updates and persisted loads with a server-private origin; preserve
+  valid concurrent entries and cover changes in `src/lib/session-manager.test.ts`.
 - Server-owned document mutations are transactions. Persist only a coherent
   document snapshot after mutation or accepted websocket sync.
 - `getSession`/create use a whole-session revision; read/write/rename/delete
@@ -26,14 +25,17 @@ the internal tool boundary; `mcp-server.ts` exposes the modern MCP contract;
 ## Collaboration and protocol boundaries
 
 - Awareness is live, per-connection presence. Do not put browser-local UI
-  state in awareness or durable document state. If presence persistence is
-  changed, keep the snapshot/listing reason explicit and test cleanup and
-  reconnect behavior.
+  state in awareness or durable document state. Each live socket owns its
+  claimed client ids; stale/idempotent foreign echoes are filtered, while
+  novel or advancing foreign entries are rejected. Preserve reconnect-safe
+  ownership cleanup and `src/lib/websocket.test.ts` coverage.
 - Keep activity as a bounded collaboration feed. It is not a version-history
-  store; snapshots/restore need their own revision model.
+  store; MCP mutations identify the diagram and record applicable base/result
+  revisions. Snapshots/restore need their own revision model.
 - `POST /mcp` is modern-only MCP `2026-07-28`; application `sessionId` and
   `diagramId` are explicit tool inputs, not MCP transport-session state. Keep
-  header validation and CORS behavior covered in `src/index.test.ts`.
+  fetch-before-write revision checks, header validation, and CORS behavior
+  covered in `src/lib/mcp.test.ts` and `src/index.test.ts`.
 
 Run the server suite with `pnpm --filter @arielcharts/server test`; use the
 root gates for a cross-package or protocol change.

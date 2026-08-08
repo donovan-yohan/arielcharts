@@ -20,18 +20,23 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
   geometry. Treat visible/clickable toolbar controls and stable preview bounds
   as browser-testable behavior.
 
-## #12/#13 guardrails
+## Mermaid and collaboration invariants
 
 - Mermaid parser-result classification decides whether controls are structural.
   Derived SVG, kind, and errors are kept in a local per-diagram preview
   registry; stale or invalid source remains source-only.
-- Track only explicit local-human transaction origins in undo. Remote, MCP,
-  initialization, and reconciliation updates must never enter that stack.
-- Coalesce durable layout writes during a local drag and apply remote layout
-  changes without jittering the active drag.
+- Undo is per diagram and tracks only explicit local-human source/visual/layout
+  origins. Remote, MCP, initialization, and reconciliation updates never enter
+  that stack; keep `src/lib/collaboration-origins.test.ts` authoritative.
+- `DragLayoutCommitter` batches durable writes at 120 ms, always flushes the
+  final position, and leaves the active node on a local overlay while remote
+  layout updates merge. Keep `src/lib/drag-layout.test.ts` and
+  `test:e2e-collaboration` green.
 
 Run `pnpm --filter @arielcharts/web test` for focused changes. Run
 `npx tsx e2e-validate.ts` for legacy canvas coverage and
-`pnpm test:e2e-sequence` for generic Mermaid coverage. Inspect
+`pnpm test:e2e-sequence` for generic Mermaid coverage. For collaboration
+changes also run `pnpm test:e2e-collaboration`. Inspect
 `/tmp/arielcharts-sequence.png` and `/tmp/arielcharts-sequence-isolation.png`
-before handoff.
+for Mermaid changes, and `/tmp/arielcharts-collaboration.png` plus
+`/tmp/arielcharts-collaboration-local-state.png` for collaboration changes.

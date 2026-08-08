@@ -69,6 +69,66 @@ describe('handleMcpToolCall', () => {
     })).resolves.toMatchObject({ diagram: { name: 'Changed' } });
   });
 
+  it('records diagram-scoped base and resulting revisions for MCP mutations', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    const created = await handleMcpToolCall(resources.manager, {
+      tool: 'create_diagram',
+      input: { session_id: 'abc123de', name: 'Checkout', revision: initial.revision },
+    }) as { diagram: { id: string; revision: string } };
+    const written = await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: created.diagram.id, mermaid_text: 'sequenceDiagram\n  Browser->>API: POST', revision: created.diagram.revision },
+    }) as { diagram: { revision: string } };
+    const renamed = await handleMcpToolCall(resources.manager, {
+      tool: 'rename_diagram',
+      input: { session_id: 'abc123de', diagram_id: created.diagram.id, name: 'Checkout API', revision: written.diagram.revision },
+    }) as { diagram: { revision: string } };
+    const deleted = await handleMcpToolCall(resources.manager, {
+      tool: 'delete_diagram',
+      input: { session_id: 'abc123de', diagram_id: created.diagram.id, revision: renamed.diagram.revision },
+    }) as { revision: string };
+
+    const activity = (await resources.manager.readSession('abc123de'))?.activity ?? [];
+    expect(activity).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'created', diagram_id: created.diagram.id, base_revision: initial.revision, result_revision: created.diagram.revision }),
+      expect.objectContaining({ action: 'replaced', diagram_id: created.diagram.id, base_revision: created.diagram.revision, result_revision: written.diagram.revision }),
+      expect.objectContaining({ action: 'renamed', diagram_id: created.diagram.id, base_revision: written.diagram.revision, result_revision: renamed.diagram.revision }),
+      expect.objectContaining({ action: 'deleted', diagram_id: created.diagram.id, base_revision: renamed.diagram.revision }),
+    ]));
+    expect(activity.find((event) => event.action === 'deleted')?.result_revision).toBeUndefined();
+    expect(deleted.revision).toEqual(expect.any(String));
+  });
+
+  it('rejects a stale agent write until it reads, merges, and retries against the current tab revision', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const firstRead = await handleMcpToolCall(resources.manager, {
+      tool: 'read_diagram', input: { session_id: 'abc123de', diagram_id: 'main' },
+    }) as { diagram: { mermaid_text: string; revision: string } };
+    const browserWrite = await resources.manager.writeDiagram(
+      'abc123de',
+      'main',
+      'flowchart LR\n  Browser-->Gateway',
+      firstRead.diagram.revision,
+      { id: 'browser-edit', timestamp: Date.now(), actor: { name: 'browser', type: 'human' }, action: 'edited' },
+    );
+
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'flowchart LR\n  Agent-->Service', revision: firstRead.diagram.revision },
+    })).rejects.toThrow('Stale diagram revision');
+
+    const current = await handleMcpToolCall(resources.manager, {
+      tool: 'read_diagram', input: { session_id: 'abc123de', diagram_id: 'main' },
+    }) as { diagram: { mermaid_text: string; revision: string } };
+    const merged = `${current.diagram.mermaid_text}\n  Gateway-->Service`;
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: merged, revision: current.diagram.revision },
+    })).resolves.toMatchObject({ diagram: { mermaid_text: merged } });
+    expect(browserWrite.mermaid_text).toContain('Browser-->Gateway');
+  });
+
   it('rejects duplicate normalized names and preserves at least one tab', async () => {
     await resources.manager.getOrCreateSession('abc123de');
     const initial = await getSession();

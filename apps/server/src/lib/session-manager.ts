@@ -17,6 +17,7 @@ import { SessionStore } from './persistence.js';
 import type { CleanupOptions, SessionSnapshot, SessionState, StoredSessionSummary } from './types.js';
 
 const MANAGED_AWARENESS_ORIGIN = 'session-manager';
+const CATALOG_REPAIR_ORIGIN = 'catalog-repair';
 const DEFAULT_DIAGRAM_ID = 'main';
 const DEFAULT_DIAGRAM_TITLE = 'Main';
 
@@ -49,6 +50,10 @@ function createDiagram(id: string, name: string, mermaidText: string): DiagramMa
   diagram.set(DIAGRAM_MERMAID_TEXT_KEY, new Y.Text(mermaidText));
   diagram.set(DIAGRAM_NODE_POSITIONS_KEY, new Y.Map());
   return diagram;
+}
+
+function isDiagramMap(value: unknown): value is DiagramMap {
+  return value instanceof Y.Map;
 }
 
 function normalizeDiagramName(name: string): string {
@@ -128,21 +133,65 @@ function readDiagram(doc: Y.Doc, id: string): Diagram {
   };
 }
 
-function ensureInitialDiagram(doc: Y.Doc): void {
+function repairDiagramCatalog(doc: Y.Doc): boolean {
   const diagrams = diagramsMap(doc);
   const order = diagramOrder(doc);
-  if (diagrams.size > 0 || order.length > 0) {
-    return;
+  let repairedEntry = false;
+
+  for (const id of [...diagrams.keys()].sort((left, right) => left.localeCompare(right))) {
+    const diagram = diagrams.get(id);
+    if (!isDiagramMap(diagram)) {
+      diagrams.delete(id);
+      repairedEntry = true;
+      continue;
+    }
+
+    const mermaid = diagram.get(DIAGRAM_MERMAID_TEXT_KEY);
+    if (!(mermaid instanceof Y.Text)) {
+      const text = new Y.Text();
+      if (typeof mermaid === 'string') text.insert(0, mermaid);
+      diagram.set(DIAGRAM_MERMAID_TEXT_KEY, text);
+      repairedEntry = true;
+    }
+    if (!(diagram.get(DIAGRAM_NODE_POSITIONS_KEY) instanceof Y.Map)) {
+      diagram.set(DIAGRAM_NODE_POSITIONS_KEY, new Y.Map());
+      repairedEntry = true;
+    }
   }
 
-  doc.transact(() => {
-    // A single authoritative server doc initializes the first tab before it
-    // can be observed by clients, so concurrent websocket joins share it.
-    if (diagrams.size === 0 && order.length === 0) {
-      diagrams.set(DEFAULT_DIAGRAM_ID, createDiagram(DEFAULT_DIAGRAM_ID, DEFAULT_DIAGRAM_TITLE, ''));
-      order.push([DEFAULT_DIAGRAM_ID]);
+  const currentOrder = order.toArray();
+  const canonicalOrder: string[] = [];
+  const seen = new Set<string>();
+  let seeded = false;
+
+  for (const id of currentOrder) {
+    if (diagrams.has(id) && !seen.has(id)) {
+      seen.add(id);
+      canonicalOrder.push(id);
     }
-  }, MANAGED_AWARENESS_ORIGIN);
+  }
+
+  if (diagrams.size === 0) {
+    diagrams.set(DEFAULT_DIAGRAM_ID, createDiagram(DEFAULT_DIAGRAM_ID, DEFAULT_DIAGRAM_TITLE, ''));
+    canonicalOrder.push(DEFAULT_DIAGRAM_ID);
+    seeded = true;
+  } else {
+    for (const id of [...diagrams.keys()].sort((left, right) => left.localeCompare(right))) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        canonicalOrder.push(id);
+      }
+    }
+  }
+
+  const orderChanged = currentOrder.length !== canonicalOrder.length
+    || currentOrder.some((id, index) => id !== canonicalOrder[index]);
+  if (orderChanged) {
+    if (order.length > 0) order.delete(0, order.length);
+    if (canonicalOrder.length > 0) order.insert(0, canonicalOrder);
+  }
+
+  return repairedEntry || seeded || orderChanged;
 }
 
 /**
@@ -150,9 +199,10 @@ function ensureInitialDiagram(doc: Y.Doc): void {
  * command validation. Resolve colliding raw names deterministically on the
  * authoritative document so an agent can safely identify a diagram by name.
  */
-function reconcileDiagramNames(doc: Y.Doc): void {
+function reconcileDiagramNames(doc: Y.Doc): boolean {
   const diagrams = diagramsMap(doc);
   const claimedNames = new Set<string>();
+  let changed = false;
 
   for (const id of [...diagrams.keys()].sort((left, right) => left.localeCompare(right))) {
     const diagram = diagrams.get(id);
@@ -175,8 +225,20 @@ function reconcileDiagramNames(doc: Y.Doc): void {
     claimedNames.add(candidate.toLocaleLowerCase());
     if (diagram.get(DIAGRAM_NAME_KEY) !== candidate) {
       diagram.set(DIAGRAM_NAME_KEY, candidate);
+      changed = true;
     }
   }
+  return changed;
+}
+
+function repairCatalogAndNames(doc: Y.Doc): boolean {
+  let changed = false;
+  doc.transact(() => {
+    const catalogChanged = repairDiagramCatalog(doc);
+    const namesChanged = reconcileDiagramNames(doc);
+    changed = catalogChanged || namesChanged;
+  }, CATALOG_REPAIR_ORIGIN);
+  return changed;
 }
 
 function readActivity(doc: Y.Doc): ActivityEvent[] {
@@ -303,12 +365,26 @@ export class SessionManager {
 
     const doc = new Y.Doc();
     Y.applyUpdate(doc, Buffer.from(persisted.encodedState, 'base64'));
-    return this.snapshotFromDoc({
+    const repaired = repairCatalogAndNames(doc);
+    const updatedAt = repaired ? Date.now() : persisted.updatedAt;
+    const snapshot = this.snapshotFromDoc({
       id: persisted.id,
       doc,
-      updatedAt: persisted.updatedAt,
+      updatedAt,
       participants: readParticipants(doc),
     });
+    if (repaired) {
+      await this.store.set({
+        id: snapshot.id,
+        title: snapshot.title,
+        activity: snapshot.activity,
+        participants: snapshot.participants,
+        encodedState: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'),
+        updatedAt,
+      });
+    }
+    doc.destroy();
+    return snapshot;
   }
 
   async getSession(sessionId: string): Promise<{ session_id: string; diagrams: DiagramSummary[]; participants: Participant[]; revision: string }> {
@@ -355,7 +431,12 @@ export class SessionManager {
       this.assertUniqueDiagramName(session.doc, normalizedName);
       diagramsMap(session.doc).set(id, createDiagram(id, normalizedName, mermaidText));
       diagramOrder(session.doc).push([id]);
-      this.appendActivity(session.doc, { ...event, diagram_id: id });
+      this.appendActivity(session.doc, {
+        ...event,
+        diagram_id: id,
+        base_revision: revision,
+        result_revision: revisionForDiagram(diagramsMap(session.doc).get(id)!, id),
+      });
     }, MANAGED_AWARENESS_ORIGIN);
     await this.afterMutation(session, participants);
     return readDiagram(session.doc, id);
@@ -377,7 +458,12 @@ export class SessionManager {
         this.assertUniqueDiagramName(session.doc, nextName, diagramId);
         diagram.set(DIAGRAM_NAME_KEY, nextName);
       }
-      this.appendActivity(session.doc, event);
+      this.appendActivity(session.doc, {
+        ...event,
+        diagram_id: diagramId,
+        base_revision: revision,
+        result_revision: revisionForDiagram(diagram, diagramId),
+      });
     }, MANAGED_AWARENESS_ORIGIN);
     await this.afterMutation(session, participants);
     return readDiagram(session.doc, diagramId);
@@ -394,7 +480,12 @@ export class SessionManager {
       const normalizedName = normalizeDiagramName(name);
       this.assertUniqueDiagramName(session.doc, normalizedName, diagramId);
       diagram.set(DIAGRAM_NAME_KEY, normalizedName);
-      this.appendActivity(session.doc, event);
+      this.appendActivity(session.doc, {
+        ...event,
+        diagram_id: diagramId,
+        base_revision: revision,
+        result_revision: revisionForDiagram(diagram, diagramId),
+      });
     }, MANAGED_AWARENESS_ORIGIN);
     await this.afterMutation(session, participants);
     return readDiagram(session.doc, diagramId);
@@ -417,7 +508,7 @@ export class SessionManager {
       if (index >= 0) {
         order.delete(index, 1);
       }
-      this.appendActivity(session.doc, event);
+      this.appendActivity(session.doc, { ...event, diagram_id: diagramId, base_revision: revision });
     }, MANAGED_AWARENESS_ORIGIN);
     await this.afterMutation(session, participants);
     return revisionFromDoc(session.doc);
@@ -490,8 +581,7 @@ export class SessionManager {
     const persisted = await this.store.get(sessionId);
     const doc = new Y.Doc();
     if (persisted) Y.applyUpdate(doc, Buffer.from(persisted.encodedState, 'base64'));
-    ensureInitialDiagram(doc);
-    reconcileDiagramNames(doc);
+    const repairedOnLoad = repairCatalogAndNames(doc);
     const awareness = new Awareness(doc);
     awareness.setLocalState(null);
     const now = Date.now();
@@ -504,13 +594,15 @@ export class SessionManager {
       state.lastAccessedAt = Date.now();
     });
     doc.on('afterTransaction', (transaction) => {
-      if (transaction.origin === MANAGED_AWARENESS_ORIGIN || transaction.origin === 'diagram-name-reconciliation') {
+      if (transaction.origin === MANAGED_AWARENESS_ORIGIN || transaction.origin === CATALOG_REPAIR_ORIGIN) {
         return;
       }
-      doc.transact(() => {
-        reconcileDiagramNames(doc);
-      }, 'diagram-name-reconciliation');
+      repairCatalogAndNames(doc);
     });
+    if (repairedOnLoad) {
+      state.updatedAt = Date.now();
+      await this.persistSession(state);
+    }
     return state;
   }
 

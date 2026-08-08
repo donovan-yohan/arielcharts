@@ -1,4 +1,5 @@
 import type { IncomingMessage } from 'node:http';
+import { isDeepStrictEqual } from 'node:util';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import { applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
@@ -31,19 +32,41 @@ function encodeMessage(messageType: number, writePayload?: (encoder: encoding.En
   return encoding.toUint8Array(encoderInstance);
 }
 
-function parseAwarenessClientIds(update: Uint8Array): number[] {
+interface AwarenessEntry {
+  clientId: number;
+  clock: number;
+  stateJson: string;
+  state: Record<string, unknown> | null;
+}
+
+function parseAwarenessEntries(update: Uint8Array): AwarenessEntry[] {
   const decoderInstance = decoding.createDecoder(update);
   const clientCount = decoding.readVarUint(decoderInstance);
-  const clientIds: number[] = [];
+  const entries: AwarenessEntry[] = [];
 
   for (let index = 0; index < clientCount; index += 1) {
     const clientId = decoding.readVarUint(decoderInstance);
-    clientIds.push(clientId);
-    decoding.readVarUint(decoderInstance);
-    decoding.readVarString(decoderInstance);
+    const clock = decoding.readVarUint(decoderInstance);
+    const stateJson = decoding.readVarString(decoderInstance);
+    const state: unknown = JSON.parse(stateJson);
+    if (state !== null && (typeof state !== 'object' || Array.isArray(state))) {
+      throw new Error(`Invalid awareness state for client ${clientId}.`);
+    }
+    entries.push({ clientId, clock, stateJson, state: state as Record<string, unknown> | null });
   }
 
-  return clientIds;
+  return entries;
+}
+
+function encodeAwarenessEntries(entries: AwarenessEntry[]): Uint8Array {
+  const encoderInstance = encoding.createEncoder();
+  encoding.writeVarUint(encoderInstance, entries.length);
+  for (const entry of entries) {
+    encoding.writeVarUint(encoderInstance, entry.clientId);
+    encoding.writeVarUint(encoderInstance, entry.clock);
+    encoding.writeVarString(encoderInstance, entry.stateJson);
+  }
+  return encoding.toUint8Array(encoderInstance);
 }
 
 export class SessionWebSocketServer {
@@ -130,10 +153,13 @@ export class SessionWebSocketServer {
     const session = await this.manager.getOrCreateSession(sessionId);
     session.sockets.delete(socket);
     const clientIds = session.socketClientIds.get(socket);
-    if (clientIds && clientIds.size > 0) {
-      removeAwarenessStates(session.awareness, [...clientIds], socket);
-    }
     session.socketClientIds.delete(socket);
+    if (clientIds && clientIds.size > 0) {
+      const orphanedClientIds = [...clientIds].filter((clientId) => !this.findLiveOwner(session, clientId));
+      if (orphanedClientIds.length > 0) {
+        removeAwarenessStates(session.awareness, orphanedClientIds, socket);
+      }
+    }
   }
 
   private async handleMessage(sessionId: string, message: RawData, sender: WebSocket): Promise<void> {
@@ -165,9 +191,16 @@ export class SessionWebSocketServer {
 
       case MESSAGE_TYPE_AWARENESS: {
         const awarenessUpdate = decoding.readVarUint8Array(decoderInstance);
-        const clientIds = parseAwarenessClientIds(awarenessUpdate);
-        this.assertSocketOwnsAwarenessClients(session, sender, clientIds);
-        applyAwarenessUpdate(session.awareness, awarenessUpdate, sender);
+        const filtered = this.filterAwarenessEntries(session, sender, parseAwarenessEntries(awarenessUpdate));
+        if (filtered.entries.length === 0) {
+          return;
+        }
+        applyAwarenessUpdate(session.awareness, encodeAwarenessEntries(filtered.entries), sender);
+        const ownedClientIds = session.socketClientIds.get(sender)!;
+        for (const clientId of filtered.claimedClientIds) ownedClientIds.add(clientId);
+        for (const clientId of filtered.releasedClientIds) {
+          if (!session.awareness.getStates().has(clientId)) ownedClientIds.delete(clientId);
+        }
         return;
       }
 
@@ -215,26 +248,69 @@ export class SessionWebSocketServer {
     });
   }
 
-  private assertSocketOwnsAwarenessClients(session: SessionState, socket: WebSocket, clientIds: number[]): void {
+  private filterAwarenessEntries(session: SessionState, socket: WebSocket, entries: AwarenessEntry[]): {
+    entries: AwarenessEntry[];
+    claimedClientIds: number[];
+    releasedClientIds: number[];
+  } {
     const ownedClientIds = session.socketClientIds.get(socket);
     if (!ownedClientIds) {
       throw new Error('Socket is not registered for the session.');
     }
 
-    if (clientIds.length === 0) {
-      return;
-    }
-
-    if (ownedClientIds.size === 0) {
-      for (const clientId of clientIds) {
-        ownedClientIds.add(clientId);
+    const nextOwnedClientIds = new Set(ownedClientIds);
+    const allowed: AwarenessEntry[] = [];
+    const claimedClientIds: number[] = [];
+    const releasedClientIds: number[] = [];
+    for (const entry of entries) {
+      if (nextOwnedClientIds.has(entry.clientId)) {
+        allowed.push(entry);
+        if (entry.state === null) {
+          nextOwnedClientIds.delete(entry.clientId);
+          releasedClientIds.push(entry.clientId);
+        }
+        continue;
       }
-      return;
+
+      const liveOwner = this.findLiveOwner(session, entry.clientId, socket);
+      if (!liveOwner && !session.managedAwarenessClientIds.has(entry.clientId) && entry.state !== null) {
+        this.releaseStaleOwners(session, entry.clientId, socket);
+        nextOwnedClientIds.add(entry.clientId);
+        claimedClientIds.push(entry.clientId);
+        allowed.push(entry);
+        continue;
+      }
+
+      const authoritativeClock = session.awareness.meta.get(entry.clientId)?.clock;
+      if (authoritativeClock !== undefined) {
+        if (entry.clock < authoritativeClock) {
+          continue;
+        }
+        if (entry.clock === authoritativeClock
+          && (entry.state === null || isDeepStrictEqual(entry.state, session.awareness.getStates().get(entry.clientId)))) {
+          continue;
+        }
+      }
+
+      throw new Error(`Awareness client ${entry.clientId} does not belong to this socket.`);
     }
 
-    for (const clientId of clientIds) {
-      if (!ownedClientIds.has(clientId)) {
-        throw new Error(`Awareness client ${clientId} does not belong to this socket.`);
+    return { entries: allowed, claimedClientIds, releasedClientIds };
+  }
+
+  private findLiveOwner(session: SessionState, clientId: number, except?: WebSocket): WebSocket | undefined {
+    for (const [candidate, clientIds] of session.socketClientIds) {
+      if (candidate !== except && candidate.readyState === WebSocket.OPEN && clientIds.has(clientId)) {
+        return candidate;
+      }
+    }
+    return undefined;
+  }
+
+  private releaseStaleOwners(session: SessionState, clientId: number, except: WebSocket): void {
+    for (const [candidate, clientIds] of session.socketClientIds) {
+      if (candidate !== except && candidate.readyState !== WebSocket.OPEN) {
+        clientIds.delete(clientId);
       }
     }
   }

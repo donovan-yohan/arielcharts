@@ -134,7 +134,7 @@ export function WorkspaceFlyouts({
               {historyError ? <div className="history-error" role="status">{historyError}</div> : null}
               {restoreError && !restoreCandidate ? <div className="history-error" role="status">{restoreError}</div> : null}
               {!historyLoading && !historyError && history?.revisions.length === 0 ? <div className="empty-inline">no revisions yet</div> : null}
-              {!historyLoading && history?.revisions.length ? (
+              {history?.revisions.length ? (
                 <ol className="history-list" data-testid="diagram-history-list">
                   {history.revisions.map((revision) => {
                     const isCurrentHead = revision.result_revision === history.current_revision;

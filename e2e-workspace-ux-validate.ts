@@ -193,6 +193,13 @@ async function closeWorkspaceSettings(page: Page): Promise<void> {
       // Theme and presence rerenders can briefly replace the document listener.
     }
   }
+  if (await dialog.count() > 0) {
+    await verifiedClick(
+      page,
+      dialog.getByRole('button', { name: 'Close', exact: true }),
+      'workspace settings Close fallback',
+    );
+  }
   await dialog.waitFor({ state: 'detached', timeout: 15_000 });
 }
 
@@ -1456,6 +1463,7 @@ async function expectRevisionHistoryCollaboration(
     const restoreTracker = observer.trackSnapshot(target.id);
     const serverOrigin = new URL(mcpUrl).origin;
     const currentPath = `/api/sessions/${encodeURIComponent(sessionId)}/diagrams/${encodeURIComponent(target.id)}`;
+    const historyPath = `${currentPath}/history`;
     const restorePath = `${currentPath}/history/${encodeURIComponent(historical.revision.id)}/restore`;
     const restoreRequests: Array<{ method: string; path: string }> = [];
     const recordRestoreRequest = (request: { method: () => string; url: () => string }) => {
@@ -1534,6 +1542,12 @@ async function expectRevisionHistoryCollaboration(
     const staleTracker = observer.trackSnapshot(target.id);
     let routedStaleRestore = false;
     let headAfterPeerLayout: { mermaidText: string; revision: string } | null = null;
+    let releaseHistoryRefresh: () => void = () => {};
+    const historyRefreshReleased = new Promise<void>((resolve) => {
+      releaseHistoryRefresh = resolve;
+    });
+    let historyRefreshStarted = false;
+    let historyRefreshFinished = false;
     page.on('request', recordStaleRestoreRequest);
     await page.route(`${serverOrigin}${restorePath}`, async (route) => {
       if (routedStaleRestore) {
@@ -1549,6 +1563,15 @@ async function expectRevisionHistoryCollaboration(
       const currentHead = await mcp.readDiagram(sessionId, target.id);
       headAfterPeerLayout = { mermaidText: currentHead.mermaidText, revision: currentHead.revision };
       await route.continue();
+    });
+    await page.route(`${serverOrigin}${historyPath}`, async (route) => {
+      historyRefreshStarted = true;
+      await historyRefreshReleased;
+      try {
+        await route.continue();
+      } finally {
+        historyRefreshFinished = true;
+      }
     });
     try {
       const staleRestoreResponse = page.waitForResponse((response) => {
@@ -1592,8 +1615,23 @@ async function expectRevisionHistoryCollaboration(
     'A stale restore appended an immutable restored revision.');
     assert(restoredActivityCountAfterStale === restoredActivityCountBeforeStale,
       'A stale restore appended an activity event instead of remaining a no-op.');
-    await staleConfirmation.waitFor({ state: 'detached', timeout: 15_000 });
-    await expect(staleItem.getByRole('button', { name: 'Restore', exact: true })).toBeEnabled({ timeout: 15_000 });
+    try {
+      await expect.poll(() => historyRefreshStarted, {
+        message: 'Stale restore did not start its history refresh.',
+        timeout: 15_000,
+      }).toBe(true);
+      await staleConfirmation.waitFor({ state: 'detached', timeout: 15_000 });
+      await expect(staleItem.getByRole('button', { name: 'Restore', exact: true })).toBeEnabled({ timeout: 5_000 });
+    } finally {
+      releaseHistoryRefresh();
+      if (historyRefreshStarted) {
+        await expect.poll(() => historyRefreshFinished, {
+          message: 'Stale restore history refresh did not finish after release.',
+          timeout: 15_000,
+        }).toBe(true);
+      }
+      await page.unroute(`${serverOrigin}${historyPath}`);
+    }
 
     await closeFlyout(page, 'activity');
     await expectHistoryFlyoutSafety(page, 'desktop', historical.revision.id);

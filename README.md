@@ -88,7 +88,9 @@ UV_THREADPOOL_SIZE=2
 ```
 
 Each production scrypt verification uses roughly 128 MiB through Node's shared
-libuv pool. A process-wide queued-work limiter remains follow-up security debt.
+libuv pool. `fly.toml` pins the server to shared-cpu-1x with 512 MiB so two
+bounded verifications plus Node/Yjs overhead do not rely on Fly's default
+memory. A process-wide queued-work limiter remains follow-up security debt.
 
 Set `NEXT_PUBLIC_SERVER_URL=https://api.arielcharts.donovanyohan.com` and
 `NEXT_PUBLIC_WS_URL=wss://api.arielcharts.donovanyohan.com` in the web

@@ -25,8 +25,10 @@ export function sourceEditor(page: Page): Locator {
   return page.locator('.cm-content');
 }
 
-export async function visitWorkspace(page: Page, baseUrl: string, sessionId: string): Promise<void> {
-  await page.goto(`${baseUrl}/s/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+export async function visitWorkspace(page: Page, baseUrl: string, sessionId: string, roomKey?: string): Promise<void> {
+  const url = new URL(`/s/${encodeURIComponent(sessionId)}`, baseUrl);
+  if (roomKey) url.hash = `roomKey=${encodeURIComponent(roomKey)}`;
+  await page.goto(url.toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
   await page.getByRole('tab', { name: 'Main', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
 }

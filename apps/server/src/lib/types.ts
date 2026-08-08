@@ -14,6 +14,15 @@ export interface SessionRecord {
   updatedAt: number;
 }
 
+/** Server-private capability verifier. It never contains the raw room key. */
+export interface RoomAccessRecord {
+  salt: string;
+  verifier: string;
+  accessVersion: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface DiagramHistoryMetadata {
   sessionId: string;
   diagramId: string;
@@ -69,10 +78,20 @@ export interface ServerEnv {
   sessionTtlMs: number;
   diskTtlMs: number;
   allowedOrigins: string[];
+  /** Required by loadServerEnv in production; tests may inject a deterministic value. */
+  roomCookieSecret?: string;
+  roomCookieTtlMs?: number;
+  roomCookieSecure?: boolean;
+  roomCookieSameSite?: 'Lax' | 'Strict' | 'None';
+  /** Explicit proxy identity source. Local/default deployments trust no forwarded headers. */
+  clientAddressProfile?: 'none' | 'fly';
+  /** Test-only low-cost verifier profile. Never enable this from production environment. */
+  roomAccessCryptoProfile?: 'test';
 }
 
 export interface UpgradeContext {
   request: IncomingMessage;
   socket: Duplex;
   head: Buffer;
+  sessionId: string;
 }

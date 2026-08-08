@@ -48,7 +48,9 @@ describe('session helpers', () => {
   });
 
   it('copies a modern MCP prompt that requires a fresh revision before writes', () => {
-    const prompt = getAgentWorkflowPrompt('abc123de', 'https://charts.test/mcp');
+    const prompt = getAgentWorkflowPrompt('abc123de', 'https://charts.test/mcp', 'raw-key');
+    expect(prompt).toContain('Authorization: Bearer abc123de.raw-key');
+    expect(prompt).toContain('distinct from the raw room key');
     expect(prompt).toContain('getSession');
     expect(prompt).toContain('readDiagram');
     expect(prompt).toContain('writeDiagram');

@@ -1,16 +1,4 @@
-export type DiagramRendererKind = 'editable' | 'static';
 export type PreviewCameraEvent = 'diagram-changed' | 'live-render-accepted' | 'preview-entered' | 'preview-exited';
-
-export function getRendererKind(isFlowchart: boolean): DiagramRendererKind {
-  return isFlowchart ? 'editable' : 'static';
-}
-
-export function shouldFitRendererKindTransition(
-  previous: DiagramRendererKind | null,
-  next: DiagramRendererKind,
-): boolean {
-  return previous !== null && previous !== next;
-}
 
 export function getNextPreviewCameraLock(current: boolean, event: PreviewCameraEvent): boolean {
   if (event === 'preview-entered') {
@@ -22,6 +10,10 @@ export function getNextPreviewCameraLock(current: boolean, event: PreviewCameraE
   return false;
 }
 
-export function shouldResetInitialCameraFit(preserveCamera: boolean, nodeCount: number, hasGraph: boolean): boolean {
-  return !preserveCamera && nodeCount === 0 && hasGraph;
+export function shouldFitInitialCamera(
+  preserveCamera: boolean,
+  hasFittedInitialCamera: boolean,
+  hasRenderableDiagram: boolean,
+): boolean {
+  return !preserveCamera && !hasFittedInitialCamera && hasRenderableDiagram;
 }

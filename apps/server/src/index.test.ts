@@ -2,7 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { WebSocket } from 'ws';
 import { createApp } from './index.js';
 import { createActivityEvent } from './lib/activity.js';
 import type { ServerEnv } from './lib/types.js';
@@ -13,6 +14,8 @@ describe('server integration', () => {
   let dataDir: string;
   let app: ReturnType<typeof createApp>;
   let port: number;
+  let roomKey: string;
+  let roomCookie: string;
 
   beforeEach(async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'arielcharts-server-'));
@@ -23,6 +26,7 @@ describe('server integration', () => {
       sessionTtlMs: 60_000,
       diskTtlMs: Infinity,
       allowedOrigins: ['http://allowed.test'],
+      roomAccessCryptoProfile: 'test',
     };
     app = createApp(env);
 
@@ -31,6 +35,9 @@ describe('server integration', () => {
     });
 
     port = (app.server.address() as AddressInfo).port;
+    const room = await app.createRoom('abc123de');
+    roomKey = room.roomKey;
+    roomCookie = (app.roomAccess.browserCookieHeaders('abc123de', room.accessVersion)['set-cookie'] as string).split(';')[0]!;
   });
 
   afterEach(async () => {
@@ -39,6 +46,7 @@ describe('server integration', () => {
   });
 
   async function mcpRequest(options: {
+    authorization?: string | null;
     headerMethod?: string;
     headerName?: string;
     id: number;
@@ -46,7 +54,7 @@ describe('server integration', () => {
     params?: Record<string, unknown>;
     toolName?: string;
   }) {
-    const { id, method, params = {}, toolName, headerMethod = method, headerName = toolName } = options;
+    const { id, method, params = {}, toolName, headerMethod = method, headerName = toolName, authorization = `Bearer abc123de.${roomKey}` } = options;
     return fetch(`http://127.0.0.1:${port}/mcp`, {
       method: 'POST',
       headers: {
@@ -54,6 +62,7 @@ describe('server integration', () => {
         'mcp-method': headerMethod,
         'mcp-protocol-version': MCP_PROTOCOL_VERSION,
         origin: 'http://allowed.test',
+        ...(authorization === null ? {} : { authorization }),
         ...(headerName === undefined ? {} : { 'mcp-name': headerName }),
       },
       body: JSON.stringify({
@@ -103,8 +112,124 @@ describe('server integration', () => {
     expect(response.headers.get('access-control-max-age')).toBe('86400');
   });
 
-  it('serves every public modern tool without an MCP transport session', async () => {
-    await app.manager.getOrCreateSession('abc123de');
+  it('rejects ID-only browser JSON requests before a session lookup and sends exact credentialed CORS', async () => {
+    const missingId = 'missingzz';
+    const url = `http://127.0.0.1:${port}/api/sessions/${missingId}/diagrams/main`;
+    const response = await fetch(url, { headers: { origin: 'http://allowed.test' } });
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: 'Room access denied.' });
+    expect(response.headers.get('access-control-allow-origin')).toBe('http://allowed.test');
+    expect(response.headers.get('access-control-allow-credentials')).toBe('true');
+    expect(await app.manager.readSession(missingId)).toBeNull();
+  });
+
+  it('rejects an unauthenticated WebSocket upgrade before it can create a room', async () => {
+    const missingId = 'missingws';
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws/${missingId}`, { headers: { origin: 'http://allowed.test' } });
+    await new Promise<void>((resolve) => {
+      socket.once('error', () => resolve());
+      socket.once('close', () => resolve());
+    });
+    expect(await app.manager.readSession(missingId)).toBeNull();
+  });
+
+  it('exchanges a raw key once, rotates capability access, and revokes existing WebSocket, cookie, and MCP authorization', async () => {
+    const accessUrl = `http://127.0.0.1:${port}/api/rooms/abc123de/access`;
+    const exchange = await fetch(accessUrl, {
+      method: 'POST',
+      headers: { origin: 'http://allowed.test', 'content-type': 'application/json' },
+      body: JSON.stringify({ room_key: roomKey }),
+    });
+    expect(exchange.status).toBe(204);
+    const oldCookie = exchange.headers.get('set-cookie')!.split(';')[0]!;
+    expect(exchange.headers.get('cache-control')).toBe('no-store');
+    await expect(fetch(accessUrl, { headers: { origin: 'http://allowed.test', cookie: oldCookie } })).resolves.toMatchObject({ status: 204 });
+
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws/abc123de`, { headers: { origin: 'http://allowed.test', cookie: oldCookie } });
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+    const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    const rotate = await fetch(`http://127.0.0.1:${port}/api/rooms/abc123de/rotate`, {
+      method: 'POST',
+      headers: { origin: 'http://allowed.test', cookie: oldCookie },
+    });
+    expect(rotate.status).toBe(200);
+    const rotated = await rotate.json() as { room_key: string };
+    const newCookie = rotate.headers.get('set-cookie')!.split(';')[0]!;
+    await closed;
+    await expect(fetch(accessUrl, { headers: { origin: 'http://allowed.test', cookie: oldCookie } })).resolves.toMatchObject({ status: 401 });
+    await expect(fetch(accessUrl, { headers: { origin: 'http://allowed.test', cookie: newCookie } })).resolves.toMatchObject({ status: 204 });
+    expect((await mcpRequest({ id: 900, method: 'server/discover', authorization: `Bearer abc123de.${roomKey}` })).status).toBe(401);
+    expect((await mcpRequest({ id: 901, method: 'server/discover', authorization: `Bearer abc123de.${rotated.room_key}` })).status).toBe(200);
+  });
+
+  it('requires a bearer for MCP discovery and rejects a tool session that differs from its bearer-bound room', async () => {
+    expect((await mcpRequest({ id: 920, method: 'server/discover', authorization: null })).status).toBe(401);
+    expect((await mcpRequest({ id: 921, method: 'server/discover', authorization: 'Bearer abc123de.invalid' })).status).toBe(401);
+    await app.createRoom('other123');
+    const crossRoom = await mcpRequest({
+      id: 922,
+      method: 'tools/call',
+      toolName: 'getSession',
+      params: { name: 'getSession', arguments: { sessionId: 'other123' } },
+    });
+    expect(crossRoom.status).toBe(200);
+    await expect(crossRoom.json()).resolves.toMatchObject({ result: { isError: true } });
+  });
+
+  it('binds each modern MCP request to its current bearer', async () => {
+    const otherRoom = await app.createRoom('other123');
+    const getSession = (id: number, sessionId: string, authorization?: string) => mcpRequest({
+      id,
+      method: 'tools/call',
+      toolName: 'getSession',
+      ...(authorization === undefined ? {} : { authorization }),
+      params: { name: 'getSession', arguments: { sessionId } },
+    });
+
+    const firstRoom = await getSession(930, 'abc123de');
+    const secondRoom = await getSession(931, 'other123', `Bearer other123.${otherRoom.roomKey}`);
+    const firstRoomAgain = await getSession(932, 'abc123de');
+    expect(firstRoom.status).toBe(200);
+    expect(secondRoom.status).toBe(200);
+    expect(firstRoomAgain.status).toBe(200);
+    await expect(firstRoom.json()).resolves.toMatchObject({ result: { structuredContent: { sessionId: 'abc123de' } } });
+    await expect(secondRoom.json()).resolves.toMatchObject({ result: { structuredContent: { sessionId: 'other123' } } });
+    await expect(firstRoomAgain.json()).resolves.toMatchObject({ result: { structuredContent: { sessionId: 'abc123de' } } });
+  });
+
+  it('keeps invalid room requests generic but reports unexpected room-access failures', async () => {
+    const accessUrl = `http://127.0.0.1:${port}/api/rooms/abc123de/access`;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const invalidSession = await fetch(`http://127.0.0.1:${port}/api/rooms/no/access`, {
+        headers: { origin: 'http://allowed.test' },
+      });
+      expect(invalidSession.status).toBe(401);
+      await expect(invalidSession.json()).resolves.toEqual({ error: 'Room access denied.' });
+
+      vi.spyOn(app.roomAccess, 'authenticateBrowserCookie').mockRejectedValueOnce(new Error('LevelDB unavailable'));
+      const failedAccess = await fetch(accessUrl, { headers: { origin: 'http://allowed.test', cookie: roomCookie } });
+      expect(failedAccess.status).toBe(500);
+      await expect(failedAccess.json()).resolves.toEqual({ error: 'Room access unavailable.' });
+
+      vi.spyOn(app.roomAccess, 'rotate').mockRejectedValueOnce(new Error('LevelDB unavailable'));
+      const failedRotation = await fetch(`http://127.0.0.1:${port}/api/rooms/abc123de/rotate`, {
+        method: 'POST',
+        headers: { origin: 'http://allowed.test', cookie: roomCookie },
+      });
+      expect(failedRotation.status).toBe(500);
+      await expect(failedRotation.json()).resolves.toEqual({ error: 'Room access unavailable.' });
+      expect(log).toHaveBeenCalledTimes(2);
+    } finally {
+      log.mockRestore();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('serves every room-bound modern tool without an MCP transport session or room enumeration', async () => {
 
     const discover = await mcpRequest({ id: 1, method: 'server/discover' });
     expect(discover.status).toBe(200);
@@ -121,7 +246,6 @@ describe('server integration', () => {
       };
     };
     expect(toolsPayload.result.tools.map((tool) => tool.name)).toEqual([
-      'listSessions',
       'getSession',
       'createDiagram',
       'readDiagram',
@@ -149,12 +273,8 @@ describe('server integration', () => {
     const promptsPayload = await promptsResponse.json() as { result: { prompts: Array<{ name: string }> } };
     expect(promptsPayload.result.prompts.map((prompt) => prompt.name)).toEqual(['diagrammingWorkflow']);
 
-    const listResponse = await mcpRequest({ id: 4, method: 'tools/call', toolName: 'listSessions', params: { name: 'listSessions', arguments: {} } });
-    expect(listResponse.status).toBe(200);
-    await expect(listResponse.json()).resolves.toMatchObject({ result: { structuredContent: { sessions: [{ id: 'abc123de' }] } } });
-
     const sessionResponse = await mcpRequest({
-      id: 5,
+      id: 4,
       method: 'tools/call',
       toolName: 'getSession',
       params: { arguments: { sessionId: 'abc123de' }, name: 'getSession' },
@@ -165,7 +285,7 @@ describe('server integration', () => {
     expect(sessionRevision).toEqual(expect.any(String));
 
     const explicitSourceCreate = await mcpRequest({
-      id: 6,
+      id: 5,
       method: 'tools/call',
       toolName: 'createDiagram',
       params: {
@@ -185,7 +305,7 @@ describe('server integration', () => {
     expect(explicitSourcePayload.result.structuredContent.diagram.mermaidText).toContain('POST /checkout');
 
     const latestSessionResponse = await mcpRequest({
-      id: 7,
+      id: 6,
       method: 'tools/call',
       toolName: 'getSession',
       params: { arguments: { sessionId: 'abc123de' }, name: 'getSession' },
@@ -197,7 +317,7 @@ describe('server integration', () => {
     const catalogBeforeRejectedCreates = latestSession.result.structuredContent.diagrams;
 
     const missingSourceCreate = await mcpRequest({
-      id: 8,
+      id: 7,
       method: 'tools/call',
       toolName: 'createDiagram',
       params: { name: 'createDiagram', arguments: { sessionId: 'abc123de', name: 'Missing source', expectedRevision: latestRevision } },
@@ -206,7 +326,7 @@ describe('server integration', () => {
     await expect(missingSourceCreate.json()).resolves.toMatchObject({ result: { isError: true } });
 
     const ambiguousSourceCreate = await mcpRequest({
-      id: 9,
+      id: 8,
       method: 'tools/call',
       toolName: 'createDiagram',
       params: {
@@ -224,7 +344,7 @@ describe('server integration', () => {
     await expect(ambiguousSourceCreate.json()).resolves.toMatchObject({ result: { isError: true } });
 
     const afterRejectedCreates = await mcpRequest({
-      id: 10,
+      id: 9,
       method: 'tools/call',
       toolName: 'getSession',
       params: { arguments: { sessionId: 'abc123de' }, name: 'getSession' },
@@ -234,7 +354,7 @@ describe('server integration', () => {
     });
 
     const createResponse = await mcpRequest({
-      id: 11,
+      id: 10,
       method: 'tools/call',
       toolName: 'createDiagram',
       params: {
@@ -254,7 +374,7 @@ describe('server integration', () => {
     expect(createPayload.result.structuredContent.diagram.mermaidText).toContain('sequenceDiagram');
 
     const readResponse = await mcpRequest({
-      id: 12,
+      id: 11,
       method: 'tools/call',
       toolName: 'readDiagram',
       params: { name: 'readDiagram', arguments: { sessionId: 'abc123de', diagramId: createPayload.result.structuredContent.diagram.id } },
@@ -264,7 +384,7 @@ describe('server integration', () => {
     expect(readPayload.result.structuredContent.diagram.mermaidText).toContain('POST /orders');
 
     const writeResponse = await mcpRequest({
-      id: 13,
+      id: 12,
       method: 'tools/call',
       toolName: 'writeDiagram',
       params: {
@@ -282,7 +402,7 @@ describe('server integration', () => {
     expect(writePayload.result.structuredContent.diagram.mermaidText).toContain('GET /health');
 
     const staleWrite = await mcpRequest({
-      id: 14,
+      id: 13,
       method: 'tools/call',
       toolName: 'writeDiagram',
       params: { name: 'writeDiagram', arguments: {
@@ -296,7 +416,7 @@ describe('server integration', () => {
     await expect(staleWrite.json()).resolves.toMatchObject({ result: { isError: true } });
 
     const renamedResponse = await mcpRequest({
-      id: 15,
+      id: 14,
       method: 'tools/call',
       toolName: 'renameDiagram',
       params: { name: 'renameDiagram', arguments: {
@@ -309,7 +429,7 @@ describe('server integration', () => {
     expect(renamedPayload.result.structuredContent.diagram.name).toBe('Health flow');
 
     const canonicalRead = await mcpRequest({
-      id: 16,
+      id: 15,
       method: 'tools/call',
       toolName: 'readDiagram',
       params: { name: 'readDiagram', arguments: { sessionId: 'abc123de', diagramId: createPayload.result.structuredContent.diagram.id } },
@@ -317,7 +437,7 @@ describe('server integration', () => {
     await expect(canonicalRead.json()).resolves.toMatchObject({ result: { structuredContent: { diagram: { mermaidText: expect.stringContaining('GET /health') } } } });
 
     const deleteResponse = await mcpRequest({
-      id: 17,
+      id: 16,
       method: 'tools/call',
       toolName: 'deleteDiagram',
       params: { name: 'deleteDiagram', arguments: {
@@ -336,15 +456,14 @@ describe('server integration', () => {
     const nameMismatch = await mcpRequest({
       id: 2,
       method: 'tools/call',
-      toolName: 'listSessions',
-      headerName: 'getSession',
-      params: { name: 'listSessions', arguments: {} },
+      toolName: 'getSession',
+      headerName: 'readDiagram',
+      params: { name: 'getSession', arguments: { sessionId: 'abc123de' } },
     });
     expect(nameMismatch.status).toBeGreaterThanOrEqual(400);
   });
 
   it('exposes origin-checked current, history, immutable revision, and revision-checked restore routes', async () => {
-    await app.manager.getOrCreateSession('abc123de');
     const initial = await app.manager.readDiagram('abc123de', 'main');
     await app.manager.writeDiagram(
       'abc123de',
@@ -355,7 +474,7 @@ describe('server integration', () => {
     );
 
     const baseUrl = `http://127.0.0.1:${port}/api/sessions/abc123de/diagrams/main`;
-    const headers = { origin: 'http://allowed.test' };
+    const headers = { origin: 'http://allowed.test', cookie: roomCookie };
     const preflight = await fetch(`${baseUrl}/history`, {
       method: 'OPTIONS',
       headers: { ...headers, 'access-control-request-headers': 'content-type' },
@@ -423,7 +542,6 @@ describe('server integration', () => {
   });
 
   it('discovers history tools with named metadata and returns a structured stale restore result', async () => {
-    await app.manager.getOrCreateSession('abc123de');
     const initial = await app.manager.readDiagram('abc123de', 'main');
     await app.manager.writeDiagram(
       'abc123de',

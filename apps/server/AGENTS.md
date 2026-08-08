@@ -29,6 +29,7 @@ the internal tool boundary; `mcp-server.ts` exposes the modern MCP contract;
 
 ## Collaboration and protocol boundaries
 
+- `room-access.ts` owns room capabilities: its verifier/access-version record is server-private LevelDB state, never Yjs, activity, history, logs, or a URL query. Authenticate HTTP, WebSocket, and MCP ingress before `SessionManager`; only explicit protected creation may create a session. Rotation increments the access version and must close live room sockets. Client-IP limits default to the socket address; only `CLIENT_ADDRESS_PROFILE=fly` may use a single validated `Fly-Client-IP`, never `X-Forwarded-For`.
 - Awareness is live, per-connection presence. Do not put browser-local UI
   state in awareness or durable document state. Each live socket owns its
   claimed client ids; stale/idempotent foreign echoes are filtered, while

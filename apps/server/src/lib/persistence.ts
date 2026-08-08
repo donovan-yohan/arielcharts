@@ -1,12 +1,13 @@
 import { Level, type BatchOperation } from 'level';
 import type { DiagramRevision } from '@arielcharts/shared';
-import type { DiagramHistoryMetadata, HistoryPersistenceChange, SessionRecord } from './types.js';
+import type { DiagramHistoryMetadata, HistoryPersistenceChange, RoomAccessRecord, SessionRecord } from './types.js';
 
 const SESSION_KEY_PREFIX = 'session:';
 const HISTORY_KEY_PREFIX = 'history:';
 const HISTORY_METADATA_KEY_PREFIX = 'history-meta:';
+const ROOM_ACCESS_KEY_PREFIX = 'room-access:';
 
-type PersistedValue = SessionRecord | DiagramRevision | DiagramHistoryMetadata;
+type PersistedValue = SessionRecord | DiagramRevision | DiagramHistoryMetadata | RoomAccessRecord;
 
 function sequenceKey(sequence: number): string {
   return sequence.toString().padStart(16, '0');
@@ -35,6 +36,19 @@ export class SessionStore {
 
   async set(record: SessionRecord): Promise<void> {
     await this.db.put(this.key(record.id), record);
+  }
+
+  async getRoomAccess(sessionId: string): Promise<RoomAccessRecord | null> {
+    try {
+      return (await this.db.get(this.roomAccessKey(sessionId)) as RoomAccessRecord | undefined) ?? null;
+    } catch (error) {
+      if (this.isNotFound(error)) return null;
+      throw error;
+    }
+  }
+
+  async setRoomAccess(sessionId: string, record: RoomAccessRecord): Promise<void> {
+    await this.db.put(this.roomAccessKey(sessionId), record);
   }
 
   async getHistoryMetadata(sessionId: string, diagramId: string): Promise<DiagramHistoryMetadata | null> {
@@ -79,10 +93,21 @@ export class SessionStore {
   }
 
   /** Commits the canonical document and every history mutation as one LevelDB batch. */
-  async persistWithHistory(record: SessionRecord, history: HistoryPersistenceChange): Promise<void> {
+  async persistWithHistory(
+    record: SessionRecord,
+    history: HistoryPersistenceChange,
+    options: { initialRoomAccess?: RoomAccessRecord } = {},
+  ): Promise<boolean> {
+    if (options.initialRoomAccess && await this.get(record.id)) {
+      return false;
+    }
     const operations: Array<BatchOperation<Level<string, PersistedValue>, string, PersistedValue>> = [
       { type: 'put', key: this.key(record.id), value: record },
     ];
+
+    if (options.initialRoomAccess) {
+      operations.push({ type: 'put', key: this.roomAccessKey(record.id), value: options.initialRoomAccess });
+    }
 
     for (const revision of history.revisions) {
       operations.push({
@@ -111,6 +136,7 @@ export class SessionStore {
     }
 
     await this.db.batch(operations);
+    return true;
   }
 
   async list(): Promise<SessionRecord[]> {
@@ -126,6 +152,7 @@ export class SessionStore {
   async delete(sessionId: string): Promise<void> {
     const operations: Array<BatchOperation<Level<string, PersistedValue>, string, PersistedValue>> = [
       { type: 'del', key: this.key(sessionId) },
+      { type: 'del', key: this.roomAccessKey(sessionId) },
     ];
     for await (const key of this.db.keys({ gte: `${HISTORY_KEY_PREFIX}${sessionId}:`, lte: `${HISTORY_KEY_PREFIX}${sessionId}:~` })) {
       operations.push({ type: 'del', key });
@@ -154,6 +181,10 @@ export class SessionStore {
 
   private historyMetadataKey(sessionId: string, diagramId: string): string {
     return `${HISTORY_METADATA_KEY_PREFIX}${sessionId}:${diagramId}`;
+  }
+
+  private roomAccessKey(sessionId: string): string {
+    return `${ROOM_ACCESS_KEY_PREFIX}${sessionId}`;
   }
 
   private isNotFound(error: unknown): boolean {

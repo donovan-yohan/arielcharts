@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { chromium, type Locator, type Page } from '@playwright/test';
+import { chromium, type Browser, type Locator, type Page } from '@playwright/test';
+import { WebSocket as NodeWebSocket } from 'ws';
 import {
   assertNoPageErrors,
   assertNoReactFlowError015,
@@ -8,9 +9,18 @@ import {
   waitForReactFlowNodePositionMatch,
   waitForReactFlowNodePositionMovement,
 } from './e2e/support/react-flow';
+import { ModernMcpClient, postModernMcp, type Diagram } from './e2e/support/mcp';
+import { withOwnedServices, type E2eEndpoints } from './e2e/support/owned-services';
+import {
+  createRoom,
+  exchangeRoomAccess,
+  getRoomAccess,
+  roomShareUrl,
+  rotateRoomAccess,
+  type RoomCredentials,
+} from './e2e/support/room-access';
 import { openYjsSessionObserver, type YjsSessionObserver } from './e2e/support/yjs-session';
 
-const MCP_PROTOCOL_VERSION = '2026-07-28';
 const BASE_FLOWCHART = `flowchart LR
   Browser[Browser] --> Gateway[Gateway]
   Gateway --> Service[Service]
@@ -26,18 +36,26 @@ const PENDING_PRUNE_REMOVED = `flowchart LR
   B[Bridge] --> C[Keep]`;
 const NEGATIVE_OBSERVATION_WINDOW_MS = 300;
 
-type Diagram = { id: string; mermaidText: string; name: string; revision: string };
-type McpPayload = {
-  error?: { message?: string };
-  result?: {
-    content?: Array<{ text?: string }>;
-    isError?: boolean;
-    structuredContent?: Record<string, unknown>;
-  };
-};
-
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+async function writeDiagram(
+  mcp: ModernMcpClient,
+  sessionId: string,
+  diagramId: string,
+  mermaidText: string,
+  expectedRevision: string,
+) {
+  return mcp.tool('writeDiagram', {
+    sessionId,
+    diagramId,
+    mermaidText,
+    expectedRevision,
+    actorName: 'E2E agent',
+    actorType: 'agent',
+    detail: 'Merged concurrent browser edit',
+  });
 }
 
 function sourceEditor(page: Page): Locator {
@@ -165,86 +183,222 @@ function positionsMatch(
   return Math.abs(left.x - right.x) <= tolerance && Math.abs(left.y - right.y) <= tolerance;
 }
 
-class ModernMcpClient {
-  private nextId = 1;
+function diagramStateUrl(serverUrl: string, sessionId: string): string {
+  return new URL(`/api/sessions/${encodeURIComponent(sessionId)}/diagrams/main`, serverUrl).toString();
+}
 
-  constructor(private readonly endpoint: string, private readonly origin: string) {}
+async function diagramStateResponse(
+  serverUrl: string,
+  origin: string,
+  sessionId: string,
+  cookie?: string,
+): Promise<Response> {
+  return fetch(diagramStateUrl(serverUrl, sessionId), {
+    headers: { ...(cookie ? { cookie } : {}), origin },
+  });
+}
 
-  async tool(name: string, args: Record<string, unknown>): Promise<McpPayload> {
-    const method = 'tools/call';
-    const response = await fetch(this.endpoint, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'mcp-method': method,
-        'mcp-name': name,
-        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-        origin: this.origin,
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: this.nextId++,
-        method,
-        params: {
-          name,
-          arguments: args,
-          _meta: {
-            'io.modelcontextprotocol/clientCapabilities': {},
-            'io.modelcontextprotocol/clientInfo': { name: 'arielcharts-collaboration-e2e', version: '1.0.0' },
-            'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION,
-          },
-        },
-      }),
-    });
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`MCP ${name} returned HTTP ${response.status}: ${body}`);
-    }
-    return response.json() as Promise<McpPayload>;
-  }
+async function waitForBrowserSocketRevocation(page: Page, label: string): Promise<void> {
+  await page.waitForFunction(() => {
+    const state = document.querySelector('[data-testid="connection-status-badge"]')?.textContent?.trim().toLowerCase();
+    return Boolean(state && state !== 'synced');
+  }, undefined, { timeout: 15_000 }).catch(() => {
+    throw new Error(`${label} remained synced after room key rotation.`);
+  });
+}
 
-  expectContent<T>(payload: McpPayload, action: string): T {
-    assert(!payload.error, `MCP ${action} JSON-RPC error: ${payload.error?.message ?? 'unknown error'}`);
-    assert(!payload.result?.isError, `MCP ${action} tool error: ${payload.result?.content?.map((item) => item.text).join('\n') ?? 'unknown error'}`);
-    assert(payload.result?.structuredContent, `MCP ${action} omitted structuredContent.`);
-    return payload.result.structuredContent as T;
-  }
-
-  async getSession(sessionId: string): Promise<{ diagrams: Array<Pick<Diagram, 'id' | 'name' | 'revision'>>; revision: string }> {
-    return this.expectContent(await this.tool('getSession', { sessionId }), 'getSession');
-  }
-
-  async readDiagram(sessionId: string, diagramId: string): Promise<Diagram> {
-    return this.expectContent<{ diagram: Diagram }>(await this.tool('readDiagram', { sessionId, diagramId }), 'readDiagram').diagram;
-  }
-
-  async createDiagramWithLatestRevision(sessionId: string, name: string, mermaidText: string): Promise<Diagram> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const session = await this.getSession(sessionId);
-      const payload = await this.tool('createDiagram', {
-        sessionId, name, mermaidText, expectedRevision: session.revision, actorName: 'E2E agent', actorType: 'agent', detail: 'Prepared local-view isolation tab',
+async function openAuthorizedWebsocket(
+  serverUrl: string,
+  origin: string,
+  sessionId: string,
+  cookie: string,
+): Promise<{ closed: Promise<void>; terminate: () => void }> {
+  const websocketUrl = new URL(`/ws/${encodeURIComponent(sessionId)}`, serverUrl);
+  websocketUrl.protocol = websocketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket = new NodeWebSocket(websocketUrl, { headers: { cookie, origin } });
+  const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        socket.terminate();
+        reject(new Error(`Authorized room WebSocket did not open: ${websocketUrl}`));
+      }, 5_000);
+      socket.once('open', () => {
+        clearTimeout(timeout);
+        resolve();
       });
-      if (!payload.result?.isError) {
-        return this.expectContent<{ diagram: Diagram }>(payload, 'createDiagram').diagram;
-      }
-      const detail = payload.result.content?.map((item) => item.text ?? '').join('\n') ?? '';
-      if (!/stale session revision/i.test(detail) || attempt === 1) {
-        return this.expectContent<{ diagram: Diagram }>(payload, 'createDiagram').diagram;
-      }
-    }
-    throw new Error('Unreachable createDiagram retry state.');
-  }
-
-  async writeDiagram(sessionId: string, diagramId: string, mermaidText: string, expectedRevision: string): Promise<McpPayload> {
-    return this.tool('writeDiagram', {
-      sessionId, diagramId, mermaidText, expectedRevision, actorName: 'E2E agent', actorType: 'agent', detail: 'Merged concurrent browser edit',
+      socket.once('error', (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
     });
+  } catch (error) {
+    socket.terminate();
+    throw error;
+  }
+  return { closed, terminate: () => socket.terminate() };
+}
+
+async function expectRejectedWebsocket(
+  serverUrl: string,
+  origin: string,
+  sessionId: string,
+  cookie?: string,
+): Promise<void> {
+  const websocketUrl = new URL(`/ws/${encodeURIComponent(sessionId)}`, serverUrl);
+  websocketUrl.protocol = websocketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  await new Promise<void>((resolve, reject) => {
+    const socket = new NodeWebSocket(websocketUrl, { headers: { ...(cookie ? { cookie } : {}), origin } });
+    const timeout = setTimeout(() => {
+      socket.terminate();
+      reject(new Error(`Rejected room WebSocket stayed open: ${websocketUrl}`));
+    }, 5_000);
+    socket.on('open', () => {
+      clearTimeout(timeout);
+      socket.terminate();
+      reject(new Error(`Rejected room WebSocket unexpectedly opened: ${websocketUrl}`));
+    });
+    socket.on('close', () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    socket.on('error', () => undefined);
+  });
+}
+
+async function expectLockedRoomDoesNotMount(
+  browser: Browser,
+  baseUrl: string,
+  serverUrl: string,
+  room: RoomCredentials,
+  invalidKey = false,
+): Promise<void> {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  const websocketUrls: string[] = [];
+  const stateRequests: string[] = [];
+  page.on('websocket', (socket) => { websocketUrls.push(socket.url()); });
+  page.on('request', (request) => {
+    if (request.url().startsWith(`${serverUrl}/api/sessions/${encodeURIComponent(room.sessionId)}/`)) {
+      stateRequests.push(request.url());
+    }
+  });
+  try {
+    const target = invalidKey
+      ? roomShareUrl(baseUrl, { ...room, roomKey: 'invalid-room-key' })
+      : new URL(`/s/${encodeURIComponent(room.sessionId)}`, baseUrl).toString();
+    await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.getByRole('heading', { name: 'Enter the room key', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+    if (invalidKey) {
+      await page.locator('#room-key-error').waitFor({ state: 'visible', timeout: 15_000 });
+    }
+    await page.waitForTimeout(300);
+    assert(await page.getByTestId('canvas-first-workspace').count() === 0,
+      `${invalidKey ? 'Invalid' : 'Bare'} room URL mounted the workspace.`);
+    assert(websocketUrls.length === 0,
+      `${invalidKey ? 'Invalid' : 'Bare'} room URL opened a WebSocket: ${JSON.stringify(websocketUrls)}.`);
+    assert(stateRequests.length === 0,
+      `${invalidKey ? 'Invalid' : 'Bare'} room URL requested diagram state: ${JSON.stringify(stateRequests)}.`);
+  } finally {
+    await context.close();
   }
 }
 
-async function validateCollaboration(): Promise<void> {
+async function expectProtectedRoomAccess(browser: Browser, endpoints: E2eEndpoints): Promise<void> {
+  const { baseUrl, mcpUrl, serverUrl } = endpoints;
+  const room = await createRoom(serverUrl, baseUrl);
+  const shareUrl = roomShareUrl(baseUrl, room);
+  const parsedShareUrl = new URL(shareUrl);
+  assert(parsedShareUrl.search === '' && parsedShareUrl.hash.startsWith('#roomKey='),
+    `Room share link leaked its key outside the fragment: ${shareUrl}.`);
+  assert((await diagramStateResponse(serverUrl, baseUrl, room.sessionId)).status === 401,
+    'Unauthenticated diagram state access was not denied.');
+  await expectRejectedWebsocket(serverUrl, baseUrl, room.sessionId);
+  await expectLockedRoomDoesNotMount(browser, baseUrl, serverUrl, room);
+  await expectLockedRoomDoesNotMount(browser, baseUrl, serverUrl, room, true);
+
+  const browserA = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const browserB = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const pageA = await browserA.newPage();
+  const pageB = await browserB.newPage();
+  let activeSocket: Awaited<ReturnType<typeof openAuthorizedWebsocket>> | null = null;
+  try {
+    await Promise.all([
+      pageA.goto(shareUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 }),
+      pageB.goto(shareUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 }),
+    ]);
+    await Promise.all([
+      pageA.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 }),
+      pageB.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 }),
+      ensureSourceFlyoutOpen(pageA),
+      ensureSourceFlyoutOpen(pageB),
+    ]);
+    await Promise.all([
+      pageA.getByTestId('connection-status-badge').filter({ hasText: /^synced$/i }).waitFor({ state: 'visible', timeout: 15_000 }),
+      pageB.getByTestId('connection-status-badge').filter({ hasText: /^synced$/i }).waitFor({ state: 'visible', timeout: 15_000 }),
+    ]);
+    assert(await pageA.evaluate(() => window.location.hash === '') && await pageB.evaluate(() => window.location.hash === ''),
+      'Successful fragment room-key exchange did not clear the browser URL hash.');
+
+    const roomAccess = await exchangeRoomAccess(serverUrl, baseUrl, room);
+    const mcp = new ModernMcpClient(mcpUrl, baseUrl, room);
+    const session = await mcp.getSession(room.sessionId);
+    assert(session.diagrams.some((diagram) => diagram.id === 'main'),
+      'Authorized MCP client did not receive the protected room main diagram.');
+
+    const roomB = await createRoom(serverUrl, baseUrl);
+    assert((await getRoomAccess(serverUrl, baseUrl, roomB.sessionId, roomAccess.cookie)).status === 401,
+      'Room-A cookie accessed room B.');
+    assert((await diagramStateResponse(serverUrl, baseUrl, roomB.sessionId, roomAccess.cookie)).status === 401,
+      'Room-A cookie accessed room-B diagram state.');
+    const foreignMcp = await postModernMcp(mcpUrl, baseUrl, room, 'getSession', { sessionId: roomB.sessionId });
+    const foreignMcpPayload = await foreignMcp.json().catch(() => null) as {
+      error?: unknown;
+      result?: { isError?: boolean };
+    } | null;
+    assert(!foreignMcp.ok || Boolean(foreignMcpPayload?.error) || foreignMcpPayload?.result?.isError === true,
+      `Room-A MCP bearer accessed room B: status=${foreignMcp.status} body=${JSON.stringify(foreignMcpPayload)}.`);
+
+    const socket = await openAuthorizedWebsocket(serverUrl, baseUrl, room.sessionId, roomAccess.cookie);
+    activeSocket = socket;
+    const rotated = await rotateRoomAccess(serverUrl, baseUrl, roomAccess);
+    await Promise.all([
+      socket.closed,
+      waitForBrowserSocketRevocation(pageA, 'authorized browser A socket'),
+      waitForBrowserSocketRevocation(pageB, 'authorized browser B socket'),
+    ]);
+    assert((await getRoomAccess(serverUrl, baseUrl, room.sessionId, roomAccess.cookie)).status === 401,
+      'Pre-rotation browser cookie remained valid.');
+    assert((await diagramStateResponse(serverUrl, baseUrl, room.sessionId, roomAccess.cookie)).status === 401,
+      'Pre-rotation browser cookie still read diagram state.');
+    await expectRejectedWebsocket(serverUrl, baseUrl, room.sessionId, roomAccess.cookie);
+    const revokedMcp = await postModernMcp(mcpUrl, baseUrl, room, 'getSession', { sessionId: room.sessionId });
+    assert(revokedMcp.status === 401, `Pre-rotation MCP bearer returned ${revokedMcp.status}, not 401.`);
+    assert((await getRoomAccess(serverUrl, baseUrl, room.sessionId, rotated.cookie)).status === 204,
+      'Replacement rotation cookie was not accepted.');
+    const replacementMcp = new ModernMcpClient(mcpUrl, baseUrl, rotated);
+    await replacementMcp.getSession(room.sessionId);
+
+    const replacementContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const replacementPage = await replacementContext.newPage();
+    try {
+      await replacementPage.goto(roomShareUrl(baseUrl, rotated), { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await replacementPage.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+      assert(await replacementPage.evaluate(() => window.location.hash === ''),
+        'Replacement room key did not clear from the browser URL after exchange.');
+    } finally {
+      await replacementContext.close();
+    }
+  } finally {
+    activeSocket?.terminate();
+    await Promise.all([browserB.close(), browserA.close()]);
+  }
+}
+
+async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoints): Promise<void> {
   const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
+  try {
   const browserA = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const browserB = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const pageA = await browserA.newPage();
@@ -252,15 +406,15 @@ async function validateCollaboration(): Promise<void> {
   await pageA.clock.install({ time: Date.now() });
   const diagnosticsA = collectReactFlowDiagnostics(pageA);
   const diagnosticsB = collectReactFlowDiagnostics(pageB);
-  const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
-  const mcpUrl = process.env.E2E_MCP_URL ?? 'http://localhost:4000/mcp';
-  const sessionId = `e2e-collaboration-${Date.now()}`;
-  const mcp = new ModernMcpClient(mcpUrl, baseUrl);
+  const room = await createRoom(serverUrl, baseUrl);
+  const roomAccess = await exchangeRoomAccess(serverUrl, baseUrl, room);
+  const sessionId = room.sessionId;
+  const mcp = new ModernMcpClient(mcpUrl, baseUrl, room);
 
-  try {
+    await expectProtectedRoomAccess(browser, { baseUrl, mcpUrl, serverUrl });
     await Promise.all([
-      pageA.goto(`${baseUrl}/s/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: 30_000 }),
-      pageB.goto(`${baseUrl}/s/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: 30_000 }),
+      pageA.goto(roomShareUrl(baseUrl, room), { waitUntil: 'domcontentloaded', timeout: 30_000 }),
+      pageB.goto(roomShareUrl(baseUrl, room), { waitUntil: 'domcontentloaded', timeout: 30_000 }),
     ]);
     await Promise.all([
       pageA.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 }),
@@ -307,14 +461,14 @@ async function validateCollaboration(): Promise<void> {
     assert(afterHuman.revision !== staleRevision, 'Browser source write did not advance the MCP diagram revision.');
     assert(afterHuman.mermaidText.includes(HUMAN_EDGE.trim()), 'MCP re-read did not observe the browser edit.');
 
-    const staleWrite = await mcp.writeDiagram(sessionId, main.id, `${BASE_FLOWCHART}\n${AGENT_EDGE}`, staleRevision);
+    const staleWrite = await writeDiagram(mcp, sessionId, main.id, `${BASE_FLOWCHART}\n${AGENT_EDGE}`, staleRevision);
     const staleText = `${staleWrite.result?.content?.map((item) => item.text ?? '').join('\n') ?? ''}\n${staleWrite.error?.message ?? ''}`;
     const staleRejected = staleWrite.result?.isError === true && /stale diagram revision/i.test(staleText);
     assert(staleRejected, `Stale modern MCP write was not rejected: ${staleText}`);
 
     const reread = await mcp.readDiagram(sessionId, main.id);
     const mergedSource = `${reread.mermaidText}\n${AGENT_EDGE}`;
-    const retriedWrite = await mcp.writeDiagram(sessionId, main.id, mergedSource, reread.revision);
+    const retriedWrite = await writeDiagram(mcp, sessionId, main.id, mergedSource, reread.revision);
     const merged = mcp.expectContent<{ diagram: Diagram }>(retriedWrite, 'writeDiagram').diagram;
     assert(merged.mermaidText === mergedSource, 'MCP retry did not write the exact merged source.');
 
@@ -399,7 +553,7 @@ async function validateCollaboration(): Promise<void> {
     let reusedNodeRejectedDraggedPosition = false;
     let restoredReplicasConverged = false;
     try {
-      observer = await openYjsSessionObserver(mcpUrl, sessionId);
+      observer = await openYjsSessionObserver(mcpUrl, sessionId, { cookie: roomAccess.cookie, origin: baseUrl });
       await observer.waitFor(
         (current) => current.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_FLOWCHART,
         'the pending-prune diagram source',
@@ -450,7 +604,7 @@ async function validateCollaboration(): Promise<void> {
       assert(observer.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_REMOVED,
         'The pending-prune source changed during the drag-stop observation window.');
 
-      freshObserver = await openYjsSessionObserver(mcpUrl, sessionId);
+      freshObserver = await openYjsSessionObserver(mcpUrl, sessionId, { cookie: roomAccess.cookie, origin: baseUrl });
       const freshRemovedSnapshot = freshObserver.snapshot(pendingPrune.id);
       freshObserverConfirmed = freshRemovedSnapshot.exists
         && freshRemovedSnapshot.mermaidText === PENDING_PRUNE_REMOVED
@@ -523,13 +677,14 @@ async function validateCollaboration(): Promise<void> {
     console.log(`post-release same-node winner moved=${postReleaseWinnerMoved} replicas converged=${postReleaseReplicasConverged}`);
     console.log(`pending removal reconciled before commit=${removalAdvanceMs}ms timer pruned=${pendingPrunedBeforeStop} stop pruned=${pendingPrunedAfterStop}`);
     console.log(`fresh canonical observer confirmed=${freshObserverConfirmed} reused initial=${reusedNodeMatchesInitial} rejected dragged=${reusedNodeRejectedDraggedPosition} replicas converged=${restoredReplicasConverged}`);
+    console.log('protected room access, cross-room isolation, fragment exchange, and rotation revocation passed=true');
     console.log('COLLABORATION E2E PASSED');
   } finally {
     await browser.close();
   }
 }
 
-validateCollaboration().catch((error) => {
+withOwnedServices(validateCollaboration).catch((error) => {
   console.error(error);
   process.exit(1);
 });

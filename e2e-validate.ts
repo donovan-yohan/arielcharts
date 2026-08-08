@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs';
 import { chromium, type Locator, type Page } from '@playwright/test';
+import { createRoom, exchangeRoomAccess, roomShareUrl } from './e2e/support/room-access';
+import { openYjsSessionObserver } from './e2e/support/yjs-session';
 
 interface SemanticState {
   circleMarker: string | null;
@@ -82,17 +84,23 @@ async function clickFirstVisibleEdge(page: Page): Promise<boolean> {
 async function validate() {
   const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
+  try {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const results: Array<{ test: string; pass: boolean }> = [];
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
-  const sessionName = `e2e-diag-${Date.now()}`;
+  const mcpUrl = process.env.E2E_MCP_URL ?? 'http://localhost:4000/mcp';
+  const room = await createRoom(new URL(mcpUrl).origin, baseUrl);
+  const roomAccess = await exchangeRoomAccess(new URL(mcpUrl).origin, baseUrl, room);
+  const durableObserver = await openYjsSessionObserver(mcpUrl, room.sessionId, { cookie: roomAccess.cookie, origin: baseUrl });
+
+  try {
 
   page.on('console', (msg) => {
     if (msg.type() === 'error') console.log(`[console.error] ${msg.text()}`);
   });
 
   console.log('1. Loading page...');
-  await page.goto(`${baseUrl}/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(roomShareUrl(baseUrl, room), { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await ensureSourceFlyoutOpen(page);
   await page.waitForTimeout(2000);
   const editor = page.locator('.cm-content');
@@ -385,6 +393,12 @@ async function validate() {
   results.push({ test: 'edge label edit sync', pass: edgeLabelPass });
   console.log(`   Edge toolbar visible: ${edgeToolbarVisible}, editor contains Critical: ${edgeLabelText?.includes('Critical') ?? false} — ${edgeLabelPass ? 'PASS' : 'FAIL'}`);
 
+  // Editing the Mermaid source rerenders the controlled edge layer, so select
+  // the visible edge again before exercising its destructive action.
+  const edgeReselected = await clickFirstVisibleEdge(page);
+  if (!edgeReselected) throw new Error('No visible edge could be reselected after its label was edited.');
+  await page.locator('div[aria-label="Selected edge toolbar"]').waitFor({ state: 'visible', timeout: 5000 });
+
   await page.locator('button[aria-label="Delete selected edge"]').click({ timeout: 5000 });
   await page.waitForTimeout(2000);
   const edgeCountAfterDelete = await page.locator('.react-flow__edge').count();
@@ -420,61 +434,144 @@ async function validate() {
   console.log('\n9b. Testing drag-out connected node creation...');
   const connectedNodeCountBefore = await page.locator('.react-flow__node').count();
   const connectedEdgeCountBefore = await page.locator('.react-flow__edge').count();
+  const connectedFlowNodeIdsBefore = await page.locator('.react-flow__node').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-id') ?? ''));
   const sourceHandle = page.locator('.mermaid-flow-handle--right.mermaid-flow-handle--source').first();
   const sourceBox = await sourceHandle.boundingBox();
+  let intendedDropPoint: { x: number; y: number } | null = null;
+  let viewportBeforeConnectedNode: string | null = null;
   if (sourceBox) {
     const startX = sourceBox.x + sourceBox.width / 2;
     const startY = sourceBox.y + sourceBox.height / 2;
+    intendedDropPoint = { x: startX + 220, y: startY + 120 };
     await page.mouse.move(startX, startY);
     await page.mouse.down();
-    await page.mouse.move(startX + 220, startY + 120, { steps: 12 });
+    await page.mouse.move(intendedDropPoint.x, intendedDropPoint.y, { steps: 12 });
+    viewportBeforeConnectedNode = await page.locator('.react-flow__viewport').getAttribute('style');
     await page.mouse.up();
+    await page.waitForFunction(
+      ({ edgeCount, nodeCount }) => (
+        document.querySelectorAll('.react-flow__node').length > nodeCount
+        && document.querySelectorAll('.react-flow__edge').length > edgeCount
+      ),
+      { edgeCount: connectedEdgeCountBefore, nodeCount: connectedNodeCountBefore },
+      { timeout: 10_000 },
+    );
   }
-  await page.waitForTimeout(3000);
   const connectedNodeCountAfter = await page.locator('.react-flow__node').count();
   const connectedEdgeCountAfter = await page.locator('.react-flow__edge').count();
+  const connectedFlowNodeIdsAfter = await page.locator('.react-flow__node').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-id') ?? ''));
+  const manuallyPositionedFlowNodeIds = connectedFlowNodeIdsAfter.filter((id) => !connectedFlowNodeIdsBefore.includes(id));
+  const manuallyPositionedFlowNodeId = manuallyPositionedFlowNodeIds.length === 1
+    ? manuallyPositionedFlowNodeIds[0]!
+    : null;
+  if (manuallyPositionedFlowNodeId) {
+    await durableObserver.waitFor(
+      (observer) => observer.hasNodePosition('main', manuallyPositionedFlowNodeId),
+      `a durable node position for drag-created node ${manuallyPositionedFlowNodeId}`,
+      10_000,
+    );
+    await page.waitForFunction(
+      (nodeId) => [...document.querySelectorAll('.diagram-canvas-svg svg g.node')]
+        .some((node) => node.id.includes(`flowchart-${nodeId}-`)),
+      manuallyPositionedFlowNodeId,
+      { timeout: 10_000 },
+    );
+  }
+  const connectedSvgNodeIdsAfter = await page.locator('.diagram-canvas-svg svg g.node').evaluateAll((nodes) => nodes.map((node) => node.id));
+  // Mermaid's DOM prefix changes on every source render, but the tail retains
+  // the canonical flow-node id that React Flow exposes as data-id.
+  const manuallyPositionedSvgNodeIds = manuallyPositionedFlowNodeIds.flatMap((nodeId) => (
+    connectedSvgNodeIdsAfter.filter((svgId) => svgId.includes(`flowchart-${nodeId}-`))
+  ));
+  const manuallyPositionedNode = manuallyPositionedFlowNodeId
+    ? page.locator(`.react-flow__node[data-id=${JSON.stringify(manuallyPositionedFlowNodeId)}]`)
+    : null;
+  const manuallyPositionedNodeBox = await manuallyPositionedNode?.boundingBox() ?? null;
+  const manualNodeDropOffset = intendedDropPoint && manuallyPositionedNodeBox
+    ? Math.hypot(
+      manuallyPositionedNodeBox.x + manuallyPositionedNodeBox.width / 2 - intendedDropPoint.x,
+      manuallyPositionedNodeBox.y + manuallyPositionedNodeBox.height / 2 - intendedDropPoint.y,
+    )
+    : Number.POSITIVE_INFINITY;
+  const manualNodeGeometry = await page.evaluate(() => {
+    const canvas = document.querySelector('[aria-label="Interactive diagram canvas"]')?.getBoundingClientRect();
+    const viewport = document.querySelector('.react-flow__viewport')?.getAttribute('style') ?? null;
+    return {
+      canvas: canvas ? { height: canvas.height, left: canvas.left, top: canvas.top, width: canvas.width } : null,
+      viewport,
+    };
+  });
+  // A drag-created node keeps its intentional durable placement rather than
+  // Mermaid's hidden auto-layout position; allow only sub-handle rounding.
+  const manuallyPositionedNodeAtDrop = manualNodeDropOffset <= 8;
+  const dragOutCameraStable = viewportBeforeConnectedNode !== null && viewportBeforeConnectedNode === manualNodeGeometry.viewport;
+  const durableManualPosition = manuallyPositionedFlowNodeId
+    ? durableObserver.snapshot('main').nodePositions[manuallyPositionedFlowNodeId] ?? null
+    : null;
   const dragOutPass = !!sourceBox
     && connectedNodeCountAfter > connectedNodeCountBefore
-    && connectedEdgeCountAfter > connectedEdgeCountBefore;
+    && connectedEdgeCountAfter > connectedEdgeCountBefore
+    && manuallyPositionedFlowNodeIds.length === 1
+    && manuallyPositionedSvgNodeIds.length === 1
+    && durableManualPosition !== null
+    && manuallyPositionedNodeAtDrop
+    && dragOutCameraStable;
   results.push({ test: 'drag connector creates connected ghost node', pass: dragOutPass });
+  results.push({ test: 'drag connector preserves camera', pass: dragOutCameraStable });
   console.log(`   Nodes before/after: ${connectedNodeCountBefore}/${connectedNodeCountAfter}`);
   console.log(`   Edges before/after: ${connectedEdgeCountBefore}/${connectedEdgeCountAfter}`);
+  console.log(`   New React Flow/SVG ids: ${manuallyPositionedFlowNodeIds.join(',')}/${manuallyPositionedSvgNodeIds.join(',')}`);
+  console.log(`   Drop geometry: ${JSON.stringify({ drop: intendedDropPoint, node: manuallyPositionedNodeBox, ...manualNodeGeometry })}`);
+  console.log(`   Durable new-node position: ${JSON.stringify(durableManualPosition)}`);
+  console.log(`   New node drop offset: ${Math.round(manualNodeDropOffset)}px — ${manuallyPositionedNodeAtDrop ? 'PASS' : 'FAIL'}`);
+  console.log(`   Drag-out camera stable: ${dragOutCameraStable} — ${dragOutCameraStable ? 'PASS' : 'FAIL'}`);
   console.log(`   Drag-out connected node: ${dragOutPass ? 'PASS' : 'FAIL'}`);
 
   // --- Test: new node overlay alignment ---
   console.log('\n10. Checking new node overlay alignment...');
-  const newAlignment = await page.evaluate(() => {
+  const newAlignment = await page.evaluate(({ manuallyPositionedFlowNodeIds: manualFlowIds, manuallyPositionedSvgNodeIds: manualSvgIds }) => {
     const svg = document.querySelector('.diagram-canvas-svg svg') as SVGSVGElement | null;
     if (!svg) return { error: 'no svg' };
 
-    const nodes = svg.querySelectorAll('g.node');
-    const overlays = document.querySelectorAll('.react-flow__node, .diagram-node-target');
-
+    const nodes = [...svg.querySelectorAll<SVGGElement>('g.node')].filter((node) => !manualSvgIds.includes(node.id));
+    const overlays = [...document.querySelectorAll<HTMLElement>('.react-flow__node, .diagram-node-target')]
+      .filter((node) => !manualFlowIds.includes(node.dataset.id ?? ''));
+    const remainingOverlays = overlays.map((overlay, index) => ({ index, rect: overlay.getBoundingClientRect() }));
     const matches: Array<{ nodeId: string; offsetPx: number }> = [];
-    nodes.forEach((n, i) => {
-      const g = n as SVGGElement;
-      const overlay = overlays[i] as HTMLElement | undefined;
-      if (!overlay) return;
 
-      const svgRect = g.getBoundingClientRect();
-      const overlayRect = overlay.getBoundingClientRect();
+    for (const node of nodes) {
+      const svgRect = node.getBoundingClientRect();
+      const svgCenter = { x: svgRect.x + svgRect.width / 2, y: svgRect.y + svgRect.height / 2 };
+      let nearestIndex = -1;
+      let nearestOffset = Number.POSITIVE_INFINITY;
 
-      matches.push({
-        nodeId: g.id,
-        offsetPx: Math.round(Math.sqrt(
-          (svgRect.x + svgRect.width / 2 - overlayRect.x - overlayRect.width / 2) ** 2 +
-          (svgRect.y + svgRect.height / 2 - overlayRect.y - overlayRect.height / 2) ** 2,
-        )),
+      remainingOverlays.forEach((overlay, index) => {
+        const overlayCenter = { x: overlay.rect.x + overlay.rect.width / 2, y: overlay.rect.y + overlay.rect.height / 2 };
+        const offset = Math.hypot(svgCenter.x - overlayCenter.x, svgCenter.y - overlayCenter.y);
+        if (offset < nearestOffset) {
+          nearestIndex = index;
+          nearestOffset = offset;
+        }
       });
-    });
 
-    return { svgNodes: nodes.length, overlays: overlays.length, matches };
-  });
+      if (nearestIndex >= 0) {
+        matches.push({ nodeId: node.id, offsetPx: Math.round(nearestOffset) });
+        remainingOverlays.splice(nearestIndex, 1);
+      }
+    }
+
+    return { svgNodes: nodes.length, overlays: overlays.length, unmatchedOverlays: remainingOverlays.length, matches };
+  }, { manuallyPositionedFlowNodeIds, manuallyPositionedSvgNodeIds });
 
   const newMaxOffset = Math.max(0, ...((newAlignment as any).matches ?? []).map((m: any) => m.offsetPx));
-  const newAlignPass = newMaxOffset <= 5;
+  const newAlignmentCountsMatch = (newAlignment as any).svgNodes > 0
+    && (newAlignment as any).svgNodes === (newAlignment as any).overlays
+    && (newAlignment as any).matches?.length === (newAlignment as any).svgNodes
+    && (newAlignment as any).unmatchedOverlays === 0;
+  const newAlignPass = newAlignmentCountsMatch && newMaxOffset <= 5;
   results.push({ test: 'new node alignment', pass: newAlignPass });
   console.log(`   Nodes: ${(newAlignment as any).svgNodes}, Overlays: ${(newAlignment as any).overlays}`);
+  console.log(`   One-to-one pairs: ${(newAlignment as any).matches?.length ?? 0}, unmatched overlays: ${(newAlignment as any).unmatchedOverlays ?? 0}`);
   console.log(`   Max offset: ${newMaxOffset}px — ${newAlignPass ? 'PASS' : 'FAIL'}`);
 
   // --- Summary ---
@@ -486,10 +583,14 @@ async function validate() {
   console.log('='.repeat(40));
   console.log(allPassed ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED');
 
-  await browser.close();
-
-  if (!allPassed) {
-    process.exit(1);
+    if (!allPassed) {
+      process.exitCode = 1;
+    }
+  } finally {
+    durableObserver.destroy();
+  }
+  } finally {
+    await browser.close();
   }
 }
 

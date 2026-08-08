@@ -67,6 +67,12 @@ export type YjsSessionObserver = {
 
 type DestroyableWebsocketProvider = WebsocketProvider & { destroy(): void };
 
+export type YjsSessionObserverOptions = {
+  cookie?: string;
+  origin?: string;
+  timeoutMs?: number;
+};
+
 function diagramMap(doc: Y.Doc, diagramId: string): Y.Map<unknown> | null {
   const diagram = doc.getMap<Y.Map<unknown>>(DIAGRAMS_KEY).get(diagramId);
   return diagram instanceof Y.Map ? diagram : null;
@@ -306,11 +312,18 @@ async function waitForInitialSync(provider: WebsocketProvider, timeoutMs: number
 export async function openYjsSessionObserver(
   mcpUrl: string,
   sessionId: string,
-  timeoutMs = 15_000,
+  { cookie, origin, timeoutMs = 15_000 }: YjsSessionObserverOptions = {},
 ): Promise<YjsSessionObserver> {
   const doc = new Y.Doc();
+  const WebSocketPolyfill = cookie
+    ? class CookieWebSocket extends WebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols, { headers: { cookie, ...(origin ? { origin } : {}) } });
+      }
+    }
+    : WebSocket;
   const provider = new WebsocketProvider(getYjsWebsocketUrl(mcpUrl), sessionId, doc, {
-    WebSocketPolyfill: WebSocket as unknown as typeof globalThis.WebSocket,
+    WebSocketPolyfill: WebSocketPolyfill as unknown as typeof globalThis.WebSocket,
     disableBc: true,
   });
 

@@ -100,11 +100,11 @@ export class SessionWebSocketServer {
     return pathname.startsWith('/ws/');
   }
 
-  async upgrade({ request, socket, head }: UpgradeContext): Promise<void> {
+  async upgrade({ request, socket, head, sessionId }: UpgradeContext): Promise<void> {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
-    const sessionId = pathname.replace(/^\/ws\//u, '');
+    const pathSessionId = pathname.replace(/^\/ws\//u, '');
 
-    if (!isValidSessionId(sessionId)) {
+    if (!isValidSessionId(sessionId) || sessionId !== pathSessionId) {
       socket.destroy();
       return;
     }
@@ -131,8 +131,21 @@ export class SessionWebSocketServer {
     });
   }
 
+  /** Rotation revokes already-upgraded peers; cookie checks alone only protect reconnects. */
+  async closeRoom(sessionId: string): Promise<void> {
+    let session: SessionState;
+    try {
+      session = await this.manager.requireSession(sessionId);
+    } catch {
+      return;
+    }
+    for (const socket of [...session.sockets]) {
+      socket.terminate();
+    }
+  }
+
   private async handleConnection(socket: WebSocket, sessionId: string): Promise<void> {
-    const session = await this.manager.getOrCreateSession(sessionId);
+    const session = await this.manager.requireSession(sessionId);
     if (socket.readyState !== WebSocket.OPEN) {
       return;
     }
@@ -150,7 +163,7 @@ export class SessionWebSocketServer {
   }
 
   private async handleClose(socket: WebSocket, sessionId: string): Promise<void> {
-    const session = await this.manager.getOrCreateSession(sessionId);
+    const session = await this.manager.requireSession(sessionId);
     session.sockets.delete(socket);
     const clientIds = session.socketClientIds.get(socket);
     session.socketClientIds.delete(socket);
@@ -168,7 +181,7 @@ export class SessionWebSocketServer {
       return;
     }
 
-    const session = await this.manager.getOrCreateSession(sessionId);
+    const session = await this.manager.requireSession(sessionId);
     this.ensureSocketRegistered(session, sender);
     const decoderInstance = decoding.createDecoder(buffer);
     const messageType = decoding.readVarUint(decoderInstance);

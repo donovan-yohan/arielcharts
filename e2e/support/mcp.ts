@@ -4,6 +4,7 @@ const MCP_PROTOCOL_VERSION = '2026-07-28';
 const MCP_FETCH_TIMEOUT_MS = 15_000;
 
 export type Diagram = { id: string; mermaidText: string; name: string; revision: string };
+export type McpRoomAccess = { roomKey: string; sessionId: string };
 export type DiagramRevisionSummary = {
   id: string;
   sequence: number;
@@ -37,48 +38,69 @@ function isRevisionConflict(payload: McpPayload): boolean {
     ...payload.result?.content?.map((item) => item.text) ?? [],
   ].filter((value): value is string => Boolean(value)).join('\n');
 
-  return /stale (?:diagram )?revision|revision conflict/i.test(message);
+  return /stale (?:(?:diagram|session) )?revision|revision conflict/i.test(message);
+}
+
+export async function postModernMcp(
+  endpoint: string,
+  origin: string,
+  room: McpRoomAccess,
+  name: string,
+  args: Record<string, unknown>,
+  id = 1,
+): Promise<Response> {
+  return fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${room.sessionId}.${room.roomKey}`,
+      'content-type': 'application/json',
+      'mcp-method': 'tools/call',
+      'mcp-name': name,
+      'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+      origin,
+    },
+    signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: {
+        name,
+        arguments: args,
+        _meta: {
+          'io.modelcontextprotocol/clientCapabilities': {},
+          'io.modelcontextprotocol/clientInfo': { name: 'arielcharts-workspace-ux-e2e', version: '1.0.0' },
+          'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION,
+        },
+      },
+    }),
+  });
 }
 
 export class ModernMcpClient {
   private nextId = 1;
 
-  constructor(private readonly endpoint: string, private readonly origin: string) {}
+  constructor(
+    private readonly endpoint: string,
+    private readonly origin: string,
+    private readonly room: McpRoomAccess,
+  ) {}
 
   async tool(name: string, args: Record<string, unknown>): Promise<McpPayload> {
+    const argumentSessionId = typeof args.sessionId === 'string' ? args.sessionId : null;
+    if (argumentSessionId && argumentSessionId !== this.room.sessionId) {
+      throw new Error(`Authenticated MCP ${name} request targeted ${argumentSessionId}, not bound room ${this.room.sessionId}.`);
+    }
+    let response: Response;
     try {
-      const response = await fetch(this.endpoint, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'mcp-method': 'tools/call',
-          'mcp-name': name,
-          'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-          origin: this.origin,
-        },
-        signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: this.nextId++,
-          method: 'tools/call',
-          params: {
-            name,
-            arguments: args,
-            _meta: {
-              'io.modelcontextprotocol/clientCapabilities': {},
-              'io.modelcontextprotocol/clientInfo': { name: 'arielcharts-workspace-ux-e2e', version: '1.0.0' },
-              'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION,
-            },
-          },
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`MCP ${name} returned HTTP ${response.status}: ${await response.text()}`);
-      }
-      return response.json() as Promise<McpPayload>;
+      response = await postModernMcp(this.endpoint, this.origin, this.room, name, args, this.nextId++);
     } catch (error) {
       throw new Error(`MCP ${name} request failed within ${MCP_FETCH_TIMEOUT_MS / 1_000}s`, { cause: error });
     }
+    if (!response.ok) {
+      throw new Error(`MCP ${name} returned HTTP ${response.status}: ${await response.text()}`);
+    }
+    return response.json() as Promise<McpPayload>;
   }
 
   expectContent<T>(payload: McpPayload, action: string): T {
@@ -131,9 +153,9 @@ export class ModernMcpClient {
   }
 
   async createDiagramWithLatestRevision(sessionId: string, name: string, mermaidText: string): Promise<Diagram> {
-    const session = await this.getSession(sessionId);
-    return this.expectContent<{ diagram: Diagram }>(
-      await this.tool('createDiagram', {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const session = await this.getSession(sessionId);
+      const payload = await this.tool('createDiagram', {
         sessionId,
         name,
         mermaidText,
@@ -141,9 +163,12 @@ export class ModernMcpClient {
         actorName: 'UX harness',
         actorType: 'agent',
         detail: 'Prepared revision-history browser coverage',
-      }),
-      'createDiagram',
-    ).diagram;
+      });
+      if (!isRevisionConflict(payload) || attempt === 1) {
+        return this.expectContent<{ diagram: Diagram }>(payload, 'createDiagram').diagram;
+      }
+    }
+    throw new Error('Unreachable createDiagram retry state.');
   }
 
   async writeLatest(sessionId: string, diagramId: string, mermaidText: string, detail = 'Remote UX anchor update'): Promise<Diagram> {

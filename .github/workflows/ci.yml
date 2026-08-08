@@ -7,6 +7,9 @@ on:
       - 'phase-*/*'
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -45,3 +48,59 @@ jobs:
       - run: pnpm --filter @arielcharts/shared build
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e-workspace-ux
+
+  protected-collaboration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e-collaboration
+
+  deploy-server:
+    # Deploy only the protected main branch, and only after every local and
+    # browser collaboration gate has passed. Pull requests never receive Fly
+    # credentials from this workflow.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - verify
+      - workspace-ux
+      - protected-collaboration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify deployment secrets
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          ROOM_COOKIE_SECRET: ${{ secrets.ROOM_COOKIE_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "$FLY_API_TOKEN" || { echo '::error::Missing required repository secret FLY_API_TOKEN.'; exit 1; }
+          test -n "$ROOM_COOKIE_SECRET" || { echo '::error::Missing required repository secret ROOM_COOKIE_SECRET.'; exit 1; }
+      - name: Set up Fly CLI
+        # Fly.io's official setup action, pinned to a reviewed source commit.
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: '0.4.80'
+      - name: Stage the room-cookie signing secret
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          ROOM_COOKIE_SECRET: ${{ secrets.ROOM_COOKIE_SECRET }}
+        run: |
+          set -euo pipefail
+          flyctl secrets set --app arielcharts-server --stage ROOM_COOKIE_SECRET="$ROOM_COOKIE_SECRET"
+      - name: Deploy server
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --app arielcharts-server --config fly.toml --remote-only

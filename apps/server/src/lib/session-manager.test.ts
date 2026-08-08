@@ -407,13 +407,13 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     const firstBatchStarted = deferred();
     const continueFirstBatch = deferred();
     let pauseOnce = true;
-    resources.store.persistWithHistory = async (record, history) => {
+    resources.store.persistWithHistory = async (record, history, options) => {
       if (pauseOnce) {
         pauseOnce = false;
         firstBatchStarted.resolve();
         await continueFirstBatch.promise;
       }
-      await originalPersist(record, history);
+      return originalPersist(record, history, options);
     };
 
     state.doc.transact(() => {
@@ -513,11 +513,11 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     expect((await manager.listDiagramHistory('abc123de', api.id)).revisions).not.toHaveLength(0);
     const originalPersist = resources.store.persistWithHistory.bind(resources.store);
     let deletionBatch: Parameters<SessionStore['persistWithHistory']>[1] | undefined;
-    resources.store.persistWithHistory = async (record, history) => {
+    resources.store.persistWithHistory = async (record, history, options) => {
       if (history.deleteDiagramHistory.some((target) => target.diagramId === api.id)) {
         deletionBatch = history;
       }
-      await originalPersist(record, history);
+      return originalPersist(record, history, options);
     };
 
     await manager.deleteDiagram('abc123de', api.id, api.revision, activity('deleted'));
@@ -535,11 +535,11 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     const activityArray = state.doc.getArray<ActivityEvent>('activity');
     const originalPersist = resources.store.persistWithHistory.bind(resources.store);
     const pruningBatches: number[][] = [];
-    resources.store.persistWithHistory = async (record, history) => {
+    resources.store.persistWithHistory = async (record, history, options) => {
       if (history.deleteSequences.length > 0) {
         pruningBatches.push(history.deleteSequences.map((target) => target.sequence));
       }
-      await originalPersist(record, history);
+      return originalPersist(record, history, options);
     };
 
     for (let index = 1; index <= 105; index += 1) {

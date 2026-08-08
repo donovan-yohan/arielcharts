@@ -87,11 +87,12 @@ async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 5_000)
   await assertion();
 }
 
-async function openClient(port: number, sessionId: string) {
+async function openClient(port: number, sessionId: string, cookie: string) {
   const doc = new Y.Doc();
   const socket = new WebSocket(`ws://127.0.0.1:${port}/ws/${sessionId}`, {
     headers: {
       origin: 'http://allowed.test',
+      cookie,
     },
   });
 
@@ -152,6 +153,7 @@ describe('SessionWebSocketServer', () => {
   let dataDir: string;
   let app: ReturnType<typeof createApp>;
   let port: number;
+  let roomCookie: string;
 
   beforeEach(async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'arielcharts-websocket-'));
@@ -162,6 +164,7 @@ describe('SessionWebSocketServer', () => {
       sessionTtlMs: 60_000,
       diskTtlMs: Infinity,
       allowedOrigins: ['http://allowed.test'],
+      roomAccessCryptoProfile: 'test',
     };
     app = createApp(env);
 
@@ -170,6 +173,8 @@ describe('SessionWebSocketServer', () => {
     });
 
     port = (app.server.address() as AddressInfo).port;
+    const room = await app.createRoom('abc123de');
+    roomCookie = (app.roomAccess.browserCookieHeaders('abc123de', room.accessVersion)['set-cookie'] as string).split(';')[0]!;
   });
 
   afterEach(async () => {
@@ -179,8 +184,8 @@ describe('SessionWebSocketServer', () => {
 
   it('converges duplicate and reversed nested tab updates, then restores them after reconnect', async () => {
     const sessionId = 'abc123de';
-    const initialWriter = await openClient(port, sessionId);
-    const initialReader = await openClient(port, sessionId);
+    const initialWriter = await openClient(port, sessionId, roomCookie);
+    const initialReader = await openClient(port, sessionId, roomCookie);
     await waitFor(async () => {
       const session = await app.manager.getOrCreateSession(sessionId);
       expect(session.sockets.size).toBe(2);
@@ -238,8 +243,8 @@ describe('SessionWebSocketServer', () => {
     });
     expect(removed).toEqual([sessionId]);
 
-    const reopenedWriter = await openClient(port, sessionId);
-    const reopenedReader = await openClient(port, sessionId);
+    const reopenedWriter = await openClient(port, sessionId, roomCookie);
+    const reopenedReader = await openClient(port, sessionId, roomCookie);
     await waitFor(async () => {
       const session = await app.manager.getOrCreateSession(sessionId);
       expect(session.sockets.size).toBe(2);
@@ -269,8 +274,8 @@ describe('SessionWebSocketServer', () => {
 
   it('drops stale and current foreign awareness echoes but rejects a foreign clock advance', async () => {
     const sessionId = 'abc123de';
-    const clientA = await openClient(port, sessionId);
-    const clientB = await openClient(port, sessionId);
+    const clientA = await openClient(port, sessionId, roomCookie);
+    const clientB = await openClient(port, sessionId, roomCookie);
     const stateA = { user: { name: 'A', color: '#111111', type: 'human' } };
     const currentStateA = { user: { name: 'A', color: '#111111', type: 'human' }, cursor: { anchor: 8, head: 8 } };
     const stateB = { user: { name: 'B', color: '#222222', type: 'human' } };
@@ -316,8 +321,8 @@ describe('SessionWebSocketServer', () => {
 
   it('hands awareness ownership to a reconnect without stale-close cleanup removing it', async () => {
     const sessionId = 'abc123de';
-    const original = await openClient(port, sessionId);
-    const replacement = await openClient(port, sessionId);
+    const original = await openClient(port, sessionId, roomCookie);
+    const replacement = await openClient(port, sessionId, roomCookie);
     const initialState = { user: { name: 'Original', color: '#111111', type: 'human' } };
     const replacementState = { user: { name: 'Replacement', color: '#333333', type: 'human' } };
     original.sendAwareness([{ clientId: 303, clock: 1, state: initialState }]);

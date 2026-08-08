@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export type E2eEndpoints = { baseUrl: string; mcpUrl: string };
+export type E2eEndpoints = { baseUrl: string; mcpUrl: string; serverUrl: string };
 
 type OwnedProcess = { child: ChildProcess; label: string; output: string[] };
 type FileSnapshot = { bytes: Buffer | null; path: string };
@@ -118,7 +118,7 @@ export async function withOwnedServices<T>(run: (endpoints: E2eEndpoints) => Pro
     if (!externalBaseUrl || !externalMcpUrl) {
       throw new Error('Set both E2E_BASE_URL and E2E_MCP_URL, or neither, when using external services.');
     }
-    return run({ baseUrl: externalBaseUrl, mcpUrl: externalMcpUrl });
+    return run({ baseUrl: externalBaseUrl, mcpUrl: externalMcpUrl, serverUrl: new URL(externalMcpUrl).origin });
   }
 
   const webPort = portFromEnv('E2E_UX_WEB_PORT', 3303);
@@ -126,7 +126,8 @@ export async function withOwnedServices<T>(run: (endpoints: E2eEndpoints) => Pro
   // This owned production stack is loopback-only. Keep one localhost origin in
   // the browser, server allowlist, and public runtime configuration.
   const baseUrl = `http://localhost:${webPort}`;
-  const mcpUrl = `http://localhost:${serverPort}/mcp`;
+  const serverUrl = `http://localhost:${serverPort}`;
+  const mcpUrl = `${serverUrl}/mcp`;
   const dataDir = await mkdtemp(join(tmpdir(), 'arielcharts-ux-e2e-'));
   // `next build` rewrites this tracked generated declaration. Preserve any
   // caller state byte-for-byte instead of using Git to reset their worktree.
@@ -135,11 +136,20 @@ export async function withOwnedServices<T>(run: (endpoints: E2eEndpoints) => Pro
     ...process.env,
     ALLOWED_ORIGINS: baseUrl,
     DATA_DIR: dataDir,
-    NEXT_PUBLIC_SERVER_URL: `http://localhost:${serverPort}`,
+    NEXT_PUBLIC_SERVER_URL: serverUrl,
     NEXT_PUBLIC_WS_URL: `ws://localhost:${serverPort}`,
     PORT: String(serverPort),
+    ROOM_COOKIE_SECRET: 'arielcharts-e2e-deterministic-cookie-secret',
+    ROOM_COOKIE_SECURE: 'false',
   };
-  const webEnv = { ...runtimeEnv, PORT: String(webPort) };
+  // The server has an explicitly guarded low-cost crypto profile for E2E.
+  // Do not leak it (or NODE_ENV=test) into Next's production build/start.
+  const serverEnv = {
+    ...runtimeEnv,
+    NODE_ENV: 'test',
+    ROOM_ACCESS_CRYPTO_PROFILE: 'test',
+  };
+  const webEnv = { ...runtimeEnv, NODE_ENV: 'production', PORT: String(webPort) };
   let server: OwnedProcess | null = null;
   let web: OwnedProcess | null = null;
 
@@ -147,10 +157,10 @@ export async function withOwnedServices<T>(run: (endpoints: E2eEndpoints) => Pro
     // Screenshots are product evidence, so build and run production services.
     // This also keeps Next's development indicator out of the captures.
     await runCommand('production build', ['build'], webEnv);
-    server = start('server', ['--filter', '@arielcharts/server', 'start'], runtimeEnv);
+    server = start('server', ['--filter', '@arielcharts/server', 'start'], serverEnv);
     web = start('web', ['--filter', '@arielcharts/web', 'start'], webEnv);
     await Promise.all([waitFor(`${baseUrl}/`, 'web'), waitFor(`http://localhost:${serverPort}/health`, 'server')]);
-    return await run({ baseUrl, mcpUrl });
+    return await run({ baseUrl, mcpUrl, serverUrl });
   } catch (error) {
     const diagnostics = [server, web]
       .filter((process): process is OwnedProcess => process !== null)

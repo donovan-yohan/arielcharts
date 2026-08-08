@@ -5,6 +5,10 @@ Repo: donovanyohan/arielcharts
 Status: APPROVED
 Mode: Builder
 
+> This is a legacy product-planning snapshot. For the implemented runtime
+> contract, room-access boundary, and release evidence, use
+> `docs/context-map.md`, `README.md`, and `packages/shared/src/types.ts`.
+
 ---
 
 ## 1. Project Overview
@@ -16,14 +20,14 @@ ArielCharts is a real-time collaborative Mermaid diagram editor. Humans and AI a
 pnpm monorepo with three packages:
 
 - **`apps/web`** — Next.js frontend (TypeScript, CodeMirror 6, Yjs CRDT, mermaid v11, React)
-- **`apps/server`** — Node.js + Express backend (TypeScript, WebSocket via y-websocket, MCP SDK, SQLite persistence)
+- **`apps/server`** — Node.js + Express backend (TypeScript, WebSocket via y-websocket, MCP SDK, LevelDB persistence, and protected-room access)
 - **`packages/shared`** — Shared types and constants
 
 ### Core Principles
 
-1. **Mermaid text is the single source of truth.** All state derives from the Yjs `Y.Text` document.
-2. **Flowchart first.** Other diagram types degrade to read-only SVG preview.
-3. **Two-way sync.** Visual edits serialize back to text; text edits update the visual overlay.
+1. **Mermaid text is the diagram source of truth.** Named tabs, source, and layout membership live in the Yjs session document; private room access and history do not.
+2. **Flowchart first for visual structure editing.** Other Mermaid types, including sequence diagrams, remain source-editable and render in the generic preview.
+3. **Two-way sync.** Visual flowchart edits serialize back to text; source edits update their preview.
 4. **Roundtrip fidelity over formatting.** Text must not get mangled by visual edits.
 
 ### Dependencies
@@ -233,7 +237,7 @@ Inline input       | #0d1117  | #30363d  | #c9d1d9  | 8px
 ### Edge Cases
 
 - **Invalid mermaid text:** Overlay disappears, last valid SVG shown + error banner
-- **Non-flowchart:** Read-only SVG, no overlay
+- **Non-flowchart:** Source-editable generic SVG preview, with no flowchart structural overlay
 - **Empty diagram:** Centered "Add your first node" button
 - **Concurrent edits:** Text editor buffers locally, commits on blur/Enter using latest graph. If edited node deleted remotely, discard and close.
 - **Zoom threshold:** Close editors below 40% zoom
@@ -290,11 +294,10 @@ interface ActivityEvent {
 ### MCP Tool Shapes
 
 ```typescript
-interface ReadDiagramInput  { session_id: string }
-interface ReadDiagramOutput { mermaid_text: string; participants: Participant[] }
-interface WriteDiagramInput { session_id: string; mermaid_text: string }
-interface WriteDiagramOutput { success: boolean }
-interface ListSessionsOutput { sessions: { id: string; title: string; participants: number }[] }
+interface GetSessionInput { sessionId: string }
+interface ReadDiagramInput { sessionId: string; diagramId: string }
+interface WriteDiagramInput { sessionId: string; diagramId: string; mermaidText: string; expectedRevision: string }
+interface DiagramOutput { diagram: { id: string; name: string; revision: string; mermaidText: string } }
 ```
 
 ### WebSocket Contract
@@ -315,7 +318,10 @@ Agent config:
   "mcpServers": {
     "arielcharts": {
       "type": "streamable-http",
-      "url": "https://arielcharts-server.fly.dev/mcp"
+      "url": "https://api.arielcharts.donovanyohan.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <sessionId>.<roomKey>"
+      }
     }
   }
 }
@@ -323,10 +329,11 @@ Agent config:
 
 ### Coordination Rules
 
-- Backend owns: Yjs doc lifecycle, WebSocket transport, persistence, session cleanup, MCP tools
+- Backend owns: protected room creation/access/rotation, Yjs doc lifecycle, WebSocket transport, persistence, session cleanup, MCP tools
 - Frontend owns: shared types consumption, session routing, awareness/activity rendering
-- `write_diagram` must append an ActivityEvent and update persisted Yjs state
-- `list_sessions` returns live + persisted sessions ordered by `updatedAt`
+- Browser share links carry `#roomKey=<roomKey>` in the fragment, exchange it for an HttpOnly cookie, and remove it before the workspace mounts. Rotation revokes existing browser and MCP access.
+- MCP has no session-listing capability. Every request uses `Authorization: Bearer <sessionId>.<roomKey>` and can access only that one room.
+- Every write-like MCP call must read fresh server state first, pass the returned revision, and re-read/merge before retrying a stale revision.
 - Session ID format: lowercase letters, digits, `_`, `-`, length 6-32
 
 ---
@@ -341,7 +348,7 @@ Agent config:
 
 ### NOT in Scope
 
-- Mobile/tablet responsive layout (desktop-only tool)
+- A separate priority pass for mobile/tablet feature density beyond the present responsive workspace
 - Editing existing edge labels from the visual editor (use text editor)
 - Drag-and-drop node positioning (mermaid layout is deterministic)
 - Undo/redo UI (already works via Y.UndoManager + CodeMirror keybindings)
@@ -362,10 +369,11 @@ apps/web/src/
 
 apps/server/src/
   lib/
-    mcp.ts                  # MCP tool handlers (read/write/list)
+    room-access.ts          # protected-room verifier, cookie, rotation, rate limits
+    mcp.ts                  # room-scoped MCP tool handlers (fresh-read writes)
     session-manager.ts      # Yjs doc lifecycle, persistence, cleanup
     websocket.ts            # y-websocket server
-    persistence.ts          # SQLite/LevelDB persistence
+    persistence.ts          # LevelDB persistence
     origin.ts               # Origin validation
     env.ts                  # Environment config
   index.ts                  # Express app, routes, WebSocket upgrade

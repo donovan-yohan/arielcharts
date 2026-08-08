@@ -29,18 +29,18 @@ async function readJson<T>(response: Response): Promise<T> {
 
 /** Fetches the canonical diagram head immediately before a restore attempt. */
 export async function readCurrentDiagram(sessionId: string, diagramId: string, signal?: AbortSignal): Promise<Diagram> {
-  const response = await fetch(getDiagramApiPath(sessionId, diagramId), { signal });
+  const response = await fetch(getDiagramApiPath(sessionId, diagramId), { credentials: 'include', signal });
   const body = await readJson<{ diagram: Diagram }>(response);
   return body.diagram;
 }
 
 export async function listDiagramHistory(sessionId: string, diagramId: string, signal?: AbortSignal): Promise<ListDiagramHistoryOutput> {
-  const response = await fetch(`${getDiagramApiPath(sessionId, diagramId)}/history`, { signal });
+  const response = await fetch(`${getDiagramApiPath(sessionId, diagramId)}/history`, { credentials: 'include', signal });
   return readJson<ListDiagramHistoryOutput>(response);
 }
 
 export async function readDiagramRevision(sessionId: string, diagramId: string, revisionId: string, signal?: AbortSignal): Promise<DiagramRevision> {
-  const response = await fetch(`${getDiagramApiPath(sessionId, diagramId)}/history/${encodeURIComponent(revisionId)}`, { signal });
+  const response = await fetch(`${getDiagramApiPath(sessionId, diagramId)}/history/${encodeURIComponent(revisionId)}`, { credentials: 'include', signal });
   const body = await readJson<{ revision: DiagramRevision }>(response);
   return body.revision;
 }
@@ -54,6 +54,7 @@ export async function restoreDiagramRevision(
 ): Promise<RestoreDiagramRevisionResult> {
   const response = await fetch(`${getDiagramApiPath(sessionId, diagramId)}/history/${encodeURIComponent(revisionId)}/restore`, {
     body: JSON.stringify({ actor_name: actor.name, actor_type: actor.type, expected_revision: expectedRevision }),
+    credentials: 'include',
     headers: { 'content-type': 'application/json' },
     method: 'POST',
   });

@@ -54,7 +54,7 @@ import {
   type MermaidItemPresentation,
   type MermaidPresentation,
 } from '../lib/mermaid-presentation';
-import { getRendererKind, shouldFitRendererKindTransition, shouldResetInitialCameraFit } from '../lib/renderer-camera-policy';
+import { shouldFitInitialCamera } from '../lib/renderer-camera-policy';
 import {
   buildSvgHitMap,
   getBoundsCenter,
@@ -260,9 +260,6 @@ export function DiagramCanvas({
   const persistedNodePositions = nodePositions ?? uncontrolledNodePositions;
   const persistedNodePositionsRef = useRef<DiagramNodePositions>(persistedNodePositions);
   const hasAutoFitInitialRenderRef = useRef(false);
-  const previousRendererKindRef = useRef<ReturnType<typeof getRendererKind> | null>(null);
-  const pendingRendererKindFitAfterRenderRef = useRef<number | null>(null);
-  const [renderedSvgRevision, setRenderedSvgRevision] = useState(0);
   const visibleNodePositions = useMemo(
     () => ({ ...persistedNodePositions, ...liveNodePositions }),
     [liveNodePositions, persistedNodePositions],
@@ -453,8 +450,6 @@ export function DiagramCanvas({
 
   const hasPersistedLayout = Object.keys(persistedNodePositions).length > 0;
   const canEditStructure = isFlowchart && !readOnly;
-  const rendererKind = getRendererKind(isFlowchart);
-
   const flowEdges = useMemo<Edge[]>(() => {
     if (!graph || !interactiveNodeBounds) {
       return [];
@@ -761,7 +756,6 @@ export function DiagramCanvas({
       const expectedSubgraphIds = graph?.subgraphs.map((subgraph) => subgraph.id) ?? [];
       setHitMap(buildSvgHitMap(svgElement, { nodeIds: expectedNodeIds, subgraphIds: expectedSubgraphIds }));
       setMermaidPresentation(extractMermaidPresentation(svgElement, expectedNodeIds));
-      setRenderedSvgRevision((revision) => revision + 1);
       onRenderSettled?.();
     });
 
@@ -769,14 +763,6 @@ export function DiagramCanvas({
       window.cancelAnimationFrame(frameId);
     };
   }, [graph?.nodes, graph?.subgraphs, onRenderSettled, svg]);
-
-  useEffect(() => {
-    const previousRendererKind = previousRendererKindRef.current;
-    previousRendererKindRef.current = rendererKind;
-    if (!preserveCamera && shouldFitRendererKindTransition(previousRendererKind, rendererKind)) {
-      pendingRendererKindFitAfterRenderRef.current = renderedSvgRevision;
-    }
-  }, [preserveCamera, rendererKind, renderedSvgRevision]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -845,12 +831,6 @@ export function DiagramCanvas({
   }, [editingEdgeIdentity, editingEdgeIndex, selectedEdgeIdentity, selectedEdgeIndex]);
 
   useEffect(() => {
-    if (shouldResetInitialCameraFit(preserveCamera, orderedNodeIds.length, graph !== null)) {
-      hasAutoFitInitialRenderRef.current = false;
-    }
-  }, [graph, orderedNodeIds.length, preserveCamera]);
-
-  useEffect(() => {
     if (!orderedNodeIds.length) {
       setFocusedNodeId(null);
       return;
@@ -862,23 +842,13 @@ export function DiagramCanvas({
   }, [focusedNodeId, orderedNodeIds]);
 
   useEffect(() => {
-    if (preserveCamera || !graphBounds || !svg || hasAutoFitInitialRenderRef.current) {
+    if (!graphBounds || !svg || !shouldFitInitialCamera(preserveCamera, hasAutoFitInitialRenderRef.current, true)) {
       return;
     }
 
     hasAutoFitInitialRenderRef.current = true;
     fitBoundsToViewport(graphBounds, false);
   }, [fitBoundsToViewport, graphBounds, preserveCamera, svg]);
-
-  useEffect(() => {
-    const fitAfterRevision = pendingRendererKindFitAfterRenderRef.current;
-    if (preserveCamera || fitAfterRevision === null || renderedSvgRevision <= fitAfterRevision || !graphBounds || !svg) {
-      return;
-    }
-
-    pendingRendererKindFitAfterRenderRef.current = null;
-    fitBoundsToViewport(graphBounds, false);
-  }, [fitBoundsToViewport, graphBounds, preserveCamera, renderedSvgRevision, svg]);
 
   useEffect(() => {
     if (!animateTransform) {

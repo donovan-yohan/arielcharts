@@ -5,8 +5,16 @@ primary_region = 'sjc'
   dockerfile = 'apps/server/Dockerfile'
 
 [env]
+  # The browser and API live on sibling subdomains of donovanyohan.com, so
+  # these Secure Lax cookies remain same-site without accepting cross-site use.
+  ALLOWED_ORIGINS = 'https://arielcharts.donovanyohan.com'
+  NODE_ENV = 'production'
   PORT = '4000'
   DATA_DIR = '/data/arielcharts'
+  ROOM_COOKIE_SAME_SITE = 'Lax'
+  ROOM_COOKIE_SECURE = 'true'
+  CLIENT_ADDRESS_PROFILE = 'fly'
+  UV_THREADPOOL_SIZE = '2'
 
 [http_service]
   internal_port = 4000

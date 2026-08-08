@@ -4,9 +4,13 @@ import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { STARTER_TEMPLATES } from '@arielcharts/shared';
-import { handleMcpToolCall } from './mcp.js';
+import { handleMcpToolCall as handleAuthorizedMcpToolCall } from './mcp.js';
 import { SessionStore } from './persistence.js';
 import { SessionManager } from './session-manager.js';
+
+function handleMcpToolCall(manager: SessionManager, payload: unknown, authorizedSessionId = 'abc123de') {
+  return handleAuthorizedMcpToolCall(manager, payload, authorizedSessionId);
+}
 
 async function createManager() {
   const dataDir = await mkdtemp(join(tmpdir(), 'arielcharts-mcp-'));
@@ -330,5 +334,12 @@ describe('handleMcpToolCall', () => {
     await expect(handleMcpToolCall(resources.manager, {
       tool: 'write_diagram', input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: '' },
     })).rejects.toThrow('Expected non-empty string field: revision');
+  });
+
+  it('rejects a supplied session from another room before invoking the manager', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'get_session', input: { session_id: 'abc123de' },
+    }, 'other123')).rejects.toThrow('Room access denied.');
   });
 });

@@ -4,7 +4,6 @@ import type {
   DeleteDiagramOutput,
   GetSessionOutput,
   ListDiagramsOutput,
-  ListSessionsOutput,
   Participant,
   ReadDiagramOutput,
   RenameDiagramOutput,
@@ -63,15 +62,20 @@ function event(input: Record<string, unknown>, action: 'created' | 'replaced' | 
   };
 }
 
-function readSessionAndDiagram(input: Record<string, unknown>) {
+function assertAuthorizedSession(sessionId: string, authorizedSessionId: string): void {
+  if (sessionId !== authorizedSessionId) throw new Error('Room access denied.');
+}
+
+function readSessionAndDiagram(input: Record<string, unknown>, authorizedSessionId: string) {
   const sessionId = readNonEmptyString(input.session_id, 'session_id');
   const diagramId = readNonEmptyString(input.diagram_id, 'diagram_id');
   assertValidSessionId(sessionId);
+  assertAuthorizedSession(sessionId, authorizedSessionId);
   return { sessionId, diagramId };
 }
 
-function readHistoryTarget(input: Record<string, unknown>) {
-  const { sessionId, diagramId } = readSessionAndDiagram(input);
+function readHistoryTarget(input: Record<string, unknown>, authorizedSessionId: string) {
+  const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
   const revisionId = readNonEmptyString(input.revision_id, 'revision_id');
   return { sessionId, diagramId, revisionId };
 }
@@ -97,7 +101,7 @@ function readCreateDiagramSource(input: Record<string, unknown>): string {
   return template.source;
 }
 
-export async function handleMcpToolCall(manager: SessionManager, payload: unknown): Promise<unknown> {
+export async function handleMcpToolCall(manager: SessionManager, payload: unknown, authorizedSessionId: string): Promise<unknown> {
   if (!isRecord(payload)) throw new Error('Expected JSON object payload.');
   const tool = readNonEmptyString(payload.tool, 'tool');
   const input = payload.input === undefined ? {} : payload.input;
@@ -107,23 +111,25 @@ export async function handleMcpToolCall(manager: SessionManager, payload: unknow
     case 'get_session': {
       const sessionId = readNonEmptyString(input.session_id, 'session_id');
       assertValidSessionId(sessionId);
+      assertAuthorizedSession(sessionId, authorizedSessionId);
       return manager.getSession(sessionId) satisfies Promise<GetSessionOutput>;
     }
     case 'list_diagrams': {
       const sessionId = readNonEmptyString(input.session_id, 'session_id');
       assertValidSessionId(sessionId);
+      assertAuthorizedSession(sessionId, authorizedSessionId);
       return manager.listDiagrams(sessionId) satisfies Promise<ListDiagramsOutput>;
     }
     case 'read_diagram': {
-      const { sessionId, diagramId } = readSessionAndDiagram(input);
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
       return manager.readDiagram(sessionId, diagramId) satisfies Promise<ReadDiagramOutput>;
     }
     case 'list_diagram_history': {
-      const { sessionId, diagramId } = readSessionAndDiagram(input);
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
       return manager.listDiagramHistory(sessionId, diagramId);
     }
     case 'read_diagram_revision': {
-      const { sessionId, diagramId, revisionId } = readHistoryTarget(input);
+      const { sessionId, diagramId, revisionId } = readHistoryTarget(input, authorizedSessionId);
       return manager.readDiagramRevision(sessionId, diagramId, revisionId);
     }
     case 'create_diagram': {
@@ -132,12 +138,13 @@ export async function handleMcpToolCall(manager: SessionManager, payload: unknow
       const name = readNonEmptyString(input.name, 'name');
       const revision = readNonEmptyString(input.revision, 'revision');
       assertValidSessionId(sessionId);
+      assertAuthorizedSession(sessionId, authorizedSessionId);
       const { meta, event: activityEvent } = event(input, 'created', 'pending');
       const diagram = await manager.createDiagram(sessionId, name, mermaidText, revision, activityEvent, meta.participants);
       return { diagram } satisfies CreateDiagramOutput;
     }
     case 'write_diagram': {
-      const { sessionId, diagramId } = readSessionAndDiagram(input);
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
       const mermaidText = readString(input.mermaid_text, 'mermaid_text');
       const revision = readNonEmptyString(input.revision, 'revision');
       const name = input.name === undefined ? undefined : readNonEmptyString(input.name, 'name');
@@ -146,7 +153,7 @@ export async function handleMcpToolCall(manager: SessionManager, payload: unknow
       return { diagram } satisfies WriteDiagramOutput;
     }
     case 'rename_diagram': {
-      const { sessionId, diagramId } = readSessionAndDiagram(input);
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
       const name = readNonEmptyString(input.name, 'name');
       const revision = readNonEmptyString(input.revision, 'revision');
       const { meta, event: activityEvent } = event(input, 'renamed', diagramId);
@@ -154,21 +161,17 @@ export async function handleMcpToolCall(manager: SessionManager, payload: unknow
       return { diagram } satisfies RenameDiagramOutput;
     }
     case 'delete_diagram': {
-      const { sessionId, diagramId } = readSessionAndDiagram(input);
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
       const revision = readNonEmptyString(input.revision, 'revision');
       const { meta, event: activityEvent } = event(input, 'deleted', diagramId);
       const nextRevision = await manager.deleteDiagram(sessionId, diagramId, revision, activityEvent, meta.participants);
       return { deleted: { id: diagramId }, revision: nextRevision } satisfies DeleteDiagramOutput;
     }
     case 'restore_diagram_revision': {
-      const { sessionId, diagramId, revisionId } = readHistoryTarget(input);
+      const { sessionId, diagramId, revisionId } = readHistoryTarget(input, authorizedSessionId);
       const expectedRevision = readNonEmptyString(input.expected_revision, 'expected_revision');
       const { meta, event: activityEvent } = event(input, 'restored', diagramId);
       return manager.restoreDiagramRevision(sessionId, diagramId, revisionId, expectedRevision, activityEvent, meta.participants, 'mcp');
-    }
-    case 'list_sessions': {
-      const sessions = await manager.listSessions();
-      return { sessions: sessions.map(({ id, title, participants }) => ({ id, title, participants })) } satisfies ListSessionsOutput;
     }
     default:
       throw new Error(`Unsupported MCP tool: ${tool}`);
@@ -185,5 +188,4 @@ export type McpToolPayload =
   | { tool: 'write_diagram'; input: { session_id: string; diagram_id: string; mermaid_text: string; revision: string; name?: string } }
   | { tool: 'rename_diagram'; input: { session_id: string; diagram_id: string; name: string; revision: string } }
   | { tool: 'delete_diagram'; input: { session_id: string; diagram_id: string; revision: string } }
-  | { tool: 'restore_diagram_revision'; input: { session_id: string; diagram_id: string; revision_id: string; expected_revision: string } }
-  | { tool: 'list_sessions'; input?: Record<string, never> };
+  | { tool: 'restore_diagram_revision'; input: { session_id: string; diagram_id: string; revision_id: string; expected_revision: string } };

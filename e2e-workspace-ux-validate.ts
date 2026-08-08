@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { WebsocketProvider } from 'y-websocket';
+import { WebSocket } from 'ws';
 import * as Y from 'yjs';
 import {
   DESKTOP_VIEWPORT,
@@ -24,6 +25,7 @@ import {
 } from './e2e/support/interactions.ts';
 import { ModernMcpClient, type DiagramRevision, type DiagramRevisionSummary } from './e2e/support/mcp.ts';
 import { withOwnedServices } from './e2e/support/owned-services.ts';
+import { createRoom, exchangeRoomAccess, type RoomAccess } from './e2e/support/room-access.ts';
 import {
   getYjsSourceLayoutTransitions,
   openYjsSessionObserver,
@@ -194,12 +196,18 @@ async function selectThemePreference(page: Page, preference: 'system' | 'light' 
   await closeWorkspaceSettings(page);
 }
 
-async function connectAgentPresence(mcpUrl: string, sessionId: string): Promise<AgentPresence> {
+async function connectAgentPresence(mcpUrl: string, sessionId: string, roomCookie: string, origin: string): Promise<AgentPresence> {
   const endpoint = getWebsocketServerUrl(new URL(mcpUrl).origin);
   const doc = new Y.Doc();
+  const WebSocketPolyfill = class CookieWebSocket extends WebSocket {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url, protocols, { headers: { cookie: roomCookie, origin } });
+    }
+  };
   const provider = new WebsocketProvider(endpoint, sessionId, doc, {
     maxBackoffTime: 2_500,
     resyncInterval: 10_000,
+    WebSocketPolyfill: WebSocketPolyfill as unknown as typeof globalThis.WebSocket,
   });
   try {
     await new Promise<void>((resolve, reject) => {
@@ -475,23 +483,36 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await saveScreenshot(page, 'issue-14-invalid');
 }
 
-async function expectRendererKindFit(page: Page): Promise<void> {
+async function expectRendererTransitionPreservesCamera(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   await closeFlyout(page, 'source');
-  const beforeZoom = await renderedCanvasTransform(page, 'Flowchart zoom verification');
+  const beforeZoom = await waitForStableCanvasTransform(page, 'Flowchart zoom verification');
   await verifiedClick(page, page.getByRole('button', { name: 'Zoom in', exact: true }), 'zoom in');
-  await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeZoom, { timeout: 5_000 });
-  const zoomed = await renderedCanvasTransform(page, 'Flowchart zoom result');
+  await page.waitForFunction((previous) => {
+    const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
+    return layer instanceof HTMLElement && layer.style.transform !== previous;
+  }, beforeZoom, { timeout: 5_000 });
+  const zoomed = await waitForStableCanvasTransform(page, 'Flowchart zoom result');
+  assert(zoomed !== beforeZoom, `Zoom in did not change the flowchart camera: ${beforeZoom}`);
   await replaceSource(page, API_SEQUENCE_FIXTURE);
   await waitForCanvas(page, 'generic');
   await closeFlyout(page, 'source');
-  await page.waitForFunction((previous) => (
-    document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous
-  ), zoomed, { timeout: 5_000 });
-  const staticTransform = await renderedCanvasTransform(page, 'Static renderer transition');
-  assert(staticTransform !== zoomed, `Editable-to-static renderer transition did not fit the camera: ${zoomed}`);
+  const staticTransform = await waitForStableCanvasTransform(page, 'Static renderer transition');
+  assert(staticTransform === zoomed, `Editable-to-static renderer transition changed the camera: ${zoomed} -> ${staticTransform}`);
   await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), 'static renderer fit diagram');
+  await page.waitForFunction((previous) => {
+    const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
+    return layer instanceof HTMLElement && layer.style.transform !== previous;
+  }, staticTransform, { timeout: 5_000 });
+  const fittedTransform = await waitForStableCanvasTransform(page, 'Static renderer explicit Fit result');
+  assert(fittedTransform !== staticTransform, `Explicit Fit did not change the static renderer camera: ${staticTransform}`);
+  await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForCanvas(page, 'flowchart');
+  await closeFlyout(page, 'source');
+  const restoredFlowchartTransform = await waitForStableCanvasTransform(page, 'Flowchart renderer restoration');
+  assert(restoredFlowchartTransform === fittedTransform,
+    `Static-to-editable renderer transition changed the camera: ${fittedTransform} -> ${restoredFlowchartTransform}`);
 }
 
 async function expectRemoteUpdateWithoutAnchorJump(page: Page, mcp: ModernMcpClient, sessionId: string, diagramName: string): Promise<void> {
@@ -504,9 +525,13 @@ async function expectRemoteUpdateWithoutAnchorJump(page: Page, mcp: ModernMcpCli
   const diagram = session.diagrams.find((candidate) => candidate.name === diagramName);
   assert(diagram, `MCP did not expose diagram ${diagramName}.`);
   const before = await snapshotAnchors(page, ANCHORS);
+  const beforeCamera = await waitForStableCanvasTransform(page, 'Remote flowchart update camera baseline');
   const remoteSource = `${FLOWCHART_FIXTURE}\n  Gateway --> Audit[Audit]`;
   await mcp.writeLatest(sessionId, diagram.id, remoteSource);
   await waitForSource(page, remoteSource);
+  await page.locator('.mermaid-flow-node').filter({ hasText: 'Audit' }).first().waitFor({ state: 'visible', timeout: 15_000 });
+  const afterCamera = await waitForStableCanvasTransform(page, 'Remote flowchart update camera result');
+  assert(afterCamera === beforeCamera, `Same-renderer remote update changed the camera: ${beforeCamera} -> ${afterCamera}`);
   assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
 }
 
@@ -557,7 +582,13 @@ async function openAgentConnectionModal(page: Page, actionLabel: 'Connect my age
   return modal;
 }
 
-async function expectAgentConnectionModal(page: Page, mcpUrl: string, sessionId: string): Promise<void> {
+async function expectAgentConnectionModal(
+  page: Page,
+  mcpUrl: string,
+  sessionId: string,
+  roomCookie: string,
+  expectedKeyAvailability: 'in-memory' | 'cookie-only',
+): Promise<void> {
   await ensureFlyout(page, 'source');
   const zeroAgentModal = await openAgentConnectionModal(page, 'Connect my agent');
   const zeroAgentDetails = zeroAgentModal.getByTestId('agent-connection-details');
@@ -566,16 +597,22 @@ async function expectAgentConnectionModal(page: Page, mcpUrl: string, sessionId:
   assert(/Agents\s+0 MCP agents connected/u.test(await zeroAgentDetails.innerText()),
     `Agent connection modal omitted the zero-agent detail: ${JSON.stringify(await zeroAgentDetails.innerText())}.`);
   const prompt = zeroAgentModal.locator('.modal-prompt-text');
-  assert((await prompt.innerText()).includes('First call getSession'), 'Agent connection modal omitted the current-session MCP prompt.');
   await saveScreenshot(page, 'issue-28-agent-connection-modal');
-  const copyAction = zeroAgentModal.locator('.modal-prompt-copy');
-  await verifiedClick(page, copyAction, 'agent prompt copy action');
-  await page.waitForFunction(() => /^(copied|copy failed)$/iu.test(document.querySelector('.modal-prompt-copy')?.textContent ?? ''), undefined, { timeout: 5_000 });
   const closeAction = zeroAgentModal.getByRole('button', { name: 'Close', exact: true });
-  await closeAction.press('Shift+Tab');
-  await waitForFocusedLocator(page, copyAction, 'Reverse Tab wrapping in agent connection modal');
-  await copyAction.press('Tab');
-  await waitForFocusedLocator(page, closeAction, 'Forward Tab wrapping in agent connection modal');
+  if (expectedKeyAvailability === 'in-memory') {
+    assert(await prompt.count() === 1, 'Fragment-derived room key was not available for the agent bearer prompt.');
+    assert((await prompt.innerText()).includes('First call getSession'), 'Agent connection modal omitted the current-session MCP prompt.');
+    const copyAction = zeroAgentModal.locator('.modal-prompt-copy');
+    await verifiedClick(page, copyAction, 'agent prompt copy action');
+    await page.waitForFunction(() => /^(copied|copy failed)$/iu.test(document.querySelector('.modal-prompt-copy')?.textContent ?? ''), undefined, { timeout: 5_000 });
+    await closeAction.press('Shift+Tab');
+    await waitForFocusedLocator(page, copyAction, 'Reverse Tab wrapping in agent connection modal');
+    await copyAction.press('Tab');
+    await waitForFocusedLocator(page, closeAction, 'Forward Tab wrapping in agent connection modal');
+  } else {
+    assert(await prompt.count() === 0, 'Cookie-only reload rendered a raw room-key agent prompt.');
+    await zeroAgentModal.getByText(/no shareable key in memory/i).waitFor({ state: 'visible', timeout: 5_000 });
+  }
   await page.keyboard.press('Escape');
   await zeroAgentModal.waitFor({ state: 'detached', timeout: 15_000 });
   await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Escaping agent connection modal');
@@ -592,7 +629,7 @@ async function expectAgentConnectionModal(page: Page, mcpUrl: string, sessionId:
   await closeButtonModal.waitFor({ state: 'detached', timeout: 15_000 });
   await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Closing agent connection modal');
 
-  const agent = await connectAgentPresence(mcpUrl, sessionId);
+  const agent = await connectAgentPresence(mcpUrl, sessionId, roomCookie, new URL(page.url()).origin);
   try {
     const settings = await openWorkspaceSettings(page);
     await page.waitForFunction(() => document.querySelector('[data-testid="workspace-agent-status"]')?.textContent?.includes('1 MCP agent working') ?? false, undefined, { timeout: 15_000 });
@@ -613,7 +650,7 @@ async function expectAgentConnectionModal(page: Page, mcpUrl: string, sessionId:
   }
 }
 
-async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: string): Promise<void> {
+async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: string, roomCookie: string): Promise<void> {
   const trigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
   const before = await snapshotAnchors(page, ANCHORS);
   const beforeTransform = await canvasTransform(page);
@@ -654,7 +691,7 @@ async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: st
   assert(await escapedInput.inputValue() === savedName, 'Cancelling display-name edit changed the saved value.');
   const draftName = 'Draft survives agent presence';
   await escapedInput.fill(draftName);
-  const draftAgent = await connectAgentPresence(mcpUrl, sessionId);
+  const draftAgent = await connectAgentPresence(mcpUrl, sessionId, roomCookie, new URL(page.url()).origin);
   try {
     await expect(reopenedAfterCancel.getByTestId('workspace-agent-status')).toContainText('1 MCP agent working', { timeout: 15_000 });
     assert(await escapedInput.inputValue() === draftName, 'An unrelated collaboration rerender reset the in-progress display-name draft.');
@@ -674,8 +711,6 @@ async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: st
   await restoredInput.fill(originalName);
   await verifiedClick(page, reopenedAfterEscape.getByRole('button', { name: 'Save name', exact: true }), 'restore display name after settings test');
   await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
-
-  await expectAgentConnectionModal(page, mcpUrl, sessionId);
 
   const backwardBoundary = await openWorkspaceSettings(page);
   await backwardBoundary.getByRole('button', { name: 'Close', exact: true }).press('Shift+Tab');
@@ -1306,10 +1341,11 @@ async function expectRevisionHistoryCollaboration(
   mcpUrl: string,
   sessionId: string,
   mcp: ModernMcpClient,
+  roomAccess: RoomAccess,
 ): Promise<void> {
   const diagramName = 'Revision history E2E';
   const target = await mcp.createDiagramWithLatestRevision(sessionId, diagramName, HISTORY_PREVIOUS_FLOWCHART);
-  const observer = await openYjsSessionObserver(mcpUrl, sessionId);
+  const observer = await openYjsSessionObserver(mcpUrl, sessionId, { cookie: roomAccess.cookie, origin: baseUrl });
   let page: Page | null = null;
   let peer: Page | null = null;
   try {
@@ -1318,8 +1354,8 @@ async function expectRevisionHistoryCollaboration(
     page = primary.page;
     peer = secondary.page;
     await Promise.all([
-      visitWorkspace(page, baseUrl, sessionId),
-      visitWorkspace(peer, baseUrl, sessionId),
+      visitWorkspace(page, baseUrl, sessionId, roomAccess.roomKey),
+      visitWorkspace(peer, baseUrl, sessionId, roomAccess.roomKey),
     ]);
     await Promise.all([
       selectTabByName(page, diagramName),
@@ -1556,7 +1592,7 @@ async function expectRevisionHistoryCollaboration(
       ['mobile-320', NARROW_MOBILE_VIEWPORT],
     ] as const) {
       const { page: responsivePage } = await browser.newPage(viewport);
-      await visitWorkspace(responsivePage, baseUrl, sessionId);
+      await visitWorkspace(responsivePage, baseUrl, sessionId, roomAccess.roomKey);
       await selectTabByName(responsivePage, diagramName);
       await waitForCanvas(responsivePage, 'flowchart');
       await expectHistoryFlyoutSafety(responsivePage, label, historical.revision.id);
@@ -1590,25 +1626,33 @@ async function validateWorkspaceUx(): Promise<void> {
   if (slice !== undefined && slice !== 'history') {
     throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history" or no slice.`);
   }
-  await withOwnedServices(async ({ baseUrl, mcpUrl }) => {
+  await withOwnedServices(async ({ baseUrl, mcpUrl, serverUrl }) => {
     const browser = await launchBrowserHarness();
-    const sessionId = `e2e-workspace-ux-${Date.now()}`;
-    const mcp = new ModernMcpClient(mcpUrl, baseUrl);
     try {
+      const room = await createRoom(serverUrl, baseUrl);
+      const roomAccess = await exchangeRoomAccess(serverUrl, baseUrl, room);
+      const sessionId = room.sessionId;
+      const mcp = new ModernMcpClient(mcpUrl, baseUrl, room);
       if (slice === 'history') {
         const { page: seedPage } = await browser.newPage(DESKTOP_VIEWPORT);
-        await visitWorkspace(seedPage, baseUrl, sessionId);
-        await expectRevisionHistoryCollaboration(browser, baseUrl, mcpUrl, sessionId, mcp);
+        await visitWorkspace(seedPage, baseUrl, sessionId, room.roomKey);
+        await expectRevisionHistoryCollaboration(browser, baseUrl, mcpUrl, sessionId, mcp, roomAccess);
         record(results, 'immutable active-tab history preview, restore, stale layout guard, invalid-source persistence, and responsive history controls');
         return;
       }
 
-      const { page } = await browser.newPage(DESKTOP_VIEWPORT);
-      await visitWorkspace(page, baseUrl, sessionId);
-      await expectThemeContract(page);
-      record(results, 'system, light, and dark media resolution plus persistence');
-      await selectThemePreference(page, 'light');
-      await expectWorkspaceSettings(page, mcpUrl, sessionId);
+        const { page } = await browser.newPage(DESKTOP_VIEWPORT);
+      await visitWorkspace(page, baseUrl, sessionId, room.roomKey);
+        await expectAgentConnectionModal(page, mcpUrl, sessionId, roomAccess.cookie, 'in-memory');
+        record(results, 'fragment-derived room key exposes a copyable MCP bearer prompt');
+        await expectThemeContract(page);
+        record(results, 'system, light, and dark media resolution plus persistence');
+        // The theme contract already reloads after the fragment exchange, so the
+        // following check exercises cookie-only access without another navigation.
+        await expectAgentConnectionModal(page, mcpUrl, sessionId, roomAccess.cookie, 'cookie-only');
+        record(results, 'cookie-only reload hides raw key material and offers reset guidance');
+        await selectThemePreference(page, 'light');
+      await expectWorkspaceSettings(page, mcpUrl, sessionId, roomAccess.cookie);
       record(results, 'settings, agent connection, focus boundaries, canvas handoff, overlay coexistence, and stable chrome');
       const blankDiagramName = await expectTemplateMenu(page);
       record(results, 'template menu visibility, keyboard navigation, focus return, stable anchors, and blank creation');
@@ -1641,17 +1685,17 @@ async function validateWorkspaceUx(): Promise<void> {
       await expectFlatChrome(page);
       record(results, 'flat monochrome chrome has no product shadows while focus and selection remain visible');
       await selectThemePreference(page, 'light');
-      await expectRendererKindFit(page);
-      record(results, 'editable/static renderer transition fits camera');
+      await expectRendererTransitionPreservesCamera(page);
+      record(results, 'editable/static renderer transition preserves camera and explicit Fit changes it');
       await expectRemoteUpdateWithoutAnchorJump(page, mcp, sessionId, diagramName);
       record(results, 'remote update leaves desktop anchors stable');
       await saveScreenshot(page, 'workspace-ux-desktop');
 
-      await expectRevisionHistoryCollaboration(browser, baseUrl, mcpUrl, sessionId, mcp);
+      await expectRevisionHistoryCollaboration(browser, baseUrl, mcpUrl, sessionId, mcp, roomAccess);
       record(results, 'immutable active-tab history preview, restore, stale layout guard, invalid-source persistence, and responsive history controls');
 
       const { page: activityFitPage } = await browser.newPage(ACTIVITY_FIT_VIEWPORT);
-      await visitWorkspace(activityFitPage, baseUrl, sessionId);
+      await visitWorkspace(activityFitPage, baseUrl, sessionId, room.roomKey);
       await selectTabByName(activityFitPage, diagramName);
       await expectActivityFlyoutFitSafety(activityFitPage);
       record(results, 'activity-open Fit keeps graph and selected toolbar in unobscured canvas');
@@ -1662,7 +1706,7 @@ async function validateWorkspaceUx(): Promise<void> {
         ['mobile-320', NARROW_MOBILE_VIEWPORT],
       ] as const) {
         const { page: responsivePage } = await browser.newPage(viewport);
-        await visitWorkspace(responsivePage, baseUrl, sessionId);
+        await visitWorkspace(responsivePage, baseUrl, sessionId, room.roomKey);
         await expectStableFlyoutAnchors(responsivePage, label);
         await expectResponsiveControls(responsivePage, label, diagramName);
         await expectNoDevelopmentIndicator(responsivePage);

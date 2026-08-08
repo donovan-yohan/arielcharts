@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { chromium, type Locator, type Page } from '@playwright/test';
+import { chromium, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import {
   assertNoPageErrors,
   assertNoReactFlowError015,
@@ -9,6 +9,7 @@ import {
   waitForReactFlowNodePositionMovement,
   waitForReactFlowNodePositions,
 } from './e2e/support/react-flow';
+import { createRoom, roomShareUrl } from './e2e/support/room-access';
 import { createBlankDiagram } from './e2e/support/workspace';
 
 const FLOWCHART_FIXTURE = `flowchart LR
@@ -273,21 +274,22 @@ async function assertSameTabKindTransition(page: Page): Promise<SameTabKindTrans
 async function validateSequenceCanvas() {
   const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
-  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
-  const page = await context.newPage();
-  const diagnostics = collectReactFlowDiagnostics(page);
-  const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
-  const sessionName = `e2e-sequence-${Date.now()}`;
-
+  let context: BrowserContext | null = null;
   try {
-    await page.goto(`${baseUrl}/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    const page = await context.newPage();
+    const diagnostics = collectReactFlowDiagnostics(page);
+    const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
+    const mcpUrl = process.env.E2E_MCP_URL ?? 'http://localhost:4000/mcp';
+    const room = await createRoom(new URL(mcpUrl).origin, baseUrl);
+    await page.goto(roomShareUrl(baseUrl, room), { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await replaceSource(page, FLOWCHART_FIXTURE);
     await waitForCanvas(page, 'flowchart');
     const peer = await page.context().newPage();
     const peerDiagnostics = collectReactFlowDiagnostics(peer);
     let multiSelectedDrag: boolean;
     try {
-      await peer.goto(`${baseUrl}/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await peer.goto(roomShareUrl(baseUrl, room), { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await waitForCanvas(peer, 'flowchart');
       multiSelectedDrag = await assertMultiSelectedNodeDrag(page, peer, diagnostics.reactFlowError015);
       assertNoPageErrors(peerDiagnostics.pageErrors, 'in the fresh persistence peer');
@@ -376,7 +378,7 @@ async function validateSequenceCanvas() {
     if (!passed) process.exitCode = 1;
   } finally {
     try {
-      await context.close();
+      await context?.close();
     } finally {
       await browser.close();
     }

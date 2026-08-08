@@ -29,6 +29,11 @@ describe('history api', () => {
       'http://localhost:4000/api/sessions/session%20one/diagrams/main/history',
       'http://localhost:4000/api/sessions/session%20one/diagrams/main/history/rev%2F1',
     ]);
+    expect(fetchMock.mock.calls.map(([, init]) => init)).toEqual([
+      { credentials: 'include', signal: undefined },
+      { credentials: 'include', signal: undefined },
+      { credentials: 'include', signal: undefined },
+    ]);
   });
 
   it('posts the freshly-read expected revision and actor for a deliberate restore', async () => {
@@ -41,6 +46,7 @@ describe('history api', () => {
       'http://localhost:4000/api/sessions/session/diagrams/main/history/rev-1/restore',
       expect.objectContaining({
         body: JSON.stringify({ actor_name: 'Ada', actor_type: 'human', expected_revision: 'head-2' }),
+        credentials: 'include',
         method: 'POST',
       }),
     );

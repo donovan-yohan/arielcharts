@@ -29,6 +29,17 @@ async function clickFirstNodeTarget(page: Page) {
   await nodeTargetLocator(page).first().click({ timeout: 5000 });
 }
 
+async function ensureSourceFlyoutOpen(page: Page): Promise<Locator> {
+  const toggle = page.getByTestId('source-flyout-toggle');
+  if (await toggle.getAttribute('aria-expanded') !== 'true') {
+    await toggle.click();
+  }
+
+  const editor = page.locator('.cm-content');
+  await editor.waitFor({ state: 'visible', timeout: 15000 });
+  return editor;
+}
+
 async function clickFirstVisibleEdge(page: Page): Promise<boolean> {
   const point = await page.evaluate(() => {
     const edges = Array.from(document.querySelectorAll('.react-flow__edge'));
@@ -82,7 +93,7 @@ async function validate() {
 
   console.log('1. Loading page...');
   await page.goto(`${baseUrl}/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForSelector('.cm-content', { timeout: 15000 });
+  await ensureSourceFlyoutOpen(page);
   await page.waitForTimeout(2000);
   const editor = page.locator('.cm-content');
 
@@ -100,6 +111,7 @@ async function validate() {
   console.log(`   Empty builder created Mermaid text: ${emptyBuilderCreated} — ${emptyBuilderCreated ? 'PASS' : 'FAIL'}`);
 
   console.log('2b. Typing flowchart...');
+  await ensureSourceFlyoutOpen(page);
   await editor.click();
   await page.keyboard.press('Control+A');
   await page.keyboard.type(`flowchart TD
@@ -209,6 +221,7 @@ async function validate() {
   console.log(`   Cylinder aria: ${semanticState.cylinderAria}, pseudo radius: ${semanticState.cylinderPseudoRadius} — ${shapeFidelityPass ? 'PASS' : 'FAIL'}`);
 
   await page.keyboard.press('Escape');
+  await ensureSourceFlyoutOpen(page);
   await editor.focus();
   let keyboardFocusState: {
     activeLabel: string | null;

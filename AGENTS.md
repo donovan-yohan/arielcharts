@@ -1,111 +1,58 @@
-# AGENTS.md
+# ArielCharts
 
-## Project overview
+ArielCharts is a pnpm monorepo for collaborative Mermaid workspaces: a Next.js
+browser client, a Node/Yjs/MCP server, and shared TypeScript contracts.
 
-ArielCharts is a real-time collaborative Mermaid diagram editor. It's a pnpm monorepo with three packages:
+## Start here
 
-- `apps/web` — React + Vite frontend (TypeScript, CSS modules, Yjs CRDT, CodeMirror, mermaid)
-- `apps/server` — Node.js + Express backend (TypeScript, WebSocket via ws, MCP server, SQLite persistence)
-- `packages/shared` — Shared types and constants
+- `docs/context-map.md` — state ownership, request/data flows, scaling seams,
+  and the evidence map. Update it when a durable schema, public contract, or
+  cross-package ownership boundary changes.
+- `apps/web/AGENTS.md` — browser rendering, editor, canvas, and local-state
+  boundaries.
+- `apps/server/AGENTS.md` — durable Yjs, MCP, persistence, and concurrency
+  boundaries.
+- `packages/shared/src/types.ts` — public shared shapes; keep it free of
+  server or browser behavior.
 
-## Hermes agent profiles
+## Cross-package rules
 
-Agent profiles live at `~/.hermes/profiles/`. Each has a `SOUL.md` (role description) and `config.yaml`.
+- A session's named diagram catalog, Mermaid source, node positions, and
+  activity live in the Yjs document. Browser selection, camera, toolbar,
+  flyout, and draft interaction state stay local.
+- MCP is a second writer to that same application document, not the owner of
+  an MCP transport session. Mutating tools must use current server-derived
+  revisions; a stale write must re-read and merge before retrying.
+- Keep flowchart structure editing separate from generic Mermaid rendering.
+  Any new diagram type must remain source-editable even when it has no canvas
+  mutation controls.
+- Prefer a focused refactor at an ownership boundary over another conditional
+  in a cross-cutting component. Do not add documentation or comments that
+  merely narrate implementation details.
 
-| Profile    | Role                                                                 |
-|------------|----------------------------------------------------------------------|
-| `planner`  | Decomposes tasks, assigns to specialists, tracks progress, merges    |
-| `frontend` | Implements UI components, pages, client-side logic (React/TS/CSS)    |
-| `backend`  | Implements APIs, data models, server logic (Node/TS/Express)         |
-| `qa`       | Tests implementations end-to-end, probes edge cases, runs test suites|
-| `reviewer` | Reviews code for correctness, design quality, security, completeness |
+## Commands and release gates
 
-All profiles use `gpt-5.4` via `openai-codex` provider.
-
-## Validation steps
-
-Before reporting work as done, agents **must** run these checks from the repo root:
+Run from the repository root. The commands below are the package scripts; use
+`npx --yes pnpm@10.15.0` in environments without a `pnpm` executable.
 
 ```bash
-# 1. Build the shared package first (other packages depend on it)
 pnpm --filter @arielcharts/shared build
-
-# 2. Typecheck all packages
+pnpm lint
 pnpm typecheck
-
-# 3. Run all tests
 pnpm test
-
-# 4. Full build
 pnpm build
 ```
 
-These mirror the CI pipeline in `.github/workflows/ci.yml`. If any step fails, fix the issue before committing.
+For browser/canvas, layout, or mobile changes, also run both services and
+`npx tsx e2e-validate.ts`. For Mermaid type/canvas changes, run
+`pnpm test:e2e-sequence`; inspect `/tmp/arielcharts-sequence.png` and
+`/tmp/arielcharts-sequence-isolation.png`. CI runs the same shared build, lint,
+typecheck, test, and build sequence in `.github/workflows/ci.yml`.
 
-## Local development
+Before a behavior, protocol, persistence, or collaboration PR is merged:
 
-### Starting the dev servers
-
-The web app and backend must both be running for full functionality:
-
-```bash
-# Terminal 1 — backend (port 4000)
-pnpm --filter @arielcharts/server dev
-
-# Terminal 2 — web app (port 3003, avoids conflicts with port 3000)
-pnpm --filter @arielcharts/web dev -- --port 3003
-```
-
-### Workarounds
-
-- **Port 3000 conflicts.** Port 3000 is often occupied by stale Next.js processes. Use `--port 3003` or kill the stale process: `lsof -ti:3000 | xargs kill`.
-- **Lock file stuck.** If Next.js reports "Another dev server running", remove the lock: `rm -f apps/web/.next/dev/lock`.
-- **Session routes.** Session pages are at `/s/[id]`, not `/session/[id]`.
-- **WebSocket errors in headless tests.** The backend WebSocket server may reject connections from Playwright. These errors are cosmetic — the editor still works for local-only testing.
-
-## Playwright UI validation
-
-Use `e2e-validate.ts` at the repo root to validate interactive editor behavior in a real browser. This catches issues that typechecking alone cannot (overlay alignment, pointer events, DOM rendering).
-
-### Prerequisites
-
-```bash
-# Install Playwright (one-time)
-npx playwright install chromium
-```
-
-### Running
-
-```bash
-# Both dev servers must be running first (see "Local development" above)
-npx tsx e2e-validate.ts
-```
-
-### What it tests
-
-1. **Overlay alignment** — verifies node overlay buttons sit exactly on top of their SVG nodes (0px tolerance)
-2. **Fit-to-diagram** — clicks the fit button and checks zoom updates
-3. **Node click** — clicks a node and verifies the editing toolbar appears
-4. **Add node** — clicks "Add node" from the toolbar, verifies a new node appears in both the diagram and the editor text
-5. **Post-mutation alignment** — re-checks overlay alignment after the diagram changes
-
-### When to run
-
-Run this after any changes to:
-- `apps/web/src/lib/svg-hit-map.ts` — coordinate transforms, hit map building
-- `apps/web/src/components/diagram-canvas.tsx` — overlay positioning, pointer events, viewport transforms
-- `apps/web/src/components/session-workspace.tsx` — SVG rendering pipeline, hit map wiring
-- Any mermaid rendering or diagram mutation logic
-
-### Extending
-
-Add new test sections to `e2e-validate.ts` following the existing pattern. Push results to the `results` array and they'll appear in the summary. Screenshots are saved to `/tmp/arielcharts-*.png` for visual inspection.
-
-## Common gotchas
-
-- **Shared package must be built first.** `apps/web` and `apps/server` import from `@arielcharts/shared`. If you change shared types, rebuild with `pnpm --filter @arielcharts/shared build` before typechecking consumers.
-- **pnpm monorepo.** Use `pnpm --filter <package>` to scope commands. Don't `cd` into subdirectories to run scripts.
-- **Yjs CRDT types.** The server uses `Y.Doc`, `Y.Text`, `Y.Map`, and `Y.Array` for collaborative state. Mutations must happen inside `doc.transact()`.
-- **mermaid-ast.** The web app uses a typed AST layer (`mermaid-ast` package) for flowchart parsing/rendering. Only flowchart syntax (`flowchart` or `graph` prefix) is supported — guard against other diagram types.
-- **Test mocks.** Server test files (`index.test.ts`, `websocket.test.ts`) construct `ServerEnv` objects manually. When adding fields to `ServerEnv`, update all test mocks.
-- **Node 24+.** The project requires Node 24 or later.
+1. Update the context map only if the ownership or contract actually changed.
+2. Run one adversarial review, batch valid findings, then re-review only the
+   changed hunks and their immediate contracts.
+3. Record exact-head command evidence in the PR; green evidence for an older
+   head is not a merge verdict.

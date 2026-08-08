@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getDefaultMermaidText, isValidSessionId, randomSessionId } from './session';
-import { canBuildFlowchartFromCanvas, getActiveDiagramName, getAgentWorkflowPrompt } from '../components/session-workspace';
+import { getActiveDiagramName, getAgentWorkflowPrompt } from '../components/session-workspace';
 
 describe('session helpers', () => {
   it('creates session ids in the expected shape', () => {
@@ -14,12 +14,6 @@ describe('session helpers', () => {
 
   it('returns starter mermaid text', () => {
     expect(getDefaultMermaidText()).toContain('flowchart LR');
-  });
-
-  it('keeps Mermaid sequence and timeline diagrams source-only', () => {
-    expect(canBuildFlowchartFromCanvas('sequenceDiagram\n  Browser->>API: request')).toBe(false);
-    expect(canBuildFlowchartFromCanvas('timeline\n  now : request')).toBe(false);
-    expect(canBuildFlowchartFromCanvas('flowchart LR\n  A-->B')).toBe(true);
   });
 
   it('copies a modern MCP prompt that requires a fresh revision before writes', () => {

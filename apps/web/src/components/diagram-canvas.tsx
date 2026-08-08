@@ -349,7 +349,7 @@ export function DiagramCanvas({
           label: nodeLabel,
           shape: node.shape,
         },
-        draggable: !readOnly,
+        draggable: isFlowchart && !readOnly,
         focusable: false,
         id: node.id,
         position: { x: bounds.x, y: bounds.y },
@@ -364,9 +364,10 @@ export function DiagramCanvas({
     });
 
     return nextNodes;
-  }, [graph, interactiveNodeBounds, readOnly, selection]);
+  }, [graph, interactiveNodeBounds, isFlowchart, readOnly, selection]);
 
   const hasPersistedLayout = Object.keys(persistedNodePositions).length > 0;
+  const canEditStructure = isFlowchart && !readOnly;
 
   const flowEdges = useMemo<Edge[]>(() => {
     if (!graph || !interactiveNodeBounds) {
@@ -500,11 +501,14 @@ export function DiagramCanvas({
   }, [isControlledSelection, onSelectedNodeIdsChange]);
 
   const setMode = useCallback((nextMode: 'select' | 'connect') => {
+    if (!isFlowchart && nextMode !== 'select') {
+      return;
+    }
     onInteractionModeChange?.(nextMode);
     if (interactionMode === undefined) {
       setInternalMode(nextMode);
     }
-  }, [interactionMode, onInteractionModeChange]);
+  }, [interactionMode, isFlowchart, onInteractionModeChange]);
 
   const fitBoundsToViewport = useCallback((bounds: SvgBounds, animated: boolean) => {
     const container = containerRef.current;
@@ -730,6 +734,27 @@ export function DiagramCanvas({
   }, [animateTransform]);
 
   useEffect(() => {
+    if (isFlowchart) {
+      return;
+    }
+
+    setSelection([]);
+    setMode('select');
+    setToolbarOpen(false);
+    setShapePickerOpen(false);
+    setEditingNodeId(null);
+    setEditingEdgeIdentity(null);
+    setEditingEdgeLabel('');
+    setSelectedEdgeIdentity(null);
+    setPendingEdge(null);
+    setPendingEdgeLabel('');
+    setConnectSourceId(null);
+    connectionStartNodeIdRef.current = null;
+    setConnectionPreviewSourceId(null);
+    setShowGroupPrompt(false);
+  }, [isFlowchart, setMode, setSelection]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isTypingElement(event.target)) {
         return;
@@ -756,7 +781,7 @@ export function DiagramCanvas({
         containerRef.current?.focus();
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'g' && selection.length > 0 && !readOnly) {
+      if (canEditStructure && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'g' && selection.length > 0) {
         event.preventDefault();
 
         if (event.shiftKey) {
@@ -771,7 +796,7 @@ export function DiagramCanvas({
         setShowGroupPrompt(true);
       }
 
-      if ((event.key === 'Delete' || event.key === 'Backspace') && !readOnly) {
+      if ((event.key === 'Delete' || event.key === 'Backspace') && canEditStructure) {
         if (selection.length > 0) {
           event.preventDefault();
           onDeleteNodes?.(selection);
@@ -799,7 +824,7 @@ export function DiagramCanvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [editingNodeId, graph, onDeleteEdge, onDeleteNodes, onUngroupNodes, readOnly, selectedCurrentEdgeIdentity, selection, setMode]);
+  }, [canEditStructure, editingNodeId, graph, onDeleteEdge, onDeleteNodes, onUngroupNodes, selectedCurrentEdgeIdentity, selection, setMode]);
 
   useEffect(() => {
     if (viewport.zoom >= EDITOR_MIN_ZOOM) {
@@ -893,6 +918,9 @@ export function DiagramCanvas({
   }, [isPanning, setSelection]);
 
   const handleNodeClick = useCallback((nodeId: string, shiftKey: boolean) => {
+    if (!isFlowchart) {
+      return;
+    }
     setShapePickerOpen(false);
     setSelectedEdgeIdentity(null);
     setEditingEdgeIdentity(null);
@@ -922,40 +950,40 @@ export function DiagramCanvas({
     }
 
     setSelection([nodeId]);
-  }, [connectSourceId, interactiveNodeBounds, mode, selection, setSelection]);
+  }, [connectSourceId, interactiveNodeBounds, isFlowchart, mode, selection, setSelection]);
 
   const commitNodeEdit = useCallback(() => {
-    if (!editingNodeId) {
+    if (!canEditStructure || !editingNodeId) {
       return;
     }
 
     onEditNodeLabel?.(editingNodeId, editingLabel.trim() || editingNodeId);
     setEditingNodeId(null);
-  }, [editingLabel, editingNodeId, onEditNodeLabel]);
+  }, [canEditStructure, editingLabel, editingNodeId, onEditNodeLabel]);
 
   const commitEdgeEdit = useCallback(() => {
-    if (!editingEdgeIdentity) {
+    if (!canEditStructure || !editingEdgeIdentity) {
       return;
     }
 
     onEditEdgeLabel?.(editingEdgeIdentity, editingEdgeLabel.trim() || undefined);
     setEditingEdgeIdentity(null);
     setEditingEdgeLabel('');
-  }, [editingEdgeIdentity, editingEdgeLabel, onEditEdgeLabel]);
+  }, [canEditStructure, editingEdgeIdentity, editingEdgeLabel, onEditEdgeLabel]);
 
   const openEdgeEditor = useCallback((edge: DiagramEdgeIdentity) => {
     const edgeIndex = graph ? resolveDiagramEdgeIndex(graph.links, edge, { includeLabel: false }) : null;
     const currentEdge = edgeIndex === null ? null : graph?.links[edgeIndex];
-    if (!currentEdge || readOnly) {
+    if (!canEditStructure || !currentEdge) {
       return;
     }
 
     setEditingEdgeIdentity(edge);
     setEditingEdgeLabel(getLinkText(currentEdge) ?? '');
-  }, [graph, readOnly]);
+  }, [canEditStructure, graph]);
 
   const commitPendingEdge = useCallback((label?: string) => {
-    if (!pendingEdge) {
+    if (!canEditStructure || !pendingEdge) {
       return;
     }
 
@@ -963,9 +991,12 @@ export function DiagramCanvas({
     setPendingEdge(null);
     setPendingEdgeLabel('');
     setMode('select');
-  }, [onAddEdge, pendingEdge, selectedConnectionType, setMode]);
+  }, [canEditStructure, onAddEdge, pendingEdge, selectedConnectionType, setMode]);
 
   const handleFlowNodesChange = useCallback((changes: NodeChange<MermaidFlowNode>[]) => {
+    if (!canEditStructure) {
+      return;
+    }
     const movedNodes = changes.filter((change) => change.type === 'position' && change.position);
     if (movedNodes.length === 0) {
       return;
@@ -980,9 +1011,12 @@ export function DiagramCanvas({
       });
       return next;
     });
-  }, []);
+  }, [canEditStructure]);
 
   const handleFlowNodeDragStop = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node) => {
+    if (!canEditStructure) {
+      return;
+    }
     setNodePositions((current) => ({
       ...current,
       [node.id]: node.position,
@@ -992,20 +1026,23 @@ export function DiagramCanvas({
       delete next[node.id];
       return next;
     });
-  }, [setNodePositions]);
+  }, [canEditStructure, setNodePositions]);
 
   const handleFlowConnectStart = useCallback<OnConnectStart>((_event, params) => {
+    if (!canEditStructure) {
+      return;
+    }
     connectionStartNodeIdRef.current = params.nodeId ?? null;
     setConnectionPreviewSourceId(params.nodeId ?? null);
     setToolbarOpen(false);
-  }, []);
+  }, [canEditStructure]);
 
   const handleFlowConnectEnd = useCallback<OnConnectEnd>((event, connectionState: FinalConnectionState) => {
     const sourceNodeId = connectionStartNodeIdRef.current;
     connectionStartNodeIdRef.current = null;
     setConnectionPreviewSourceId(null);
 
-    if (!sourceNodeId || readOnly || connectionState.isValid) {
+    if (!canEditStructure || !sourceNodeId || connectionState.isValid) {
       return;
     }
 
@@ -1025,12 +1062,12 @@ export function DiagramCanvas({
     };
 
     onAddConnectedNode?.(sourceNodeId, DEFAULT_NEW_NODE_LABEL, DEFAULT_NEW_NODE_SHAPE, nodePosition, selectedConnectionType);
-  }, [onAddConnectedNode, readOnly, selectedConnectionType, viewport.panX, viewport.panY, viewport.zoom]);
+  }, [canEditStructure, onAddConnectedNode, selectedConnectionType, viewport.panX, viewport.panY, viewport.zoom]);
 
   const handleFlowConnect = useCallback((connection: Connection) => {
     connectionStartNodeIdRef.current = null;
     setConnectionPreviewSourceId(null);
-    if (!connection.source || !connection.target || connection.source === connection.target || !interactiveNodeBounds) {
+    if (!canEditStructure || !connection.source || !connection.target || connection.source === connection.target || !interactiveNodeBounds) {
       return;
     }
 
@@ -1041,22 +1078,31 @@ export function DiagramCanvas({
 
     setPendingEdge({ midpoint, source: connection.source, target: connection.target });
     setPendingEdgeLabel('');
-  }, [interactiveNodeBounds]);
+  }, [canEditStructure, interactiveNodeBounds]);
 
   const addDefaultNode = useCallback(() => {
+    if (!canEditStructure) {
+      return;
+    }
     onAddNode?.(DEFAULT_NEW_NODE_LABEL, DEFAULT_NEW_NODE_SHAPE);
-  }, [onAddNode]);
+  }, [canEditStructure, onAddNode]);
 
   const addNodeFromToolbar = useCallback(() => {
+    if (!canEditStructure) {
+      return;
+    }
     onAddNode?.(newNodeLabel.trim() || DEFAULT_NEW_NODE_LABEL, newNodeShape);
     setNewNodeLabel('');
-  }, [newNodeLabel, newNodeShape, onAddNode]);
+  }, [canEditStructure, newNodeLabel, newNodeShape, onAddNode]);
 
   const openNodeEditor = useCallback((node: DiagramNode) => {
+    if (!canEditStructure) {
+      return;
+    }
     setToolbarOpen(false);
     setEditingNodeId(node.id);
     setEditingLabel(getNodeText(node));
-  }, []);
+  }, [canEditStructure]);
 
   const registerNodeElement = useCallback((nodeId: string, element: HTMLElement | null) => {
     if (element) {
@@ -1263,8 +1309,8 @@ export function DiagramCanvas({
               maxZoom={MAX_ZOOM}
               minZoom={MIN_ZOOM}
               nodes={flowNodes}
-              nodesConnectable={!readOnly}
-              nodesDraggable={!readOnly}
+              nodesConnectable={canEditStructure}
+              nodesDraggable={canEditStructure}
               nodeTypes={FLOW_NODE_TYPES}
               onConnect={handleFlowConnect}
               onConnectEnd={handleFlowConnectEnd}
@@ -1296,7 +1342,7 @@ export function DiagramCanvas({
               onNodeDoubleClick={(event, node) => {
                 event.stopPropagation();
                 const diagramNode = nodeById.get(node.id);
-                if (diagramNode && !readOnly) {
+                if (diagramNode && canEditStructure) {
                   openNodeEditor(diagramNode);
                 }
               }}
@@ -1541,7 +1587,9 @@ export function DiagramCanvas({
                     <button
                       key={shape.value}
                       onClick={() => {
-                        onChangeNodeShape?.(selection[0]!, shape.value);
+                        if (canEditStructure) {
+                          onChangeNodeShape?.(selection[0]!, shape.value);
+                        }
                         setShapePickerOpen(false);
                       }}
                       style={{
@@ -1616,7 +1664,7 @@ export function DiagramCanvas({
               right: 12,
             }}
           >
-            {hasPersistedLayout ? (
+            {isFlowchart && hasPersistedLayout ? (
               <ToolbarButton label="Reset shared layout to Mermaid" onClick={() => { setNodePositions(() => ({}), 'replace'); }}>
                 <RotateCcw size={16} />
               </ToolbarButton>

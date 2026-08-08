@@ -44,9 +44,10 @@ pnpm build
 ```
 
 For browser/canvas, layout, or mobile changes, also run both services and
-`npx tsx e2e-validate.ts`; inspect the screenshots written to
-`/tmp/arielcharts-*.png`. CI runs the same shared build, lint, typecheck, test,
-and build sequence in `.github/workflows/ci.yml`.
+`npx tsx e2e-validate.ts`. For Mermaid type/canvas changes, run
+`pnpm test:e2e-sequence`; inspect `/tmp/arielcharts-sequence.png` and
+`/tmp/arielcharts-sequence-isolation.png`. CI runs the same shared build, lint,
+typecheck, test, and build sequence in `.github/workflows/ci.yml`.
 
 Before a behavior, protocol, persistence, or collaboration PR is merged:
 

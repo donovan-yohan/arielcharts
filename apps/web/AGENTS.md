@@ -8,8 +8,9 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
 
 ## Current boundaries
 
-- Durable shared state is the tab catalog/order plus each tab's Mermaid source
-  and node positions. Active tab, camera, selection, open flyout, toolbar,
+- Durable shared state is the server/Yjs-owned tab catalog/order, Mermaid
+  source, node positions, and activity feed. The browser renders that activity
+  but does not own it. Active tab, camera, selection, open flyout, toolbar,
   rename draft, and transient drag state are local; remote updates must not
   take them over.
 - Mermaid source is canonical. Flowchart canvas mutations serialize through
@@ -19,16 +20,18 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
   geometry. Treat visible/clickable toolbar controls and stable preview bounds
   as browser-testable behavior.
 
-## #12/#13 target guardrails
+## #12/#13 guardrails
 
-- Replace the current source-prefix flowchart check with Mermaid parser-result
-  classification. Keep last-valid SVG and kind per tab so invalid source in one
-  tab cannot affect another tab.
+- Mermaid parser-result classification decides whether controls are structural.
+  Derived SVG, kind, and errors are kept in a local per-diagram preview
+  registry; stale or invalid source remains source-only.
 - Track only explicit local-human transaction origins in undo. Remote, MCP,
   initialization, and reconciliation updates must never enter that stack.
 - Coalesce durable layout writes during a local drag and apply remote layout
   changes without jittering the active drag.
 
 Run `pnpm --filter @arielcharts/web test` for focused changes. Run
-`npx tsx e2e-validate.ts` after canvas, flyout, toolbar, layout, or responsive
-UI changes, then use root gates before handoff.
+`npx tsx e2e-validate.ts` for legacy canvas coverage and
+`pnpm test:e2e-sequence` for generic Mermaid coverage. Inspect
+`/tmp/arielcharts-sequence.png` and `/tmp/arielcharts-sequence-isolation.png`
+before handoff.

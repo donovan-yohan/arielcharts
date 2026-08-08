@@ -21,7 +21,7 @@ canonical; the SVG and flowchart interaction model derive from it.
 | Realtime | `y-websocket` browser provider; server websocket protocol/awareness relay | `session-workspace.tsx`, `apps/server/src/lib/websocket.ts` | `websocket.test.ts` |
 | MCP writes | Modern-only HTTP MCP maps camelCase tools to session-manager commands | `apps/server/src/lib/mcp-server.ts`, `mcp.ts`, `index.ts` | `mcp.test.ts`, `index.test.ts` |
 | Source editing | CodeMirror + Yjs binding, per active tab | `session-workspace.tsx` | `apps/web/src/lib/session.test.ts` |
-| Render/navigation | Mermaid SVG; canvas overlays and structural editing only for flowcharts | `session-workspace.tsx`, `diagram-canvas.tsx`, `svg-hit-map.ts` | Current `e2e-validate.ts` is flowchart-only; #12 requires generic, cross-tab SVG browser coverage. |
+| Render/navigation | Mermaid parser result classifies flowcharts; a local per-diagram registry holds derived SVG, kind, and parse errors | `session-workspace.tsx`, `diagram-preview.ts`, `diagram-canvas.tsx`, `svg-hit-map.ts` | `diagram-preview.test.ts`, `pnpm test:e2e-sequence`, `/tmp/arielcharts-sequence.png`, `/tmp/arielcharts-sequence-isolation.png` |
 | Flowchart mutations | Mermaid AST -> mutation -> minimal Y.Text diff | `apps/web/src/lib/diagram-mutations.ts` | `diagram-mutations.test.ts`, `diagram-flow-identity.test.ts` |
 | Persistence | LevelDB stores encoded Yjs state and derived session metadata | `apps/server/src/lib/persistence.ts`, `session-manager.ts` | `session-manager.test.ts` |
 
@@ -31,10 +31,10 @@ canonical; the SVG and flowchart interaction model derive from it.
 | --- | --- | --- | --- |
 | Diagram ids, names, order, Mermaid source, node positions | Durable/session | Yjs document; server persists it | Stable diagram ids are the MCP target; names are human-facing aliases. |
 | MCP revision | Request-time concurrency guard | SessionManager | Create checks the session revision; existing-tab mutations check that tab's revision. |
-| Activity | Durable but bounded feed | Yjs document | Retain at most 100 events. It cannot substitute for version history. |
+| Activity | Durable but bounded feed | Server-managed Yjs document | Browser UI renders it; retain at most 100 events. It cannot substitute for version history. |
 | Presence/cursors | Ephemeral collaboration | Yjs awareness | The server currently materializes a participant snapshot for session metadata; it must not become a store for browser UI state. |
 | Active tab, camera, selection, toolbar, flyout, drafts | Browser local | React/local storage where appropriate | Never move these into Yjs merely to make UI react to remote edits. |
-| Parsed SVG, hit map, flowchart snapshot | Derived browser state | Mermaid/mermaid-ast | Current last-valid state is active-tab derived; #12 requires per-tab isolation. |
+| Parsed SVG, kind, parse error, hit map, flowchart snapshot | Derived browser state | Mermaid/mermaid-ast and local preview registry | Per-diagram last-valid state is isolated by stable diagram id; only an exact, representable current flowchart enables structural controls. |
 
 ## Ingress and concurrency flow
 
@@ -55,9 +55,9 @@ canonical; the SVG and flowchart interaction model derive from it.
 
 | Decision | Direction | Reason and threshold |
 | --- | --- | --- |
-| Generic Mermaid preview | Extend the existing Mermaid SVG/canvas path | Mermaid already parses/renders sequence diagrams. Add viewBox-aware pan/zoom/Fit for generic SVG; do not introduce a second diagram renderer or a generic editable AST. |
-| Flowchart capability detection | Refactor one classification seam before adding types | Replace source-prefix checks in `session-workspace.tsx` with Mermaid parser-result classification. The same result must control canvas controls, copy, and cached last-valid kind. |
-| Per-tab render resilience | Introduce a small per-diagram render registry if needed | Last-valid SVG/kind must survive tab switching and invalid input independently. Do not use one global preview cache or reset unrelated tab state. |
+| Generic Mermaid preview | Reuse the Mermaid SVG/canvas path | Mermaid renders API sequence diagrams through viewBox-aware pan/zoom/Fit; `pnpm test:e2e-sequence` covers generic behavior, cross-tab isolation, and invalid source. |
+| Flowchart capability detection | Use Mermaid parser-result classification | Only current, representable `flowchart*` source exposes structural controls; generic and stale/invalid source stays source-editable. |
+| Per-tab render resilience | Local per-diagram preview registry | Last-valid SVG/kind/error survives tab switching and invalid input independently; deleted ids are pruned and session changes reset the registry. |
 | Human/MCP collaboration | Reuse Yjs plus server revision checks | They already converge document operations and prevent stale agent replacement. Do not add a second realtime database, lock service, or transport-session identity. |
 | Interaction lifecycle | Extract only where an invariant cannot be tested in `session-workspace.tsx` | It currently binds provider, active-tab state, CodeMirror, rendering, activity, and local UI. Pull out focused tab/render or transaction-origin helpers before adding more cross-cutting effects, not a framework-wide rewrite. |
 | Undo, drag, and remote updates | Establish explicit origin/coalescing seams before feature growth | The acceptance boundary is local undo only, no remote camera/focus takeover, and no active-drag jitter. Add interface-level tests at those seams. |
@@ -74,10 +74,9 @@ canonical; the SVG and flowchart interaction model derive from it.
 - `session-workspace.tsx` is the coordination point, not a universal feature
   bucket. A new behavior that needs both local UI and durable state must name
   its ownership and test seam before being added there.
-- Current prefix-based flowchart detection and active-tab-only last-valid render
-  state are known #12 refactor targets. Current undo-origin configuration,
-  remote-layout drag behavior, reconnect/out-of-order convergence, and
-  activity revision metadata are #13 proof targets.
+- Current undo-origin configuration, remote-layout drag behavior,
+  reconnect/out-of-order convergence, and activity revision metadata remain
+  #13 proof targets.
 
 ## Verification and evidence
 
@@ -92,7 +91,9 @@ pnpm build
 ```
 
 For browser interaction work, start the server and web app, then run
-`npx tsx e2e-validate.ts`; screenshots are written to `/tmp/arielcharts-*.png`.
+`npx tsx e2e-validate.ts`; for Mermaid type/canvas coverage also run
+`pnpm test:e2e-sequence`. Inspect `/tmp/arielcharts-sequence.png` and
+`/tmp/arielcharts-sequence-isolation.png`.
 The CI contract is `.github/workflows/ci.yml`. For architecture decisions,
 evidence comes from the named source/test files above and issues #12 (generic
 Mermaid/API flows) and #13 (coworking semantics), not a stale status document.

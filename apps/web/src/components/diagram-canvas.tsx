@@ -316,13 +316,17 @@ export function DiagramCanvas({
       return null;
     }
 
+    if (!isFlowchart) {
+      return hitMap.viewBox;
+    }
+
     const nodeBounds = interactiveNodeBounds ? [...interactiveNodeBounds.values()] : [...hitMap.nodes.values()];
     const allBounds = nodeBounds.length > 0
       ? [...nodeBounds, ...hitMap.subgraphs.values()]
       : [...hitMap.subgraphs.values(), ...[...hitMap.edges.values()].map((edge) => edge.bounds)];
 
-    return getBoundsUnion(allBounds);
-  }, [hitMap, interactiveNodeBounds]);
+    return getBoundsUnion(allBounds) ?? hitMap.viewBox;
+  }, [hitMap, interactiveNodeBounds, isFlowchart]);
 
   const flowNodes = useMemo<MermaidFlowNode[]>(() => {
     if (!graph || !interactiveNodeBounds) {

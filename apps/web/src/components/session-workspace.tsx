@@ -28,6 +28,8 @@ import {
   type DiagramNodePositions,
   type NodePositionsSyncMode,
 } from '../lib/diagram-layout';
+import { classifyDiagramCapability } from '../lib/diagram-capabilities';
+import { canUseFlowchartControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
 
 const DIAGRAMS_KEY = 'diagrams';
@@ -185,15 +187,6 @@ function getParticipantAvatarText(participant: Participant): string {
   return compact.slice(0, 2).toUpperCase() || '??';
 }
 
-export function isFlowchartSyntax(text: string): boolean {
-  const trimmed = text.trimStart();
-  return trimmed.startsWith('flowchart') || trimmed.startsWith('graph');
-}
-
-export function canBuildFlowchartFromCanvas(text: string): boolean {
-  return text.trim().length === 0 || isFlowchartSyntax(text);
-}
-
 export function getAgentWorkflowPrompt(sessionId: string, mcpUrl: string): string {
   return `Connect to my ArielCharts session "${sessionId}" using the MCP server at ${mcpUrl}. First call getSession to see the named diagrams and stable IDs. Create a named diagram for each distinct flow by passing getSession's latest revision as expectedRevision. Before changing any existing tab, call readDiagram and pass its latest revision as expectedRevision to writeDiagram; on a stale-revision error, readDiagram again, merge the current source, and retry. Mermaid changes sync collaboratively in real-time. Look up your docs for how to add an MCP server globally.`;
 }
@@ -314,6 +307,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const editorViewRef = useRef<EditorView | null>(null);
   const editorThemeRef = useRef(new Compartment());
   const renderSequenceRef = useRef(0);
+  const activeRenderRef = useRef<{ diagramId: string; sequence: number; source: string } | null>(null);
+  const previewRegistryRef = useRef(new DiagramPreviewRegistry());
   const joinedActivityRef = useRef(false);
   const editDebounceRef = useRef<number | null>(null);
   const currentIdentityRef = useRef<LocalIdentity | null>(null);
@@ -329,14 +324,13 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [activeDiagramId, setActiveDiagramId] = useState<string | null>(null);
   const [mermaidText, setMermaidText] = useState('');
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
-  const [lastValidSvg, setLastValidSvg] = useState('');
+  const [preview, setPreview] = useState<DiagramPreview | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [shareCopyState, setShareCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [promptCopyState, setPromptCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [shareUrl, setShareUrl] = useState(() => getSessionPath(sessionId));
   const [showConnectModal, setShowConnectModal] = useState(false);
-  const [flowchartSnapshot, setFlowchartSnapshot] = useState<FlowchartSnapshot | null>(null);
   const [nodePositions, setNodePositions] = useState<DiagramNodePositions>({});
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [interactionMode, setInteractionMode] = useState<'select' | 'connect'>('select');
@@ -360,6 +354,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     setShareUrl(getSessionPath(sessionId));
+    previewRegistryRef.current.reset();
+    setPreview(null);
+    setRenderError(null);
 
     if (typeof window !== 'undefined') {
       setShareUrl(new URL(getSessionPath(sessionId), window.location.origin).toString());
@@ -395,6 +392,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
     const syncDiagrams = () => {
       const tabs = readDiagramTabs(diagramsMap, diagramOrder);
+      previewRegistryRef.current.prune(tabs.map((tab) => tab.id));
       setDiagrams(tabs);
       setActiveDiagramId((current) => {
         if (current && tabs.some((tab) => tab.id === current)) return current;
@@ -498,8 +496,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       mutationQueueRef.current = null;
       setMermaidText('');
       setNodePositions({});
-      setLastValidSvg('');
-      setFlowchartSnapshot(null);
+      setPreview(null);
+      setRenderError(null);
       setSelectedNodeIds([]);
       setInteractionMode('select');
       return;
@@ -513,8 +511,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     };
     syncText();
     syncNodePositions();
-    setLastValidSvg('');
-    setFlowchartSnapshot(null);
+    setPreview(previewRegistryRef.current.get(activeDiagram.id));
+    setRenderError(previewRegistryRef.current.getError(activeDiagram.id));
     setSelectedNodeIds([]);
     setInteractionMode('select');
     mutationQueueRef.current = new MutationQueue(activeDiagram.yText, { transactionOrigin: 'visual' });
@@ -607,16 +605,25 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [activeDiagram, collaboration, openFlyout]);
 
   useEffect(() => {
-    let isCancelled = false;
     const renderId = renderSequenceRef.current + 1;
     renderSequenceRef.current = renderId;
+    const diagramId = activeDiagramId;
+    const renderToken = diagramId ? { diagramId, sequence: renderId, source: mermaidText } : null;
+    activeRenderRef.current = renderToken;
+
+    const isCurrentRender = () => (
+      renderToken !== null
+      && activeRenderRef.current?.diagramId === renderToken.diagramId
+      && activeRenderRef.current?.sequence === renderToken.sequence
+      && activeRenderRef.current?.source === renderToken.source
+    );
 
     const renderPreview = async () => {
       if (!mermaidText.trim()) {
-        if (!isCancelled) {
+        if (diagramId && isCurrentRender()) {
+          previewRegistryRef.current.clear(diagramId);
           setRenderError(null);
-          setLastValidSvg('');
-          setFlowchartSnapshot(null);
+          setPreview(null);
           setSelectedNodeIds([]);
           setInteractionMode('select');
         }
@@ -624,33 +631,35 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       }
 
       try {
-        await mermaid.parse(mermaidText);
-        const { svg } = await mermaid.render(`arielcharts-${sessionId}-${activeDiagramId ?? 'none'}-${renderId}`, mermaidText);
+        const parseResult = await mermaid.parse(mermaidText);
+        const capability = classifyDiagramCapability(parseResult.diagramType);
+        const { svg } = await mermaid.render(`arielcharts-${sessionId}-${diagramId ?? 'none'}-${renderId}`, mermaidText);
         let snapshot: FlowchartSnapshot | null = null;
-        if (isFlowchartSyntax(mermaidText)) {
+        if (capability.kind === 'flowchart') {
           try {
             snapshot = parseFlowchartSnapshot(mermaidText);
           } catch {
-            // Non-flowchart or unparseable — leave snapshot null
+            snapshot = null;
           }
         }
-        if (!isCancelled) {
-          setLastValidSvg(svg);
-          setFlowchartSnapshot(snapshot);
+        if (diagramId && isCurrentRender()) {
+          const nextPreview = { capability, diagramId, flowchartSnapshot: snapshot, source: mermaidText, svg };
+          previewRegistryRef.current.set(nextPreview);
+          setPreview(nextPreview);
           setRenderError(null);
         }
       } catch (error) {
-        if (!isCancelled) {
-          setRenderError(error instanceof Error ? error.message : 'Mermaid could not parse the diagram.');
+        if (isCurrentRender()) {
+          const message = error instanceof Error ? error.message : 'Mermaid could not parse the diagram.';
+          if (diagramId) {
+            previewRegistryRef.current.setError(diagramId, message);
+          }
+          setRenderError(message);
         }
       }
     };
 
     void renderPreview();
-
-    return () => {
-      isCancelled = true;
-    };
   }, [activeDiagramId, mermaidText, sessionId]);
 
   useEffect(() => {
@@ -741,7 +750,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     : connectionState === 'disconnected'
       ? 'Offline'
       : 'Saving changes…';
-  const diagramModeLabel = mermaidText.trim().length === 0 || isFlowchartSyntax(mermaidText)
+  const isFlowchart = canUseFlowchartControls(mermaidText, preview);
+  const diagramModeLabel = isFlowchart
     ? 'Flowchart · editable'
     : 'Mermaid · source only';
   const shareButtonLabel = shareCopyState === 'copied' ? 'copied' : shareCopyState === 'error' ? 'copy failed' : 'share';
@@ -1072,11 +1082,12 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
           ) : null}
 
           <DiagramCanvas
+            key={activeDiagramId ?? 'no-active-diagram'}
             className="diagram-canvas"
             emptyMessage={mermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
-            graph={flowchartSnapshot}
+            graph={preview?.flowchartSnapshot ?? null}
             interactionMode={interactionMode}
-            isFlowchart={canBuildFlowchartFromCanvas(mermaidText)}
+            isFlowchart={isFlowchart}
             nodePositions={nodePositions}
             onAddEdge={(source, target, label, type) => mutationQueueRef.current?.addEdge(source, target, { label, type })}
             onAddNode={(label, shape) => mutationQueueRef.current?.addNode(label, { shape })}
@@ -1106,7 +1117,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             onSelectedNodeIdsChange={setSelectedNodeIds}
             onUngroupNodes={(id) => mutationQueueRef.current?.ungroupSubgraph(id)}
             selectedNodeIds={selectedNodeIds}
-            svg={lastValidSvg}
+            svg={preview?.svg ?? ''}
           />
         </article>
 

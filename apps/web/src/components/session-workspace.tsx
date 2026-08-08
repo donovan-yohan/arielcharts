@@ -1144,6 +1144,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
     setRestorePending(true);
     setRestoreError(null);
+    let shouldRefreshHistory = false;
     try {
       // A restore is deliberately never retried from an old list response.
       const current = await readCurrentDiagram(sessionId, activeDiagramId);
@@ -1157,20 +1158,23 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       if (result.status === 'stale') {
         cancelHistoryPreview();
         setRestoreCandidate(null);
-        setRestoreError('This diagram changed while you were reviewing it. History was refreshed; review the new head and confirm again.');
-        await refreshDiagramHistory();
+        setRestoreError('This diagram changed while you were reviewing it. History is refreshing; review the new head and confirm again.');
+        shouldRefreshHistory = true;
         return;
       }
       cancelHistoryPreview();
       setRestoreCandidate(null);
-      await refreshDiagramHistory();
+      shouldRefreshHistory = true;
     } catch (error) {
       setRestoreCandidate(null);
       setRestoreError(error instanceof Error ? `${error.message} Review the latest head before restoring.` : 'Restore could not be applied. Review the latest head before restoring.');
-      await refreshDiagramHistory();
+      shouldRefreshHistory = true;
     } finally {
       setRestorePending(false);
       returnFocusToRestoreOrigin();
+      if (shouldRefreshHistory) {
+        void refreshDiagramHistory();
+      }
     }
   }, [activeDiagramId, cancelHistoryPreview, refreshDiagramHistory, restoreCandidate, returnFocusToRestoreOrigin, sessionId]);
 

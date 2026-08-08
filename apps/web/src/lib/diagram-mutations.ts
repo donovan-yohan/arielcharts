@@ -36,6 +36,8 @@ export interface DiagramEdgeIdentity {
 }
 
 export interface MutationResult {
+  /** The node created by a node-creation mutation, when applicable. */
+  nodeId?: string;
   nextText: string;
   previousText: string;
   snapshot: FlowchartSnapshot;
@@ -61,6 +63,8 @@ export interface AddEdgeOptions {
   label?: string;
   type?: FlowchartLinkType;
 }
+
+export interface AddConnectedNodeOptions extends AddNodeOptions, AddEdgeOptions {}
 
 export interface GroupNodesOptions {
   id?: string;
@@ -157,6 +161,11 @@ export function applyDiff(yText: Y.Text, newText: string, oldText = yText.toStri
   }
 }
 
+/** Report rejected UI mutations instead of leaving an unhandled promise. */
+export function observeMutationFailure<T>(mutation: Promise<T>, onFailure: (error: unknown) => void): void {
+  void mutation.catch(onFailure);
+}
+
 export class MutationQueue {
   private readonly queue: QueuedMutation[] = [];
 
@@ -203,6 +212,26 @@ export class MutationQueue {
       const nodeId = ensureUniqueId(chart.nodeIds, options.id ?? createNodeId(label));
       chart.addNode(nodeId, label, { shape: options.shape ?? DEFAULT_NODE_SHAPE });
     }, { createIfEmpty: true, direction: options.direction });
+  }
+
+  /** Add a node and its incoming edge from one queued chart snapshot. */
+  async addConnectedNode(source: string, label = DEFAULT_NODE_LABEL, options: AddConnectedNodeOptions = {}): Promise<MutationResult> {
+    return this.enqueueResult((currentText) => {
+      const chart = getMutableFlowchart(currentText, { createIfEmpty: true, direction: options.direction });
+      const nodeId = ensureUniqueId(chart.nodeIds, options.id ?? createNodeId(label));
+      chart.addNode(nodeId, label, { shape: options.shape ?? DEFAULT_NODE_SHAPE });
+      chart.addLink(source, nodeId, {
+        text: options.label,
+        type: options.type ?? DEFAULT_LINK_TYPE,
+      });
+
+      return {
+        nextText: chart.render(),
+        nodeId,
+        previousText: currentText,
+        snapshot: getFlowchartSnapshot(chart),
+      };
+    });
   }
 
   async removeNode(nodeId: string): Promise<MutationResult> {

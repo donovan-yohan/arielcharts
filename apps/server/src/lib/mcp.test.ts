@@ -8,150 +8,85 @@ import { SessionManager } from './session-manager.js';
 
 async function createManager() {
   const dataDir = await mkdtemp(join(tmpdir(), 'arielcharts-mcp-'));
-  const store = new SessionStore(dataDir);
-  const manager = new SessionManager(store);
-  return {
-    dataDir,
-    manager,
-    async close() {
-      await manager.close();
-      await rm(dataDir, { recursive: true, force: true });
-    },
-  };
+  const manager = new SessionManager(new SessionStore(dataDir));
+  return { dataDir, manager, async close() { await manager.close(); await rm(dataDir, { recursive: true, force: true }); } };
 }
 
 describe('handleMcpToolCall', () => {
   let resources: Awaited<ReturnType<typeof createManager>>;
 
-  beforeEach(async () => {
-    resources = await createManager();
-  });
+  beforeEach(async () => { resources = await createManager(); });
+  afterEach(async () => { await resources.close(); });
 
-  afterEach(async () => {
-    await resources.close();
-  });
+  async function getSession() {
+    return handleMcpToolCall(resources.manager, { tool: 'get_session', input: { session_id: 'abc123de' } }) as Promise<{
+      diagrams: Array<{ id: string; name: string; revision: string }>;
+      revision: string;
+    }>;
+  }
 
-  it('writes and reads a deterministic session', async () => {
-    const sessionId = 'abc123de';
-    const mermaidText = 'graph TD\n  A-->B';
+  it('orients an agent with ordered names and stable IDs, then creates, reads, and writes one exact diagram', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    expect(initial.diagrams).toEqual([{ id: 'main', name: 'Main', revision: expect.any(String) }]);
 
-    await expect(
-      handleMcpToolCall(resources.manager, {
-        tool: 'write_diagram',
-        input: {
-          session_id: sessionId,
-          mermaid_text: mermaidText,
-          actor_name: 'backend-agent',
-          participants: [{ name: 'backend-agent', color: '#00aaff', type: 'agent' }],
-        },
-      }),
-    ).resolves.toEqual({ success: true });
+    const created = await handleMcpToolCall(resources.manager, {
+      tool: 'create_diagram',
+      input: { session_id: 'abc123de', name: 'Checkout API sequence', mermaid_text: 'sequenceDiagram\n  Browser->>API: POST /checkout', revision: initial.revision },
+    }) as { diagram: { id: string; name: string; revision: string } };
+    expect(created.diagram).toMatchObject({ name: 'Checkout API sequence' });
 
-    await expect(
-      handleMcpToolCall(resources.manager, {
-        tool: 'read_diagram',
-        input: { session_id: sessionId },
-      }),
-    ).resolves.toEqual({
-      mermaid_text: mermaidText,
-      participants: [{ name: 'backend-agent', color: '#00aaff', type: 'agent' }],
-    });
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'read_diagram', input: { session_id: 'abc123de', diagram_id: created.diagram.id },
+    })).resolves.toMatchObject({ diagram: { id: created.diagram.id, name: 'Checkout API sequence', mermaid_text: expect.stringContaining('sequenceDiagram') } });
 
-    await expect(resources.manager.readSession(sessionId)).resolves.toMatchObject({
-      id: sessionId,
-      mermaidText,
-      participants: [{ name: 'backend-agent', color: '#00aaff', type: 'agent' }],
-      activity: [
-        expect.objectContaining({
-          action: 'replaced',
-          actor: { name: 'backend-agent', type: 'agent' },
-        }),
-      ],
-    });
-  });
-
-  it('supports empty diagram text and synthesizes actor awareness when participants are omitted', async () => {
-    await expect(
-      handleMcpToolCall(resources.manager, {
-        tool: 'write_diagram',
-        input: {
-          session_id: 'abc123de',
-          mermaid_text: '',
-          actor_name: 'diagram-bot',
-        },
-      }),
-    ).resolves.toEqual({ success: true });
-
-    await expect(
-      handleMcpToolCall(resources.manager, {
-        tool: 'read_diagram',
-        input: { session_id: 'abc123de' },
-      }),
-    ).resolves.toEqual({
-      mermaid_text: '',
-      participants: [{ name: 'diagram-bot', color: '#7c3aed', type: 'agent' }],
-    });
-  });
-
-  it('lists active sessions', async () => {
-    await handleMcpToolCall(resources.manager, {
+    await expect(handleMcpToolCall(resources.manager, {
       tool: 'write_diagram',
-      input: {
-        session_id: 'abc123de',
-        mermaid_text: 'flowchart LR\n  A-->B',
-        participants: [],
-      },
-    });
+      input: { session_id: 'abc123de', diagram_id: created.diagram.id, mermaid_text: 'timeline\n  now : request', revision: created.diagram.revision },
+    })).resolves.toMatchObject({ diagram: { id: created.diagram.id, mermaid_text: 'timeline\n  now : request' } });
 
-    await expect(
-      handleMcpToolCall(resources.manager, {
-        tool: 'list_sessions',
-        input: {},
-      }),
-    ).resolves.toEqual({
-      sessions: [
-        {
-          id: 'abc123de',
-          title: 'flowchart LR',
-          participants: 0,
-        },
+    await expect(getSession()).resolves.toMatchObject({
+      diagrams: [
+        { id: 'main', name: 'Main', revision: expect.any(String) },
+        { id: created.diagram.id, name: 'Checkout API sequence', revision: expect.any(String) },
       ],
     });
   });
 
-  it('rejects invalid session ids', async () => {
-    await expect(
-      handleMcpToolCall(resources.manager, {
-        tool: 'read_diagram',
-        input: { session_id: 'Invalid!' },
-      }),
-    ).rejects.toThrow('Invalid session_id');
+  it('requires an exact latest revision for every MCP mutation', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    const first = await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram', input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'flowchart LR\n A-->B', revision: initial.diagrams[0]!.revision },
+    }) as { diagram: { revision: string } };
+
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'rename_diagram', input: { session_id: 'abc123de', diagram_id: 'main', name: 'Changed', revision: initial.diagrams[0]!.revision },
+    })).rejects.toThrow('Stale diagram revision');
+
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'rename_diagram', input: { session_id: 'abc123de', diagram_id: 'main', name: 'Changed', revision: first.diagram.revision },
+    })).resolves.toMatchObject({ diagram: { name: 'Changed' } });
   });
 
-  it('rejects invalid payloads', async () => {
-    await expect(
-      handleMcpToolCall(resources.manager, {
-        tool: 'write_diagram',
-        input: {
-          session_id: 'abc123de',
-        },
-      }),
-    ).rejects.toThrow('Expected string field: mermaid_text');
+  it('rejects duplicate normalized names and preserves at least one tab', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'create_diagram', input: { session_id: 'abc123de', name: ' main ', revision: initial.revision },
+    })).rejects.toThrow('Diagram name already exists');
 
-    await expect(
-      handleMcpToolCall(resources.manager, {
-        tool: 'unsupported_tool',
-        input: {},
-      }),
-    ).rejects.toThrow('Unsupported MCP tool: unsupported_tool');
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'delete_diagram', input: { session_id: 'abc123de', diagram_id: 'main', revision: initial.diagrams[0]!.revision },
+    })).rejects.toThrow('must retain at least one diagram');
   });
 
-  it('rejects nonexistent sessions', async () => {
-    await expect(
-      handleMcpToolCall(resources.manager, {
-        tool: 'read_diagram',
-        input: { session_id: 'abc123de' },
-      }),
-    ).rejects.toThrow('Session not found: abc123de');
+  it('rejects invalid IDs and missing required diagram fields', async () => {
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'get_session', input: { session_id: 'Invalid!' },
+    })).rejects.toThrow('Invalid session_id');
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram', input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: '' },
+    })).rejects.toThrow('Expected non-empty string field: revision');
   });
 });

@@ -14,7 +14,7 @@ The repo now includes the Phase 2 + Phase 3 implementation baseline:
   - presence strip, activity feed, share URL, and connection status UI
   - configurable server/websocket endpoints via `NEXT_PUBLIC_SERVER_URL` and `NEXT_PUBLIC_WS_URL`
 - `apps/server` — Node.js TypeScript server with:
-  - `POST /mcp` MCP HTTP endpoint for `read_diagram`, `write_diagram`, and `list_sessions`
+  - modern-only MCP `2026-07-28` `POST /mcp` endpoint for named diagram tabs (`listSessions`, `getSession`, `createDiagram`, `readDiagram`, `writeDiagram`, `renameDiagram`, and `deleteDiagram`)
   - `OPTIONS /mcp` preflight handling and CORS response headers for browser-origin MCP requests
   - `/health` health endpoint
   - `/ws/:roomId` Yjs-compatible websocket rooms
@@ -118,8 +118,9 @@ pnpm --filter @arielcharts/web test
 
 ## Core HTTP and websocket contracts
 
-- `POST /mcp` accepts `{ tool, input }` JSON and returns `{ result }`
-- `OPTIONS /mcp` supports browser preflight for deployed web-to-server requests
+- `POST /mcp` implements MCP protocol `2026-07-28`. It is modern-only: use `server/discover` instead of `initialize`; requests carry the MCP protocol envelope plus `MCP-Protocol-Version`, `Mcp-Method`, and (for `tools/call`) `Mcp-Name` headers. MCP transport sessions and `Mcp-Session-Id` are not used.
+- ArielCharts collaboration is application state, not MCP transport state: pass an explicit `sessionId` and stable `diagramId` to diagram tools. Call `getSession` before creating a tab, and `readDiagram` before replacing or renaming one; mutations pass that latest value as `expectedRevision` and must re-read after a stale-revision error.
+- `OPTIONS /mcp` supports browser preflight for the protocol headers above.
 - `/health` returns a simple readiness payload
 - `/ws/:roomId` hosts Yjs collaboration rooms
 

@@ -55,7 +55,7 @@ function metadata(input: Record<string, unknown>): { actorName: string; actorTyp
   };
 }
 
-function event(input: Record<string, unknown>, action: 'created' | 'replaced' | 'renamed' | 'deleted', diagramId: string) {
+function event(input: Record<string, unknown>, action: 'created' | 'replaced' | 'renamed' | 'deleted' | 'restored', diagramId: string) {
   const value = metadata(input);
   return {
     meta: value,
@@ -68,6 +68,12 @@ function readSessionAndDiagram(input: Record<string, unknown>) {
   const diagramId = readNonEmptyString(input.diagram_id, 'diagram_id');
   assertValidSessionId(sessionId);
   return { sessionId, diagramId };
+}
+
+function readHistoryTarget(input: Record<string, unknown>) {
+  const { sessionId, diagramId } = readSessionAndDiagram(input);
+  const revisionId = readNonEmptyString(input.revision_id, 'revision_id');
+  return { sessionId, diagramId, revisionId };
 }
 
 const STARTER_TEMPLATE_IDS = STARTER_TEMPLATES.map((template) => template.id).join(', ');
@@ -112,6 +118,14 @@ export async function handleMcpToolCall(manager: SessionManager, payload: unknow
       const { sessionId, diagramId } = readSessionAndDiagram(input);
       return manager.readDiagram(sessionId, diagramId) satisfies Promise<ReadDiagramOutput>;
     }
+    case 'list_diagram_history': {
+      const { sessionId, diagramId } = readSessionAndDiagram(input);
+      return manager.listDiagramHistory(sessionId, diagramId);
+    }
+    case 'read_diagram_revision': {
+      const { sessionId, diagramId, revisionId } = readHistoryTarget(input);
+      return manager.readDiagramRevision(sessionId, diagramId, revisionId);
+    }
     case 'create_diagram': {
       const mermaidText = readCreateDiagramSource(input);
       const sessionId = readNonEmptyString(input.session_id, 'session_id');
@@ -146,6 +160,12 @@ export async function handleMcpToolCall(manager: SessionManager, payload: unknow
       const nextRevision = await manager.deleteDiagram(sessionId, diagramId, revision, activityEvent, meta.participants);
       return { deleted: { id: diagramId }, revision: nextRevision } satisfies DeleteDiagramOutput;
     }
+    case 'restore_diagram_revision': {
+      const { sessionId, diagramId, revisionId } = readHistoryTarget(input);
+      const expectedRevision = readNonEmptyString(input.expected_revision, 'expected_revision');
+      const { meta, event: activityEvent } = event(input, 'restored', diagramId);
+      return manager.restoreDiagramRevision(sessionId, diagramId, revisionId, expectedRevision, activityEvent, meta.participants);
+    }
     case 'list_sessions': {
       const sessions = await manager.listSessions();
       return { sessions: sessions.map(({ id, title, participants }) => ({ id, title, participants })) } satisfies ListSessionsOutput;
@@ -159,8 +179,11 @@ export type McpToolPayload =
   | { tool: 'get_session'; input: { session_id: string } }
   | { tool: 'list_diagrams'; input: { session_id: string } }
   | { tool: 'read_diagram'; input: { session_id: string; diagram_id: string } }
+  | { tool: 'list_diagram_history'; input: { session_id: string; diagram_id: string } }
+  | { tool: 'read_diagram_revision'; input: { session_id: string; diagram_id: string; revision_id: string } }
   | { tool: 'create_diagram'; input: CreateDiagramInput }
   | { tool: 'write_diagram'; input: { session_id: string; diagram_id: string; mermaid_text: string; revision: string; name?: string } }
   | { tool: 'rename_diagram'; input: { session_id: string; diagram_id: string; name: string; revision: string } }
   | { tool: 'delete_diagram'; input: { session_id: string; diagram_id: string; revision: string } }
+  | { tool: 'restore_diagram_revision'; input: { session_id: string; diagram_id: string; revision_id: string; expected_revision: string } }
   | { tool: 'list_sessions'; input?: Record<string, never> };

@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import * as Y from 'yjs';
+import type { ActivityEvent } from '@arielcharts/shared';
 import { getDefaultMermaidText, getWebsocketServerUrl, isValidSessionId, randomSessionId } from './session';
 import {
+  commitLayoutActivityCheckpoint,
   getActiveDiagramName,
   getAgentCountLabel,
   getAgentWorkflowPrompt,
   getModalWrappedFocusIndex,
+  reconcileSelectionForAcceptedRender,
   getTemplateDiagramCreation,
   getTemplateDiagramName,
 } from '../components/session-workspace';
@@ -34,7 +38,56 @@ describe('session helpers', () => {
     expect(prompt).toContain('readDiagram');
     expect(prompt).toContain('writeDiagram');
     expect(prompt).toContain('expectedRevision');
+    expect(prompt).toContain('listDiagramHistory');
+    expect(prompt).toContain('readDiagramRevision');
+    expect(prompt).toContain('restoreDiagramRevision');
+    expect(prompt).toContain('Immediately before restoreDiagramRevision, call readDiagram again');
+    expect(prompt).toContain('never blindly retry');
     expect(prompt).not.toContain('get_session');
+  });
+
+  it('commits visual layout before its single activity checkpoint becomes observable', () => {
+    const doc = new Y.Doc();
+    const activity = doc.getArray<ActivityEvent>('activity');
+    const positions = doc.getMap<{ x: number; y: number }>('positions');
+    const observed: Array<{ activityCount: number; positions: Record<string, { x: number; y: number }> }> = [];
+    doc.on('afterTransaction', () => {
+      observed.push({ activityCount: activity.length, positions: positions.toJSON() });
+    });
+
+    commitLayoutActivityCheckpoint(doc, activity, positions, { node: { x: 48, y: 72 } }, 'merge', {
+      action: 'edited',
+      actor: { name: 'Human-aa', type: 'human' },
+      diagram_id: 'main',
+      id: 'checkpoint-1',
+      timestamp: 1,
+    });
+
+    expect(observed).toEqual([{ activityCount: 1, positions: { node: { x: 48, y: 72 } } }]);
+
+    observed.length = 0;
+    commitLayoutActivityCheckpoint(doc, activity, positions, {}, 'replace', {
+      action: 'edited',
+      actor: { name: 'Human-aa', type: 'human' },
+      diagram_id: 'main',
+      id: 'checkpoint-2',
+      timestamp: 2,
+    });
+
+    expect(observed).toEqual([{ activityCount: 2, positions: {} }]);
+    doc.destroy();
+  });
+
+  it('preserves canonical selection across detached preview entry and cancellation', () => {
+    const selected = ['Browser'];
+    const duringPreview = reconcileSelectionForAcceptedRender(selected, 'detached-preview', 'flowchart');
+    const afterCancel = reconcileSelectionForAcceptedRender(duringPreview, 'live', 'flowchart');
+
+    expect(duringPreview).toBe(selected);
+    expect(afterCancel).toBe(selected);
+    expect(reconcileSelectionForAcceptedRender(selected, 'detached-preview', 'invalid')).toBe(selected);
+    expect(reconcileSelectionForAcceptedRender(selected, 'live', 'generic')).toEqual([]);
+    expect(reconcileSelectionForAcceptedRender(selected, 'live', 'invalid')).toEqual([]);
   });
 
   it('reads active-tab metadata from the latest diagram catalog without changing its ID', () => {

@@ -131,6 +131,49 @@ describe('handleMcpToolCall', () => {
     })).resolves.toMatchObject({ diagram: { name: 'Changed' } });
   });
 
+  it('lists and reads immutable named-tab history, then restores only against an immediately current revision', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    const written = await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: {
+        session_id: 'abc123de',
+        diagram_id: 'main',
+        mermaid_text: 'sequenceDiagram\n  Browser->>API: GET /health',
+        revision: initial.diagrams[0]!.revision,
+      },
+    }) as { diagram: { revision: string } };
+
+    const history = await handleMcpToolCall(resources.manager, {
+      tool: 'list_diagram_history',
+      input: { session_id: 'abc123de', diagram_id: 'main' },
+    }) as { current_revision: string; revisions: Array<{ revision_id: string; name: string }> };
+    expect(history.current_revision).toBe(written.diagram.revision);
+    expect(history.revisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Main', revision_id: expect.any(String) }),
+    ]));
+
+    const target = history.revisions.at(-1)!.revision_id;
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'read_diagram_revision',
+      input: { session_id: 'abc123de', diagram_id: 'main', revision_id: target },
+    })).resolves.toMatchObject({ revision_id: target, diagram_id: 'main', mermaid_text: expect.any(String) });
+
+    const fresh = await handleMcpToolCall(resources.manager, {
+      tool: 'read_diagram', input: { session_id: 'abc123de', diagram_id: 'main' },
+    }) as { diagram: { revision: string } };
+    const restored = await handleMcpToolCall(resources.manager, {
+      tool: 'restore_diagram_revision',
+      input: { session_id: 'abc123de', diagram_id: 'main', revision_id: target, expected_revision: fresh.diagram.revision },
+    }) as { status: string; revision?: { restored_from_revision_id?: string } };
+    expect(restored).toMatchObject({ status: 'restored', revision: { restored_from_revision_id: target } });
+
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'restore_diagram_revision',
+      input: { session_id: 'abc123de', diagram_id: 'main', revision_id: target, expected_revision: fresh.diagram.revision },
+    })).resolves.toMatchObject({ status: 'stale', current_revision: expect.any(String) });
+  });
+
   it('prunes MCP-removed Mermaid layout before the id is reused', async () => {
     await resources.manager.getOrCreateSession('abc123de');
     const initial = await getSession();
@@ -141,10 +184,13 @@ describe('handleMcpToolCall', () => {
     const positions = await nodePositions();
     positions.set('A', { x: 10, y: 20 });
     positions.set('B', { x: 30, y: 40 });
+    const afterLayout = await handleMcpToolCall(resources.manager, {
+      tool: 'read_diagram', input: { session_id: 'abc123de', diagram_id: 'main' },
+    }) as { diagram: { revision: string } };
 
     const removed = await handleMcpToolCall(resources.manager, {
       tool: 'write_diagram',
-      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'flowchart LR\n  B --> C', revision: initialWrite.diagram.revision },
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'flowchart LR\n  B --> C', revision: afterLayout.diagram.revision },
     }) as { diagram: { revision: string } };
     expect([...positions.entries()]).toEqual([['B', { x: 30, y: 40 }]]);
 
@@ -164,10 +210,13 @@ describe('handleMcpToolCall', () => {
     }) as { diagram: { revision: string } };
     const positions = await nodePositions();
     positions.set('A', { x: 10, y: 20 });
+    const afterLayout = await handleMcpToolCall(resources.manager, {
+      tool: 'read_diagram', input: { session_id: 'abc123de', diagram_id: 'main' },
+    }) as { diagram: { revision: string } };
 
     await handleMcpToolCall(resources.manager, {
       tool: 'write_diagram',
-      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'not valid Mermaid', revision: valid.diagram.revision },
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'not valid Mermaid', revision: afterLayout.diagram.revision },
     });
     expect([...positions.entries()]).toEqual([['A', { x: 10, y: 20 }]]);
   });
@@ -181,17 +230,23 @@ describe('handleMcpToolCall', () => {
     }) as { diagram: { revision: string } };
     const positions = await nodePositions();
     positions.set('A', { x: 10, y: 20 });
+    const afterFlowchartLayout = await handleMcpToolCall(resources.manager, {
+      tool: 'read_diagram', input: { session_id: 'abc123de', diagram_id: 'main' },
+    }) as { diagram: { revision: string } };
 
     const generic = await handleMcpToolCall(resources.manager, {
       tool: 'write_diagram',
-      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'sequenceDiagram\n  Browser->>API: request', revision: flowchart.diagram.revision },
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'sequenceDiagram\n  Browser->>API: request', revision: afterFlowchartLayout.diagram.revision },
     }) as { diagram: { revision: string } };
     expect([...positions.entries()]).toEqual([]);
 
     positions.set('B', { x: 30, y: 40 });
+    const afterGenericLayout = await handleMcpToolCall(resources.manager, {
+      tool: 'read_diagram', input: { session_id: 'abc123de', diagram_id: 'main' },
+    }) as { diagram: { revision: string } };
     await handleMcpToolCall(resources.manager, {
       tool: 'write_diagram',
-      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: '', revision: generic.diagram.revision },
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: '', revision: afterGenericLayout.diagram.revision },
     });
     expect([...positions.entries()]).toEqual([]);
   });

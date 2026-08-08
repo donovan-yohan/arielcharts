@@ -58,6 +58,7 @@ export function createCorsHeaders(
   origin: string | undefined,
   allowedOrigins: readonly string[],
   requestedHeaders: string | undefined,
+  allowedMethods = 'POST, OPTIONS',
 ): OutgoingHttpHeaders {
   const isWildcard = allowedOrigins.length === 0 || allowedOrigins.includes('*');
   const allowOrigin = isWildcard ? '*' : origin;
@@ -69,7 +70,7 @@ export function createCorsHeaders(
 
   const headers: OutgoingHttpHeaders = {
     'access-control-allow-headers': allowedHeaders.join(', '),
-    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-methods': allowedMethods,
     'access-control-max-age': '86400',
     vary: isWildcard ? 'Access-Control-Request-Headers' : 'Origin, Access-Control-Request-Headers',
   };

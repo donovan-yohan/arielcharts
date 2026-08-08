@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from './index.js';
+import { createActivityEvent } from './lib/activity.js';
 import type { ServerEnv } from './lib/types.js';
 
 const MCP_PROTOCOL_VERSION = '2026-07-28';
@@ -124,9 +125,12 @@ describe('server integration', () => {
       'getSession',
       'createDiagram',
       'readDiagram',
+      'listDiagramHistory',
+      'readDiagramRevision',
       'writeDiagram',
       'renameDiagram',
       'deleteDiagram',
+      'restoreDiagramRevision',
     ]);
     const createTool = toolsPayload.result.tools.find((tool) => tool.name === 'createDiagram');
     expect(createTool?.inputSchema?.properties?.templateId?.enum).toEqual([
@@ -337,6 +341,146 @@ describe('server integration', () => {
       params: { name: 'listSessions', arguments: {} },
     });
     expect(nameMismatch.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('exposes origin-checked current, history, immutable revision, and revision-checked restore routes', async () => {
+    await app.manager.getOrCreateSession('abc123de');
+    const initial = await app.manager.readDiagram('abc123de', 'main');
+    await app.manager.writeDiagram(
+      'abc123de',
+      'main',
+      'sequenceDiagram\n  Browser->>API: GET /health',
+      initial.diagram.revision,
+      createActivityEvent({ action: 'edited', actorName: 'Ada', actorType: 'human', detail: 'added health request' }),
+    );
+
+    const baseUrl = `http://127.0.0.1:${port}/api/sessions/abc123de/diagrams/main`;
+    const headers = { origin: 'http://allowed.test' };
+    const preflight = await fetch(`${baseUrl}/history`, {
+      method: 'OPTIONS',
+      headers: { ...headers, 'access-control-request-headers': 'content-type' },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-methods')).toBe('GET, POST, OPTIONS');
+    const current = await fetch(baseUrl, { headers });
+    expect(current.status).toBe(200);
+    const currentPayload = await current.json() as { diagram: { revision: string; mermaid_text: string } };
+    expect(currentPayload.diagram.mermaid_text).toContain('GET /health');
+
+    const history = await fetch(`${baseUrl}/history`, { headers });
+    expect(history.status).toBe(200);
+    const historyPayload = await history.json() as {
+      current_revision: string;
+      revisions: Array<{ revision_id: string; sequence: number; name: string }>;
+    };
+    expect(historyPayload.current_revision).toBe(currentPayload.diagram.revision);
+    expect(historyPayload.revisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Main', revision_id: expect.any(String), sequence: expect.any(Number) }),
+    ]));
+
+    const targetId = historyPayload.revisions.at(-1)!.revision_id;
+    const revision = await fetch(`${baseUrl}/history/${encodeURIComponent(targetId)}`, { headers });
+    expect(revision.status).toBe(200);
+    await expect(revision.json()).resolves.toMatchObject({
+      revision: { revision_id: targetId, diagram_id: 'main', mermaid_text: expect.any(String), node_positions: expect.any(Object) },
+    });
+
+    const restored = await fetch(`${baseUrl}/history/${encodeURIComponent(targetId)}/restore`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ actor_name: 'Ada', actor_type: 'human', expected_revision: currentPayload.diagram.revision }),
+    });
+    expect(restored.status).toBe(200);
+    const restoredPayload = await restored.json() as { status: string; diagram: { revision: string }; revision: { restored_from_revision_id?: string } };
+    expect(restoredPayload).toMatchObject({ status: 'restored', revision: { restored_from_revision_id: targetId } });
+
+    const stale = await fetch(`${baseUrl}/history/${encodeURIComponent(targetId)}/restore`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: currentPayload.diagram.revision }),
+    });
+    expect(stale.status).toBe(409);
+    await expect(stale.json()).resolves.toMatchObject({
+      status: 'stale',
+      current_revision: restoredPayload.diagram.revision,
+    });
+
+    const blocked = await fetch(`${baseUrl}/history`, { headers: { origin: 'http://blocked.test' } });
+    expect(blocked.status).toBe(403);
+    await expect(blocked.json()).resolves.toEqual({ error: 'Origin not allowed.' });
+  });
+
+  it('discovers history tools with named metadata and returns a structured stale restore result', async () => {
+    await app.manager.getOrCreateSession('abc123de');
+    const initial = await app.manager.readDiagram('abc123de', 'main');
+    await app.manager.writeDiagram(
+      'abc123de',
+      'main',
+      'sequenceDiagram\n  Browser->>API: GET /health',
+      initial.diagram.revision,
+      createActivityEvent({ action: 'edited', actorName: 'Ada', actorType: 'human', detail: 'added health request' }),
+    );
+
+    const listed = await mcpRequest({
+      id: 40,
+      method: 'tools/call',
+      toolName: 'listDiagramHistory',
+      params: { name: 'listDiagramHistory', arguments: { sessionId: 'abc123de', diagramId: 'main' } },
+    });
+    const listedPayload = await listed.json() as {
+      result: { structuredContent: { currentRevision: string; revisions: Array<{ id: string; diagramId: string; diagramName: string }> } };
+    };
+    expect(listedPayload.result.structuredContent.revisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ diagramId: 'main', diagramName: 'Main', id: expect.any(String) }),
+    ]));
+
+    const revisionId = listedPayload.result.structuredContent.revisions.at(-1)!.id;
+    const readRevision = await mcpRequest({
+      id: 41,
+      method: 'tools/call',
+      toolName: 'readDiagramRevision',
+      params: { name: 'readDiagramRevision', arguments: { sessionId: 'abc123de', diagramId: 'main', revisionId } },
+    });
+    await expect(readRevision.json()).resolves.toMatchObject({
+      result: { structuredContent: { revision: { id: revisionId, diagramId: 'main', mermaidText: expect.any(String) } } },
+    });
+
+    const fresh = await mcpRequest({
+      id: 42,
+      method: 'tools/call',
+      toolName: 'readDiagram',
+      params: { name: 'readDiagram', arguments: { sessionId: 'abc123de', diagramId: 'main' } },
+    });
+    const freshPayload = await fresh.json() as { result: { structuredContent: { diagram: { revision: string } } } };
+
+    const restored = await mcpRequest({
+      id: 43,
+      method: 'tools/call',
+      toolName: 'restoreDiagramRevision',
+      params: { name: 'restoreDiagramRevision', arguments: {
+        sessionId: 'abc123de', diagramId: 'main', revisionId, expectedRevision: freshPayload.result.structuredContent.diagram.revision,
+      } },
+    });
+    expect(restored.status).toBe(200);
+    await expect(restored.json()).resolves.toMatchObject({
+      result: { structuredContent: { revision: { restoredFromRevisionId: revisionId } } },
+    });
+
+    const stale = await mcpRequest({
+      id: 44,
+      method: 'tools/call',
+      toolName: 'restoreDiagramRevision',
+      params: { name: 'restoreDiagramRevision', arguments: {
+        sessionId: 'abc123de', diagramId: 'main', revisionId, expectedRevision: freshPayload.result.structuredContent.diagram.revision,
+      } },
+    });
+    expect(stale.status).toBe(200);
+    await expect(stale.json()).resolves.toMatchObject({
+      result: {
+        isError: true,
+        structuredContent: { error: { code: 'STALE_DIAGRAM_REVISION', currentDiagram: { id: 'main' } } },
+      },
+    });
   });
 
   it('rejects the retired initialize lifecycle', async () => {

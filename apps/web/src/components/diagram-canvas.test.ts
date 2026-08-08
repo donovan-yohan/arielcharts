@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import type { DiagramLink } from '../lib/diagram-mutations';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
-import { getFlowEdgePresentation } from './diagram-canvas';
+import { getCanonicalSelectionAttribute, getFlowEdgePresentation, getNodeClickSelection } from './diagram-canvas';
+
+describe('getCanonicalSelectionAttribute', () => {
+  it('keeps one stable app-owned snapshot across preview entry and exit', () => {
+    const selected = ['Browser', 'API'];
+    const beforePreview = getCanonicalSelectionAttribute(selected);
+    const duringDetachedPreview = getCanonicalSelectionAttribute(selected);
+    const afterCancel = getCanonicalSelectionAttribute(selected);
+
+    expect(beforePreview).toBe('["API","Browser"]');
+    expect(duringDetachedPreview).toBe(beforePreview);
+    expect(afterCancel).toBe(beforePreview);
+  });
+});
+
+describe('getNodeClickSelection', () => {
+  it('keeps ordinary and Shift selection in app-owned click handlers', () => {
+    expect(getNodeClickSelection(['A'], 'B', false)).toEqual(['B']);
+    expect(getNodeClickSelection(['A'], 'B', true)).toEqual(['A', 'B']);
+    expect(getNodeClickSelection(['A', 'B'], 'A', true)).toEqual(['B']);
+  });
+});
 
 describe('getFlowEdgePresentation', () => {
   it.each(['arrow_circle', 'arrow_cross'] as const)('uses authored stroke color for %s markers', (type) => {

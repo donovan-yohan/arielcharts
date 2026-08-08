@@ -4,6 +4,24 @@ const MCP_PROTOCOL_VERSION = '2026-07-28';
 const MCP_FETCH_TIMEOUT_MS = 15_000;
 
 export type Diagram = { id: string; mermaidText: string; name: string; revision: string };
+export type DiagramRevisionSummary = {
+  id: string;
+  sequence: number;
+  diagramId: string;
+  diagramName: string;
+  timestamp: number;
+  actor: { name: string; type: 'human' | 'agent' };
+  origin: 'browser' | 'mcp' | 'system';
+  action: string;
+  baseRevision?: string;
+  resultRevision: string;
+  restoredFromRevisionId?: string;
+};
+
+export type DiagramRevision = DiagramRevisionSummary & {
+  mermaidText: string;
+  nodePositions: Record<string, { x: number; y: number }>;
+};
 type McpPayload = {
   error?: { message?: string };
   result?: {
@@ -76,6 +94,56 @@ export class ModernMcpClient {
 
   async readDiagram(sessionId: string, diagramId: string): Promise<Diagram> {
     return this.expectContent<{ diagram: Diagram }>(await this.tool('readDiagram', { sessionId, diagramId }), 'readDiagram').diagram;
+  }
+
+  async listDiagramHistory(sessionId: string, diagramId: string): Promise<{ currentRevision: string; revisions: DiagramRevisionSummary[] }> {
+    return this.expectContent<{ currentRevision: string; revisions: DiagramRevisionSummary[] }>(
+      await this.tool('listDiagramHistory', { sessionId, diagramId }),
+      'listDiagramHistory',
+    );
+  }
+
+  async readDiagramRevision(sessionId: string, diagramId: string, revisionId: string): Promise<DiagramRevision> {
+    return this.expectContent<{ revision: DiagramRevision }>(
+      await this.tool('readDiagramRevision', { sessionId, diagramId, revisionId }),
+      'readDiagramRevision',
+    ).revision;
+  }
+
+  async restoreDiagramRevision(
+    sessionId: string,
+    diagramId: string,
+    revisionId: string,
+    expectedRevision: string,
+  ): Promise<{ diagram: Diagram; revision: DiagramRevisionSummary }> {
+    return this.expectContent<{ diagram: Diagram; revision: DiagramRevisionSummary }>(
+      await this.tool('restoreDiagramRevision', {
+        sessionId,
+        diagramId,
+        revisionId,
+        expectedRevision,
+        actorName: 'UX harness',
+        actorType: 'agent',
+        detail: 'Restored a revision from E2E history coverage',
+      }),
+      'restoreDiagramRevision',
+    );
+  }
+
+  async createDiagramWithLatestRevision(sessionId: string, name: string, mermaidText: string): Promise<Diagram> {
+    const session = await this.getSession(sessionId);
+    return this.expectContent<{ diagram: Diagram }>(
+      await this.tool('createDiagram', {
+        sessionId,
+        name,
+        mermaidText,
+        expectedRevision: session.revision,
+        actorName: 'UX harness',
+        actorType: 'agent',
+        detail: 'Prepared revision-history browser coverage',
+      }),
+      'createDiagram',
+    ).diagram;
   }
 
   async writeLatest(sessionId: string, diagramId: string, mermaidText: string, detail = 'Remote UX anchor update'): Promise<Diagram> {

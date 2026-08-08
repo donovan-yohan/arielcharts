@@ -8,6 +8,7 @@ import {
   waitForReactFlowNodePositionMatch,
   waitForReactFlowNodePositionMovement,
 } from './e2e/support/react-flow';
+import { openYjsSessionObserver, type YjsSessionObserver } from './e2e/support/yjs-session';
 
 const MCP_PROTOCOL_VERSION = '2026-07-28';
 const BASE_FLOWCHART = `flowchart LR
@@ -18,6 +19,12 @@ const LOCAL_VIEW_FLOWCHART = `flowchart TD
   Local[Local view] --> Scratch[Scratch]`;
 const HUMAN_EDGE = '  Browser --> Audit[Audit]';
 const AGENT_EDGE = '  Gateway --> Worker[Worker]';
+const PENDING_PRUNE_FLOWCHART = `flowchart LR
+  A[Disposable] --> B[Bridge]
+  B --> C[Keep]`;
+const PENDING_PRUNE_REMOVED = `flowchart LR
+  B[Bridge] --> C[Keep]`;
+const NEGATIVE_OBSERVATION_WINDOW_MS = 300;
 
 type Diagram = { id: string; mermaidText: string; name: string; revision: string };
 type McpPayload = {
@@ -132,6 +139,32 @@ async function nudgeNode(page: Page, locator: Locator, dx: number, dy: number, h
   if (!hold) await page.mouse.up();
 }
 
+async function advanceClockUntilNodePresence(
+  page: Page,
+  nodeId: string,
+  expectedCount: number,
+  maximumAdvanceMs: number,
+  stepMs = 10,
+): Promise<number> {
+  let elapsed = 0;
+  while (await nodeById(page, nodeId).count() !== expectedCount) {
+    assert(elapsed < maximumAdvanceMs,
+      `Node ${nodeId} did not reach count ${expectedCount} within ${maximumAdvanceMs}ms of controlled clock time.`);
+    const advance = Math.min(stepMs, maximumAdvanceMs - elapsed);
+    await page.clock.runFor(advance);
+    elapsed += advance;
+  }
+  return elapsed;
+}
+
+function positionsMatch(
+  left: { x: number; y: number },
+  right: { x: number; y: number },
+  tolerance = 2,
+): boolean {
+  return Math.abs(left.x - right.x) <= tolerance && Math.abs(left.y - right.y) <= tolerance;
+}
+
 class ModernMcpClient {
   private nextId = 1;
 
@@ -216,6 +249,7 @@ async function validateCollaboration(): Promise<void> {
   const browserB = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const pageA = await browserA.newPage();
   const pageB = await browserB.newPage();
+  await pageA.clock.install({ time: Date.now() });
   const diagnosticsA = collectReactFlowDiagnostics(pageA);
   const diagnosticsB = collectReactFlowDiagnostics(pageB);
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
@@ -314,15 +348,14 @@ async function validateCollaboration(): Promise<void> {
     assertNoReactFlowError015(diagnosticsB.reactFlowError015, 'when browser B completed its node drag');
     await pageA.waitForTimeout(500);
     const heldAfterRemote = await boxOf(activeDragNode, 'Active drag node disappeared during remote update.');
-    const activeDragStable = Math.abs(heldAfterRemote.x - heldBeforeRemote.x) <= 2
-      && Math.abs(heldAfterRemote.y - heldBeforeRemote.y) <= 2;
+    const activeDragStable = positionsMatch(heldAfterRemote, heldBeforeRemote);
     assert(activeDragStable, `Remote layout update jittered active drag overlay: before=${JSON.stringify(heldBeforeRemote)} after=${JSON.stringify(heldAfterRemote)}`);
     await pageA.mouse.up();
     await pageA.waitForTimeout(700);
     assertNoReactFlowError015(diagnosticsA.reactFlowError015, 'when browser A completed its node drag');
     const finalA = await getReactFlowNodePosition(nodeById(pageA, dragNodeId), 'Dragged node disappeared after drag stop');
     const finalB = await getReactFlowNodePosition(nodeById(pageB, dragNodeId), 'Remote replica dragged node disappeared after drag stop');
-    const replicasConverged = Math.abs(finalA.x - finalB.x) <= 2 && Math.abs(finalA.y - finalB.y) <= 2;
+    const replicasConverged = positionsMatch(finalA, finalB);
     assert(replicasConverged, `Drag replicas did not converge: A=${JSON.stringify(finalA)} B=${JSON.stringify(finalB)}`);
 
     const releasedPosition = finalB;
@@ -334,10 +367,153 @@ async function validateCollaboration(): Promise<void> {
     assert(postReleaseWinnerMoved, `Post-release same-node drag did not establish a new winner: before=${JSON.stringify(releasedPosition)} after=${JSON.stringify(winnerB)}`);
     await waitForReactFlowNodePositionMatch(pageA, dragNodeId, winnerB);
     const winnerA = await getReactFlowNodePosition(nodeById(pageA, dragNodeId), 'Browser A replica lost the post-release winner node');
-    const postReleaseReplicasConverged = Math.abs(winnerA.x - winnerB.x) <= 2 && Math.abs(winnerA.y - winnerB.y) <= 2;
+    const postReleaseReplicasConverged = positionsMatch(winnerA, winnerB);
     assert(postReleaseReplicasConverged, `Post-release same-node winner did not converge: A=${JSON.stringify(winnerA)} B=${JSON.stringify(winnerB)}`);
+
+    const pendingPrune = await mcp.createDiagramWithLatestRevision(sessionId, 'Pending prune', PENDING_PRUNE_FLOWCHART);
+    await Promise.all([
+      pageA.getByRole('tab', { name: pendingPrune.name, exact: true }).waitFor({ state: 'visible', timeout: 15_000 }),
+      pageB.getByRole('tab', { name: pendingPrune.name, exact: true }).waitFor({ state: 'visible', timeout: 15_000 }),
+    ]);
+    await Promise.all([
+      selectTabByName(pageA, pendingPrune.name),
+      selectTabByName(pageB, pendingPrune.name),
+    ]);
+    await Promise.all([ensureSourceFlyoutOpen(pageA), ensureSourceFlyoutOpen(pageB)]);
+    await Promise.all([
+      waitForSource(pageA, PENDING_PRUNE_FLOWCHART),
+      waitForSource(pageB, PENDING_PRUNE_FLOWCHART),
+      waitForFlowchart(pageA),
+      waitForFlowchart(pageB),
+    ]);
+
+    let observer: YjsSessionObserver | null = null;
+    let freshObserver: YjsSessionObserver | null = null;
+    let clockPaused = false;
+    let raceMouseHeld = false;
+    let removalAdvanceMs = -1;
+    let pendingPrunedBeforeStop = false;
+    let pendingPrunedAfterStop = false;
+    let freshObserverConfirmed = false;
+    let reusedNodeMatchesInitial = false;
+    let reusedNodeRejectedDraggedPosition = false;
+    let restoredReplicasConverged = false;
+    try {
+      observer = await openYjsSessionObserver(mcpUrl, sessionId);
+      await observer.waitFor(
+        (current) => current.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_FLOWCHART,
+        'the pending-prune diagram source',
+      );
+      assert(observer.diagramExists(pendingPrune.id), 'Pending-prune fixture diagram is absent from the canonical Yjs map.');
+      assert(!observer.hasNodePosition(pendingPrune.id, 'A'), 'Pending-prune fixture unexpectedly began with a persisted position for A.');
+
+      const initialA = await getReactFlowNodePosition(nodeById(pageA, 'A'), 'Pending-prune node A was missing before the race');
+      const pauseTime = await pageA.evaluate(() => Date.now() + 100);
+      await pageA.clock.pauseAt(pauseTime);
+      clockPaused = true;
+
+      await nudgeNode(pageA, nodeById(pageA, 'A'), 132, 48, true);
+      raceMouseHeld = true;
+      const queuedA = await getReactFlowNodePosition(nodeById(pageA, 'A'), 'Pending-prune node A disappeared during its held drag');
+      assert(Math.hypot(queuedA.x - initialA.x, queuedA.y - initialA.y) >= 8,
+        `Held drag did not queue a meaningful position change: initial=${JSON.stringify(initialA)} queued=${JSON.stringify(queuedA)}`);
+
+      await replaceSource(pageB, PENDING_PRUNE_REMOVED);
+      await observer.waitFor(
+        (current) => current.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_REMOVED,
+        'the source edit that removes node A',
+      );
+      await waitForSource(pageB, PENDING_PRUNE_REMOVED);
+      assert(observer.diagramExists(pendingPrune.id), 'Pending-prune diagram disappeared before the removal race.');
+      const removedNodeHistory = observer.trackNodePosition(pendingPrune.id, 'A');
+      removalAdvanceMs = await advanceClockUntilNodePresence(pageA, 'A', 0, 120);
+      assert(removalAdvanceMs < 120,
+        `Node A was not reconciled away before the 120ms drag commit deadline: advanced=${removalAdvanceMs}ms.`);
+
+      await pageA.clock.runFor(250);
+      await removedNodeHistory.expectAbsentFor(NEGATIVE_OBSERVATION_WINDOW_MS, 'the post-timer observation window');
+      pendingPrunedBeforeStop = observer.diagramExists(pendingPrune.id)
+        && !removedNodeHistory.hasAppeared()
+        && !observer.hasNodePosition(pendingPrune.id, 'A');
+      assert(pendingPrunedBeforeStop, 'The expired drag timer resurrected removed node A in the canonical positions map.');
+      assert(observer.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_REMOVED,
+        'The pending-prune source changed during the timer observation window.');
+
+      await pageA.mouse.up();
+      raceMouseHeld = false;
+      await pageA.clock.runFor(250);
+      await removedNodeHistory.expectAbsentFor(NEGATIVE_OBSERVATION_WINDOW_MS, 'the post-drag-stop observation window');
+      pendingPrunedAfterStop = observer.diagramExists(pendingPrune.id)
+        && !removedNodeHistory.hasAppeared()
+        && !observer.hasNodePosition(pendingPrune.id, 'A');
+      assert(pendingPrunedAfterStop, 'Drag stop resurrected removed node A in the canonical positions map.');
+      assert(observer.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_REMOVED,
+        'The pending-prune source changed during the drag-stop observation window.');
+
+      freshObserver = await openYjsSessionObserver(mcpUrl, sessionId);
+      const freshRemovedSnapshot = freshObserver.snapshot(pendingPrune.id);
+      freshObserverConfirmed = freshRemovedSnapshot.exists
+        && freshRemovedSnapshot.mermaidText === PENDING_PRUNE_REMOVED
+        && !freshObserver.hasNodePosition(pendingPrune.id, 'A');
+      assert(freshObserverConfirmed,
+        `A fresh Yjs observer did not confirm canonical removal: ${JSON.stringify(freshRemovedSnapshot)}`);
+
+      await replaceSource(pageB, PENDING_PRUNE_FLOWCHART);
+      await Promise.all([
+        observer.waitFor(
+          (current) => current.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_FLOWCHART,
+          'restored source in the original observer',
+        ),
+        freshObserver.waitFor(
+          (current) => current.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_FLOWCHART,
+          'restored source in the fresh observer',
+        ),
+      ]);
+      await advanceClockUntilNodePresence(pageA, 'A', 1, 500);
+      await pageA.clock.resume();
+      clockPaused = false;
+
+      await Promise.all([
+        waitForSource(pageA, PENDING_PRUNE_FLOWCHART),
+        waitForSource(pageB, PENDING_PRUNE_FLOWCHART),
+        waitForFlowchart(pageA),
+        waitForFlowchart(pageB),
+      ]);
+      await Promise.all([closeSourceFlyout(pageA), closeSourceFlyout(pageB)]);
+      const reusedA = await getReactFlowNodePosition(nodeById(pageA, 'A'), 'Reused node A was missing after source restoration');
+      reusedNodeMatchesInitial = positionsMatch(reusedA, initialA);
+      reusedNodeRejectedDraggedPosition = Math.hypot(reusedA.x - queuedA.x, reusedA.y - queuedA.y) >= 8;
+      assert(reusedNodeMatchesInitial,
+        `Reused node A did not return to its clean layout position: initial=${JSON.stringify(initialA)} reused=${JSON.stringify(reusedA)}`);
+      assert(reusedNodeRejectedDraggedPosition,
+        `Reused node A inherited its removed drag position: queued=${JSON.stringify(queuedA)} reused=${JSON.stringify(reusedA)}`);
+      assert(!removedNodeHistory.hasAppeared()
+        && observer.diagramExists(pendingPrune.id)
+        && freshObserver.diagramExists(pendingPrune.id)
+        && !observer.hasNodePosition(pendingPrune.id, 'A')
+        && !freshObserver.hasNodePosition(pendingPrune.id, 'A'),
+        'Reusing node ID A repopulated the canonical positions map with a stale coordinate.');
+
+      const validB = await getReactFlowNodePosition(nodeById(pageA, 'B'), 'Valid node B was missing after the pending-prune race');
+      await Promise.all([
+        waitForReactFlowNodePositionMatch(pageB, 'A', reusedA),
+        waitForReactFlowNodePositionMatch(pageB, 'B', validB),
+      ]);
+      const replicaA = await getReactFlowNodePosition(nodeById(pageB, 'A'), 'Browser B lost reused node A after source restoration');
+      const replicaB = await getReactFlowNodePosition(nodeById(pageB, 'B'), 'Browser B lost valid node B after source restoration');
+      restoredReplicasConverged = positionsMatch(replicaA, reusedA) && positionsMatch(replicaB, validB);
+      assert(restoredReplicasConverged, 'Valid and reused nodes did not converge after the pending-prune race.');
+    } finally {
+      if (raceMouseHeld) await pageA.mouse.up().catch(() => undefined);
+      if (clockPaused) await pageA.clock.resume().catch(() => undefined);
+      freshObserver?.destroy();
+      observer?.destroy();
+    }
+
     assertNoPageErrors(diagnosticsA.pageErrors, 'in collaboration browser A');
     assertNoPageErrors(diagnosticsB.pageErrors, 'in collaboration browser B');
+    assertNoReactFlowError015(diagnosticsA.reactFlowError015, 'during the collaboration gate');
+    assertNoReactFlowError015(diagnosticsB.reactFlowError015, 'during the collaboration gate');
     await pageA.screenshot({ path: '/tmp/arielcharts-collaboration.png' });
 
     console.log(`modern MCP stale write rejected=${staleRejected}`);
@@ -345,6 +521,8 @@ async function validateCollaboration(): Promise<void> {
     console.log(`remote local-state isolation tab=${activeTabPreserved} flyouts=${sourceFlyoutsPreserved} selection=${localSelectionPreserved} mode=${localConnectModePreserved} camera=${localCameraPreserved}`);
     console.log(`concurrent drag active overlay stable=${activeDragStable} replicas converged=${replicasConverged}`);
     console.log(`post-release same-node winner moved=${postReleaseWinnerMoved} replicas converged=${postReleaseReplicasConverged}`);
+    console.log(`pending removal reconciled before commit=${removalAdvanceMs}ms timer pruned=${pendingPrunedBeforeStop} stop pruned=${pendingPrunedAfterStop}`);
+    console.log(`fresh canonical observer confirmed=${freshObserverConfirmed} reused initial=${reusedNodeMatchesInitial} rejected dragged=${reusedNodeRejectedDraggedPosition} replicas converged=${restoredReplicasConverged}`);
     console.log('COLLABORATION E2E PASSED');
   } finally {
     await browser.close();

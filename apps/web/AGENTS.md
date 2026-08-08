@@ -39,8 +39,12 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
   origins. Remote, MCP, initialization, and reconciliation updates never enter
   that stack; keep `src/lib/collaboration-origins.test.ts` authoritative.
 - `DragLayoutCommitter` is the sole durable drag-write path: it batches at 120
-  ms and flushes every final group position before local runtime ownership is
-  released. After release, the canonical Yjs position wins. Keep
+  ms. On a normal drag finish, it final-flushes the remaining canonical pending
+  ids before local runtime ownership is released. Source invalidation drops
+  invalid pending and active ids; valid pending siblings may finish their batch
+  after the canvas clears local runtime. The workspace synchronously reconciles
+  source membership before durable deletion; the canvas remains
+  presentation-local. After release, the canonical Yjs position wins. Keep
   `src/lib/drag-layout.test.ts`, `src/lib/reactflow-controlled-node-adapter.test.ts`,
   `test:e2e-sequence`, and `test:e2e-collaboration` green.
 

@@ -88,7 +88,7 @@ export interface DiagramCanvasProps {
   onGroupNodes?: (nodeIds: string[], label: string) => void;
   onInteractionModeChange?: (mode: 'select' | 'connect') => void;
   onNodeDrag?: (positions: DiagramNodePositions) => void;
-  onNodeDragStart?: (nodeId: string, position: SvgPoint) => void;
+  onNodeDragStart?: (positions: DiagramNodePositions) => boolean | void;
   onNodeDragStop?: (positions: DiagramNodePositions) => void;
   onNodePositionsChange?: (positions: DiagramNodePositions, mode?: NodePositionsSyncMode) => void;
   onSelectedNodeIdsChange?: (nodeIds: string[]) => void;
@@ -130,12 +130,18 @@ const FLOW_NODE_TYPES: NodeTypes = {
   mermaidFlowNode: MermaidReactFlowNode,
 };
 
-function getDraggedNodePositions(node: MermaidFlowNode, nodes: MermaidFlowNode[]): DiagramNodePositions {
+function getDraggedNodePositions(
+  node: MermaidFlowNode | null | undefined,
+  nodes: MermaidFlowNode[] | null | undefined,
+): DiagramNodePositions | null {
   const positions: DiagramNodePositions = {};
-  for (const draggedNode of [...nodes, node]) {
+  for (const draggedNode of [...(nodes ?? []), node]) {
+    if (!draggedNode?.id || !draggedNode.position) {
+      continue;
+    }
     positions[draggedNode.id] = { x: draggedNode.position.x, y: draggedNode.position.y };
   }
-  return positions;
+  return Object.keys(positions).length > 0 ? positions : null;
 }
 const FLOW_PRO_OPTIONS = { hideAttribution: true };
 const FLOW_EDGE_COLOR = 'var(--diagram-item-stroke-fallback)';
@@ -723,15 +729,17 @@ export function DiagramCanvas({
         return;
       }
 
-      setHitMap(buildSvgHitMap(svgElement));
-      setMermaidPresentation(extractMermaidPresentation(svgElement));
+      const expectedNodeIds = graph?.nodes.map((node) => node.id) ?? [];
+      const expectedSubgraphIds = graph?.subgraphs.map((subgraph) => subgraph.id) ?? [];
+      setHitMap(buildSvgHitMap(svgElement, { nodeIds: expectedNodeIds, subgraphIds: expectedSubgraphIds }));
+      setMermaidPresentation(extractMermaidPresentation(svgElement, expectedNodeIds));
       setRenderedSvgRevision((revision) => revision + 1);
     });
 
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [svg]);
+  }, [graph?.nodes, graph?.subgraphs, svg]);
 
   useEffect(() => {
     const previousRendererKind = previousRendererKindRef.current;
@@ -766,31 +774,21 @@ export function DiagramCanvas({
   }, []);
 
   useEffect(() => {
-    if (!graph) {
-      setNodePositions((current) => (Object.keys(current).length > 0 ? {} : current), 'merge', null);
+    if (!graph || !isFlowchart) {
+      activeDragNodeIdsRef.current.clear();
       setLiveNodePositions({});
       setFlowNodeRuntime({});
       return;
     }
 
     const currentNodeIds = new Set(graph.nodes.map((node) => node.id));
-    const removedPositions: DiagramNodePositions = {};
-    setNodePositions((current) => {
-      const next: DiagramNodePositions = {};
-      for (const [nodeId, position] of Object.entries(current)) {
-        if (currentNodeIds.has(nodeId)) {
-          next[nodeId] = position;
-        } else {
-          removedPositions[nodeId] = position;
-        }
-      }
-
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
-    }, 'remove', removedPositions);
+    if ([...activeDragNodeIdsRef.current].some((nodeId) => !currentNodeIds.has(nodeId))) {
+      activeDragNodeIdsRef.current.clear();
+    }
     setLiveNodePositions((current) => Object.fromEntries(
       Object.entries(current).filter(([nodeId]) => currentNodeIds.has(nodeId)),
     ));
-  }, [graph, setNodePositions]);
+  }, [graph, isFlowchart]);
 
   useEffect(() => {
     setFlowNodeRuntime((current) => reconcileControlledNodeRuntime(flowNodes, current));
@@ -1158,16 +1156,24 @@ export function DiagramCanvas({
       return;
     }
     const positions = getDraggedNodePositions(node, nodes);
+    if (!positions) {
+      return;
+    }
+    if (onNodeDragStart?.(positions) === false) {
+      return;
+    }
     Object.keys(positions).forEach((nodeId) => activeDragNodeIdsRef.current.add(nodeId));
     setLiveNodePositions((current) => {
       return { ...current, ...positions };
     });
-    onNodeDragStart?.(node.id, node.position);
   }, [canEditStructure, onNodeDragStart]);
 
   const handleFlowNodeDrag = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node, nodes) => {
+    if (!canEditStructure) {
+      return;
+    }
     const positions = getDraggedNodePositions(node, nodes);
-    if (!canEditStructure || !Object.keys(positions).some((nodeId) => activeDragNodeIdsRef.current.has(nodeId))) {
+    if (!positions || !Object.keys(positions).some((nodeId) => activeDragNodeIdsRef.current.has(nodeId))) {
       return;
     }
     setLiveNodePositions((current) => ({ ...current, ...positions }));
@@ -1179,6 +1185,9 @@ export function DiagramCanvas({
       return;
     }
     const positions = getDraggedNodePositions(node, nodes);
+    if (!positions) {
+      return;
+    }
     Object.keys(positions).forEach((nodeId) => activeDragNodeIdsRef.current.delete(nodeId));
     if (onNodeDragStop) {
       onNodeDragStop(positions);

@@ -1,3 +1,9 @@
+import {
+  isMermaidFlowchartEntityDomId,
+  MERMAID_EDGE_SELECTOR,
+  resolveMermaidNodeId,
+} from './svg-hit-map';
+
 export interface MermaidItemPresentation {
   fill?: string;
   stroke?: string;
@@ -40,12 +46,12 @@ interface PaintDeclaration {
 }
 
 /** Projects Mermaid's rendered classDef/style output without making it shared app state. */
-export function extractMermaidPresentation(svg: SVGSVGElement): MermaidPresentation {
+export function extractMermaidPresentation(svg: SVGSVGElement, expectedNodeIds: readonly string[] = []): MermaidPresentation {
   const styles = [...svg.querySelectorAll('style')].map((style) => style.textContent ?? '');
   const nodes = new Map<string, MermaidItemPresentation>();
 
   svg.querySelectorAll<SVGGElement>('g.node').forEach((group) => {
-    const id = extractNodeId(group.id);
+    const id = resolveMermaidNodeId(group.id, expectedNodeIds);
     if (!id) {
       return;
     }
@@ -57,9 +63,14 @@ export function extractMermaidPresentation(svg: SVGSVGElement): MermaidPresentat
     nodes.set(id, getMermaidNodePresentation(shapePresentation, labelPresentations));
   });
 
-  const edges = [...svg.querySelectorAll<SVGGElement>('g.edgePath')].map((group) => {
-    const path = group.querySelector<SVGElement>('path') ?? group;
-    return getElementPresentation(path, group, styles);
+  const seenPaths = new Set<Element>();
+  const edges = [...svg.querySelectorAll<SVGGraphicsElement>(MERMAID_EDGE_SELECTOR)].flatMap((element) => {
+    const path = element instanceof SVGPathElement ? element : element.querySelector<SVGElement>('path') ?? element;
+    if (seenPaths.has(path)) {
+      return [];
+    }
+    seenPaths.add(path);
+    return [getMermaidEdgePresentationFromElement({ style: getInlineStyle(path, element) })];
   });
 
   return { edges, nodes };
@@ -94,6 +105,11 @@ export function getMermaidPresentationFromElement({
     strokeWidth: normalizeValue(declarations['stroke-width']?.value),
     text: normalizePaint(declarations.color?.value),
   };
+}
+
+/** Edge theme CSS is not authored diagram state; only Mermaid's inline linkStyle is projected. */
+export function getMermaidEdgePresentationFromElement({ style }: Pick<PresentationElement, 'style'>): MermaidItemPresentation {
+  return getMermaidPresentationFromElement({ style });
 }
 
 export function getMermaidNodePresentation(
@@ -131,7 +147,7 @@ export function getCanvasEdgeMarker(type: CanvasEdgeMarker['type'], color: strin
   };
 }
 
-function getElementPresentation(element: Element, root: SVGGElement, css: string[]): MermaidItemPresentation {
+function getElementPresentation(element: Element, root: SVGElement, css: string[]): MermaidItemPresentation {
   const attributes = Object.fromEntries([...PRESENTATION_PROPERTIES].map((property) => [
     property,
     element.getAttribute(property) ?? root.getAttribute(property),
@@ -141,9 +157,13 @@ function getElementPresentation(element: Element, root: SVGGElement, css: string
     classNames: [...new Set([...root.classList, ...element.classList])],
     css,
     rootId: root.id,
-    style: [root.getAttribute('style'), element.getAttribute('style')].filter(Boolean).join(';'),
+    style: getInlineStyle(element, root),
     tagName: element.tagName,
   });
+}
+
+function getInlineStyle(element: Element, root: Element): string {
+  return [root.getAttribute('style'), element.getAttribute('style')].filter(Boolean).join(';');
 }
 
 function getMatchingRules(stylesheet: string, classNames: string[], rootId: string | null | undefined, tagName?: string): string[] {
@@ -161,7 +181,7 @@ function getMatchingRules(stylesheet: string, classNames: string[], rootId: stri
 
 function selectorMatches(selector: string, classNames: string[], rootId: string | null | undefined, tagName?: string): boolean {
   const selectorIds = [...selector.matchAll(/#([A-Za-z0-9_-]+)/g)].map((match) => match[1]);
-  const entityIds = selectorIds.filter((id) => id.startsWith('flowchart-'));
+  const entityIds = selectorIds.filter(isMermaidFlowchartEntityDomId);
   if (entityIds.length > 0 && !entityIds.some((id) => id === rootId)) {
     return false;
   }
@@ -218,9 +238,4 @@ function normalizePaint(value: string | undefined): string | undefined {
 function normalizeValue(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized || undefined;
-}
-
-function extractNodeId(rawId: string): string | null {
-  const match = rawId.match(/^flowchart-(.+)-\d+$/);
-  return match?.[1] ?? null;
 }

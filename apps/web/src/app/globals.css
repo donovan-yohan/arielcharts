@@ -991,7 +991,7 @@ code {
 .mermaid-flow-node {
   align-items: center;
   background: var(--control-surface);
-  border: 1px solid var(--control-border);
+  border: 1px solid var(--diagram-item-stroke-fallback);
   box-shadow: 0 10px 28px var(--shadow-color);
   color: var(--ink);
   display: flex;

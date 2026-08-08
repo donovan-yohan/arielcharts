@@ -18,6 +18,10 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "tsx": "4.20.5"
+    "@types/ws": "8.18.1",
+    "tsx": "4.20.5",
+    "ws": "8.21.0",
+    "y-websocket": "2.1.0",
+    "yjs": "13.6.27"
   }
 }

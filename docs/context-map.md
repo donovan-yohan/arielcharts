@@ -20,6 +20,7 @@ canonical; the SVG and flowchart interaction model derive from it.
 | Diagram content | Per-diagram `mermaid: Y.Text`, `name`, and `nodePositions: Y.Map`; shared source policy makes accepted source authoritative for durable layout membership | `packages/shared/src/source-layout.ts`, `session-manager.ts`, `apps/web/src/components/session-workspace.tsx`, `apps/web/src/lib/diagram-layout.ts` | `source-layout.test.ts`, `mcp.test.ts`, `diagram-layout.test.ts` |
 | Realtime | Yjs nested-document convergence plus socket-owned, filtered awareness | `apps/web/src/components/session-workspace.tsx`, `apps/server/src/lib/websocket.ts` | `apps/server/src/lib/websocket.test.ts`, `e2e-collaboration-validate.ts` (`pnpm test:e2e-collaboration`) |
 | MCP writes | Modern-only HTTP tools require current server-derived revisions before mutation; accepted source reconciliation prunes obsolete layout in the same replacement transaction | `apps/server/src/lib/mcp-server.ts`, `apps/server/src/lib/mcp.ts`, `apps/server/src/lib/session-manager.ts` | `apps/server/src/lib/mcp.test.ts`, `apps/server/src/index.test.ts` |
+| Starter creation | Immutable shared starter registry resolves a selected template to ordinary Mermaid source before the existing browser or revision-checked MCP creation owner runs; template identity is never durable state | `packages/shared/src/starter-templates.ts`, `apps/server/src/lib/mcp.ts`, `apps/server/src/lib/mcp-server.ts` | `starter-templates.test.ts`, `mcp.test.ts`, `index.test.ts` |
 | Source editing and undo | Per-tab CodeMirror/Yjs binding; UndoManager tracks local-human origins only | `apps/web/src/components/session-workspace.tsx`, `apps/web/src/lib/collaboration-origins.ts` | `apps/web/src/lib/session.test.ts`, `apps/web/src/lib/collaboration-origins.test.ts` |
 | Drag collaboration | The workspace synchronously reconciles source membership and drops invalid pending and active ids before durable deletion. On normal drag finish, `DragLayoutCommitter` writes Yjs positions in 120 ms batches and final-flushes canonical pending ids before local runtime release; invalidation can let valid pending siblings finish after the presentation-local canvas clears runtime | `apps/web/src/components/diagram-canvas.tsx`, `apps/web/src/components/session-workspace.tsx`, `apps/web/src/lib/reactflow-controlled-node-adapter.ts`, `apps/web/src/lib/drag-layout.ts` | `reactflow-controlled-node-adapter.test.ts`, `drag-layout.test.ts`, `pnpm test:e2e-sequence`, `pnpm test:e2e-collaboration` |
 | Render/navigation | Mermaid parser result classifies flowcharts; a local per-diagram registry holds derived SVG, kind, and parse errors | `session-workspace.tsx`, `diagram-preview.ts`, `diagram-canvas.tsx`, `svg-hit-map.ts` | `diagram-preview.test.ts`, `pnpm test:e2e-sequence`, `/tmp/arielcharts-sequence.png`, `/tmp/arielcharts-sequence-isolation.png` |
@@ -33,6 +34,7 @@ canonical; the SVG and flowchart interaction model derive from it.
 | --- | --- | --- | --- |
 | Diagram ids, names, order, Mermaid source, node positions | Durable/session | Yjs document; server persists it | Stable diagram ids are the MCP target; names are human-facing aliases. |
 | MCP revision | Request-time concurrency guard | SessionManager | Create checks the session revision; existing-tab mutations check that tab's revision. |
+| Starter template identity | Creation-time input only | Shared immutable registry | Browser and MCP resolve it to ordinary source before one creation transaction; it is not stored in Yjs, activity, or tool outputs. |
 | Activity | Durable but bounded feed | Server-managed Yjs document | Browser UI renders it; retain at most 100 events. It cannot substitute for version history. |
 | Presence/cursors | Ephemeral collaboration | Yjs awareness with per-socket client-id ownership | The server filters stale/idempotent echoes and rejects foreign advances; awareness is not an authorization system or browser UI store. |
 | Active tab, camera, selection, toolbar, flyout, drafts | Browser local | React/local storage where appropriate | Flyouts are exclusive overlays and cannot mutate outer anchors, camera, or remote state. |
@@ -49,7 +51,9 @@ canonical; the SVG and flowchart interaction model derive from it.
    the active diagram's Y.Text; visual flowchart edits use `MutationQueue` so
    the latest source is parsed and minimally diffed before the Yjs write.
 3. An MCP client discovers tools, calls `getSession` to choose a stable id,
-   then `readDiagram` before a replacement/rename/delete. The session manager
+   then supplies exactly one `templateId` or `mermaidText` to `createDiagram`,
+   or `readDiagram` before a replacement/rename/delete. The MCP boundary
+   resolves a valid template to source before the session manager
    resolves source membership, checks the supplied current revision inside the
    mutation path, atomically replaces source and prunes accepted obsolete
    layout, then appends activity, persists, and broadcasts through the same

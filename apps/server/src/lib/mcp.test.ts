@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
+import { STARTER_TEMPLATES } from '@arielcharts/shared';
 import { handleMcpToolCall } from './mcp.js';
 import { SessionStore } from './persistence.js';
 import { SessionManager } from './session-manager.js';
@@ -62,6 +63,56 @@ describe('handleMcpToolCall', () => {
         { id: created.diagram.id, name: 'Checkout API sequence', revision: expect.any(String) },
       ],
     });
+  });
+
+  it('resolves a starter before creating an ordinary diagram without persisting template identity', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    const template = STARTER_TEMPLATES.find(({ id }) => id === 'api-sequence')!;
+
+    const created = await handleMcpToolCall(resources.manager, {
+      tool: 'create_diagram',
+      input: { session_id: 'abc123de', name: template.defaultName, template_id: template.id, revision: initial.revision },
+    }) as { diagram: { id: string; mermaid_text: string } };
+
+    expect(created.diagram.mermaid_text).toBe(template.source);
+    const session = await resources.manager.getOrCreateSession('abc123de');
+    const diagram = session.doc.getMap<Y.Map<unknown>>('diagrams').get(created.diagram.id);
+    expect([...diagram!.keys()]).toEqual(expect.not.arrayContaining(['template_id', 'templateId']));
+    expect(JSON.stringify((await resources.manager.readSession('abc123de'))?.activity)).not.toContain(template.id);
+  });
+
+  it('requires exactly one creation source before it mutates the session', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    const invalidInputs = [
+      { session_id: 'abc123de', name: 'Missing source', revision: initial.revision },
+      { session_id: 'abc123de', name: 'Ambiguous source', mermaid_text: 'flowchart LR\n  A --> B', template_id: 'blank', revision: initial.revision },
+      { session_id: 'abc123de', name: 'Unknown starter', template_id: 'not-a-template', revision: initial.revision },
+    ];
+
+    for (const input of invalidInputs) {
+      await expect(handleMcpToolCall(resources.manager, { tool: 'create_diagram', input })).rejects.toThrow(
+        input.template_id === 'not-a-template' ? 'Expected one of: blank, api-sequence' : 'Expected exactly one of mermaid_text or template_id',
+      );
+    }
+
+    await expect(getSession()).resolves.toMatchObject({ diagrams: [{ id: 'main' }], revision: initial.revision });
+  });
+
+  it('rejects a stale session revision before creating a template tab', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    await handleMcpToolCall(resources.manager, {
+      tool: 'create_diagram',
+      input: { session_id: 'abc123de', name: 'First template', template_id: 'service-flowchart', revision: initial.revision },
+    });
+
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'create_diagram',
+      input: { session_id: 'abc123de', name: 'Stale template', template_id: 'api-sequence', revision: initial.revision },
+    })).rejects.toThrow('Stale diagram revision');
+    await expect(getSession()).resolves.toMatchObject({ diagrams: [{ id: 'main' }, { name: 'First template' }] });
   });
 
   it('requires an exact latest revision for every MCP mutation', async () => {
@@ -150,7 +201,7 @@ describe('handleMcpToolCall', () => {
     const initial = await getSession();
     const created = await handleMcpToolCall(resources.manager, {
       tool: 'create_diagram',
-      input: { session_id: 'abc123de', name: 'Checkout', revision: initial.revision },
+      input: { session_id: 'abc123de', name: 'Checkout', template_id: 'blank', revision: initial.revision },
     }) as { diagram: { id: string; revision: string } };
     const written = await handleMcpToolCall(resources.manager, {
       tool: 'write_diagram',
@@ -209,7 +260,7 @@ describe('handleMcpToolCall', () => {
     await resources.manager.getOrCreateSession('abc123de');
     const initial = await getSession();
     await expect(handleMcpToolCall(resources.manager, {
-      tool: 'create_diagram', input: { session_id: 'abc123de', name: ' main ', revision: initial.revision },
+      tool: 'create_diagram', input: { session_id: 'abc123de', name: ' main ', template_id: 'blank', revision: initial.revision },
     })).rejects.toThrow('Diagram name already exists');
 
     await expect(handleMcpToolCall(resources.manager, {

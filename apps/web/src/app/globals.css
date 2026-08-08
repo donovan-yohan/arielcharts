@@ -476,12 +476,24 @@ code {
   background: var(--surface-raised);
 }
 
-.workspace-diagram-tab-list {
-  display: flex;
-  align-items: stretch;
+.workspace-diagram-tab-scroller {
+  flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: thin;
+}
+
+.workspace-diagram-tab-list {
+  display: flex;
+  align-items: stretch;
+  min-width: max-content;
+}
+
+.workspace-template-picker {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: stretch;
 }
 
 .workspace-diagram-tab {
@@ -566,6 +578,46 @@ code {
   justify-content: center;
   width: 44px;
   margin: 0;
+}
+
+.workspace-template-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(280px, calc(100vw - 16px));
+  max-height: min(420px, calc(100dvh - 96px));
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px var(--shadow-color);
+}
+
+.workspace-template-menu-item {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: 600 12px var(--font-sans);
+}
+
+.workspace-template-menu-item small {
+  color: var(--ink-muted);
+  font: 11px var(--font-sans);
+}
+
+.workspace-template-menu-item:hover,
+.workspace-template-menu-item:focus-visible {
+  background: var(--control-surface-hover);
+  color: var(--interactive-hover);
+  outline: none;
 }
 
 .workspace-diagram-tab-add:hover,
@@ -1483,6 +1535,15 @@ code {
 
   .workspace-diagram-tabs {
     padding-inline: 8px;
+  }
+
+  .workspace-template-menu {
+    position: fixed;
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: max(48px, calc(40px + env(safe-area-inset-bottom)));
+    width: auto;
   }
 
   .workspace-source-toggle span {

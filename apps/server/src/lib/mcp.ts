@@ -1,4 +1,5 @@
 import type {
+  CreateDiagramInput,
   CreateDiagramOutput,
   DeleteDiagramOutput,
   GetSessionOutput,
@@ -9,6 +10,7 @@ import type {
   RenameDiagramOutput,
   WriteDiagramOutput,
 } from '@arielcharts/shared';
+import { getStarterTemplate, STARTER_TEMPLATES } from '@arielcharts/shared';
 import { createActivityEvent } from './activity.js';
 import { assertValidSessionId } from './session-id.js';
 import type { SessionManager } from './session-manager.js';
@@ -68,6 +70,27 @@ function readSessionAndDiagram(input: Record<string, unknown>) {
   return { sessionId, diagramId };
 }
 
+const STARTER_TEMPLATE_IDS = STARTER_TEMPLATES.map((template) => template.id).join(', ');
+
+function readCreateDiagramSource(input: Record<string, unknown>): string {
+  const hasMermaidText = input.mermaid_text !== undefined;
+  const hasTemplateId = input.template_id !== undefined;
+  if (hasMermaidText === hasTemplateId) {
+    throw new Error('Expected exactly one of mermaid_text or template_id.');
+  }
+
+  if (hasMermaidText) {
+    return readString(input.mermaid_text, 'mermaid_text');
+  }
+
+  const templateId = readString(input.template_id, 'template_id');
+  const template = getStarterTemplate(templateId);
+  if (!template) {
+    throw new Error(`Invalid template_id "${templateId}". Expected one of: ${STARTER_TEMPLATE_IDS}.`);
+  }
+  return template.source;
+}
+
 export async function handleMcpToolCall(manager: SessionManager, payload: unknown): Promise<unknown> {
   if (!isRecord(payload)) throw new Error('Expected JSON object payload.');
   const tool = readNonEmptyString(payload.tool, 'tool');
@@ -90,10 +113,10 @@ export async function handleMcpToolCall(manager: SessionManager, payload: unknow
       return manager.readDiagram(sessionId, diagramId) satisfies Promise<ReadDiagramOutput>;
     }
     case 'create_diagram': {
+      const mermaidText = readCreateDiagramSource(input);
       const sessionId = readNonEmptyString(input.session_id, 'session_id');
       const name = readNonEmptyString(input.name, 'name');
       const revision = readNonEmptyString(input.revision, 'revision');
-      const mermaidText = input.mermaid_text === undefined ? '' : readString(input.mermaid_text, 'mermaid_text');
       assertValidSessionId(sessionId);
       const { meta, event: activityEvent } = event(input, 'created', 'pending');
       const diagram = await manager.createDiagram(sessionId, name, mermaidText, revision, activityEvent, meta.participants);
@@ -136,7 +159,7 @@ export type McpToolPayload =
   | { tool: 'get_session'; input: { session_id: string } }
   | { tool: 'list_diagrams'; input: { session_id: string } }
   | { tool: 'read_diagram'; input: { session_id: string; diagram_id: string } }
-  | { tool: 'create_diagram'; input: { session_id: string; name: string; mermaid_text?: string; revision: string } }
+  | { tool: 'create_diagram'; input: CreateDiagramInput }
   | { tool: 'write_diagram'; input: { session_id: string; diagram_id: string; mermaid_text: string; revision: string; name?: string } }
   | { tool: 'rename_diagram'; input: { session_id: string; diagram_id: string; name: string; revision: string } }
   | { tool: 'delete_diagram'; input: { session_id: string; diagram_id: string; revision: string } }

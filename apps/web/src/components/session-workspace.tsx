@@ -1,7 +1,7 @@
 'use client';
 
-import type { ActivityEvent, AwarenessState, Participant } from '@arielcharts/shared';
-import { APP_NAME } from '@arielcharts/shared';
+import type { ActivityEvent, AwarenessState, Participant, StarterTemplateId } from '@arielcharts/shared';
+import { APP_NAME, STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -308,6 +308,32 @@ function getActiveDiagramState(collaboration: CollaborationState | null, diagram
 
 function createDiagramId(): string {
   return `diagram_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`;
+}
+
+export function getTemplateDiagramName(defaultName: string, diagramId: string, existingNames: readonly string[]): string {
+  const existing = new Set(existingNames.map((name) => name.trim().toLocaleLowerCase()));
+  const suffixes = [diagramId.slice(-4), diagramId.slice(-8), diagramId];
+  for (const suffix of suffixes) {
+    const candidate = `${defaultName} ${suffix}`.trim();
+    if (!existing.has(candidate.toLocaleLowerCase())) return candidate;
+  }
+  let duplicateIndex = 2;
+  while (existing.has(`${defaultName} ${diagramId} ${duplicateIndex}`.toLocaleLowerCase())) {
+    duplicateIndex += 1;
+  }
+  return `${defaultName} ${diagramId} ${duplicateIndex}`;
+}
+
+export function getTemplateDiagramCreation(templateId: StarterTemplateId, diagramId: string, existingNames: readonly string[]) {
+  const template = getStarterTemplate(templateId);
+  if (!template) {
+    throw new Error(`Unknown starter template: ${templateId}`);
+  }
+  return {
+    id: diagramId,
+    name: getTemplateDiagramName(template.defaultName, diagramId, existingNames),
+    source: template.source,
+  };
 }
 
 export function SessionWorkspace({ sessionId }: { sessionId: string }) {
@@ -977,23 +1003,24 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     focusDiagramTab(diagrams[nextIndex]!.id);
   }, [diagrams, focusDiagramTab]);
 
-  const createBlankDiagram = useCallback(() => {
+  const createDiagramFromTemplate = useCallback((templateId: StarterTemplateId) => {
     if (!collaboration) return;
-    const id = createDiagramId();
-    // The stable-ID suffix keeps independently created blank tabs uniquely
-    // named even when two collaborators click + before their CRDT updates meet.
-    const name = `Untitled ${id.slice(-4)}`;
+    const creation = getTemplateDiagramCreation(
+      templateId,
+      createDiagramId(),
+      readDiagramTabs(collaboration.diagramsMap, collaboration.diagramOrder).map((diagram) => diagram.name),
+    );
     collaboration.doc.transact(() => {
       const diagram = new Y.Map<unknown>();
-      diagram.set(DIAGRAM_NAME_KEY, name);
-      diagram.set(DIAGRAM_MERMAID_TEXT_KEY, new Y.Text());
+      diagram.set(DIAGRAM_NAME_KEY, creation.name);
+      diagram.set(DIAGRAM_MERMAID_TEXT_KEY, new Y.Text(creation.source));
       diagram.set(DIAGRAM_NODE_POSITIONS_KEY, new Y.Map<NodePosition>());
-      collaboration.diagramsMap.set(id, diagram);
-      collaboration.diagramOrder.push([id]);
+      collaboration.diagramsMap.set(creation.id, diagram);
+      collaboration.diagramOrder.push([creation.id]);
     }, 'tab-create');
-    setActiveDiagramId(id);
-    addActivityRef.current?.('created', `Created ${name}`, id);
-  }, [collaboration]);
+    focusDiagramTab(creation.id);
+    addActivityRef.current?.('created', `Created ${creation.name}`, creation.id);
+  }, [collaboration, focusDiagramTab]);
 
   const commitDiagramName = useCallback(() => {
     if (!collaboration || !renamingDiagramId) return;
@@ -1137,7 +1164,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
         diagrams={diagrams}
         onActiveDiagramChange={setActiveDiagramId}
         onCommitDiagramName={commitDiagramName}
-        onCreateDiagram={createBlankDiagram}
+        onCreateDiagram={createDiagramFromTemplate}
         onDeleteDiagram={deleteActiveDiagram}
         onDiagramKeyDown={handleDiagramTabKeyDown}
         onDiagramNameDraftChange={setDiagramNameDraft}
@@ -1150,6 +1177,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
         }}
         renamingDiagramId={renamingDiagramId}
         sourceOpen={openFlyout === 'source'}
+        starterTemplates={STARTER_TEMPLATES}
       />
 
       <section aria-labelledby={activeDiagramId ? `diagram-tab-${activeDiagramId}` : undefined} className="workspace-main" data-testid="canvas-first-workspace" id="diagram-workspace" role="tabpanel">

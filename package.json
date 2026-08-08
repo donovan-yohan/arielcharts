@@ -13,9 +13,11 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "test:e2e-sequence": "tsx e2e-sequence-validate.ts",
-    "test:e2e-collaboration": "tsx e2e-collaboration-validate.ts"
+    "test:e2e-collaboration": "tsx e2e-collaboration-validate.ts",
+    "test:e2e-workspace-ux": "tsx e2e-workspace-ux-validate.ts"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1"
+    "@playwright/test": "^1.59.1",
+    "tsx": "4.20.5"
   }
 }

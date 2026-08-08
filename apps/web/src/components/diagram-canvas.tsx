@@ -32,9 +32,20 @@ import {
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { DiagramEdgeIdentity, DiagramLink, DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
 import { getDiagramEdgeIdentity, resolveDiagramEdgeIndex } from '../lib/diagram-mutations';
+import { measureUnobscuredCanvasViewport, type ViewportRect } from '../lib/canvas-viewport';
+import { shouldCanvasHandleEscape } from '../lib/canvas-keyboard-ownership';
 import { getConnectNodeActivation } from '../lib/diagram-connect-state';
 import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
+import {
+  extractMermaidPresentation,
+  getCanvasEdgeMarker,
+  getCanvasHandlePaint,
+  getCanvasNodePaint,
+  type MermaidItemPresentation,
+  type MermaidPresentation,
+} from '../lib/mermaid-presentation';
+import { getRendererKind, shouldFitRendererKindTransition } from '../lib/renderer-camera-policy';
 import {
   buildSvgHitMap,
   getBoundsCenter,
@@ -44,6 +55,7 @@ import {
   type SvgHitMap,
   type SvgPoint,
 } from '../lib/svg-hit-map';
+import { getSafeToolbarPosition } from '../lib/toolbar-safe-area';
 
 export interface DiagramCanvasProps {
   className?: string;
@@ -55,6 +67,7 @@ export interface DiagramCanvasProps {
   readOnly?: boolean;
   selectedNodeIds?: string[];
   svg: string;
+  theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
@@ -90,12 +103,14 @@ interface PendingEdge {
 interface MermaidFlowNodeData extends Record<string, unknown> {
   ariaLabel: string;
   label: string;
+  presentation: MermaidItemPresentation;
   shape: DiagramNodeShape;
 }
 
 type MermaidFlowNode = Node<MermaidFlowNodeData, 'mermaidFlowNode'>;
 
 interface FlowNodeInteractionContextValue {
+  connectMode: boolean;
   focusedNodeId: string | null;
   onFocus: (nodeId: string) => void;
   onKeyDown: (nodeId: string, event: ReactKeyboardEvent<HTMLElement>) => void;
@@ -106,9 +121,7 @@ const FLOW_NODE_TYPES: NodeTypes = {
   mermaidFlowNode: MermaidReactFlowNode,
 };
 const FLOW_PRO_OPTIONS = { hideAttribution: true };
-const FLOW_EDGE_COLOR = '#e2e8f0';
-const FLOW_EDGE_MARKER_CIRCLE_ID = 'arielcharts-flow-edge-circle';
-const FLOW_EDGE_MARKER_CROSS_ID = 'arielcharts-flow-edge-cross';
+const FLOW_EDGE_COLOR = 'var(--diagram-item-stroke-fallback)';
 const FLOW_HANDLE_POSITIONS = [Position.Top, Position.Right, Position.Bottom, Position.Left] as const;
 const GHOST_NODE_WIDTH = 144;
 const GHOST_NODE_HEIGHT = 56;
@@ -118,6 +131,9 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
 const EDITOR_MIN_ZOOM = 0.4;
 const FIT_PADDING = 64;
+const BOTTOM_TOOLBAR_INSET = 12;
+const BOTTOM_CONTROLS_HEIGHT = 34;
+const BOTTOM_TOOLBAR_GAP = 8;
 const DEFAULT_NEW_NODE_LABEL = 'New Node';
 const DEFAULT_NEW_NODE_SHAPE: DiagramNodeShape = 'rect';
 const SHAPE_OPTIONS: Array<{ label: string; value: DiagramNodeShape }> = [
@@ -143,7 +159,7 @@ const TOOLBAR_BUTTON_STYLE: CSSProperties = {
   background: 'transparent',
   border: 'none',
   borderRadius: 4,
-  color: '#8b949e',
+  color: 'var(--ink-muted)',
   display: 'inline-flex',
   height: 24,
   justifyContent: 'center',
@@ -178,17 +194,24 @@ export function DiagramCanvas({
   readOnly = false,
   selectedNodeIds,
   svg,
+  theme = 'dark',
 }: DiagramCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgContainerRef = useRef<HTMLDivElement | null>(null);
   const nodeButtonRefs = useRef(new Map<string, HTMLElement | null>());
   const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
+  const [mermaidPresentation, setMermaidPresentation] = useState<MermaidPresentation>({ edges: [], nodes: new Map() });
+  const [canvasViewport, setCanvasViewport] = useState<ViewportRect>({ height: 0, width: 0, x: 0, y: 0 });
+  const [canvasSize, setCanvasSize] = useState({ height: 0, width: 0 });
   const [uncontrolledNodePositions, setUncontrolledNodePositions] = useState<DiagramNodePositions>({});
   const [liveNodePositions, setLiveNodePositions] = useState<DiagramNodePositions>({});
   const activeDragNodeIdsRef = useRef(new Set<string>());
   const persistedNodePositions = nodePositions ?? uncontrolledNodePositions;
   const persistedNodePositionsRef = useRef<DiagramNodePositions>(persistedNodePositions);
   const hasAutoFitInitialRenderRef = useRef(false);
+  const previousRendererKindRef = useRef<ReturnType<typeof getRendererKind> | null>(null);
+  const pendingRendererKindFitAfterRenderRef = useRef<number | null>(null);
+  const [renderedSvgRevision, setRenderedSvgRevision] = useState(0);
   const visibleNodePositions = useMemo(
     () => ({ ...persistedNodePositions, ...liveNodePositions }),
     [liveNodePositions, persistedNodePositions],
@@ -353,6 +376,7 @@ export function DiagramCanvas({
         data: {
           ariaLabel,
           label: nodeLabel,
+          presentation: mermaidPresentation.nodes.get(node.id) ?? {},
           shape: node.shape,
         },
         draggable: isFlowchart && !readOnly,
@@ -370,10 +394,11 @@ export function DiagramCanvas({
     });
 
     return nextNodes;
-  }, [graph, interactiveNodeBounds, isFlowchart, readOnly, selection]);
+  }, [graph, interactiveNodeBounds, isFlowchart, mermaidPresentation.nodes, readOnly, selection]);
 
   const hasPersistedLayout = Object.keys(persistedNodePositions).length > 0;
   const canEditStructure = isFlowchart && !readOnly;
+  const rendererKind = getRendererKind(isFlowchart);
 
   const flowEdges = useMemo<Edge[]>(() => {
     if (!graph || !interactiveNodeBounds) {
@@ -389,12 +414,17 @@ export function DiagramCanvas({
         selectable: true,
         selected: selectedEdgeIndex === graphIndex,
         ...getFlowEdgeHandles(link, interactiveNodeBounds, graph.direction),
-        ...getFlowEdgePresentation(link),
+        ...getFlowEdgePresentation(link, mermaidPresentation.edges[graphIndex]),
         source: link.source,
         target: link.target,
         type: 'smoothstep',
       }));
-  }, [graph, interactiveNodeBounds, selectedEdgeIndex]);
+  }, [graph, interactiveNodeBounds, mermaidPresentation.edges, selectedEdgeIndex]);
+
+  const flowEdgeMarkerColors = useMemo(() => [...new Set([
+    FLOW_EDGE_COLOR,
+    ...mermaidPresentation.edges.flatMap((presentation) => presentation.stroke ? [presentation.stroke] : []),
+  ])], [mermaidPresentation.edges]);
 
   const useReactFlowRenderer = isFlowchart && flowNodes.length > 0;
   const flowViewport = useMemo<Viewport>(() => ({
@@ -432,6 +462,14 @@ export function DiagramCanvas({
   const selectedEdgeMidpoint = useMemo(() => (
     selectedEdge && interactiveNodeBounds ? getEdgeMidpoint(selectedEdge, interactiveNodeBounds) : null
   ), [interactiveNodeBounds, selectedEdge]);
+  const selectedEdgeToolbarPosition = useMemo(() => {
+    const midpoint = selectedEdgeMidpoint ? toScreenPoint(selectedEdgeMidpoint, viewport) : { x: 12, y: 12 };
+    return getSafeToolbarPosition({
+      anchor: midpoint,
+      canvas: canvasViewport,
+      toolbar: { height: 34, width: 84 },
+    });
+  }, [canvasViewport, selectedEdgeMidpoint, viewport]);
 
   const editingEdgeMidpoint = useMemo(() => {
     if (editingEdgeIndex === null || !graph || !interactiveNodeBounds) {
@@ -483,19 +521,29 @@ export function DiagramCanvas({
   }, [connectionPreviewSourceId, cursorPoint, readOnly, viewport]);
 
   const displayedToolbarRect = screenSelectionBounds ?? { height: 0, width: 0, x: 16, y: 16 };
+  const canvasViewportBottomOffset = canvasSize.height - (canvasViewport.y + canvasViewport.height);
+  const selectedToolbarPosition = getSafeToolbarPosition({
+    anchor: {
+      x: displayedToolbarRect.x + (displayedToolbarRect.width / 2),
+      y: displayedToolbarRect.y,
+    },
+    canvas: canvasViewport,
+    toolbar: { height: 34, width: 188 },
+  });
   const toolbarStyle: CSSProperties = {
     alignItems: 'center',
-    background: '#161b22',
-    border: '1px solid #30363d',
+    background: 'var(--control-surface)',
+    border: '1px solid var(--control-border)',
     borderRadius: 8,
-    boxShadow: '0 12px 32px rgba(2, 6, 23, 0.45)',
+    boxShadow: 'var(--shadow-elevated)',
     display: 'inline-flex',
     gap: 6,
-    left: Math.max(12, displayedToolbarRect.x + (displayedToolbarRect.width / 2) - 88),
+    left: selectedToolbarPosition.left,
+    maxWidth: canvasViewport.width > 0 ? Math.max(1, canvasViewport.width - (BOTTOM_TOOLBAR_INSET * 2)) : 'calc(100% - 24px)',
     padding: '4px 6px',
     pointerEvents: 'auto',
     position: 'absolute',
-    top: screenSelectionBounds ? Math.max(12, screenSelectionBounds.y - 40) : 12,
+    top: selectedToolbarPosition.top,
     zIndex: 30,
   };
 
@@ -522,16 +570,17 @@ export function DiagramCanvas({
       return;
     }
 
-    const availableWidth = Math.max(1, container.clientWidth - (FIT_PADDING * 2));
-    const availableHeight = Math.max(1, container.clientHeight - (FIT_PADDING * 2));
+    const visibleViewport = measureUnobscuredCanvasViewport(container);
+    const availableWidth = Math.max(1, visibleViewport.width - (FIT_PADDING * 2));
+    const availableHeight = Math.max(1, visibleViewport.height - (FIT_PADDING * 2));
     const zoom = clamp(
       Math.min(availableWidth / Math.max(bounds.width, 1), availableHeight / Math.max(bounds.height, 1)),
       MIN_ZOOM,
       MAX_ZOOM,
     );
 
-    const panX = ((container.clientWidth - (bounds.width * zoom)) / 2) - (bounds.x * zoom);
-    const panY = ((container.clientHeight - (bounds.height * zoom)) / 2) - (bounds.y * zoom);
+    const panX = visibleViewport.x + ((visibleViewport.width - (bounds.width * zoom)) / 2) - (bounds.x * zoom);
+    const panY = visibleViewport.y + ((visibleViewport.height - (bounds.height * zoom)) / 2) - (bounds.y * zoom);
 
     setAnimateTransform(animated);
     setViewport({ panX, panY, zoom });
@@ -633,6 +682,7 @@ export function DiagramCanvas({
   useEffect(() => {
     if (!svg || !svgContainerRef.current) {
       setHitMap(null);
+      setMermaidPresentation({ edges: [], nodes: new Map() });
       return;
     }
 
@@ -641,16 +691,51 @@ export function DiagramCanvas({
       const svgElement = svgContainerRef.current?.querySelector('svg');
       if (!svgElement) {
         setHitMap(null);
+        setMermaidPresentation({ edges: [], nodes: new Map() });
         return;
       }
 
       setHitMap(buildSvgHitMap(svgElement));
+      setMermaidPresentation(extractMermaidPresentation(svgElement));
+      setRenderedSvgRevision((revision) => revision + 1);
     });
 
     return () => {
       window.cancelAnimationFrame(frameId);
     };
   }, [svg]);
+
+  useEffect(() => {
+    const previousRendererKind = previousRendererKindRef.current;
+    previousRendererKindRef.current = rendererKind;
+    if (shouldFitRendererKindTransition(previousRendererKind, rendererKind)) {
+      pendingRendererKindFitAfterRenderRef.current = renderedSvgRevision;
+    }
+  }, [rendererKind, renderedSvgRevision]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const updateViewport = () => {
+      const next = measureUnobscuredCanvasViewport(container);
+      setCanvasSize((current) => current.height === container.clientHeight && current.width === container.clientWidth
+        ? current
+        : { height: container.clientHeight, width: container.clientWidth });
+      setCanvasViewport((current) => areViewportRectsEqual(current, next) ? current : next);
+    };
+    updateViewport();
+    const resizeObserver = new ResizeObserver(updateViewport);
+    resizeObserver.observe(container);
+    const mutationObserver = new MutationObserver(updateViewport);
+    mutationObserver.observe(container.closest('.workspace-main') ?? container.parentElement ?? container, { childList: true });
+    return () => {
+      mutationObserver.disconnect();
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     if (!graph) {
@@ -726,6 +811,16 @@ export function DiagramCanvas({
   }, [fitBoundsToViewport, graphBounds, svg]);
 
   useEffect(() => {
+    const fitAfterRevision = pendingRendererKindFitAfterRenderRef.current;
+    if (fitAfterRevision === null || renderedSvgRevision <= fitAfterRevision || !graphBounds || !svg) {
+      return;
+    }
+
+    pendingRendererKindFitAfterRenderRef.current = null;
+    fitBoundsToViewport(graphBounds, false);
+  }, [fitBoundsToViewport, graphBounds, renderedSvgRevision, svg]);
+
+  useEffect(() => {
     if (!animateTransform) {
       return;
     }
@@ -770,7 +865,15 @@ export function DiagramCanvas({
         setSpacePressed(true);
       }
 
-      if (event.key === 'Escape') {
+      const canvas = containerRef.current;
+      const ownsEscape = canvas
+        ? shouldCanvasHandleEscape(
+          event.target instanceof Node && canvas.contains(event.target),
+          document.activeElement !== null && canvas.contains(document.activeElement),
+        )
+        : false;
+
+      if (event.key === 'Escape' && ownsEscape) {
         setShapePickerOpen(false);
         setPendingEdge(null);
         setPendingEdgeLabel('');
@@ -784,7 +887,7 @@ export function DiagramCanvas({
         setEditingEdgeIdentity(null);
         setEditingEdgeLabel('');
         setMode('select');
-        containerRef.current?.focus();
+        canvas?.focus();
       }
 
       if (canEditStructure && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'g' && selection.length > 0) {
@@ -1159,11 +1262,12 @@ export function DiagramCanvas({
   }, [handleNodeClick, moveFocus, nodeById, openNodeEditor, readOnly]);
 
   const flowNodeInteraction = useMemo<FlowNodeInteractionContextValue>(() => ({
+    connectMode: mode === 'connect',
     focusedNodeId,
     onFocus: setFocusedNodeId,
     onKeyDown: handleNodeKeyDown,
     registerNodeElement,
-  }), [focusedNodeId, handleNodeKeyDown, registerNodeElement]);
+  }), [focusedNodeId, handleNodeKeyDown, mode, registerNodeElement]);
 
   const transformStyle: CSSProperties = {
     inset: 0,
@@ -1180,6 +1284,7 @@ export function DiagramCanvas({
     <div
       aria-label="Interactive diagram canvas"
       className={className}
+      data-testid="diagram-canvas"
       onClick={(event) => {
         if (!(event.target instanceof Element)) return;
         if (event.target.closest('button, input, select, [role="button"]')) return;
@@ -1203,7 +1308,7 @@ export function DiagramCanvas({
       ref={containerRef}
       role="application"
       style={{
-        background: '#0d1117',
+        background: 'var(--surface-canvas)',
         cursor: canvasCursor,
         flex: 1,
         minHeight: 0,
@@ -1254,10 +1359,10 @@ export function DiagramCanvas({
                   ref={(element) => { registerNodeElement(nodeId, element); }}
                   role="button"
                   style={{
-                    background: selected ? 'rgba(56, 189, 248, 0.08)' : focused ? 'rgba(148, 163, 184, 0.06)' : 'rgba(255, 255, 255, 0.01)',
-                    border: selected || focused ? '2px solid #38bdf8' : '1px solid transparent',
+                    background: selected ? 'color-mix(in srgb, var(--selection) 10%, transparent)' : focused ? 'color-mix(in srgb, var(--ink-muted) 8%, transparent)' : 'transparent',
+                    border: selected || focused ? '2px solid var(--selection)' : '1px solid transparent',
                     borderRadius: 12,
-                    boxShadow: selected || focused ? '0 0 0 4px rgba(56,189,248,0.25)' : 'none',
+                    boxShadow: selected || focused ? '0 0 0 4px color-mix(in srgb, var(--selection) 25%, transparent)' : 'none',
                     cursor: readOnly ? 'default' : 'pointer',
                     height: bounds.height,
                     left: bounds.x,
@@ -1287,7 +1392,7 @@ export function DiagramCanvas({
                     aria-hidden="true"
                     key={`${nodeId}-port-${index}`}
                     style={{
-                      background: '#38bdf8',
+                      background: 'var(--selection)',
                       borderRadius: '50%',
                       height: 6,
                       left: port.x - 3,
@@ -1305,14 +1410,14 @@ export function DiagramCanvas({
 
       {useReactFlowRenderer ? (
         <div className="diagram-reactflow-layer">
-          <FlowEdgeMarkers />
+          <FlowEdgeMarkers colors={flowEdgeMarkerColors} />
           <FlowNodeInteractionContext.Provider value={flowNodeInteraction}>
             <ReactFlow
-              colorMode="dark"
+              colorMode={theme}
               autoPanOnConnect
               autoPanOnNodeDrag
               connectOnClick={false}
-              connectionLineStyle={{ stroke: '#38bdf8', strokeWidth: 2 }}
+              connectionLineStyle={{ stroke: 'var(--selection)', strokeWidth: 2 }}
               connectionLineType={ConnectionLineType.SmoothStep}
               edges={flowEdges}
               fitView={false}
@@ -1385,7 +1490,7 @@ export function DiagramCanvas({
         {rubberBandPoints ? (
           <svg style={{ height: '100%', width: '100%' }}>
             <line
-              stroke="#38bdf8"
+              stroke="var(--selection)"
               strokeDasharray={pendingEdge ? undefined : '6 4'}
               strokeWidth={2}
               x1={rubberBandPoints.from.x}
@@ -1400,10 +1505,10 @@ export function DiagramCanvas({
           <div
             style={{
               alignItems: 'center',
-              background: 'rgba(22, 27, 34, 0.72)',
-              border: '1px dashed #38bdf8',
+              background: 'color-mix(in srgb, var(--control-surface) 80%, transparent)',
+              border: '1px dashed var(--selection)',
               borderRadius: 10,
-              color: '#e2e8f0',
+              color: 'var(--ink)',
               display: 'flex',
               fontSize: 13,
               fontWeight: 600,
@@ -1422,13 +1527,13 @@ export function DiagramCanvas({
         {mode === 'connect' ? (
           <div
             style={{
-              background: '#161b22',
-              border: '1px solid #30363d',
+              background: 'var(--control-surface)',
+              border: '1px solid var(--control-border)',
               borderRadius: 16,
-              color: '#8b949e',
+              color: 'var(--ink-muted)',
               fontFamily: 'var(--font-mono)',
               fontSize: 11,
-              left: '50%',
+              left: canvasViewport.width > 0 ? canvasViewport.x + (canvasViewport.width / 2) : '50%',
               padding: '6px 12px',
               position: 'absolute',
               top: 12,
@@ -1444,24 +1549,27 @@ export function DiagramCanvas({
         {isFlowchart && !readOnly ? (
           <form
             aria-label="Add Mermaid node"
+            data-testid="canvas-add-node-toolbar"
             onSubmit={(event) => {
               event.preventDefault();
               addNodeFromToolbar();
             }}
             style={{
               alignItems: 'center',
-              background: '#161b22',
-              border: '1px solid #30363d',
+              background: 'var(--control-surface)',
+              border: '1px solid var(--control-border)',
               borderRadius: 10,
-              boxShadow: '0 12px 32px rgba(2, 6, 23, 0.35)',
-              color: '#8b949e',
+              boxShadow: 'var(--shadow-elevated)',
+              color: 'var(--ink-muted)',
               display: 'flex',
+              flexWrap: 'wrap',
               gap: 8,
-              left: 12,
+              left: canvasViewport.x + BOTTOM_TOOLBAR_INSET,
+              maxWidth: canvasViewport.width > 0 ? Math.max(1, canvasViewport.width - (BOTTOM_TOOLBAR_INSET * 2)) : 'calc(100% - 24px)',
               padding: '8px 10px',
               pointerEvents: 'auto',
               position: 'absolute',
-              bottom: 12,
+              bottom: canvasViewportBottomOffset + BOTTOM_TOOLBAR_INSET + BOTTOM_CONTROLS_HEIGHT + BOTTOM_TOOLBAR_GAP,
               zIndex: 20,
             }}
           >
@@ -1471,15 +1579,15 @@ export function DiagramCanvas({
               onChange={(event) => { setNewNodeLabel(event.target.value); }}
               placeholder="label"
               style={{
-                background: '#0d1117',
-                border: '1px solid #30363d',
+                background: 'var(--surface-canvas)',
+                border: '1px solid var(--control-border)',
                 borderRadius: 6,
-                color: '#c9d1d9',
+                color: 'var(--ink)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: 11,
                 outline: 'none',
                 padding: '5px 7px',
-                width: 140,
+                width: 'clamp(80px, 38vw, 140px)',
               }}
               value={newNodeLabel}
             />
@@ -1487,10 +1595,10 @@ export function DiagramCanvas({
               aria-label="New node shape"
               onChange={(event) => { setNewNodeShape(event.target.value as DiagramNodeShape); }}
               style={{
-                background: '#0d1117',
-                border: '1px solid #30363d',
+                background: 'var(--surface-canvas)',
+                border: '1px solid var(--control-border)',
                 borderRadius: 6,
-                color: '#c9d1d9',
+                color: 'var(--ink)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: 11,
                 padding: '5px 7px',
@@ -1520,10 +1628,10 @@ export function DiagramCanvas({
             <button
               onClick={addDefaultNode}
               style={{
-                background: '#161b22',
-                border: '1px solid #30363d',
+                background: 'var(--control-surface)',
+                border: '1px solid var(--control-border)',
                 borderRadius: 999,
-                color: '#e2e8f0',
+                color: 'var(--ink)',
                 padding: '10px 16px',
                 pointerEvents: 'auto',
               }}
@@ -1539,7 +1647,7 @@ export function DiagramCanvas({
         ) : null)}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
-          <div style={toolbarStyle}>
+          <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
             {selection.length === 1 ? (
               <ToolbarButton label="Edit label" onClick={() => {
                 const selectedNode = selection[0] ? nodeById.get(selection[0]) : undefined;
@@ -1576,8 +1684,8 @@ export function DiagramCanvas({
             {shapePickerOpen && selection.length === 1 ? (
               <div
                 style={{
-                  background: '#161b22',
-                  border: '1px solid #30363d',
+                  background: 'var(--control-surface)',
+                  border: '1px solid var(--control-border)',
                   borderRadius: 8,
                   display: 'grid',
                   gap: 8,
@@ -1606,9 +1714,9 @@ export function DiagramCanvas({
                       style={{
                         alignItems: 'center',
                         background: 'transparent',
-                        border: active ? '1px solid #38bdf8' : '1px solid #30363d',
+                        border: active ? '1px solid var(--selection)' : '1px solid var(--control-border)',
                         borderRadius: 4,
-                        color: active ? '#e2e8f0' : '#8b949e',
+                        color: active ? 'var(--ink)' : 'var(--ink-muted)',
                         display: 'grid',
                         gap: 4,
                         justifyItems: 'center',
@@ -1630,19 +1738,21 @@ export function DiagramCanvas({
         {isFlowchart && !readOnly && selectedCurrentEdgeIdentity && selectedEdgeMidpoint ? (
           <div
             aria-label="Selected edge toolbar"
+            data-testid="canvas-edge-toolbar"
             style={{
               alignItems: 'center',
-              background: '#161b22',
-              border: '1px solid #30363d',
+              background: 'var(--control-surface)',
+              border: '1px solid var(--control-border)',
               borderRadius: 8,
-              boxShadow: '0 12px 32px rgba(2, 6, 23, 0.45)',
+              boxShadow: 'var(--shadow-elevated)',
               display: 'inline-flex',
               gap: 6,
-              left: toScreenPoint(selectedEdgeMidpoint, viewport).x - 42,
+              left: selectedEdgeToolbarPosition.left,
+              maxWidth: canvasViewport.width > 0 ? Math.max(1, canvasViewport.width - (BOTTOM_TOOLBAR_INSET * 2)) : 'calc(100% - 24px)',
               padding: '4px 6px',
               pointerEvents: 'auto',
               position: 'absolute',
-              top: toScreenPoint(selectedEdgeMidpoint, viewport).y - 40,
+              top: selectedEdgeToolbarPosition.top,
               zIndex: 30,
             }}
           >
@@ -1660,19 +1770,21 @@ export function DiagramCanvas({
 
         {!readOnly ? (
           <div
+            data-testid="canvas-controls-toolbar"
             style={{
               alignItems: 'center',
-              background: '#161b22',
-              border: '1px solid #30363d',
+              background: 'var(--control-surface)',
+              border: '1px solid var(--control-border)',
               borderRadius: 8,
-              bottom: 12,
-              color: '#8b949e',
+              bottom: canvasViewportBottomOffset + BOTTOM_TOOLBAR_INSET,
+              color: 'var(--ink-muted)',
               display: 'inline-flex',
               gap: 6,
+              maxWidth: canvasViewport.width > 0 ? Math.max(1, canvasViewport.width - (BOTTOM_TOOLBAR_INSET * 2)) : 'calc(100% - 24px)',
               padding: '4px 6px',
               pointerEvents: 'auto',
               position: 'absolute',
-              right: 12,
+              right: Math.max(BOTTOM_TOOLBAR_INSET, canvasSize.width - (canvasViewport.x + canvasViewport.width) + BOTTOM_TOOLBAR_INSET),
             }}
           >
             {isFlowchart && hasPersistedLayout ? (
@@ -1724,11 +1836,11 @@ export function DiagramCanvas({
               }}
               placeholder="node label"
               style={{
-                background: '#0d1117',
-                border: '1px solid #30363d',
-                borderBottomColor: '#38bdf8',
+                background: 'var(--surface-canvas)',
+                border: '1px solid var(--control-border)',
+                borderBottomColor: 'var(--selection)',
                 borderRadius: 8,
-                color: '#c9d1d9',
+                color: 'var(--ink)',
                 outline: 'none',
                 padding: '8px 10px',
                 width: '100%',
@@ -1765,11 +1877,11 @@ export function DiagramCanvas({
               }}
               placeholder="edge label"
               style={{
-                background: '#0d1117',
-                border: '1px solid #30363d',
-                borderBottomColor: '#38bdf8',
+                background: 'var(--surface-canvas)',
+                border: '1px solid var(--control-border)',
+                borderBottomColor: 'var(--selection)',
                 borderRadius: 8,
-                color: '#c9d1d9',
+                color: 'var(--ink)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: 12,
                 outline: 'none',
@@ -1805,10 +1917,10 @@ export function DiagramCanvas({
               }}
               placeholder="label (optional)"
               style={{
-                background: '#0d1117',
-                border: '1px solid #30363d',
+                background: 'var(--surface-canvas)',
+                border: '1px solid var(--control-border)',
                 borderRadius: 8,
-                color: '#c9d1d9',
+                color: 'var(--ink)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: 12,
                 outline: 'none',
@@ -1848,10 +1960,10 @@ export function DiagramCanvas({
               }}
               placeholder="group name"
               style={{
-                background: '#0d1117',
-                border: '1px solid #30363d',
+                background: 'var(--surface-canvas)',
+                border: '1px solid var(--control-border)',
                 borderRadius: 8,
-                color: '#c9d1d9',
+                color: 'var(--ink)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: 12,
                 outline: 'none',
@@ -1867,10 +1979,10 @@ export function DiagramCanvas({
           <div
             style={{
               alignItems: 'center',
-              background: '#161b22',
-              border: '1px solid #30363d',
+              background: 'var(--control-surface)',
+              border: '1px solid var(--control-border)',
               borderRadius: 8,
-              color: '#8b949e',
+              color: 'var(--ink-muted)',
               display: 'inline-flex',
               gap: 6,
               left: 12,
@@ -1884,10 +1996,10 @@ export function DiagramCanvas({
             <select
               onChange={(event) => { setSelectedConnectionType(event.target.value as DiagramLinkType); }}
               style={{
-                background: '#0d1117',
-                border: '1px solid #30363d',
+                background: 'var(--surface-canvas)',
+                border: '1px solid var(--control-border)',
                 borderRadius: 6,
-                color: '#c9d1d9',
+                color: 'var(--ink)',
                 fontFamily: 'var(--font-mono)',
                 fontSize: 11,
                 padding: '4px 6px',
@@ -1905,34 +2017,42 @@ export function DiagramCanvas({
   );
 }
 
-function FlowEdgeMarkers() {
+function FlowEdgeMarkers({ colors }: { colors: string[] }) {
   return (
     <svg aria-hidden="true" focusable="false" style={{ height: 0, position: 'absolute', width: 0 }}>
       <defs>
-        <marker
-          id={FLOW_EDGE_MARKER_CIRCLE_ID}
-          markerHeight="10"
-          markerUnits="strokeWidth"
-          markerWidth="10"
-          orient="auto"
-          refX="9"
-          refY="5"
-          viewBox="0 0 10 10"
-        >
-          <circle cx="5" cy="5" fill="#0d1117" r="3" stroke={FLOW_EDGE_COLOR} strokeWidth="1.6" />
-        </marker>
-        <marker
-          id={FLOW_EDGE_MARKER_CROSS_ID}
-          markerHeight="10"
-          markerUnits="strokeWidth"
-          markerWidth="10"
-          orient="auto"
-          refX="9"
-          refY="5"
-          viewBox="0 0 10 10"
-        >
-          <path d="M3 3 L7 7 M7 3 L3 7" fill="none" stroke={FLOW_EDGE_COLOR} strokeLinecap="round" strokeWidth="1.8" />
-        </marker>
+        {colors.flatMap((color) => {
+          const circle = getCanvasEdgeMarker('arrow_circle', color);
+          const cross = getCanvasEdgeMarker('arrow_cross', color);
+          return [
+            <marker
+              id={circle.id}
+              key={circle.id}
+              markerHeight="10"
+              markerUnits="strokeWidth"
+              markerWidth="10"
+              orient="auto"
+              refX="9"
+              refY="5"
+              viewBox="0 0 10 10"
+            >
+              <circle cx="5" cy="5" fill="var(--surface-canvas)" r="3" stroke={circle.color} strokeWidth="1.6" />
+            </marker>,
+            <marker
+              id={cross.id}
+              key={cross.id}
+              markerHeight="10"
+              markerUnits="strokeWidth"
+              markerWidth="10"
+              orient="auto"
+              refX="9"
+              refY="5"
+              viewBox="0 0 10 10"
+            >
+              <path d="M3 3 L7 7 M7 3 L3 7" fill="none" stroke={cross.color} strokeLinecap="round" strokeWidth="1.8" />
+            </marker>,
+          ];
+        })}
       </defs>
     </svg>
   );
@@ -1942,6 +2062,7 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
   const interaction = useContext(FlowNodeInteractionContext);
   const focused = interaction?.focusedNodeId === id;
   const label = data.ariaLabel;
+  const handleColor = getCanvasHandlePaint(Boolean(selected || focused || interaction?.connectMode));
 
   return (
     <div
@@ -1952,6 +2073,7 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
       onKeyDown={(event) => { interaction?.onKeyDown(id, event); }}
       ref={(element) => { interaction?.registerNodeElement(id, element); }}
       role="button"
+      style={getCanvasNodePaint(data.presentation)}
       tabIndex={focused ? 0 : -1}
     >
       {FLOW_HANDLE_POSITIONS.map((position) => (
@@ -1960,6 +2082,7 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
           id={getFlowHandleId('target', position)}
           key={`target-${position}`}
           position={position}
+          style={{ background: handleColor, borderColor: 'var(--surface-canvas)' }}
           type="target"
         />
       ))}
@@ -1970,6 +2093,7 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
           id={getFlowHandleId('source', position)}
           key={`source-${position}`}
           position={position}
+          style={{ background: handleColor, borderColor: 'var(--surface-canvas)' }}
           type="source"
         />
       ))}
@@ -1979,7 +2103,7 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
 
 function ToolbarButton({ children, label, onClick }: { children: ReactNode; label: string; onClick: () => void }) {
   return (
-    <button aria-label={label} onClick={onClick} style={TOOLBAR_BUTTON_STYLE} title={label} type="button">
+    <button aria-label={label} data-testid={`canvas-action-${toTestId(label)}`} onClick={onClick} style={TOOLBAR_BUTTON_STYLE} title={label} type="button">
       {children}
     </button>
   );
@@ -1997,25 +2121,26 @@ function getLinkText(link: { text?: string | { text?: string } }): string | unde
   return link.text?.text;
 }
 
-function getFlowEdgePresentation(link: DiagramLink): Pick<Edge, 'markerEnd' | 'style'> {
+export function getFlowEdgePresentation(link: DiagramLink, presentation: MermaidItemPresentation = {}): Pick<Edge, 'markerEnd' | 'style'> {
   const strokeWidth = link.stroke === 'thick' ? 3 : 1.8;
   const strokeDasharray = link.stroke === 'dotted' ? '5 5' : undefined;
   const style: CSSProperties = {
-    stroke: FLOW_EDGE_COLOR,
-    strokeDasharray,
-    strokeWidth,
+    stroke: presentation.stroke ?? FLOW_EDGE_COLOR,
+    strokeDasharray: presentation.strokeDasharray ?? strokeDasharray,
+    strokeWidth: presentation.strokeWidth ?? strokeWidth,
   };
+  const markerColor = presentation.stroke ?? FLOW_EDGE_COLOR;
 
   switch (link.type) {
     case 'arrow_open':
-      return { markerEnd: { color: FLOW_EDGE_COLOR, type: MarkerType.Arrow }, style };
+      return { markerEnd: { color: markerColor, type: MarkerType.Arrow }, style };
     case 'arrow_circle':
-      return { markerEnd: FLOW_EDGE_MARKER_CIRCLE_ID, style };
+      return { markerEnd: getCanvasEdgeMarker('arrow_circle', markerColor).id, style };
     case 'arrow_cross':
-      return { markerEnd: FLOW_EDGE_MARKER_CROSS_ID, style };
+      return { markerEnd: getCanvasEdgeMarker('arrow_cross', markerColor).id, style };
     case 'arrow_point':
     default:
-      return { markerEnd: { color: FLOW_EDGE_COLOR, type: MarkerType.ArrowClosed }, style };
+      return { markerEnd: { color: markerColor, type: MarkerType.ArrowClosed }, style };
   }
 }
 
@@ -2025,6 +2150,17 @@ function getNodeAriaLabel(shape: string | undefined, label: string): string {
 
 function getShapeClassName(shape?: DiagramNodeShape): string {
   return shape?.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'rect';
+}
+
+function toTestId(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function areViewportRectsEqual(left: ViewportRect, right: ViewportRect): boolean {
+  return left.height === right.height
+    && left.width === right.width
+    && left.x === right.x
+    && left.y === right.y;
 }
 
 function isTypingElement(target: EventTarget | null): boolean {
@@ -2047,7 +2183,7 @@ function ShapePreview({ shape }: { shape: DiagramNodeShape }) {
 }
 
 function renderShape(shape: DiagramNodeShape) {
-  const common = { fill: 'transparent', stroke: '#8b949e', strokeWidth: 1.4 };
+  const common = { fill: 'transparent', stroke: 'var(--ink-muted)', strokeWidth: 1.4 };
 
   switch (shape) {
     case 'circle':

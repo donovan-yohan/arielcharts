@@ -11,9 +11,21 @@ importers:
       '@playwright/test':
         specifier: ^1.59.1
         version: 1.59.1
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
       tsx:
         specifier: 4.20.5
         version: 4.20.5
+      ws:
+        specifier: 8.18.3
+        version: 8.18.3
+      y-websocket:
+        specifier: 2.1.0
+        version: 2.1.0(yjs@13.6.27)
+      yjs:
+        specifier: 13.6.27
+        version: 13.6.27
 
   apps/server:
     dependencies:
@@ -132,6 +144,13 @@ importers:
         version: 3.2.4(@types/node@24.6.0)(tsx@4.20.5)
 
   packages/shared:
+    dependencies:
+      mermaid:
+        specifier: 11.12.0
+        version: 11.12.0
+      mermaid-ast:
+        specifier: ^0.8.2
+        version: 0.8.2
     devDependencies:
       typescript:
         specifier: 5.9.3

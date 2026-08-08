@@ -171,7 +171,14 @@ async function assertMultiSelectedNodeDrag(
   return true;
 }
 
-async function assertSameTabKindTransition(page: Page): Promise<boolean> {
+type SameTabKindTransition = {
+  flowchartRestoresStructure: boolean;
+  genericClearsPersistedLayout: boolean;
+  genericWithholdsStructure: boolean;
+  passed: boolean;
+};
+
+async function assertSameTabKindTransition(page: Page): Promise<SameTabKindTransition> {
   const node = page.locator('.react-flow__node').first();
   const nodeId = await node.getAttribute('data-id');
   if (!nodeId) throw new Error('Single-node drag fixture requires a stable node ID.');
@@ -184,7 +191,14 @@ async function assertSameTabKindTransition(page: Page): Promise<boolean> {
     return selected.length === 1 && selected[0]?.dataset.id === selectedId;
   }, nodeId, { timeout: 5_000 });
   const nodeBounds = await node.boundingBox();
-  if (!nodeBounds) return false;
+  if (!nodeBounds) {
+    return {
+      flowchartRestoresStructure: false,
+      genericClearsPersistedLayout: false,
+      genericWithholdsStructure: false,
+      passed: false,
+    };
+  }
 
   await page.mouse.move(nodeBounds.x + (nodeBounds.width / 2), nodeBounds.y + (nodeBounds.height / 2));
   await page.mouse.down();
@@ -201,7 +215,15 @@ async function assertSameTabKindTransition(page: Page): Promise<boolean> {
 
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
-  return genericWithholdsStructure && await resetLayout.count() > 0;
+  const flowchartRestoresStructure = await page.locator('form[aria-label="Add Mermaid node"]').count() > 0
+    && await page.getByRole('button', { name: 'Add node to Mermaid text', exact: true }).count() > 0;
+  const genericClearsPersistedLayout = await resetLayout.count() === 0;
+  return {
+    flowchartRestoresStructure,
+    genericClearsPersistedLayout,
+    genericWithholdsStructure,
+    passed: genericWithholdsStructure && flowchartRestoresStructure && genericClearsPersistedLayout,
+  };
 }
 
 async function validateSequenceCanvas() {
@@ -293,7 +315,7 @@ async function validateSequenceCanvas() {
       && genericFitBounds.fits
       && fitRestoredTransform
       && multiSelectedDrag
-      && sameTabTransition
+      && sameTabTransition.passed
       && flowchartRestored
       && invalidPreviewRetained
       && invalidDoesNotLeak;
@@ -302,7 +324,7 @@ async function validateSequenceCanvas() {
     console.log(`generic Fit bounds=${genericFitBounds.fits} transform=${fittedTransform} viewBox=${genericFitBounds.viewBox} style=${genericFitBounds.svgStyle} svg=${JSON.stringify(genericFitBounds.svg)} canvas=${JSON.stringify(genericFitBounds.canvas)}`);
     console.log(`generic Space-drag transform changed=${panChangedTransform}`);
     console.log(`multi-selected nodes drag together and persist to fresh peer=${multiSelectedDrag}`);
-    console.log(`same-tab flowchart/sequence transition=${sameTabTransition}`);
+    console.log(`same-tab flowchart/sequence transition=${sameTabTransition.passed} generic withholds structure=${sameTabTransition.genericWithholdsStructure} flowchart restores structure=${sameTabTransition.flowchartRestoresStructure} generic clears persisted layout=${sameTabTransition.genericClearsPersistedLayout}`);
     console.log(`flowchart controls restore=${flowchartRestored}`);
     console.log(`invalid generic preview retained=${invalidPreviewRetained}`);
     console.log(`invalid state isolated=${invalidDoesNotLeak}`);

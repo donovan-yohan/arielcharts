@@ -17,6 +17,11 @@ the internal tool boundary; `mcp-server.ts` exposes the modern MCP contract;
   valid concurrent entries and cover changes in `src/lib/session-manager.test.ts`.
 - Server-owned document mutations are transactions. Persist only a coherent
   document snapshot after mutation or accepted websocket sync.
+- `writeDiagram` resolves canonical source membership before its replacement
+  transaction. Accepted flowchart, generic, and blank source prunes obsolete
+  `nodePositions`; invalid source preserves settled layout. Keep this policy in
+  `@arielcharts/shared` so inactive MCP writes and active browser updates do
+  not drift.
 - `getSession`/create use a whole-session revision; read/write/rename/delete
   use the target diagram revision. Revisions are server-derived, checked
   before mutation, and stale errors are retry instructions—not permission to

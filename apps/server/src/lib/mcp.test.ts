@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as Y from 'yjs';
 import { handleMcpToolCall } from './mcp.js';
 import { SessionStore } from './persistence.js';
 import { SessionManager } from './session-manager.js';
@@ -23,6 +24,16 @@ describe('handleMcpToolCall', () => {
       diagrams: Array<{ id: string; name: string; revision: string }>;
       revision: string;
     }>;
+  }
+
+  async function nodePositions(diagramId = 'main'): Promise<Y.Map<{ x: number; y: number }>> {
+    const session = await resources.manager.getOrCreateSession('abc123de');
+    const diagram = session.doc.getMap<Y.Map<unknown>>('diagrams').get(diagramId);
+    const positions = diagram?.get('nodePositions');
+    if (!(positions instanceof Y.Map)) {
+      throw new Error(`Missing node positions for diagram ${diagramId}.`);
+    }
+    return positions as Y.Map<{ x: number; y: number }>;
   }
 
   it('orients an agent with ordered names and stable IDs, then creates, reads, and writes one exact diagram', async () => {
@@ -67,6 +78,71 @@ describe('handleMcpToolCall', () => {
     await expect(handleMcpToolCall(resources.manager, {
       tool: 'rename_diagram', input: { session_id: 'abc123de', diagram_id: 'main', name: 'Changed', revision: first.diagram.revision },
     })).resolves.toMatchObject({ diagram: { name: 'Changed' } });
+  });
+
+  it('reconciles an inactive diagram’s layout before MCP removes and later reuses a Mermaid id', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    const initialWrite = await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'flowchart LR\n  A --> B', revision: initial.diagrams[0]!.revision },
+    }) as { diagram: { revision: string } };
+    const positions = await nodePositions();
+    positions.set('A', { x: 10, y: 20 });
+    positions.set('B', { x: 30, y: 40 });
+
+    const removed = await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'flowchart LR\n  B --> C', revision: initialWrite.diagram.revision },
+    }) as { diagram: { revision: string } };
+    expect([...positions.entries()]).toEqual([['B', { x: 30, y: 40 }]]);
+
+    await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'flowchart LR\n  A --> B', revision: removed.diagram.revision },
+    });
+    expect([...positions.entries()]).toEqual([['B', { x: 30, y: 40 }]]);
+  });
+
+  it('preserves settled layout for invalid Mermaid source', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    const valid = await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'flowchart LR\n  A --> B', revision: initial.diagrams[0]!.revision },
+    }) as { diagram: { revision: string } };
+    const positions = await nodePositions();
+    positions.set('A', { x: 10, y: 20 });
+
+    await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'not valid Mermaid', revision: valid.diagram.revision },
+    });
+    expect([...positions.entries()]).toEqual([['A', { x: 10, y: 20 }]]);
+  });
+
+  it('clears obsolete layout for blank and accepted generic Mermaid source', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    const flowchart = await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'flowchart LR\n  A --> B', revision: initial.diagrams[0]!.revision },
+    }) as { diagram: { revision: string } };
+    const positions = await nodePositions();
+    positions.set('A', { x: 10, y: 20 });
+
+    const generic = await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: 'sequenceDiagram\n  Browser->>API: request', revision: flowchart.diagram.revision },
+    }) as { diagram: { revision: string } };
+    expect([...positions.entries()]).toEqual([]);
+
+    positions.set('B', { x: 30, y: 40 });
+    await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: { session_id: 'abc123de', diagram_id: 'main', mermaid_text: '', revision: generic.diagram.revision },
+    });
+    expect([...positions.entries()]).toEqual([]);
   });
 
   it('records diagram-scoped base and resulting revisions for MCP mutations', async () => {

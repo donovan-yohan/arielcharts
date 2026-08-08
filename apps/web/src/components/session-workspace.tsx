@@ -36,7 +36,8 @@ import {
 import { classifyDiagramCapability } from '../lib/diagram-capabilities';
 import { canUseFlowchartControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
-import { DragLayoutCommitter } from '../lib/drag-layout';
+import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
+import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
 import { getMermaidThemeVariables } from '../lib/theme';
 import { getNextWorkspaceFlyout, type WorkspaceFlyout } from '../lib/workspace-flyout-state';
@@ -365,6 +366,26 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     });
   }, []);
 
+  const applySourceLayoutPolicy = useCallback((policy: SourceLayoutPolicy) => {
+    const committer = dragCommitterRef.current;
+    if (!committer || !activeDiagram) {
+      return;
+    }
+
+    committer.setAllowedNodeIds(policy.nodeIds);
+    if (!policy.pruneDurablePositions) {
+      return;
+    }
+
+    const { removed } = pruneNodePositions(readNodePositions(activeDiagram.nodePositionsMap), policy.nodeIds);
+    if (Object.keys(removed).length === 0 || !collaboration) {
+      return;
+    }
+    collaboration.doc.transact(() => {
+      writeNodePositions(activeDiagram.nodePositionsMap, removed, 'remove');
+    }, collaborationOrigins.reconciliation);
+  }, [activeDiagram, collaboration]);
+
   const closeFlyout = useCallback(() => {
     pendingFlyoutReturnFocusRef.current = flyoutOriginRef.current;
     setOpenFlyout(null);
@@ -548,17 +569,13 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     }
 
     const syncText = () => {
-      setMermaidText(activeDiagram.yText.toString());
+      const source = activeDiagram.yText.toString();
+      applySourceLayoutPolicy(getSourceLayoutPolicy(source));
+      setMermaidText(source);
     };
     const syncNodePositions = () => {
       setNodePositions(readNodePositions(activeDiagram.nodePositionsMap));
     };
-    syncText();
-    syncNodePositions();
-    setPreview(previewRegistryRef.current.get(activeDiagram.id));
-    setRenderError(previewRegistryRef.current.getError(activeDiagram.id));
-    setSelectedNodeIds([]);
-    setInteractionMode('select');
     const undoManager = createDiagramUndoManager(activeDiagram.yText, activeDiagram.nodePositionsMap);
     undoManagerRef.current = undoManager;
     mutationQueueRef.current = new MutationQueue(activeDiagram.yText, { transactionOrigin: collaborationOrigins.visual });
@@ -568,13 +585,19 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       }, collaborationOrigins.visualLayout);
     });
     dragCommitterRef.current = dragCommitter;
+    syncText();
+    syncNodePositions();
+    setPreview(previewRegistryRef.current.get(activeDiagram.id));
+    setRenderError(previewRegistryRef.current.getError(activeDiagram.id));
+    setSelectedNodeIds([]);
+    setInteractionMode('select');
     activeDiagram.yText.observe(syncText);
     activeDiagram.nodePositionsMap.observe(syncNodePositions);
 
     return () => {
       activeDiagram.yText.unobserve(syncText);
       activeDiagram.nodePositionsMap.unobserve(syncNodePositions);
-      dragCommitter.destroy();
+      dragCommitter.destroy(getDragLayoutTeardownOptions(collaboration?.diagramsMap.has(activeDiagram.id) ?? false));
       if (dragCommitterRef.current === dragCommitter) {
         dragCommitterRef.current = null;
       }
@@ -584,7 +607,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       }
       mutationQueueRef.current = null;
     };
-  }, [activeDiagram, collaboration]);
+  }, [activeDiagram, applySourceLayoutPolicy, collaboration]);
 
   useEffect(() => {
     const undoManager = undoManagerRef.current;
@@ -695,6 +718,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       try {
         const parseResult = await mermaid.parse(mermaidText);
         const capability = classifyDiagramCapability(parseResult.diagramType);
+        if (capability.kind === 'generic' && diagramId && isCurrentRender()) {
+          applySourceLayoutPolicy(getAcceptedGenericSourceLayoutPolicy());
+        }
         const { svg } = await mermaid.render(`arielcharts-${sessionId}-${diagramId ?? 'none'}-${renderId}`, mermaidText);
         let snapshot: FlowchartSnapshot | null = null;
         if (capability.kind === 'flowchart') {
@@ -722,7 +748,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     };
 
     void renderPreview();
-  }, [activeDiagramId, mermaidText, resolvedTheme, sessionId]);
+  }, [activeDiagramId, applySourceLayoutPolicy, mermaidText, resolvedTheme, sessionId]);
 
   useEffect(() => {
     if (shareCopyState === 'idle') {
@@ -895,8 +921,12 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     handleNodePositionsChange({ [nodeId]: position }, 'merge');
   }, [handleNodePositionsChange]);
 
-  const handleNodeDragStart = useCallback(() => {
-    undoManagerRef.current?.stopCapturing();
+  const handleNodeDragStart = useCallback((positions: DiagramNodePositions) => {
+    const accepted = dragCommitterRef.current?.begin(Object.keys(positions)) ?? false;
+    if (accepted) {
+      undoManagerRef.current?.stopCapturing();
+    }
+    return accepted;
   }, []);
 
   const handleNodeDrag = useCallback((positions: DiagramNodePositions) => {
@@ -904,19 +934,15 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     if (!committer) {
       return;
     }
-    Object.entries(positions).forEach(([nodeId, position]) => committer.update(nodeId, position));
+    committer.update(positions);
   }, []);
 
   const handleNodeDragStop = useCallback((positions: DiagramNodePositions) => {
     const committer = dragCommitterRef.current;
-    if (!committer) {
-      handleNodePositionsChange(positions);
-      return;
+    if (committer?.finish(positions)) {
+      undoManagerRef.current?.stopCapturing();
     }
-    Object.entries(positions).forEach(([nodeId, position]) => committer.update(nodeId, position));
-    committer.flush();
-    undoManagerRef.current?.stopCapturing();
-  }, [handleNodePositionsChange]);
+  }, []);
 
   const handleAddConnectedNode = useCallback((source: string, label: string, shape: DiagramNodeShape, position: NodePosition, type: DiagramLinkType) => {
     const queue = mutationQueueRef.current;

@@ -13,6 +13,7 @@ describe('collaboration transaction origins', () => {
     doc.transact(() => { positions.set('A', { x: 12, y: 24 }); }, collaborationOrigins.visualLayout);
     doc.transact(() => { source.insert(source.length, '\nA'); }, 'mcp');
     doc.transact(() => { positions.set('B', { x: 36, y: 48 }); }, null);
+    doc.transact(() => { positions.delete('A'); }, collaborationOrigins.reconciliation);
 
     expect(undoManager.undoStack).toHaveLength(1);
     undoManager.undo();

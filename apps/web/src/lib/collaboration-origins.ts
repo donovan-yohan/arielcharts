@@ -4,6 +4,7 @@ import * as Y from 'yjs';
 export const collaborationOrigins = {
   visual: Symbol('arielcharts.local-human.visual'),
   visualLayout: Symbol('arielcharts.local-human.visual-layout'),
+  reconciliation: Symbol('arielcharts.source-layout.reconciliation'),
 } as const;
 
 export function createDiagramUndoManager<T>(yText: Y.Text, nodePositions: Y.Map<T>): Y.UndoManager {

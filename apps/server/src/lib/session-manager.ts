@@ -1,4 +1,4 @@
-import type { ActivityEvent, Diagram, DiagramSummary, Participant, SessionSummary } from '@arielcharts/shared';
+import { resolveSourceLayoutPolicy, type ActivityEvent, type Diagram, type DiagramSummary, type Participant, type SessionSummary, type SourceLayoutPolicy } from '@arielcharts/shared';
 import { createHash } from 'node:crypto';
 import * as encoding from 'lib0/encoding';
 import { Awareness, applyAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
@@ -37,6 +37,28 @@ function getMermaidText(diagram: DiagramMap): Y.Text {
     throw new Error('Diagram is missing its Mermaid text.');
   }
   return value;
+}
+
+function getNodePositions(diagram: DiagramMap): Y.Map<unknown> {
+  const value = diagram.get(DIAGRAM_NODE_POSITIONS_KEY);
+  if (!(value instanceof Y.Map)) {
+    throw new Error('Diagram is missing its node positions.');
+  }
+  return value;
+}
+
+/** Source is canonical: only accepted blank/generic/flowchart source can prune layout. */
+function reconcileNodePositionsForSource(diagram: DiagramMap, policy: SourceLayoutPolicy): void {
+  if (!policy.pruneDurablePositions) {
+    return;
+  }
+
+  const positions = getNodePositions(diagram);
+  for (const nodeId of positions.keys()) {
+    if (!policy.nodeIds.has(nodeId)) {
+      positions.delete(nodeId);
+    }
+  }
 }
 
 function getDiagramName(diagram: DiagramMap, id: string): string {
@@ -443,6 +465,7 @@ export class SessionManager {
   }
 
   async writeDiagram(sessionId: string, diagramId: string, mermaidText: string, revision: string, event: ActivityEvent, participants?: Participant[], name?: string): Promise<Diagram> {
+    const sourceLayoutPolicy = await resolveSourceLayoutPolicy(mermaidText);
     const session = await this.getOrCreateSession(sessionId);
     const diagram = diagramsMap(session.doc).get(diagramId);
     if (!diagram) {
@@ -454,6 +477,7 @@ export class SessionManager {
       const text = getMermaidText(diagram);
       text.delete(0, text.length);
       text.insert(0, mermaidText);
+      reconcileNodePositionsForSource(diagram, sourceLayoutPolicy);
       if (nextName !== undefined) {
         this.assertUniqueDiagramName(session.doc, nextName, diagramId);
         diagram.set(DIAGRAM_NAME_KEY, nextName);

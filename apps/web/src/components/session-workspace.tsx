@@ -8,15 +8,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
 import { DiagramCanvas } from './diagram-canvas';
-import { ThemeControl } from './theme-control';
 import { useTheme } from './theme-provider';
 import { WorkspaceFlyouts } from './workspace-flyouts';
 import { WorkspaceFooter } from './workspace-footer';
+import { WorkspaceSettings } from './workspace-settings';
 import { WorkspaceTabStrip, type WorkspaceDiagramTab } from './workspace-tab-strip';
 import {
   MutationQueue,
@@ -39,6 +39,8 @@ import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManag
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
+import type { ConnectionState } from '../lib/connection-state';
+import { FOCUSABLE_SELECTOR } from '../lib/focusable';
 import { getMermaidThemeVariables } from '../lib/theme';
 import { getNextWorkspaceFlyout, type WorkspaceFlyout } from '../lib/workspace-flyout-state';
 
@@ -62,7 +64,6 @@ const connectionLabels: Record<ConnectionState, string> = {
   reconnecting: 'Reconnecting',
 };
 
-type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 type CollaborationState = {
   activityArray: Y.Array<ActivityEvent>;
   awareness: AwarenessLike;
@@ -232,6 +233,27 @@ function countConnectedAgents(participants: Participant[]): number {
   return participants.filter((participant) => participant.type === 'agent').length;
 }
 
+export function getAgentCountLabel(agentCount: number): string {
+  return `${agentCount} MCP agent${agentCount === 1 ? '' : 's'} connected`;
+}
+
+export function getModalWrappedFocusIndex(
+  activeElementIndex: number,
+  focusableElementCount: number,
+  shiftKey: boolean,
+): number | null {
+  if (focusableElementCount === 0 || activeElementIndex < 0) {
+    return null;
+  }
+  if (shiftKey && activeElementIndex === 0) {
+    return focusableElementCount - 1;
+  }
+  if (!shiftKey && activeElementIndex === focusableElementCount - 1) {
+    return 0;
+  }
+  return null;
+}
+
 function describeActivityCompact(event: ActivityEvent): string {
   switch (event.action) {
     case 'joined':
@@ -363,10 +385,13 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const flyoutOriginRef = useRef<HTMLButtonElement | null>(null);
   const pendingFlyoutReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const activityCloseRef = useRef<HTMLButtonElement | null>(null);
-  const renameCancelledRef = useRef(false);
+  const connectModalCloseRef = useRef<HTMLButtonElement | null>(null);
+  const connectModalDialogRef = useRef<HTMLDivElement | null>(null);
+  const connectModalReturnFocusRef = useRef<HTMLButtonElement | null>(null);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const [displayName, setDisplayName] = useState('Human');
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [diagrams, setDiagrams] = useState<DiagramTab[]>([]);
   const [activeDiagramId, setActiveDiagramId] = useState<string | null>(null);
@@ -382,8 +407,6 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [nodePositions, setNodePositions] = useState<DiagramNodePositions>({});
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [interactionMode, setInteractionMode] = useState<'select' | 'connect'>('select');
-  const [renamingParticipantName, setRenamingParticipantName] = useState<string | null>(null);
-  const [displayNameDraft, setDisplayNameDraft] = useState('');
   const [renamingDiagramId, setRenamingDiagramId] = useState<string | null>(null);
   const [diagramNameDraft, setDiagramNameDraft] = useState('');
   const [openFlyout, setOpenFlyout] = useState<WorkspaceFlyout>(null);
@@ -472,6 +495,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     const activityArray = doc.getArray<ActivityEvent>(ACTIVITY_KEY);
     const localIdentity = getOrCreateIdentity();
     currentIdentityRef.current = localIdentity;
+    setDisplayName(stripParticipantTabSuffix(localIdentity.name));
     awareness.setLocalState({ user: localIdentity });
 
     const syncActivity = () => {
@@ -577,6 +601,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       doc.destroy();
       addActivityRef.current = null;
       currentIdentityRef.current = null;
+      setDisplayName('Human');
       joinedActivityRef.current = false;
       setCollaboration(null);
       setDiagrams([]);
@@ -837,22 +862,52 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     }
   };
 
+  const closeConnectModal = useCallback(() => {
+    setShowConnectModal(false);
+    const returnFocusTarget = connectModalReturnFocusRef.current;
+    window.requestAnimationFrame(() => {
+      if (returnFocusTarget?.isConnected) {
+        returnFocusTarget.focus({ preventScroll: true });
+      }
+    });
+  }, []);
+
+  const openConnectModal = useCallback((returnFocusTarget: HTMLButtonElement) => {
+    connectModalReturnFocusRef.current = returnFocusTarget;
+    setShowConnectModal(true);
+  }, []);
+
   useEffect(() => {
     if (!showConnectModal) {
       return;
     }
 
+    window.requestAnimationFrame(() => { connectModalCloseRef.current?.focus({ preventScroll: true }); });
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setShowConnectModal(false);
+        event.preventDefault();
+        event.stopPropagation();
+        closeConnectModal();
+        return;
+      }
+      if (event.key !== 'Tab' || !connectModalDialogRef.current?.contains(document.activeElement)) {
+        return;
+      }
+      const focusableElements = [...connectModalDialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)];
+      const activeElementIndex = focusableElements.indexOf(document.activeElement as HTMLElement);
+      const nextIndex = getModalWrappedFocusIndex(activeElementIndex, focusableElements.length, event.shiftKey);
+      if (nextIndex !== null) {
+        event.preventDefault();
+        focusableElements[nextIndex]?.focus({ preventScroll: true });
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown, true);
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [showConnectModal]);
+  }, [closeConnectModal, showConnectModal]);
 
   useEffect(() => {
     if (!openFlyout) return;
@@ -903,27 +958,20 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const shareButtonLabel = shareCopyState === 'copied' ? 'copied' : shareCopyState === 'error' ? 'copy failed' : 'share';
   const promptCopyLabel = promptCopyState === 'copied' ? 'copied' : promptCopyState === 'error' ? 'copy failed' : 'copy';
 
-  const commitDisplayName = useCallback(() => {
-    if (renameCancelledRef.current) {
-      renameCancelledRef.current = false;
-      return;
-    }
-
+  const saveDisplayName = useCallback((displayName: string) => {
     const currentIdentity = currentIdentityRef.current;
     if (!currentIdentity || !collaboration) {
-      setRenamingParticipantName(null);
       return;
     }
 
-    const nextBaseName = displayNameDraft.trim() || 'Human';
+    const nextBaseName = displayName.trim() || 'Human';
     const updatedIdentity = renameIdentity(currentIdentity, nextBaseName);
 
     updateStoredIdentity(nextBaseName, updatedIdentity.color);
     currentIdentityRef.current = updatedIdentity;
+    setDisplayName(stripParticipantTabSuffix(updatedIdentity.name));
     collaboration.awareness.setLocalStateField('user', updatedIdentity);
-    setDisplayNameDraft(stripParticipantTabSuffix(updatedIdentity.name));
-    setRenamingParticipantName(null);
-  }, [collaboration, displayNameDraft]);
+  }, [collaboration]);
 
   const handleNodePositionsChange = useCallback((positions: DiagramNodePositions, mode: NodePositionsSyncMode = 'merge') => {
     setNodePositions((current) => {
@@ -1068,24 +1116,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       <header className="workspace-topbar">
         <div className="workspace-topbar-left">
           <span className="workspace-logo">{APP_NAME}</span>
-          <button
-            className="workspace-connect-button"
-            type="button"
-            onClick={() => { setShowConnectModal(true); }}
-          >
-            connect my agent
-          </button>
-          {connectedAgentCount > 0 ? (
-            <div className="workspace-mcp-status" aria-label={`MCP: ${connectedAgentCount} agents connected`} data-testid="mcp-status">
-              <span className="workspace-mcp-dot" />
-              <span>{connectedAgentCount === 1 ? 'MCP agent working' : `${connectedAgentCount} MCP agents working`}</span>
-              <ChevronDown aria-hidden="true" size={14} />
-            </div>
-          ) : null}
         </div>
 
         <div className="workspace-topbar-right">
-          <ThemeControl />
           <div data-testid="presence-bar" className="workspace-presence-avatars" aria-label="Session presence">
             {participants.length > 0 ? (
               participants.map((participant, index) => (
@@ -1093,65 +1126,20 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
                   className="workspace-avatar-stack-item"
                   key={`${participant.name}-${participant.type}`}
                 >
-                  {participant.name === currentIdentityRef.current?.name ? (
-                    <>
-                      <button
-                        aria-expanded={renamingParticipantName === participant.name}
-                        aria-haspopup="dialog"
-                        className={`workspace-avatar workspace-avatar-${participant.type} workspace-avatar-button`}
-                        onClick={() => {
-                          const displayName = getParticipantDisplayName(participant);
-                          setDisplayNameDraft(displayName);
-                          setRenamingParticipantName((current) => current === participant.name ? null : participant.name);
-                        }}
-                        style={{
-                          backgroundColor: participant.type === 'agent' ? 'var(--agent-surface)' : participant.color,
-                          borderColor: participant.type === 'agent' ? 'var(--agent-border)' : 'var(--surface-inset)',
-                          borderStyle: getParticipantBorderStyle(participant.type),
-                          zIndex: participants.length - index,
-                        }}
-                        title={`${getParticipantDisplayName(participant)} (click to rename)`}
-                        type="button"
-                      >
-                        {getParticipantAvatarText(participant)}
-                      </button>
-
-                      {renamingParticipantName === participant.name ? (
-                        <div className="workspace-avatar-popover" role="dialog" aria-label="Rename display name">
-                          <input
-                            autoFocus
-                            className="workspace-avatar-input"
-                            onBlur={commitDisplayName}
-                            onChange={(event) => { setDisplayNameDraft(event.target.value); }}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                commitDisplayName();
-                              }
-                              if (event.key === 'Escape') {
-                                renameCancelledRef.current = true;
-                                setDisplayNameDraft(getParticipantDisplayName(participant));
-                                setRenamingParticipantName(null);
-                              }
-                            }}
-                            value={displayNameDraft}
-                          />
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <div
-                      className={`workspace-avatar workspace-avatar-${participant.type}`}
-                      style={{
-                        backgroundColor: participant.type === 'agent' ? 'var(--agent-surface)' : participant.color,
-                        borderColor: participant.type === 'agent' ? 'var(--agent-border)' : 'var(--surface-inset)',
-                        borderStyle: getParticipantBorderStyle(participant.type),
-                        zIndex: participants.length - index,
-                      }}
-                      title={getParticipantDisplayName(participant)}
-                    >
-                      {getParticipantAvatarText(participant)}
-                    </div>
-                  )}
+                  <div
+                    aria-label={`${getParticipantDisplayName(participant)}, ${participant.type}`}
+                    className={`workspace-avatar workspace-avatar-${participant.type}`}
+                    role="img"
+                    style={{
+                      backgroundColor: participant.type === 'agent' ? 'var(--agent-surface)' : participant.color,
+                      borderColor: participant.type === 'agent' ? 'var(--agent-border)' : 'var(--surface-inset)',
+                      borderStyle: getParticipantBorderStyle(participant.type),
+                      zIndex: participants.length - index,
+                    }}
+                    title={getParticipantDisplayName(participant)}
+                  >
+                    {getParticipantAvatarText(participant)}
+                  </div>
                 </div>
               ))
             ) : (
@@ -1162,6 +1150,13 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             <span>{shareButtonLabel}</span>
             {shareCopyState === 'copied' ? <Check aria-hidden="true" size={13} /> : null}
           </button>
+          <WorkspaceSettings
+            agentCount={connectedAgentCount}
+            connectionState={connectionState}
+            displayName={displayName}
+            onConnectAgent={openConnectModal}
+            onDisplayNameSave={saveDisplayName}
+          />
         </div>
       </header>
 
@@ -1276,15 +1271,19 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       />
 
       {showConnectModal ? (
-        <div className="modal-backdrop" onClick={() => { setShowConnectModal(false); }}>
-          <div className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="connect-agent-title" onClick={(event) => { event.stopPropagation(); }}>
+        <div className="modal-backdrop" onClick={closeConnectModal}>
+          <div className="modal-dialog" ref={connectModalDialogRef} role="dialog" aria-modal="true" aria-labelledby="connect-agent-title" onClick={(event) => { event.stopPropagation(); }}>
             <div className="modal-header">
-              <span className="modal-title" id="connect-agent-title">Connect your agent</span>
-              <button className="modal-close" type="button" onClick={() => { setShowConnectModal(false); }} aria-label="Close">
+              <span className="modal-title" id="connect-agent-title">Agent connection</span>
+              <button className="modal-close" ref={connectModalCloseRef} type="button" onClick={closeConnectModal} aria-label="Close">
                 &times;
               </button>
             </div>
             <div className="modal-body">
+              <div className="modal-connection-details" data-testid="agent-connection-details">
+                <p><span>Session status</span><strong>{connectionLabels[connectionState]}</strong></p>
+                <p><span>Agents</span><strong>{getAgentCountLabel(connectedAgentCount)}</strong></p>
+              </div>
               <div className="modal-prompt-block">
                 <pre className="modal-prompt-text">{getAgentPrompt()}</pre>
                 <button className="workspace-copy-button modal-prompt-copy" type="button" onClick={handleCopyAgentPrompt}>

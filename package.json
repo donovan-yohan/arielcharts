@@ -17,6 +17,7 @@
     "test:e2e-workspace-ux": "tsx e2e-workspace-ux-validate.ts"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1"
+    "@playwright/test": "^1.59.1",
+    "tsx": "4.20.5"
   }
 }

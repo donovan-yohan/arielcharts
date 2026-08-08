@@ -80,7 +80,7 @@ describe('handleMcpToolCall', () => {
     })).resolves.toMatchObject({ diagram: { name: 'Changed' } });
   });
 
-  it('reconciles an inactive diagram’s layout before MCP removes and later reuses a Mermaid id', async () => {
+  it('prunes MCP-removed Mermaid layout before the id is reused', async () => {
     await resources.manager.getOrCreateSession('abc123de');
     const initial = await getSession();
     const initialWrite = await handleMcpToolCall(resources.manager, {

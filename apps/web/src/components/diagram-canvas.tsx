@@ -729,15 +729,17 @@ export function DiagramCanvas({
         return;
       }
 
-      setHitMap(buildSvgHitMap(svgElement));
-      setMermaidPresentation(extractMermaidPresentation(svgElement));
+      const expectedNodeIds = graph?.nodes.map((node) => node.id) ?? [];
+      const expectedSubgraphIds = graph?.subgraphs.map((subgraph) => subgraph.id) ?? [];
+      setHitMap(buildSvgHitMap(svgElement, { nodeIds: expectedNodeIds, subgraphIds: expectedSubgraphIds }));
+      setMermaidPresentation(extractMermaidPresentation(svgElement, expectedNodeIds));
       setRenderedSvgRevision((revision) => revision + 1);
     });
 
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [svg]);
+  }, [graph?.nodes, graph?.subgraphs, svg]);
 
   useEffect(() => {
     const previousRendererKind = previousRendererKindRef.current;

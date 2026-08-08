@@ -39,8 +39,8 @@ export async function resolveSourceLayoutPolicy(source: string): Promise<SourceL
     return policy;
   }
 
+  const { default: mermaid } = await import('mermaid');
   try {
-    const { default: mermaid } = await import('mermaid');
     await mermaid.parse(source);
     return getAcceptedGenericSourceLayoutPolicy();
   } catch {

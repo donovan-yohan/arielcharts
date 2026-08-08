@@ -9,6 +9,19 @@ describe('source layout policy', () => {
     expect([...policy.nodeIds].sort()).toEqual(['A', 'B', 'C']);
   });
 
+  it('prunes blank source but defers generic source synchronously', () => {
+    expect(getSourceLayoutPolicy('  \n\t')).toMatchObject({
+      kind: 'blank',
+      nodeIds: new Set(),
+      pruneDurablePositions: true,
+    });
+    expect(getSourceLayoutPolicy('sequenceDiagram\n  Browser->>API: request')).toMatchObject({
+      kind: 'indeterminate',
+      nodeIds: new Set(),
+      pruneDurablePositions: false,
+    });
+  });
+
   it('distinguishes accepted generic source from invalid source without clearing early', async () => {
     await expect(resolveSourceLayoutPolicy('sequenceDiagram\n  Browser->>API: request')).resolves.toMatchObject({
       kind: 'generic',

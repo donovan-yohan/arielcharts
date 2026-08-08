@@ -36,6 +36,7 @@ const API_SEQUENCE_FIXTURE = `sequenceDiagram
   Gateway->>Auth: validate token
   Auth-->>Gateway: 401 Unauthorized
   Gateway-->>Browser: 401 Unauthorized`;
+const NEGATIVE_DOM_OBSERVATION_WINDOW_MS = 300;
 
 async function ensureSourceFlyoutOpen(page: Page): Promise<Locator> {
   const toggle = page.getByTestId('source-flyout-toggle');
@@ -79,6 +80,44 @@ async function waitForTransformChange(page: Page, layer: Locator, previous: stri
     return layerElement?.getAttribute('style') !== lastTransform;
   }, previous, { timeout: 5000 });
   return layer.getAttribute('style');
+}
+
+async function observeButtonAbsentFor(page: Page, ariaLabel: string, durationMs: number): Promise<boolean> {
+  const selector = `button[aria-label=${JSON.stringify(ariaLabel)}]`;
+  return page.evaluate<boolean>(`(() => {
+    const selector = ${JSON.stringify(selector)};
+    if (document.querySelector(selector)) return false;
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer = 0;
+      const finish = (absent) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        observer.disconnect();
+        resolve(absent);
+      };
+      const containsButton = (node) => node instanceof Element
+        && (node.matches(selector) || node.querySelector(selector) !== null);
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          if ((record.type === 'attributes' && containsButton(record.target))
+            || [...record.addedNodes].some(containsButton)) {
+            finish(false);
+            return;
+          }
+        }
+      });
+      observer.observe(document.documentElement, {
+        attributeFilter: ['aria-label'],
+        attributes: true,
+        childList: true,
+        subtree: true,
+      });
+      timer = window.setTimeout(() => { finish(true); }, ${JSON.stringify(durationMs)});
+    });
+  })()`);
 }
 
 interface GenericFitBounds {
@@ -217,7 +256,11 @@ async function assertSameTabKindTransition(page: Page): Promise<SameTabKindTrans
   await waitForCanvas(page, 'flowchart');
   const flowchartRestoresStructure = await page.locator('form[aria-label="Add Mermaid node"]').count() > 0
     && await page.getByRole('button', { name: 'Add node to Mermaid text', exact: true }).count() > 0;
-  const genericClearsPersistedLayout = await resetLayout.count() === 0;
+  const genericClearsPersistedLayout = await observeButtonAbsentFor(
+    page,
+    'Reset shared layout to Mermaid',
+    NEGATIVE_DOM_OBSERVATION_WINDOW_MS,
+  );
   return {
     flowchartRestoresStructure,
     genericClearsPersistedLayout,

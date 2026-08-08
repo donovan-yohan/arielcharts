@@ -12,6 +12,7 @@ export type YjsNodePosition = {
 };
 
 export type YjsSessionSnapshot = {
+  exists: boolean;
   mermaidText: string | null;
   nodePositions: Record<string, YjsNodePosition>;
 };
@@ -29,6 +30,7 @@ export type YjsNodePositionHistory = {
 };
 
 export type YjsSessionObserver = {
+  diagramExists(diagramId: string): boolean;
   destroy(): void;
   hasNodePosition(diagramId: string, nodeId: string): boolean;
   snapshot(diagramId: string): YjsSessionSnapshot;
@@ -66,7 +68,7 @@ export function getYjsWebsocketUrl(mcpUrl: string): string {
 
 export function readYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessionSnapshot {
   const diagram = diagramMap(doc, diagramId);
-  if (!diagram) return { mermaidText: null, nodePositions: {} };
+  if (!diagram) return { exists: false, mermaidText: null, nodePositions: {} };
 
   const mermaid = diagram.get(DIAGRAM_MERMAID_TEXT_KEY);
   const positions = diagram.get(DIAGRAM_NODE_POSITIONS_KEY);
@@ -78,6 +80,7 @@ export function readYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessio
   }
 
   return {
+    exists: true,
     mermaidText: mermaid instanceof Y.Text ? mermaid.toString() : null,
     nodePositions,
   };
@@ -193,6 +196,9 @@ export async function openYjsSessionObserver(
   let destroyed = false;
   const histories = new Set<YjsNodePositionHistory>();
   const observer: YjsSessionObserver = {
+    diagramExists(diagramId) {
+      return readYjsSessionSnapshot(doc, diagramId).exists;
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;

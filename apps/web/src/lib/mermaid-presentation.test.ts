@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getCanvasEdgeMarker,
   getCanvasHandlePaint,
+  getMermaidEdgePresentationFromElement,
   getCanvasNodePaint,
   getMermaidNodePresentation,
   getMermaidPresentationFromElement,
@@ -36,6 +37,18 @@ describe('getMermaidPresentationFromElement', () => {
     });
   });
 
+  it('keeps a prefixed Mermaid entity selector scoped to its exact rendered node', () => {
+    const css = ['#arielcharts-session-main-4-flowchart-Gateway-0 { fill: #e7f5ff; }'];
+    expect(getMermaidPresentationFromElement({
+      css,
+      rootId: 'arielcharts-session-main-4-flowchart-Gateway-0',
+    }).fill).toBe('#e7f5ff');
+    expect(getMermaidPresentationFromElement({
+      css,
+      rootId: 'arielcharts-session-main-4-flowchart-Other-0',
+    }).fill).toBeUndefined();
+  });
+
   it('keeps important stylesheet paint ahead of normal inline paint', () => {
     expect(getMermaidPresentationFromElement({
       classNames: ['critical'],
@@ -44,6 +57,23 @@ describe('getMermaidPresentationFromElement', () => {
     })).toMatchObject({
       fill: '#ffec99',
       stroke: '#d9480f',
+    });
+  });
+
+  it('leaves an unstyled Mermaid edge to the canvas fallback instead of copying theme CSS', () => {
+    expect(getMermaidEdgePresentationFromElement({ style: ';' })).toEqual({
+      fill: undefined,
+      stroke: undefined,
+      strokeDasharray: undefined,
+      strokeWidth: undefined,
+      text: undefined,
+    });
+  });
+
+  it('projects an authored inline Mermaid linkStyle for the editable edge', () => {
+    expect(getMermaidEdgePresentationFromElement({ style: 'stroke:#d9480f;stroke-width:4px' })).toMatchObject({
+      stroke: '#d9480f',
+      strokeWidth: '4px',
     });
   });
 

@@ -348,15 +348,14 @@ async function validateCollaboration(): Promise<void> {
     assertNoReactFlowError015(diagnosticsB.reactFlowError015, 'when browser B completed its node drag');
     await pageA.waitForTimeout(500);
     const heldAfterRemote = await boxOf(activeDragNode, 'Active drag node disappeared during remote update.');
-    const activeDragStable = Math.abs(heldAfterRemote.x - heldBeforeRemote.x) <= 2
-      && Math.abs(heldAfterRemote.y - heldBeforeRemote.y) <= 2;
+    const activeDragStable = positionsMatch(heldAfterRemote, heldBeforeRemote);
     assert(activeDragStable, `Remote layout update jittered active drag overlay: before=${JSON.stringify(heldBeforeRemote)} after=${JSON.stringify(heldAfterRemote)}`);
     await pageA.mouse.up();
     await pageA.waitForTimeout(700);
     assertNoReactFlowError015(diagnosticsA.reactFlowError015, 'when browser A completed its node drag');
     const finalA = await getReactFlowNodePosition(nodeById(pageA, dragNodeId), 'Dragged node disappeared after drag stop');
     const finalB = await getReactFlowNodePosition(nodeById(pageB, dragNodeId), 'Remote replica dragged node disappeared after drag stop');
-    const replicasConverged = Math.abs(finalA.x - finalB.x) <= 2 && Math.abs(finalA.y - finalB.y) <= 2;
+    const replicasConverged = positionsMatch(finalA, finalB);
     assert(replicasConverged, `Drag replicas did not converge: A=${JSON.stringify(finalA)} B=${JSON.stringify(finalB)}`);
 
     const releasedPosition = finalB;
@@ -368,7 +367,7 @@ async function validateCollaboration(): Promise<void> {
     assert(postReleaseWinnerMoved, `Post-release same-node drag did not establish a new winner: before=${JSON.stringify(releasedPosition)} after=${JSON.stringify(winnerB)}`);
     await waitForReactFlowNodePositionMatch(pageA, dragNodeId, winnerB);
     const winnerA = await getReactFlowNodePosition(nodeById(pageA, dragNodeId), 'Browser A replica lost the post-release winner node');
-    const postReleaseReplicasConverged = Math.abs(winnerA.x - winnerB.x) <= 2 && Math.abs(winnerA.y - winnerB.y) <= 2;
+    const postReleaseReplicasConverged = positionsMatch(winnerA, winnerB);
     assert(postReleaseReplicasConverged, `Post-release same-node winner did not converge: A=${JSON.stringify(winnerA)} B=${JSON.stringify(winnerB)}`);
 
     const pendingPrune = await mcp.createDiagramWithLatestRevision(sessionId, 'Pending prune', PENDING_PRUNE_FLOWCHART);
@@ -405,6 +404,7 @@ async function validateCollaboration(): Promise<void> {
         (current) => current.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_FLOWCHART,
         'the pending-prune diagram source',
       );
+      assert(observer.diagramExists(pendingPrune.id), 'Pending-prune fixture diagram is absent from the canonical Yjs map.');
       assert(!observer.hasNodePosition(pendingPrune.id, 'A'), 'Pending-prune fixture unexpectedly began with a persisted position for A.');
 
       const initialA = await getReactFlowNodePosition(nodeById(pageA, 'A'), 'Pending-prune node A was missing before the race');
@@ -424,29 +424,36 @@ async function validateCollaboration(): Promise<void> {
         'the source edit that removes node A',
       );
       await waitForSource(pageB, PENDING_PRUNE_REMOVED);
+      assert(observer.diagramExists(pendingPrune.id), 'Pending-prune diagram disappeared before the removal race.');
       const removedNodeHistory = observer.trackNodePosition(pendingPrune.id, 'A');
-      removalAdvanceMs = await advanceClockUntilNodePresence(pageA, 'A', 0, 110);
+      removalAdvanceMs = await advanceClockUntilNodePresence(pageA, 'A', 0, 120);
       assert(removalAdvanceMs < 120,
         `Node A was not reconciled away before the 120ms drag commit deadline: advanced=${removalAdvanceMs}ms.`);
 
       await pageA.clock.runFor(250);
       await removedNodeHistory.expectAbsentFor(NEGATIVE_OBSERVATION_WINDOW_MS, 'the post-timer observation window');
-      pendingPrunedBeforeStop = !removedNodeHistory.hasAppeared() && !observer.hasNodePosition(pendingPrune.id, 'A');
+      pendingPrunedBeforeStop = observer.diagramExists(pendingPrune.id)
+        && !removedNodeHistory.hasAppeared()
+        && !observer.hasNodePosition(pendingPrune.id, 'A');
       assert(pendingPrunedBeforeStop, 'The expired drag timer resurrected removed node A in the canonical positions map.');
       assert(observer.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_REMOVED,
         'The pending-prune source changed during the timer observation window.');
 
       await pageA.mouse.up();
       raceMouseHeld = false;
+      await pageA.clock.runFor(250);
       await removedNodeHistory.expectAbsentFor(NEGATIVE_OBSERVATION_WINDOW_MS, 'the post-drag-stop observation window');
-      pendingPrunedAfterStop = !removedNodeHistory.hasAppeared() && !observer.hasNodePosition(pendingPrune.id, 'A');
+      pendingPrunedAfterStop = observer.diagramExists(pendingPrune.id)
+        && !removedNodeHistory.hasAppeared()
+        && !observer.hasNodePosition(pendingPrune.id, 'A');
       assert(pendingPrunedAfterStop, 'Drag stop resurrected removed node A in the canonical positions map.');
       assert(observer.snapshot(pendingPrune.id).mermaidText === PENDING_PRUNE_REMOVED,
         'The pending-prune source changed during the drag-stop observation window.');
 
       freshObserver = await openYjsSessionObserver(mcpUrl, sessionId);
       const freshRemovedSnapshot = freshObserver.snapshot(pendingPrune.id);
-      freshObserverConfirmed = freshRemovedSnapshot.mermaidText === PENDING_PRUNE_REMOVED
+      freshObserverConfirmed = freshRemovedSnapshot.exists
+        && freshRemovedSnapshot.mermaidText === PENDING_PRUNE_REMOVED
         && !freshObserver.hasNodePosition(pendingPrune.id, 'A');
       assert(freshObserverConfirmed,
         `A fresh Yjs observer did not confirm canonical removal: ${JSON.stringify(freshRemovedSnapshot)}`);
@@ -481,6 +488,8 @@ async function validateCollaboration(): Promise<void> {
       assert(reusedNodeRejectedDraggedPosition,
         `Reused node A inherited its removed drag position: queued=${JSON.stringify(queuedA)} reused=${JSON.stringify(reusedA)}`);
       assert(!removedNodeHistory.hasAppeared()
+        && observer.diagramExists(pendingPrune.id)
+        && freshObserver.diagramExists(pendingPrune.id)
         && !observer.hasNodePosition(pendingPrune.id, 'A')
         && !freshObserver.hasNodePosition(pendingPrune.id, 'A'),
         'Reusing node ID A repopulated the canonical positions map with a stale coordinate.');

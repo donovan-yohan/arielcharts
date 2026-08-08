@@ -29,11 +29,16 @@ export interface SvgHitMap {
   viewBox: SvgViewBox;
 }
 
+export interface MermaidHitMapOptions {
+  nodeIds?: readonly string[];
+  subgraphIds?: readonly string[];
+}
+
 const MERMAID_NODE_SELECTOR = 'g.node';
-const MERMAID_EDGE_SELECTOR = 'g.edgePath';
+export const MERMAID_EDGE_SELECTOR = 'g.edgePath, path.flowchart-link[data-edge="true"]';
 const MERMAID_SUBGRAPH_SELECTOR = 'g.cluster';
 
-export function buildSvgHitMap(svg: SVGSVGElement): SvgHitMap {
+export function buildSvgHitMap(svg: SVGSVGElement, options: MermaidHitMapOptions = {}): SvgHitMap {
   const viewBox = getSvgViewBox(svg);
 
   const nodes = new Map<string, SvgBounds>();
@@ -41,7 +46,7 @@ export function buildSvgHitMap(svg: SVGSVGElement): SvgHitMap {
   const subgraphs = new Map<string, SvgBounds>();
 
   svg.querySelectorAll<SVGGElement>(MERMAID_NODE_SELECTOR).forEach((element) => {
-    const nodeId = extractMermaidEntityId(element.id);
+    const nodeId = resolveMermaidNodeId(element.id, options.nodeIds);
     const bounds = getTransformedBounds(element);
 
     if (!nodeId || !bounds) {
@@ -51,21 +56,29 @@ export function buildSvgHitMap(svg: SVGSVGElement): SvgHitMap {
     nodes.set(nodeId, bounds);
   });
 
-  svg.querySelectorAll<SVGGElement>(MERMAID_EDGE_SELECTOR).forEach((element, index) => {
-    const path = element.querySelector<SVGPathElement>('path');
+  const seenPaths = new Set<SVGPathElement>();
+  svg.querySelectorAll<SVGGraphicsElement>(MERMAID_EDGE_SELECTOR).forEach((element, index) => {
+    const path = element instanceof SVGPathElement ? element : element.querySelector<SVGPathElement>('path');
     const bounds = getTransformedBounds(path ?? element);
-    if (!path || !bounds) {
+    if (!path || !bounds || seenPaths.has(path)) {
       return;
     }
+    seenPaths.add(path);
 
-    const edgeKey = [element.id, path.id, path.getAttribute('data-id'), `edge-${index}`]
-      .find((candidate) => typeof candidate === 'string' && candidate.length > 0) ?? `edge-${index}`;
+    const edgeKey = getMermaidEdgeKey([
+      path.getAttribute('data-id'),
+      element.getAttribute('data-id'),
+      path.id,
+      element.id,
+    ], index);
 
     edges.set(edgeKey, { bounds, path });
   });
 
   svg.querySelectorAll<SVGGElement>(MERMAID_SUBGRAPH_SELECTOR).forEach((element, index) => {
-    const subgraphId = extractMermaidEntityId(element.id) ?? element.getAttribute('data-id') ?? `subgraph-${index}`;
+    const subgraphId = resolveMermaidSubgraphId(element.id, options.subgraphIds)
+      ?? element.getAttribute('data-id')
+      ?? `subgraph-${index}`;
     const bounds = getTransformedBounds(element);
 
     if (!bounds) {
@@ -88,17 +101,76 @@ export function extractMermaidEntityId(rawId: string | null | undefined): string
     return null;
   }
 
-  const withKnownPrefix = rawId.match(/^flowchart-(.+)-\d+$/);
+  const entityId = rawId.startsWith('flowchart-')
+    ? rawId
+    : rawId.includes('-flowchart-')
+      ? rawId.slice(rawId.lastIndexOf('-flowchart-') + 1)
+      : rawId;
+  const withKnownPrefix = entityId.match(/^flowchart-(.+)-\d+$/);
   if (withKnownPrefix?.[1]) {
     return withKnownPrefix[1];
   }
 
-  const genericMatch = rawId.match(/^(.+)-\d+$/);
+  const genericMatch = entityId.match(/^(.+)-\d+$/);
   if (genericMatch?.[1]) {
     return genericMatch[1];
   }
 
-  return rawId;
+  return entityId;
+}
+
+export function resolveMermaidNodeId(rawId: string | null | undefined, expectedNodeIds: readonly string[] = []): string | null {
+  const expectedId = resolveExpectedSuffix(rawId, expectedNodeIds, 'flowchart-');
+  return expectedId ?? extractMermaidEntityId(rawId);
+}
+
+export function resolveMermaidSubgraphId(
+  rawId: string | null | undefined,
+  expectedSubgraphIds: readonly string[] = [],
+): string | null {
+  const expectedId = resolveExpectedSuffix(rawId, expectedSubgraphIds, '');
+  return expectedId ?? extractMermaidEntityId(rawId);
+}
+
+export function getMermaidEdgeKey(candidates: Array<string | null | undefined>, index: number): string {
+  return candidates.find((candidate) => typeof candidate === 'string' && candidate.length > 0) ?? `edge-${index}`;
+}
+
+export function isMermaidFlowchartEntityDomId(rawId: string): boolean {
+  return rawId.startsWith('flowchart-') || rawId.includes('-flowchart-');
+}
+
+function resolveExpectedSuffix(
+  rawId: string | null | undefined,
+  expectedIds: readonly string[],
+  marker: string,
+): string | null {
+  if (!rawId) {
+    return null;
+  }
+
+  for (const expectedId of [...expectedIds].sort((left, right) => right.length - left.length)) {
+    if (marker && matchesNumberedMermaidSuffix(rawId, `${marker}${expectedId}-`)) {
+      return expectedId;
+    }
+    if (!marker && (rawId === expectedId || rawId.endsWith(`-${expectedId}`))) {
+      return expectedId;
+    }
+  }
+
+  return null;
+}
+
+function matchesNumberedMermaidSuffix(rawId: string, prefix: string): boolean {
+  const directSuffix = rawId.startsWith(prefix) ? rawId.slice(prefix.length) : null;
+  if (directSuffix && /^\d+$/.test(directSuffix)) {
+    return true;
+  }
+
+  const prefixedMarker = `-${prefix}`;
+  const markerIndex = rawId.lastIndexOf(prefixedMarker);
+  const renderSuffix = markerIndex >= 0 ? rawId.slice(markerIndex + prefixedMarker.length) : null;
+  return Boolean(renderSuffix && /^\d+$/.test(renderSuffix));
 }
 
 export function getSvgBounds(element: SVGGraphicsElement | null): SvgBounds | null {

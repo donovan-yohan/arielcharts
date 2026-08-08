@@ -8,6 +8,7 @@ import {
   TABLET_VIEWPORT,
   launchBrowserHarness,
   saveScreenshot,
+  type BrowserHarness,
 } from './e2e/support/browser.ts';
 import { assert, describeError } from './e2e/support/assert.ts';
 import {
@@ -21,8 +22,14 @@ import {
   snapshotAnchors,
   verifiedClick,
 } from './e2e/support/interactions.ts';
-import { ModernMcpClient } from './e2e/support/mcp.ts';
+import { ModernMcpClient, type DiagramRevision, type DiagramRevisionSummary } from './e2e/support/mcp.ts';
 import { withOwnedServices } from './e2e/support/owned-services.ts';
+import {
+  getYjsSourceLayoutTransitions,
+  openYjsSessionObserver,
+  type YjsSessionSnapshot,
+  type YjsSessionSnapshotHistory,
+} from './e2e/support/yjs-session.ts';
 import { STARTER_TEMPLATES } from './packages/shared/src/starter-templates.js';
 import { getWebsocketServerUrl } from './apps/web/src/lib/session.ts';
 import {
@@ -67,6 +74,18 @@ const SOURCE_OWNED_COLOR_FIXTURE = `flowchart LR
 const TRANSPARENT_MERMAID_FIXTURE = `flowchart LR
   classDef ghost fill:none,stroke:transparent,color:transparent;
   Ghost[Ghost]:::ghost --> Visible[Visible]`;
+
+const HISTORY_PREVIOUS_FLOWCHART = `flowchart LR
+  Browser[Browser] --> Prior[Prior revision]
+  Prior --> API[API]`;
+const HISTORY_CURRENT_FLOWCHART = `flowchart LR
+  Browser[Browser] --> Current[Current revision]
+  Current --> API[API]`;
+const HISTORY_GENERIC_SEQUENCE = `sequenceDiagram
+  Browser->>API: Historical request
+  API-->>Browser: Historical response`;
+const HISTORY_INVALID_FLOWCHART = 'this is a temporary invalid Mermaid revision';
+const HISTORY_NEGATIVE_OBSERVATION_MS = 250;
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
@@ -126,6 +145,36 @@ async function renderedCanvasTransform(page: Page, label: string): Promise<strin
   const transform = await canvasTransform(page);
   assert(transform !== null, `${label} requires a rendered canvas camera layer.`);
   return transform;
+}
+
+async function renderedCanvasCameraTransform(page: Page, label: string): Promise<string> {
+  const layer = page.locator('.diagram-canvas-svg').locator('..');
+  const transform = await layer.evaluate((element) => (element as HTMLElement).style.transform);
+  assert(transform.length > 0, `${label} requires a rendered canvas transform.`);
+  return transform;
+}
+
+async function waitForStableCanvasTransform(page: Page, label: string): Promise<string> {
+  const deadline = Date.now() + 15_000;
+  let samples: string[] = [];
+  while (Date.now() < deadline) {
+    samples = await page.evaluate(async () => {
+      const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
+      if (!(layer instanceof HTMLElement)) {
+        return [];
+      }
+      const transforms: string[] = [];
+      for (let frame = 0; frame < 4; frame += 1) {
+        await new Promise<void>((resolve) => { requestAnimationFrame(() => { resolve(); }); });
+        transforms.push(layer.style.transform);
+      }
+      return transforms;
+    });
+    if (samples.length === 4 && samples[0] && samples.every((transform) => transform === samples[0])) {
+      return samples[0];
+    }
+  }
+  throw new Error(`${label} did not settle a rendered canvas camera transform: ${JSON.stringify(samples)}.`);
 }
 
 async function closeWorkspaceSettings(page: Page): Promise<void> {
@@ -322,9 +371,9 @@ async function expectFlyoutFocusAndEscape(page: Page): Promise<void> {
 
   const activityToggle = page.getByTestId('activity-flyout-toggle');
   await verifiedClick(page, activityToggle, 'activity flyout toggle');
-  const closeActivity = page.getByLabel('Close activity history', { exact: true });
+  const closeActivity = page.getByLabel('Close activity and history', { exact: true });
   await closeActivity.waitFor({ state: 'visible', timeout: 15_000 });
-  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Close activity history', undefined, { timeout: 5_000 });
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Close activity and history', undefined, { timeout: 5_000 });
   await saveScreenshot(page, 'issue-14-activity-focus');
   await page.keyboard.press('Escape');
   await page.getByTestId('activity-flyout').waitFor({ state: 'detached', timeout: 15_000 });
@@ -882,6 +931,7 @@ async function expectContrastRoles(page: Page): Promise<void> {
   assertContrastAtLeast(roleColors.focus, roleColors.canvas, 3, 'Focus role');
   assertContrastAtLeast(roleColors.interactive, roleColors.surface, 3, 'Interactive role');
   await ensureFlyout(page, 'activity');
+  await verifiedClick(page, page.getByTestId('activity-flyout').getByRole('button', { name: /^Activity\s+/u }), 'activity view switch for contrast audit');
   const activityColors = await page.locator('.activity-time').first().evaluate((element) => {
     const background = element.closest('.activity-item-content');
     return { background: background ? getComputedStyle(background).backgroundColor : '', text: getComputedStyle(element).color };
@@ -935,6 +985,36 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
   await selectTabByName(page, diagramName);
   await waitForCanvas(page, 'flowchart');
+  const sourceToggle = page.getByTestId('source-flyout-toggle');
+  await expect(sourceToggle).toHaveAccessibleName(/^(show|hide) source$/i);
+  assert(await sourceToggle.getAttribute('title') === 'Mermaid source',
+    `${label} source toggle must retain its tooltip when text is hidden.`);
+  await assertHitTarget(page, sourceToggle, `${label} source toggle`);
+  if (label.startsWith('mobile')) {
+    const sourceBounds = await sourceToggle.boundingBox();
+    assert(sourceBounds !== null && sourceBounds.width >= 44 && sourceBounds.height >= 44,
+      `${label} source toggle must provide a 44px touch target: ${JSON.stringify(sourceBounds)}.`);
+  }
+  if (label === 'mobile-320') {
+    const topbarOverflow = page.getByTestId('topbar-collaborator-overflow');
+    const footerOverflow = page.getByTestId('footer-collaborator-overflow');
+    await expect.poll(async () => Number((await topbarOverflow.textContent())?.slice(1) ?? '0'), {
+      message: 'mobile-320 did not expose an overflow indicator for four or more topbar collaborators.',
+      timeout: 15_000,
+    }).toBeGreaterThan(0);
+    await expect.poll(async () => Number((await footerOverflow.textContent())?.slice(1) ?? '0'), {
+      message: 'mobile-320 did not expose an overflow indicator for four or more footer collaborators.',
+      timeout: 15_000,
+    }).toBeGreaterThan(0);
+    for (const [target, targetLabel] of [
+      [topbarOverflow, 'topbar collaborator overflow'],
+      [footerOverflow, 'footer collaborator overflow'],
+    ] as const) {
+      await target.waitFor({ state: 'visible', timeout: 15_000 });
+      assert(/^\d+ more collaborators$/u.test(await target.getAttribute('aria-label') ?? ''),
+        `${label} ${targetLabel} must expose its hidden collaborator count to assistive technology.`);
+    }
+  }
   const settingsTrigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
   await assertHitTarget(page, settingsTrigger, `${label} workspace settings trigger`);
   await assertContainedInViewport(page, settingsTrigger, `${label} workspace settings trigger`);
@@ -964,7 +1044,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   }
   await saveScreenshot(page, `issue-28-${label}-settings`);
   await closeWorkspaceSettings(page);
-  await verifiedClick(page, page.getByTestId('source-flyout-toggle'), `${label} source toggle`);
+  await verifiedClick(page, sourceToggle, `${label} source toggle`);
   await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
   await verifiedClick(page, page.getByLabel('Close source panel', { exact: true }), `${label} close source`);
   await page.getByTestId('source-flyout').waitFor({ state: 'detached', timeout: 15_000 });
@@ -983,7 +1063,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     for (const [target, targetLabel] of [
       [templateTrigger, 'tab creation control'],
       [settingsTrigger, 'workspace settings trigger'],
-      [page.getByTestId('source-flyout-toggle'), 'source toggle'],
+      [sourceToggle, 'source toggle'],
       [page.getByTestId('canvas-add-node-toolbar'), 'add-node toolbar'],
       [page.getByTestId('canvas-controls-toolbar'), 'canvas controls toolbar'],
     ] as const) {
@@ -1007,13 +1087,522 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   }
 }
 
+function historyItem(page: Page, revisionId: string): Locator {
+  return page.getByTestId(`history-revision-${revisionId}`);
+}
+
+function snapshotsMatch(left: YjsSessionSnapshot, right: YjsSessionSnapshot): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sourceAndLayoutMatch(
+  snapshot: YjsSessionSnapshot,
+  revision: Pick<DiagramRevision, 'mermaidText' | 'nodePositions'>,
+): boolean {
+  return snapshot.mermaidText === revision.mermaidText
+    && JSON.stringify(snapshot.nodePositions) === JSON.stringify(revision.nodePositions);
+}
+
+async function waitForHistoryRevision(
+  mcp: ModernMcpClient,
+  sessionId: string,
+  diagramId: string,
+  source: string,
+): Promise<{ history: { currentRevision: string; revisions: DiagramRevisionSummary[] }; revision: DiagramRevision }> {
+  let match: { history: { currentRevision: string; revisions: DiagramRevisionSummary[] }; revision: DiagramRevision } | null = null;
+  await expect.poll(async () => {
+    const history = await mcp.listDiagramHistory(sessionId, diagramId);
+    for (const summary of history.revisions) {
+      const revision = await mcp.readDiagramRevision(sessionId, diagramId, summary.id);
+      if (revision.mermaidText === source) {
+        match = { history, revision };
+        return true;
+      }
+    }
+    return false;
+  }, {
+    message: `Immutable history did not capture the requested Mermaid source for ${diagramId}.`,
+    timeout: 15_000,
+  }).toBe(true);
+  assert(match, `History search did not retain ${diagramId} even though its poll succeeded.`);
+  return match;
+}
+
+async function renderedSelectedNodeIds(page: Page): Promise<string[]> {
+  return page.locator('.react-flow__node.selected').evaluateAll((nodes) => nodes
+    .map((node) => node.getAttribute('data-id'))
+    .filter((id): id is string => Boolean(id))
+    .sort());
+}
+
+async function canonicalSelectedNodeIds(page: Page): Promise<string[]> {
+  const value = await page.getByTestId('diagram-canvas').getAttribute('data-selected-node-ids');
+  assert(value !== null, 'Diagram canvas did not expose canonical selected-node state.');
+  try {
+    const selected = JSON.parse(value);
+    assert(Array.isArray(selected) && selected.every((nodeId) => typeof nodeId === 'string'),
+      `Diagram canvas exposed invalid canonical selected-node state: ${value}.`);
+    return selected;
+  } catch {
+    throw new Error(`Diagram canvas exposed invalid canonical selected-node state: ${value}.`);
+  }
+}
+
+async function presenceSignature(page: Page): Promise<string[]> {
+  return page.getByTestId('presence-bar').locator('[title]').evaluateAll((avatars) => avatars
+    .map((avatar) => avatar.getAttribute('title') ?? '')
+    .filter(Boolean)
+    .sort());
+}
+
+type LocalWorkspaceSnapshot = {
+  activeTab: string;
+  camera: string;
+  presence: string[];
+  selected: string[];
+};
+
+async function snapshotLocalWorkspace(page: Page, label: string): Promise<LocalWorkspaceSnapshot> {
+  return {
+    activeTab: await activeTabName(page),
+    camera: await renderedCanvasCameraTransform(page, `${label} camera`),
+    presence: await presenceSignature(page),
+    selected: await canonicalSelectedNodeIds(page),
+  };
+}
+
+async function selectAndZoomHistoryDiagram(page: Page, index: number, label: string): Promise<void> {
+  const node = page.locator('.react-flow__node').nth(index);
+  await verifiedClick(page, node, `${label} selected node`);
+  const beforeZoom = await renderedCanvasTransform(page, `${label} before zoom`);
+  await verifiedClick(page, page.getByRole('button', { name: 'Zoom in', exact: true }), `${label} zoom in`);
+  await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeZoom, { timeout: 5_000 });
+}
+
+async function dragHistoryNode(page: Page, label: string, delta: { x: number; y: number }): Promise<string> {
+  const node = page.locator('.react-flow__node').first();
+  const nodeId = await node.getAttribute('data-id');
+  assert(nodeId, `${label} drag fixture is missing a React Flow node ID.`);
+  const box = await node.boundingBox();
+  assert(box, `${label} drag fixture has no node bounds.`);
+  await page.mouse.move(box.x + (box.width / 2), box.y + (box.height / 2));
+  await page.mouse.down();
+  await page.mouse.move(box.x + (box.width / 2) + delta.x, box.y + (box.height / 2) + delta.y, { steps: 8 });
+  await page.mouse.up();
+  return nodeId;
+}
+
+async function expectHistoryFlyoutSafety(
+  page: Page,
+  label: string,
+  revisionId: string,
+): Promise<void> {
+  const before = await snapshotAnchors(page, ANCHORS);
+  const beforeCamera = await waitForStableCanvasTransform(page, `${label} history camera`);
+  const toggle = page.getByTestId('activity-flyout-toggle');
+  await assertHitTarget(page, toggle, `${label} activity and history toggle`);
+  await assertContainedInViewport(page, toggle, `${label} activity and history toggle`);
+  await verifiedClick(page, toggle, `${label} activity and history toggle`);
+  const flyout = page.getByTestId('activity-flyout');
+  await flyout.waitFor({ state: 'visible', timeout: 15_000 });
+  await assertContainedInViewport(page, flyout, `${label} history flyout`);
+  const close = flyout.getByLabel('Close activity and history', { exact: true });
+  await waitForFocusedLocator(page, close, `${label} opening activity and history`);
+  const historySwitch = flyout.getByRole('button', { name: 'History', exact: true });
+  await assertHitTarget(page, historySwitch, `${label} history view toggle`);
+  const revision = historyItem(page, revisionId);
+  await revision.waitFor({ state: 'visible', timeout: 15_000 });
+  const preview = revision.getByRole('button', { name: 'Preview', exact: true });
+  const restore = revision.getByRole('button', { name: 'Restore', exact: true });
+  const isMobile = label.startsWith('mobile');
+  if (!isMobile) {
+    await assertHitTarget(page, preview, `${label} revision preview action`);
+    await assertHitTarget(page, restore, `${label} revision restore action`);
+  } else {
+    for (const [target, targetLabel] of [
+      [toggle, 'activity and history toggle'],
+      [close, 'close activity and history'],
+      [historySwitch, 'History switch'],
+      [preview, 'revision Preview'],
+      [restore, 'revision Restore'],
+    ] as const) {
+      await target.scrollIntoViewIfNeeded();
+      await assertHitTarget(page, target, `${label} ${targetLabel}`);
+      const bounds = await target.boundingBox();
+      assert(bounds !== null && bounds.height >= 44,
+        `${label} ${targetLabel} must provide a 44px touch target: ${JSON.stringify(bounds)}.`);
+    }
+  }
+  assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
+  assert(await renderedCanvasCameraTransform(page, `${label} history open camera`) === beforeCamera,
+    `${label} opening history changed the canvas camera.`);
+
+  if (isMobile) {
+    await preview.scrollIntoViewIfNeeded();
+  }
+  await verifiedClick(page, preview, `${label} revision preview action`);
+  const cancelPreview = flyout.getByRole('button', { name: 'Cancel preview', exact: true });
+  await cancelPreview.waitFor({ state: 'visible', timeout: 15_000 });
+  if (isMobile) {
+    await cancelPreview.scrollIntoViewIfNeeded();
+  }
+  await assertHitTarget(page, cancelPreview, `${label} cancel history preview`);
+  if (isMobile) {
+    const bounds = await cancelPreview.boundingBox();
+    assert(bounds !== null && bounds.height >= 44,
+      `${label} Cancel preview must provide a 44px touch target: ${JSON.stringify(bounds)}.`);
+  }
+  await verifiedClick(page, cancelPreview, `${label} cancel history preview`);
+  await cancelPreview.waitFor({ state: 'detached', timeout: 15_000 });
+  assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
+  assert(await renderedCanvasCameraTransform(page, `${label} history cancel camera`) === beforeCamera,
+    `${label} cancelling history preview changed the canvas camera.`);
+  await page.keyboard.press('Escape');
+  await flyout.waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, 'activity-flyout-toggle', `${label} closing history with Escape`);
+}
+
+async function expectCrossRendererHistoryPreviewCameraHandoff(
+  page: Page,
+  mcp: ModernMcpClient,
+  sessionId: string,
+  diagramId: string,
+): Promise<void> {
+  await mcp.writeLatest(sessionId, diagramId, HISTORY_GENERIC_SEQUENCE, 'Prepared generic history camera handoff');
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, HISTORY_GENERIC_SEQUENCE);
+  await closeFlyout(page, 'source');
+  await waitForCanvas(page, 'generic');
+  const genericHistory = await waitForHistoryRevision(mcp, sessionId, diagramId, HISTORY_GENERIC_SEQUENCE);
+
+  await mcp.writeLatest(sessionId, diagramId, HISTORY_CURRENT_FLOWCHART, 'Prepared live flowchart after generic history');
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, HISTORY_CURRENT_FLOWCHART);
+  await closeFlyout(page, 'source');
+  await waitForCanvas(page, 'flowchart');
+  await selectAndZoomHistoryDiagram(page, 0, 'cross-renderer history camera handoff');
+  const beforeCamera = await waitForStableCanvasTransform(page, 'cross-renderer history camera baseline');
+
+  await ensureFlyout(page, 'activity');
+  const genericRevision = historyItem(page, genericHistory.revision.id);
+  await genericRevision.waitFor({ state: 'visible', timeout: 15_000 });
+  await verifiedClick(page, genericRevision.getByRole('button', { name: 'Preview', exact: true }), 'cross-renderer historical generic preview');
+  await page.getByTestId('history-preview-notice').waitFor({ state: 'visible', timeout: 15_000 });
+  await waitForCanvas(page, 'generic');
+  assert(await waitForStableCanvasTransform(page, 'cross-renderer generic history preview camera') === beforeCamera,
+    'Cross-renderer history preview changed the active local camera.');
+
+  await verifiedClick(page, page.getByRole('button', { name: 'Cancel preview', exact: true }), 'cross-renderer historical preview cancel');
+  await page.getByTestId('history-preview-notice').waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForCanvas(page, 'flowchart');
+  assert(await waitForStableCanvasTransform(page, 'cross-renderer history cancel camera') === beforeCamera,
+    'Cancelling a generic historical preview into the live flowchart changed the active local camera.');
+  await closeFlyout(page, 'activity');
+}
+
+async function expectRevisionHistoryCollaboration(
+  browser: BrowserHarness,
+  baseUrl: string,
+  mcpUrl: string,
+  sessionId: string,
+  mcp: ModernMcpClient,
+): Promise<void> {
+  const diagramName = 'Revision history E2E';
+  const target = await mcp.createDiagramWithLatestRevision(sessionId, diagramName, HISTORY_PREVIOUS_FLOWCHART);
+  const observer = await openYjsSessionObserver(mcpUrl, sessionId);
+  let page: Page | null = null;
+  let peer: Page | null = null;
+  try {
+    const primary = await browser.newPage(DESKTOP_VIEWPORT);
+    const secondary = await browser.newPage(DESKTOP_VIEWPORT);
+    page = primary.page;
+    peer = secondary.page;
+    await Promise.all([
+      visitWorkspace(page, baseUrl, sessionId),
+      visitWorkspace(peer, baseUrl, sessionId),
+    ]);
+    await Promise.all([
+      selectTabByName(page, diagramName),
+      selectTabByName(peer, diagramName),
+    ]);
+    await Promise.all([
+      ensureSourceFlyoutOpen(page),
+      ensureSourceFlyoutOpen(peer),
+      waitForCanvas(page, 'flowchart'),
+      waitForCanvas(peer, 'flowchart'),
+    ]);
+    await Promise.all([
+      waitForSource(page, HISTORY_PREVIOUS_FLOWCHART),
+      waitForSource(peer, HISTORY_PREVIOUS_FLOWCHART),
+    ]);
+    await Promise.all([closeFlyout(page, 'source'), closeFlyout(peer, 'source')]);
+    await Promise.all([waitForCanvas(page, 'flowchart'), waitForCanvas(peer, 'flowchart')]);
+
+    const historical = await waitForHistoryRevision(mcp, sessionId, target.id, HISTORY_PREVIOUS_FLOWCHART);
+    assert(Object.keys(historical.revision.nodePositions).length === 0,
+      `The requested source-only revision unexpectedly included a layout: ${JSON.stringify(historical.revision.nodePositions)}.`);
+    assert(historical.history.revisions.some((revision) => revision.id === historical.revision.id),
+      'MCP listDiagramHistory did not expose the revision that readDiagramRevision returned.');
+
+    const movedNodeId = await dragHistoryNode(page, 'history baseline', { x: 102, y: 38 });
+    await observer.waitFor(
+      (current) => Object.hasOwn(current.snapshot(target.id).nodePositions, movedNodeId),
+      'the browser layout checkpoint before the current revision',
+    );
+    await mcp.writeLatest(sessionId, target.id, HISTORY_CURRENT_FLOWCHART, 'Prepared current history revision');
+    await Promise.all([
+      ensureSourceFlyoutOpen(page),
+      ensureSourceFlyoutOpen(peer),
+      waitForSource(page, HISTORY_CURRENT_FLOWCHART),
+      waitForSource(peer, HISTORY_CURRENT_FLOWCHART),
+    ]);
+    await Promise.all([closeFlyout(page, 'source'), closeFlyout(peer, 'source')]);
+    await Promise.all([waitForCanvas(page, 'flowchart'), waitForCanvas(peer, 'flowchart')]);
+    await selectAndZoomHistoryDiagram(page, 0, 'primary history local state');
+    await selectAndZoomHistoryDiagram(peer, 1, 'peer history local state');
+    await expect.poll(async () => (await presenceSignature(page)).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+    await expect.poll(async () => (await presenceSignature(peer)).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+
+    const localBeforePreview = await snapshotLocalWorkspace(page, 'primary history preview baseline');
+    const peerBeforePreview = await snapshotLocalWorkspace(peer, 'peer history preview baseline');
+    const renderedSelectionBeforePreview = await renderedSelectedNodeIds(page);
+    const sharedBeforePreview = observer.snapshot(target.id);
+    const previewTracker = observer.trackSnapshot(target.id);
+    const desktopAnchors = await snapshotAnchors(page, ANCHORS);
+    const currentSvgBeforePreview = await page.locator('.diagram-canvas-svg svg').innerHTML();
+
+    await ensureFlyout(page, 'activity');
+    const historicalItem = historyItem(page, historical.revision.id);
+    await historicalItem.waitFor({ state: 'visible', timeout: 15_000 });
+    await verifiedClick(page, historicalItem.getByRole('button', { name: 'Preview', exact: true }), 'desktop immutable history preview');
+    await page.getByTestId('history-preview-notice').waitFor({ state: 'visible', timeout: 15_000 });
+    await expect.poll(async () => page.locator('.diagram-canvas-svg svg').innerHTML(), {
+      message: 'History preview did not replace the live Mermaid SVG with the requested immutable revision.',
+      timeout: 15_000,
+    }).not.toBe(currentSvgBeforePreview);
+    assert(snapshotsMatch(sharedBeforePreview, observer.snapshot(target.id)), 'History preview wrote canonical Yjs state.');
+    const localDuringPreview = await snapshotLocalWorkspace(page, 'primary during history preview');
+    const peerDuringPreview = await snapshotLocalWorkspace(peer, 'peer during history preview');
+    assert(JSON.stringify(localBeforePreview) === JSON.stringify(localDuringPreview),
+      `History preview changed local active tab, selection, camera, or Awareness presence: before=${JSON.stringify(localBeforePreview)} after=${JSON.stringify(localDuringPreview)}.`);
+    assert(JSON.stringify(peerBeforePreview) === JSON.stringify(peerDuringPreview),
+      `History preview changed the peer active tab, selection, camera, or Awareness presence: before=${JSON.stringify(peerBeforePreview)} after=${JSON.stringify(peerDuringPreview)}.`);
+    assertAnchorsStable(desktopAnchors, await snapshotAnchors(page, ANCHORS));
+    assert(await renderedCanvasCameraTransform(page, 'history preview camera') === localBeforePreview.camera,
+      'History preview changed the primary canvas camera.');
+    await verifiedClick(page, page.getByRole('button', { name: 'Cancel preview', exact: true }), 'desktop immutable history cancel preview');
+    await page.getByTestId('history-preview-notice').waitFor({ state: 'detached', timeout: 15_000 });
+    await waitForCanvas(page, 'flowchart');
+    await expect.poll(() => renderedSelectedNodeIds(page), {
+      message: 'Cancelling history preview did not restore React Flow selection chrome.',
+      timeout: 15_000,
+    }).toEqual(renderedSelectionBeforePreview);
+    await previewTracker.expectUnchangedFor(HISTORY_NEGATIVE_OBSERVATION_MS, 'detached history preview and cancellation');
+    previewTracker.destroy();
+    assert(snapshotsMatch(sharedBeforePreview, observer.snapshot(target.id)), 'Cancelling history preview changed canonical Yjs state.');
+    const localAfterPreviewCancellation = await snapshotLocalWorkspace(page, 'primary after history preview cancellation');
+    assert(JSON.stringify(localBeforePreview) === JSON.stringify(localAfterPreviewCancellation),
+      `Cancelling history preview changed primary local state: before=${JSON.stringify(localBeforePreview)} after=${JSON.stringify(localAfterPreviewCancellation)}.`);
+    assert(JSON.stringify(peerBeforePreview) === JSON.stringify(await snapshotLocalWorkspace(peer, 'peer after history preview cancellation')),
+      'Cancelling history preview changed peer local state.');
+
+    const historyBeforeRestore = await mcp.listDiagramHistory(sessionId, target.id);
+    const activityCountBeforeRestore = observer.snapshot(target.id).activity.length;
+    const restoreTracker = observer.trackSnapshot(target.id);
+    const serverOrigin = new URL(mcpUrl).origin;
+    const currentPath = `/api/sessions/${encodeURIComponent(sessionId)}/diagrams/${encodeURIComponent(target.id)}`;
+    const restorePath = `${currentPath}/history/${encodeURIComponent(historical.revision.id)}/restore`;
+    const restoreRequests: Array<{ method: string; path: string }> = [];
+    const recordRestoreRequest = (request: { method: () => string; url: () => string }) => {
+      const url = new URL(request.url());
+      if (url.origin === serverOrigin && (url.pathname === currentPath || url.pathname === restorePath)) {
+        restoreRequests.push({ method: request.method(), path: url.pathname });
+      }
+    };
+    page.on('request', recordRestoreRequest);
+    try {
+      await verifiedClick(page, historicalItem.getByRole('button', { name: 'Restore', exact: true }), 'desktop immutable history restore');
+      const confirmation = page.getByTestId('history-restore-confirmation');
+      await confirmation.waitFor({ state: 'visible', timeout: 15_000 });
+      await verifiedClick(page, confirmation.getByRole('button', { name: 'Confirm restore', exact: true }), 'confirm immutable history restore');
+      await observer.waitFor(
+        (current) => sourceAndLayoutMatch(current.snapshot(target.id), historical.revision),
+        'the restored immutable source and layout in Yjs',
+      );
+      await Promise.all([waitForCanvas(page, 'flowchart'), waitForCanvas(peer, 'flowchart')]);
+      await expect.poll(() => restoreRequests.filter((request) => request.path === currentPath && request.method === 'GET').length, {
+        message: `Confirmed restore did not issue one current-head GET: ${JSON.stringify(restoreRequests)}.`,
+        timeout: 15_000,
+      })
+        .toBe(1);
+      await expect.poll(() => restoreRequests.filter((request) => request.path === restorePath && request.method === 'POST').length, {
+        message: `Confirmed restore did not issue one restore POST: ${JSON.stringify(restoreRequests)}.`,
+        timeout: 15_000,
+      })
+        .toBe(1);
+    } finally {
+      page.off('request', recordRestoreRequest);
+    }
+    assert(JSON.stringify(restoreRequests) === JSON.stringify([
+      { method: 'GET', path: currentPath },
+      { method: 'POST', path: restorePath },
+    ]), `Confirmed restore did not perform exactly one fresh GET followed by one POST: ${JSON.stringify(restoreRequests)}.`);
+    await restoreTracker.expectUnchangedFor(HISTORY_NEGATIVE_OBSERVATION_MS, 'the post-restore convergence window');
+    const restoreAppearances = getYjsSourceLayoutTransitions(restoreTracker.appearances)
+      .filter((appearance) => sourceAndLayoutMatch(appearance.snapshot, historical.revision));
+    restoreTracker.destroy();
+    assert(restoreAppearances.length === 1,
+      `Restored source/layout appeared ${restoreAppearances.length} times in the Yjs observer: ${JSON.stringify(restoreAppearances)}.`);
+    const historyAfterRestore = await mcp.listDiagramHistory(sessionId, target.id);
+    assert(historyAfterRestore.revisions.length === historyBeforeRestore.revisions.length + 1,
+      'Confirmed restore did not create exactly one new immutable history revision.');
+    const newestRevision = historyAfterRestore.revisions[0];
+    assert(newestRevision?.action === 'restored' && newestRevision.restoredFromRevisionId === historical.revision.id,
+      `Confirmed restore did not record immutable restore provenance: ${JSON.stringify(newestRevision)}.`);
+    const restoredCurrent = await mcp.readDiagram(sessionId, target.id);
+    assert(restoredCurrent.mermaidText === historical.revision.mermaidText
+      && restoredCurrent.revision === historyAfterRestore.currentRevision,
+    'MCP current head did not match the confirmed UI restore.');
+    const activityAfterRestore = observer.snapshot(target.id).activity;
+    assert(activityAfterRestore.length === activityCountBeforeRestore + 1
+      && activityAfterRestore.at(-1)?.action === 'restored'
+      && activityAfterRestore.at(-1)?.restoredFromRevisionId === historical.revision.id,
+    `Confirmed restore did not append exactly one linked activity item: ${JSON.stringify(activityAfterRestore.slice(-2))}.`);
+    await saveScreenshot(page, 'issue-17-history-restored');
+
+    await closeFlyout(page, 'activity');
+    await ensureFlyout(page, 'activity');
+    const staleItem = historyItem(page, historical.revision.id);
+    await staleItem.waitFor({ state: 'visible', timeout: 15_000 });
+    await verifiedClick(page, staleItem.getByRole('button', { name: 'Restore', exact: true }), 'stale layout-only restore candidate');
+    const staleConfirmation = page.getByTestId('history-restore-confirmation');
+    await staleConfirmation.waitFor({ state: 'visible', timeout: 15_000 });
+    const staleRestoreRequests: Array<{ method: string; path: string }> = [];
+    const recordStaleRestoreRequest = (request: { method: () => string; url: () => string }) => {
+      const url = new URL(request.url());
+      if (url.origin === serverOrigin && (url.pathname === currentPath || url.pathname === restorePath)) {
+        staleRestoreRequests.push({ method: request.method(), path: url.pathname });
+      }
+    };
+    const historyBeforeStaleRestore = await mcp.listDiagramHistory(sessionId, target.id);
+    const restoredActivityCountBeforeStale = observer.snapshot(target.id).activity.filter((event) => event.action === 'restored').length;
+    const staleTracker = observer.trackSnapshot(target.id);
+    let routedStaleRestore = false;
+    let headAfterPeerLayout: { mermaidText: string; revision: string } | null = null;
+    page.on('request', recordStaleRestoreRequest);
+    await page.route(`${serverOrigin}${restorePath}`, async (route) => {
+      if (routedStaleRestore) {
+        await route.continue();
+        return;
+      }
+      routedStaleRestore = true;
+      const peerMovedNodeId = await dragHistoryNode(peer, 'layout-only peer stale-restore race', { x: -86, y: 52 });
+      await observer.waitFor(
+        (current) => Object.hasOwn(current.snapshot(target.id).nodePositions, peerMovedNodeId),
+        'the peer layout-only change between restore read and write',
+      );
+      const currentHead = await mcp.readDiagram(sessionId, target.id);
+      headAfterPeerLayout = { mermaidText: currentHead.mermaidText, revision: currentHead.revision };
+      await route.continue();
+    });
+    try {
+      const staleRestoreResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.origin === serverOrigin
+          && url.pathname === restorePath
+          && response.request().method() === 'POST';
+      }, { timeout: 15_000 });
+      await verifiedClick(page, staleConfirmation.getByRole('button', { name: 'Confirm restore', exact: true }), 'confirm stale layout-only restore');
+      const response = await staleRestoreResponse;
+      assert(response.status() === 409, `Stale restore response was ${response.status()} instead of 409.`);
+      await expect.poll(() => staleRestoreRequests.filter((request) => request.path === restorePath && request.method === 'POST').length, {
+        message: `Stale restore did not issue one restore POST: ${JSON.stringify(staleRestoreRequests)}.`,
+        timeout: 15_000,
+      })
+        .toBe(1);
+    } finally {
+      await page.unroute(`${serverOrigin}${restorePath}`);
+      page.off('request', recordStaleRestoreRequest);
+    }
+    assert(routedStaleRestore, 'The stale-restore test did not interpose the layout-only peer update between GET and POST.');
+    assert(JSON.stringify(staleRestoreRequests) === JSON.stringify([
+      { method: 'GET', path: currentPath },
+      { method: 'POST', path: restorePath },
+    ]), `Stale restore did not use one fresh GET and one POST: ${JSON.stringify(staleRestoreRequests)}.`);
+    assert(headAfterPeerLayout !== null, 'The peer layout-only update did not provide a current head for stale-restore verification.');
+    const currentAfterStaleRestore = await mcp.readDiagram(sessionId, target.id);
+    assert(currentAfterStaleRestore.revision === headAfterPeerLayout.revision
+      && currentAfterStaleRestore.mermaidText === headAfterPeerLayout.mermaidText,
+    'A stale restore changed the current head after its 409 response.');
+    const staleSnapshot = observer.snapshot(target.id);
+    assert(staleSnapshot.mermaidText === HISTORY_PREVIOUS_FLOWCHART
+      && JSON.stringify(staleSnapshot.nodePositions) !== JSON.stringify(historical.revision.nodePositions),
+    `A layout-only peer change did not leave stale restore as a no-op: ${JSON.stringify(staleSnapshot)}.`);
+    await staleTracker.expectUnchangedFor(HISTORY_NEGATIVE_OBSERVATION_MS, 'the stale-restore no-op window');
+    staleTracker.destroy();
+    const historyAfterStaleRestore = await mcp.listDiagramHistory(sessionId, target.id);
+    const restoredActivityCountAfterStale = observer.snapshot(target.id).activity.filter((event) => event.action === 'restored').length;
+    assert(historyAfterStaleRestore.revisions.filter((revision) => revision.action === 'restored').length
+      === historyBeforeStaleRestore.revisions.filter((revision) => revision.action === 'restored').length,
+    'A stale restore appended an immutable restored revision.');
+    assert(restoredActivityCountAfterStale === restoredActivityCountBeforeStale,
+      'A stale restore appended an activity event instead of remaining a no-op.');
+
+    await closeFlyout(page, 'activity');
+    await expectHistoryFlyoutSafety(page, 'desktop', historical.revision.id);
+    for (const [label, viewport] of [
+      ['tablet', TABLET_VIEWPORT],
+      ['mobile-390', MOBILE_VIEWPORT],
+      ['mobile-320', NARROW_MOBILE_VIEWPORT],
+    ] as const) {
+      const { page: responsivePage } = await browser.newPage(viewport);
+      await visitWorkspace(responsivePage, baseUrl, sessionId);
+      await selectTabByName(responsivePage, diagramName);
+      await waitForCanvas(responsivePage, 'flowchart');
+      await expectHistoryFlyoutSafety(responsivePage, label, historical.revision.id);
+    }
+
+    await expectCrossRendererHistoryPreviewCameraHandoff(page, mcp, sessionId, target.id);
+
+    const invalidTracker: YjsSessionSnapshotHistory = observer.trackSnapshot(target.id);
+    await ensureSourceFlyoutOpen(peer);
+    await replaceSource(peer, HISTORY_INVALID_FLOWCHART);
+    await waitForInvalidPreview(peer);
+    await observer.waitFor(
+      (current) => current.snapshot(target.id).mermaidText === HISTORY_INVALID_FLOWCHART,
+      'the temporary invalid Mermaid source',
+    );
+    await ensureSourceFlyoutOpen(page);
+    await waitForSource(page, HISTORY_INVALID_FLOWCHART);
+    await invalidTracker.expectUnchangedFor(HISTORY_NEGATIVE_OBSERVATION_MS, 'the invalid Mermaid transient observation window');
+    invalidTracker.destroy();
+    assert(observer.snapshot(target.id).mermaidText === HISTORY_INVALID_FLOWCHART,
+      'Temporary invalid Mermaid source auto-reverted instead of remaining the canonical current source.');
+    await saveScreenshot(peer, 'issue-17-invalid-transient');
+  } finally {
+    observer.destroy();
+  }
+}
+
 async function validateWorkspaceUx(): Promise<void> {
   const results: string[] = [];
+  const slice = process.env.ARIELCHARTS_E2E_SLICE;
+  if (slice !== undefined && slice !== 'history') {
+    throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history" or no slice.`);
+  }
   await withOwnedServices(async ({ baseUrl, mcpUrl }) => {
     const browser = await launchBrowserHarness();
     const sessionId = `e2e-workspace-ux-${Date.now()}`;
     const mcp = new ModernMcpClient(mcpUrl, baseUrl);
     try {
+      if (slice === 'history') {
+        const { page: seedPage } = await browser.newPage(DESKTOP_VIEWPORT);
+        await visitWorkspace(seedPage, baseUrl, sessionId);
+        await expectRevisionHistoryCollaboration(browser, baseUrl, mcpUrl, sessionId, mcp);
+        record(results, 'immutable active-tab history preview, restore, stale layout guard, invalid-source persistence, and responsive history controls');
+        return;
+      }
+
       const { page } = await browser.newPage(DESKTOP_VIEWPORT);
       await visitWorkspace(page, baseUrl, sessionId);
       await expectThemeContract(page);
@@ -1057,6 +1646,9 @@ async function validateWorkspaceUx(): Promise<void> {
       await expectRemoteUpdateWithoutAnchorJump(page, mcp, sessionId, diagramName);
       record(results, 'remote update leaves desktop anchors stable');
       await saveScreenshot(page, 'workspace-ux-desktop');
+
+      await expectRevisionHistoryCollaboration(browser, baseUrl, mcpUrl, sessionId, mcp);
+      record(results, 'immutable active-tab history preview, restore, stale layout guard, invalid-source persistence, and responsive history controls');
 
       const { page: activityFitPage } = await browser.newPage(ACTIVITY_FIT_VIEWPORT);
       await visitWorkspace(activityFitPage, baseUrl, sessionId);

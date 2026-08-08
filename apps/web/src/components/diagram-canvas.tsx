@@ -40,12 +40,12 @@ import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLink
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
 import {
   applyControlledNodeChanges,
-  applyControlledSelectionChanges,
   createControlledNodeComposer,
   reconcileControlledNodeRuntime,
   releaseControlledNodeRuntime,
   type ControlledNodeRuntime,
 } from '../lib/reactflow-controlled-node-adapter';
+import { reconcileReactFlowViewport } from '../lib/reactflow-viewport-control';
 import {
   extractMermaidPresentation,
   getCanvasEdgeMarker,
@@ -54,7 +54,7 @@ import {
   type MermaidItemPresentation,
   type MermaidPresentation,
 } from '../lib/mermaid-presentation';
-import { getRendererKind, shouldFitRendererKindTransition } from '../lib/renderer-camera-policy';
+import { getRendererKind, shouldFitRendererKindTransition, shouldResetInitialCameraFit } from '../lib/renderer-camera-policy';
 import {
   buildSvgHitMap,
   getBoundsCenter,
@@ -73,6 +73,7 @@ export interface DiagramCanvasProps {
   interactionMode?: 'select' | 'connect';
   isFlowchart?: boolean;
   nodePositions?: DiagramNodePositions;
+  preserveCamera?: boolean;
   readOnly?: boolean;
   selectedNodeIds?: string[];
   svg: string;
@@ -91,6 +92,8 @@ export interface DiagramCanvasProps {
   onNodeDragStart?: (positions: DiagramNodePositions) => boolean | void;
   onNodeDragStop?: (positions: DiagramNodePositions) => void;
   onNodePositionsChange?: (positions: DiagramNodePositions, mode?: NodePositionsSyncMode) => void;
+  onResetSharedLayout?: () => void;
+  onRenderSettled?: () => void;
   onSelectedNodeIdsChange?: (nodeIds: string[]) => void;
   onUngroupNodes?: (subgraphId: string) => void;
 }
@@ -177,6 +180,26 @@ const CONNECTION_TYPE_OPTIONS: Array<{ label: string; value: DiagramLinkType }> 
   { label: 'circle', value: 'arrow_circle' },
   { label: 'cross', value: 'arrow_cross' },
 ];
+
+export function getNodeClickSelection(current: readonly string[], nodeId: string, shiftKey: boolean): string[] {
+  if (!shiftKey) {
+    return [nodeId];
+  }
+  return current.includes(nodeId)
+    ? current.filter((id) => id !== nodeId)
+    : [...current, nodeId];
+}
+
+export function getCanonicalSelectionAttribute(nodeIds: readonly string[]): string {
+  return JSON.stringify([...nodeIds].sort((left, right) => left.localeCompare(right)));
+}
+
+export function getRendererInteractionMode(
+  current: 'select' | 'connect',
+  isFlowchart: boolean,
+): 'select' | 'connect' {
+  return isFlowchart ? current : 'select';
+}
 const TOOLBAR_BUTTON_STYLE: CSSProperties = {
   alignItems: 'center',
   background: 'transparent',
@@ -198,6 +221,7 @@ export function DiagramCanvas({
   interactionMode,
   isFlowchart = true,
   nodePositions,
+  preserveCamera = false,
   onAddEdge,
   onAddNode,
   onAddConnectedNode,
@@ -212,6 +236,8 @@ export function DiagramCanvas({
   onNodeDragStart,
   onNodeDragStop,
   onNodePositionsChange,
+  onResetSharedLayout,
+  onRenderSettled,
   onSelectedNodeIdsChange,
   onUngroupNodes,
   readOnly = false,
@@ -580,12 +606,15 @@ export function DiagramCanvas({
   };
 
   const setSelection = useCallback((nodeIds: string[]) => {
+    if (readOnly) {
+      return;
+    }
     selectionRef.current = nodeIds;
     onSelectedNodeIdsChange?.(nodeIds);
     if (!isControlledSelection) {
       setInternalSelection(nodeIds);
     }
-  }, [isControlledSelection, onSelectedNodeIdsChange]);
+  }, [isControlledSelection, onSelectedNodeIdsChange, readOnly]);
 
   const setMode = useCallback((nextMode: 'select' | 'connect') => {
     if (!isFlowchart && nextMode !== 'select') {
@@ -733,20 +762,21 @@ export function DiagramCanvas({
       setHitMap(buildSvgHitMap(svgElement, { nodeIds: expectedNodeIds, subgraphIds: expectedSubgraphIds }));
       setMermaidPresentation(extractMermaidPresentation(svgElement, expectedNodeIds));
       setRenderedSvgRevision((revision) => revision + 1);
+      onRenderSettled?.();
     });
 
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [graph?.nodes, graph?.subgraphs, svg]);
+  }, [graph?.nodes, graph?.subgraphs, onRenderSettled, svg]);
 
   useEffect(() => {
     const previousRendererKind = previousRendererKindRef.current;
     previousRendererKindRef.current = rendererKind;
-    if (shouldFitRendererKindTransition(previousRendererKind, rendererKind)) {
+    if (!preserveCamera && shouldFitRendererKindTransition(previousRendererKind, rendererKind)) {
       pendingRendererKindFitAfterRenderRef.current = renderedSvgRevision;
     }
-  }, [rendererKind, renderedSvgRevision]);
+  }, [preserveCamera, rendererKind, renderedSvgRevision]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -815,10 +845,10 @@ export function DiagramCanvas({
   }, [editingEdgeIdentity, editingEdgeIndex, selectedEdgeIdentity, selectedEdgeIndex]);
 
   useEffect(() => {
-    if (orderedNodeIds.length === 0 && graph) {
+    if (shouldResetInitialCameraFit(preserveCamera, orderedNodeIds.length, graph !== null)) {
       hasAutoFitInitialRenderRef.current = false;
     }
-  }, [graph, orderedNodeIds.length]);
+  }, [graph, orderedNodeIds.length, preserveCamera]);
 
   useEffect(() => {
     if (!orderedNodeIds.length) {
@@ -832,23 +862,23 @@ export function DiagramCanvas({
   }, [focusedNodeId, orderedNodeIds]);
 
   useEffect(() => {
-    if (!graphBounds || !svg || hasAutoFitInitialRenderRef.current) {
+    if (preserveCamera || !graphBounds || !svg || hasAutoFitInitialRenderRef.current) {
       return;
     }
 
     hasAutoFitInitialRenderRef.current = true;
     fitBoundsToViewport(graphBounds, false);
-  }, [fitBoundsToViewport, graphBounds, svg]);
+  }, [fitBoundsToViewport, graphBounds, preserveCamera, svg]);
 
   useEffect(() => {
     const fitAfterRevision = pendingRendererKindFitAfterRenderRef.current;
-    if (fitAfterRevision === null || renderedSvgRevision <= fitAfterRevision || !graphBounds || !svg) {
+    if (preserveCamera || fitAfterRevision === null || renderedSvgRevision <= fitAfterRevision || !graphBounds || !svg) {
       return;
     }
 
     pendingRendererKindFitAfterRenderRef.current = null;
     fitBoundsToViewport(graphBounds, false);
-  }, [fitBoundsToViewport, graphBounds, renderedSvgRevision, svg]);
+  }, [fitBoundsToViewport, graphBounds, preserveCamera, renderedSvgRevision, svg]);
 
   useEffect(() => {
     if (!animateTransform) {
@@ -869,8 +899,7 @@ export function DiagramCanvas({
       return;
     }
 
-    setSelection([]);
-    setMode('select');
+    setMode(getRendererInteractionMode(mode, isFlowchart));
     setToolbarOpen(false);
     setShapePickerOpen(false);
     setEditingNodeId(null);
@@ -883,7 +912,7 @@ export function DiagramCanvas({
     connectionStartNodeIdRef.current = null;
     setConnectionPreviewSourceId(null);
     setShowGroupPrompt(false);
-  }, [isFlowchart, setMode, setSelection]);
+  }, [isFlowchart, mode, setMode]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1085,13 +1114,7 @@ export function DiagramCanvas({
 
   const handleNodeClick = useCallback((nodeId: string, shiftKey: boolean) => {
     const currentSelection = selectionRef.current;
-    if (shiftKey) {
-      setSelection(currentSelection.includes(nodeId)
-        ? currentSelection.filter((id) => id !== nodeId)
-        : [...currentSelection, nodeId]);
-    } else {
-      setSelection([nodeId]);
-    }
+    setSelection(getNodeClickSelection(currentSelection, nodeId, shiftKey));
     handleNodeActivation(nodeId);
   }, [handleNodeActivation, setSelection]);
 
@@ -1137,18 +1160,13 @@ export function DiagramCanvas({
   }, [canEditStructure, onAddEdge, pendingEdge, selectedConnectionType, setMode]);
 
   const handleFlowNodesChange = useCallback<OnNodesChange<MermaidFlowNode>>((changes) => {
-    const currentSelection = selectionRef.current;
-    const nextSelection = applyControlledSelectionChanges(currentSelection, changes);
-    if (nextSelection !== currentSelection) {
-      setSelection(nextSelection);
-    }
     setFlowNodeRuntime((current) => applyControlledNodeChanges(
       flowNodes,
       current,
       changes,
       activeDragNodeIdsRef.current,
     ));
-  }, [flowNodes, setSelection]);
+  }, [flowNodes]);
 
   const handleFlowNodeDragStart = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node, nodes) => {
     if (!canEditStructure) {
@@ -1347,6 +1365,7 @@ export function DiagramCanvas({
     <div
       aria-label="Interactive diagram canvas"
       className={className}
+      data-selected-node-ids={getCanonicalSelectionAttribute(selection)}
       data-testid="diagram-canvas"
       onClick={(event) => {
         if (!(event.target instanceof Element)) return;
@@ -1517,7 +1536,7 @@ export function DiagramCanvas({
               }}
               onNodeClick={(event, node) => {
                 event.stopPropagation();
-                handleNodeActivation(node.id);
+                handleNodeClick(node.id, event.shiftKey);
               }}
               onNodeDoubleClick={(event, node) => {
                 event.stopPropagation();
@@ -1532,11 +1551,7 @@ export function DiagramCanvas({
               onNodesChange={handleFlowNodesChange}
               onMove={(_event, nextViewport) => {
                 setAnimateTransform(false);
-                setViewport((current) => ({
-                  panX: nextViewport.x,
-                  panY: nextViewport.y,
-                  zoom: current.zoom,
-                }));
+                setViewport((current) => reconcileReactFlowViewport(current, nextViewport));
               }}
               onPaneClick={handleCanvasClick}
               panOnDrag={false}
@@ -1852,7 +1867,13 @@ export function DiagramCanvas({
             }}
           >
             {isFlowchart && hasPersistedLayout ? (
-              <ToolbarButton label="Reset shared layout to Mermaid" onClick={() => { setNodePositions(() => ({}), 'replace'); }}>
+              <ToolbarButton label="Reset shared layout to Mermaid" onClick={() => {
+                if (onResetSharedLayout) {
+                  onResetSharedLayout();
+                  return;
+                }
+                setNodePositions(() => ({}), 'replace');
+              }}>
                 <RotateCcw size={16} />
               </ToolbarButton>
             ) : null}

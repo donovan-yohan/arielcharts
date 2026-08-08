@@ -25,11 +25,12 @@ export interface ActivityEvent {
     name: string;
     type: ParticipantType;
   };
-  action: 'joined' | 'left' | 'edited' | 'replaced' | 'created' | 'renamed' | 'deleted';
+  action: 'joined' | 'left' | 'edited' | 'replaced' | 'created' | 'renamed' | 'deleted' | 'restored';
   detail?: string;
   diagram_id?: string;
   base_revision?: string;
   result_revision?: string;
+  restored_from_revision_id?: string;
 }
 
 export interface DiagramSummary {
@@ -40,6 +41,40 @@ export interface DiagramSummary {
 
 export interface Diagram extends DiagramSummary {
   mermaid_text: string;
+}
+
+export interface DiagramNodePosition {
+  x: number;
+  y: number;
+}
+
+export type DiagramNodePositions = Record<string, DiagramNodePosition>;
+
+export type DiagramRevisionOrigin = 'browser' | 'mcp' | 'system';
+
+export type DiagramRevisionAction = ActivityEvent['action'] | 'baseline' | 'checkpoint';
+
+export interface DiagramRevisionSummary {
+  revision_id: string;
+  sequence: number;
+  diagram_id: string;
+  name: string;
+  timestamp: number;
+  actor: {
+    name: string;
+    type: ParticipantType;
+  };
+  origin: DiagramRevisionOrigin;
+  action: DiagramRevisionAction;
+  activity_id?: string;
+  base_revision?: string;
+  result_revision?: string;
+  restored_from_revision_id?: string;
+}
+
+export interface DiagramRevision extends DiagramRevisionSummary {
+  mermaid_text: string;
+  node_positions: DiagramNodePositions;
 }
 
 export interface SessionSummary {
@@ -79,6 +114,43 @@ export interface ListDiagramsOutput {
   participants: Participant[];
   revision: string;
 }
+
+export interface ListDiagramHistoryInput {
+  session_id: string;
+  diagram_id: string;
+}
+
+export interface ListDiagramHistoryOutput {
+  revisions: DiagramRevisionSummary[];
+  current_revision: string;
+}
+
+export interface ReadDiagramRevisionInput {
+  session_id: string;
+  diagram_id: string;
+  revision_id: string;
+}
+
+export type ReadDiagramRevisionOutput = DiagramRevision;
+
+export interface RestoreDiagramRevisionInput {
+  session_id: string;
+  diagram_id: string;
+  revision_id: string;
+  expected_revision: string;
+}
+
+export type RestoreDiagramRevisionResult =
+  | {
+    status: 'restored';
+    diagram: Diagram;
+    revision: DiagramRevisionSummary;
+  }
+  | {
+    status: 'stale';
+    current: Diagram;
+    current_revision: string;
+  };
 
 export type CreateDiagramInput = {
   session_id: string;

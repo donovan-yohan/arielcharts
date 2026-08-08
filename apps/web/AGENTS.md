@@ -19,6 +19,12 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
   currently source-editable with flowchart mutation controls withheld.
 - Source and activity flyouts overlay the canvas without moving outer anchors
   or camera state. Closing returns focus to the originating toggle.
+- Revision history is read from the server-private journal through
+  `src/lib/history-api.ts`. A history preview is a detached local render keyed
+  by revision ID: it must not write Yjs, activity, Awareness, active-tab,
+  selection, or camera state. Restore always reads the current server head
+  immediately before its one explicit revision-checked request; stale restore
+  is never retried automatically.
 - Shell semantic tokens are separate from Mermaid source-owned item styles.
   Authored item colors override the neutral accessible fallbacks.
 

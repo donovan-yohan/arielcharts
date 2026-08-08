@@ -5,6 +5,7 @@ import * as Y from 'yjs';
 const DIAGRAMS_KEY = 'diagrams';
 const DIAGRAM_MERMAID_TEXT_KEY = 'mermaid';
 const DIAGRAM_NODE_POSITIONS_KEY = 'nodePositions';
+const ACTIVITY_KEY = 'activity';
 
 export type YjsNodePosition = {
   x: number;
@@ -12,9 +13,30 @@ export type YjsNodePosition = {
 };
 
 export type YjsSessionSnapshot = {
+  activity: Array<{
+    action: string;
+    actorName: string;
+    actorType: string;
+    detail: string | null;
+    diagramId: string | null;
+    id: string;
+    resultRevision: string | null;
+    restoredFromRevisionId: string | null;
+  }>;
   exists: boolean;
   mermaidText: string | null;
   nodePositions: Record<string, YjsNodePosition>;
+};
+
+export type YjsSessionSnapshotAppearance = {
+  snapshot: YjsSessionSnapshot;
+  update: number;
+};
+
+export type YjsSessionSnapshotHistory = {
+  readonly appearances: readonly YjsSessionSnapshotAppearance[];
+  destroy(): void;
+  expectUnchangedFor(durationMs: number, description: string): Promise<void>;
 };
 
 export type YjsNodePositionAppearance = {
@@ -34,6 +56,7 @@ export type YjsSessionObserver = {
   destroy(): void;
   hasNodePosition(diagramId: string, nodeId: string): boolean;
   snapshot(diagramId: string): YjsSessionSnapshot;
+  trackSnapshot(diagramId: string): YjsSessionSnapshotHistory;
   trackNodePosition(diagramId: string, nodeId: string): YjsNodePositionHistory;
   waitFor(
     predicate: (observer: YjsSessionObserver) => boolean,
@@ -55,6 +78,26 @@ function isNodePosition(value: unknown): value is YjsNodePosition {
   return Number.isFinite(candidate.x) && Number.isFinite(candidate.y);
 }
 
+function activitySnapshot(doc: Y.Doc) {
+  return doc.getArray<unknown>(ACTIVITY_KEY).toArray().flatMap((value) => {
+    if (!value || typeof value !== 'object') return [];
+    const event = value as Record<string, unknown>;
+    const actor = event.actor && typeof event.actor === 'object' ? event.actor as Record<string, unknown> : {};
+    const id = typeof event.id === 'string' ? event.id : null;
+    if (!id) return [];
+    return [{
+      action: typeof event.action === 'string' ? event.action : '',
+      actorName: typeof actor.name === 'string' ? actor.name : '',
+      actorType: typeof actor.type === 'string' ? actor.type : '',
+      detail: typeof event.detail === 'string' ? event.detail : null,
+      diagramId: typeof event.diagram_id === 'string' ? event.diagram_id : null,
+      id,
+      resultRevision: typeof event.result_revision === 'string' ? event.result_revision : null,
+      restoredFromRevisionId: typeof event.restored_from_revision_id === 'string' ? event.restored_from_revision_id : null,
+    }];
+  });
+}
+
 export function getYjsWebsocketUrl(mcpUrl: string): string {
   const url = new URL(mcpUrl);
   if (url.protocol === 'http:') url.protocol = 'ws:';
@@ -66,23 +109,109 @@ export function getYjsWebsocketUrl(mcpUrl: string): string {
   return url.toString().replace(/\/$/u, '');
 }
 
-export function readYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessionSnapshot {
-  const diagram = diagramMap(doc, diagramId);
-  if (!diagram) return { exists: false, mermaidText: null, nodePositions: {} };
-
-  const mermaid = diagram.get(DIAGRAM_MERMAID_TEXT_KEY);
-  const positions = diagram.get(DIAGRAM_NODE_POSITIONS_KEY);
+export function readYjsNodePositions(doc: Y.Doc, diagramId: string): Record<string, YjsNodePosition> {
+  const positions = diagramMap(doc, diagramId)?.get(DIAGRAM_NODE_POSITIONS_KEY);
   const nodePositions: Record<string, YjsNodePosition> = {};
   if (positions instanceof Y.Map) {
     for (const [nodeId, value] of positions.entries()) {
       if (isNodePosition(value)) nodePositions[nodeId] = { x: value.x, y: value.y };
     }
   }
+  return nodePositions;
+}
+
+export function readYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessionSnapshot {
+  const diagram = diagramMap(doc, diagramId);
+  if (!diagram) return { activity: activitySnapshot(doc), exists: false, mermaidText: null, nodePositions: {} };
+
+  const mermaid = diagram.get(DIAGRAM_MERMAID_TEXT_KEY);
 
   return {
+    activity: activitySnapshot(doc),
     exists: true,
     mermaidText: mermaid instanceof Y.Text ? mermaid.toString() : null,
-    nodePositions,
+    nodePositions: readYjsNodePositions(doc, diagramId),
+  };
+}
+
+/**
+ * A diagram restore is one source/layout state transition. Document updates
+ * that only persist participant metadata must not count as another restore.
+ */
+export function getYjsSourceLayoutSignature(snapshot: YjsSessionSnapshot): string {
+  return JSON.stringify({ mermaidText: snapshot.mermaidText, nodePositions: snapshot.nodePositions });
+}
+
+export function getYjsSessionSnapshotSignature(snapshot: YjsSessionSnapshot): string {
+  return JSON.stringify(snapshot);
+}
+
+export function getYjsSourceLayoutTransitions(
+  appearances: readonly YjsSessionSnapshotAppearance[],
+): YjsSessionSnapshotAppearance[] {
+  let previousSignature: string | null = null;
+  return appearances.filter((appearance) => {
+    const signature = getYjsSourceLayoutSignature(appearance.snapshot);
+    if (signature === previousSignature) {
+      return false;
+    }
+    previousSignature = signature;
+    return true;
+  });
+}
+
+export function trackYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessionSnapshotHistory {
+  const appearances: YjsSessionSnapshotAppearance[] = [];
+  const listeners = new Set<(appearance: YjsSessionSnapshotAppearance) => void>();
+  let destroyed = false;
+  let update = 0;
+
+  const record = () => {
+    const appearance = { snapshot: readYjsSessionSnapshot(doc, diagramId), update };
+    appearances.push(appearance);
+    listeners.forEach((listener) => { listener(appearance); });
+  };
+  const onUpdate = () => {
+    update += 1;
+    record();
+  };
+  doc.on('update', onUpdate);
+  record();
+
+  return {
+    get appearances() {
+      return appearances;
+    },
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      doc.off('update', onUpdate);
+      listeners.clear();
+    },
+    async expectUnchangedFor(durationMs, description) {
+      if (destroyed) throw new Error('Cannot observe a destroyed Yjs snapshot history.');
+      const baseline = appearances.at(-1);
+      if (!baseline) throw new Error('Yjs snapshot history has no baseline appearance.');
+      const baselineSignature = getYjsSessionSnapshotSignature(baseline.snapshot);
+      await new Promise<void>((resolve, reject) => {
+        const onAppearance = (appearance: YjsSessionSnapshotAppearance) => {
+          if (getYjsSessionSnapshotSignature(appearance.snapshot) === baselineSignature) {
+            return;
+          }
+          cleanup();
+          reject(new Error(`Yjs session changed during ${description}: baseline=${JSON.stringify(baseline.snapshot)} next=${JSON.stringify(appearance.snapshot)}`));
+        };
+        const timeout = setTimeout(() => {
+          cleanup();
+          resolve();
+        }, durationMs);
+        const cleanup = () => {
+          clearTimeout(timeout);
+          listeners.delete(onAppearance);
+        };
+        listeners.add(onAppearance);
+      });
+    },
   };
 }
 
@@ -97,7 +226,7 @@ export function trackYjsNodePosition(
   let update = 0;
 
   const recordIfPresent = () => {
-    const position = readYjsSessionSnapshot(doc, diagramId).nodePositions[nodeId];
+    const position = readYjsNodePositions(doc, diagramId)[nodeId];
     if (!position) return;
     const appearance = { position, update };
     appearances.push(appearance);
@@ -194,7 +323,8 @@ export async function openYjsSessionObserver(
   }
 
   let destroyed = false;
-  const histories = new Set<YjsNodePositionHistory>();
+  const nodePositionHistories = new Set<YjsNodePositionHistory>();
+  const snapshotHistories = new Set<YjsSessionSnapshotHistory>();
   const observer: YjsSessionObserver = {
     diagramExists(diagramId) {
       return readYjsSessionSnapshot(doc, diagramId).exists;
@@ -202,21 +332,29 @@ export async function openYjsSessionObserver(
     destroy() {
       if (destroyed) return;
       destroyed = true;
-      histories.forEach((history) => { history.destroy(); });
-      histories.clear();
+      nodePositionHistories.forEach((history) => { history.destroy(); });
+      nodePositionHistories.clear();
+      snapshotHistories.forEach((history) => { history.destroy(); });
+      snapshotHistories.clear();
       (provider as DestroyableWebsocketProvider).destroy();
       doc.destroy();
     },
     hasNodePosition(diagramId, nodeId) {
-      return Object.hasOwn(readYjsSessionSnapshot(doc, diagramId).nodePositions, nodeId);
+      return Object.hasOwn(readYjsNodePositions(doc, diagramId), nodeId);
     },
     snapshot(diagramId) {
       return readYjsSessionSnapshot(doc, diagramId);
     },
+    trackSnapshot(diagramId) {
+      if (destroyed) throw new Error('Cannot track a snapshot on a destroyed Yjs session observer.');
+      const history = trackYjsSessionSnapshot(doc, diagramId);
+      snapshotHistories.add(history);
+      return history;
+    },
     trackNodePosition(diagramId, nodeId) {
       if (destroyed) throw new Error('Cannot track a node position on a destroyed Yjs session observer.');
       const history = trackYjsNodePosition(doc, diagramId, nodeId);
-      histories.add(history);
+      nodePositionHistories.add(history);
       return history;
     },
     async waitFor(predicate, description, waitTimeoutMs = timeoutMs) {

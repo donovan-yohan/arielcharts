@@ -37,6 +37,12 @@ the internal tool boundary; `mcp-server.ts` exposes the modern MCP contract;
 - Keep activity as a bounded collaboration feed. It is not a version-history
   store; MCP mutations identify the diagram and record applicable base/result
   revisions. Snapshots/restore need their own revision model.
+- Revision history is a server-private immutable LevelDB journal, not a Yjs
+  root. `SessionManager` captures baseline plus the latest 99 checkpoints per
+  diagram with the canonical session snapshot in one batch; activity ids bound
+  browser checkpoint deduplication. Restore copies an immutable source/layout
+  snapshot into one new transaction, preserves the current name, and returns a
+  structured no-op for a stale expected diagram revision.
 - `POST /mcp` is modern-only MCP `2026-07-28`; application `sessionId` and
   `diagramId` are explicit tool inputs, not MCP transport-session state. Keep
   fetch-before-write revision checks, header validation, and CORS behavior

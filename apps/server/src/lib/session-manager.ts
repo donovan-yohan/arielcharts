@@ -1,4 +1,18 @@
-import { resolveSourceLayoutPolicy, type ActivityEvent, type Diagram, type DiagramSummary, type Participant, type SessionSummary, type SourceLayoutPolicy } from '@arielcharts/shared';
+import {
+  resolveSourceLayoutPolicy,
+  type ActivityEvent,
+  type Diagram,
+  type DiagramNodePositions,
+  type DiagramRevision,
+  type DiagramRevisionAction,
+  type DiagramRevisionOrigin,
+  type DiagramRevisionSummary,
+  type DiagramSummary,
+  type Participant,
+  type RestoreDiagramRevisionResult,
+  type SessionSummary,
+  type SourceLayoutPolicy,
+} from '@arielcharts/shared';
 import { createHash } from 'node:crypto';
 import * as encoding from 'lib0/encoding';
 import { Awareness, applyAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
@@ -14,14 +28,36 @@ import {
   PRESENCE_KEY,
 } from './constants.js';
 import { SessionStore } from './persistence.js';
-import type { CleanupOptions, SessionSnapshot, SessionState, StoredSessionSummary } from './types.js';
+import type { CleanupOptions, DiagramHistoryMetadata, HistoryPersistenceChange, SessionRecord, SessionSnapshot, SessionState, StoredSessionSummary } from './types.js';
 
 const MANAGED_AWARENESS_ORIGIN = 'session-manager';
 const CATALOG_REPAIR_ORIGIN = 'catalog-repair';
 const DEFAULT_DIAGRAM_ID = 'main';
 const DEFAULT_DIAGRAM_TITLE = 'Main';
+const HISTORY_PROCESSED_ACTIVITY_LIMIT = 200;
+const HISTORY_RETAINED_MUTATIONS = 99;
+const SYSTEM_HISTORY_ACTOR = { name: 'System', type: 'agent' as const };
+const ACTIVITY_ACTIONS = new Set<ActivityEvent['action']>(['joined', 'left', 'edited', 'replaced', 'created', 'renamed', 'deleted', 'restored']);
 
 type DiagramMap = Y.Map<unknown>;
+
+interface DiagramHistorySnapshot {
+  id: string;
+  name: string;
+  mermaidText: string;
+  nodePositions: DiagramNodePositions;
+  revision: string;
+}
+
+interface HistorySnapshot {
+  diagrams: DiagramHistorySnapshot[];
+  activity: ActivityEvent[];
+}
+
+interface PendingSessionPersistence {
+  snapshot: HistorySnapshot;
+  record: SessionRecord;
+}
 
 function diagramsMap(doc: Y.Doc): Y.Map<DiagramMap> {
   return doc.getMap<DiagramMap>(DIAGRAMS_KEY);
@@ -47,6 +83,19 @@ function getNodePositions(diagram: DiagramMap): Y.Map<unknown> {
   return value;
 }
 
+function readRevisionNodePositions(diagram: DiagramMap): DiagramNodePositions {
+  const positions = Object.create(null) as DiagramNodePositions;
+  for (const [id, value] of [...getNodePositions(diagram).entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    if (!id || !value || typeof value !== 'object') continue;
+    const position = value as Partial<{ x: unknown; y: unknown }>;
+    if (typeof position.x === 'number' && Number.isFinite(position.x)
+      && typeof position.y === 'number' && Number.isFinite(position.y)) {
+      positions[id] = { x: position.x, y: position.y };
+    }
+  }
+  return positions;
+}
+
 /** Source is canonical: only accepted blank/generic/flowchart source can prune layout. */
 function reconcileNodePositionsForSource(diagram: DiagramMap, policy: SourceLayoutPolicy): void {
   if (!policy.pruneDurablePositions) {
@@ -58,6 +107,16 @@ function reconcileNodePositionsForSource(diagram: DiagramMap, policy: SourceLayo
     if (!policy.nodeIds.has(nodeId)) {
       positions.delete(nodeId);
     }
+  }
+}
+
+function replaceNodePositions(diagram: DiagramMap, positions: DiagramNodePositions): void {
+  const durablePositions = getNodePositions(diagram);
+  for (const id of [...durablePositions.keys()]) {
+    durablePositions.delete(id);
+  }
+  for (const [id, position] of Object.entries(positions)) {
+    durablePositions.set(id, { x: position.x, y: position.y });
   }
 }
 
@@ -95,12 +154,11 @@ function revisionFromDoc(doc: Y.Doc): string {
 }
 
 function revisionForDiagram(diagram: DiagramMap, id: string): string {
+  const name = normalizeDiagramName(getDiagramName(diagram, id));
+  const source = getMermaidText(diagram).toString();
+  const positions = readRevisionNodePositions(diagram);
   return createHash('sha256')
-    .update(id)
-    .update('\0')
-    .update(getDiagramName(diagram, id))
-    .update('\0')
-    .update(getMermaidText(diagram).toString())
+    .update(JSON.stringify({ id, name, source, positions }))
     .digest('base64url');
 }
 
@@ -267,6 +325,21 @@ function readActivity(doc: Y.Doc): ActivityEvent[] {
   return doc.getArray<ActivityEvent>(ACTIVITY_KEY).toArray();
 }
 
+function isDiagramActivityEvent(value: unknown, diagramId: string): value is ActivityEvent {
+  if (!value || typeof value !== 'object') return false;
+  const event = value as Partial<ActivityEvent>;
+  return event.diagram_id === diagramId
+    && typeof event.id === 'string'
+    && event.id.length > 0
+    && typeof event.timestamp === 'number'
+    && Number.isFinite(event.timestamp)
+    && typeof event.action === 'string'
+    && ACTIVITY_ACTIONS.has(event.action as ActivityEvent['action'])
+    && !!event.actor
+    && typeof event.actor.name === 'string'
+    && (event.actor.type === 'human' || event.actor.type === 'agent');
+}
+
 function isParticipant(value: unknown): value is Participant {
   if (!value || typeof value !== 'object') {
     return false;
@@ -344,6 +417,7 @@ export class SessionManager {
   private readonly store: SessionStore;
   private readonly sessions = new Map<string, SessionState>();
   private readonly loadingSessions = new Map<string, Promise<SessionState>>();
+  private readonly persistenceQueues = new Map<string, Promise<void>>();
 
   constructor(store: SessionStore) {
     this.store = store;
@@ -396,14 +470,14 @@ export class SessionManager {
       participants: readParticipants(doc),
     });
     if (repaired) {
-      await this.store.set({
+      await this.runSessionPersistence(sessionId, () => this.store.set({
         id: snapshot.id,
         title: snapshot.title,
         activity: snapshot.activity,
         participants: snapshot.participants,
         encodedState: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'),
         updatedAt,
-      });
+      }));
     }
     doc.destroy();
     return snapshot;
@@ -444,6 +518,86 @@ export class SessionManager {
     return { diagram, participants: snapshot.participants };
   }
 
+  async listDiagramHistory(sessionId: string, diagramId: string): Promise<{ revisions: DiagramRevisionSummary[]; current_revision: string }> {
+    const session = await this.getOrCreateSession(sessionId);
+    const diagram = readDiagram(session.doc, diagramId);
+    const revisions = await this.store.listDiagramHistory(sessionId, diagramId);
+    return {
+      revisions: revisions.map(({ mermaid_text: _source, node_positions: _positions, ...summary }) => summary),
+      current_revision: diagram.revision,
+    };
+  }
+
+  async readDiagramRevision(sessionId: string, diagramId: string, revisionId: string): Promise<DiagramRevision> {
+    const session = await this.getOrCreateSession(sessionId);
+    readDiagram(session.doc, diagramId);
+    const revision = await this.store.getDiagramRevision(sessionId, diagramId, revisionId);
+    if (!revision) {
+      throw new Error(`Diagram revision not found: ${revisionId}`);
+    }
+    return revision;
+  }
+
+  async restoreDiagramRevision(
+    sessionId: string,
+    diagramId: string,
+    revisionId: string,
+    expectedRevision: string,
+    event: ActivityEvent,
+    participants?: Participant[],
+    origin: Extract<DiagramRevisionOrigin, 'browser' | 'mcp'> = 'mcp',
+  ): Promise<RestoreDiagramRevisionResult> {
+    const session = await this.getOrCreateSession(sessionId);
+    const current = readDiagram(session.doc, diagramId);
+    if (expectedRevision !== current.revision) {
+      return { status: 'stale', current, current_revision: current.revision };
+    }
+
+    const target = await this.store.getDiagramRevision(sessionId, diagramId, revisionId);
+    if (!target) {
+      throw new Error(`Diagram revision not found: ${revisionId}`);
+    }
+
+    const currentAfterTargetRead = readDiagram(session.doc, diagramId);
+    if (expectedRevision !== currentAfterTargetRead.revision) {
+      return { status: 'stale', current: currentAfterTargetRead, current_revision: currentAfterTargetRead.revision };
+    }
+
+    const diagram = diagramsMap(session.doc).get(diagramId);
+    if (!diagram) {
+      throw new Error(`Diagram not found: ${diagramId}`);
+    }
+
+    const restoreEvent: ActivityEvent = {
+      ...event,
+      action: 'restored',
+      diagram_id: diagramId,
+      base_revision: expectedRevision,
+      restored_from_revision_id: revisionId,
+    };
+    const currentBeforeRestore = readDiagram(session.doc, diagramId);
+    if (expectedRevision !== currentBeforeRestore.revision) {
+      return { status: 'stale', current: currentBeforeRestore, current_revision: currentBeforeRestore.revision };
+    }
+
+    session.doc.transact(() => {
+      const text = getMermaidText(diagram);
+      text.delete(0, text.length);
+      text.insert(0, target.mermaid_text);
+      replaceNodePositions(diagram, target.node_positions);
+      this.appendActivity(session.doc, {
+        ...restoreEvent,
+        result_revision: revisionForDiagram(diagram, diagramId),
+      });
+    }, MANAGED_AWARENESS_ORIGIN);
+    const revisions = await this.afterMutation(session, participants, restoreEvent.id, origin);
+    const revision = revisions.find((candidate) => candidate.activity_id === restoreEvent.id);
+    if (!revision) {
+      throw new Error('Restore history checkpoint was not persisted.');
+    }
+    return { status: 'restored', diagram: readDiagram(session.doc, diagramId), revision: this.revisionSummary(revision) };
+  }
+
   async createDiagram(sessionId: string, name: string, mermaidText: string, revision: string, event: ActivityEvent, participants?: Participant[]): Promise<Diagram> {
     const session = await this.getOrCreateSession(sessionId);
     this.assertRevision(session.doc, revision);
@@ -460,7 +614,7 @@ export class SessionManager {
         result_revision: revisionForDiagram(diagramsMap(session.doc).get(id)!, id),
       });
     }, MANAGED_AWARENESS_ORIGIN);
-    await this.afterMutation(session, participants);
+    await this.afterMutation(session, participants, event.id);
     return readDiagram(session.doc, id);
   }
 
@@ -489,7 +643,7 @@ export class SessionManager {
         result_revision: revisionForDiagram(diagram, diagramId),
       });
     }, MANAGED_AWARENESS_ORIGIN);
-    await this.afterMutation(session, participants);
+    await this.afterMutation(session, participants, event.id);
     return readDiagram(session.doc, diagramId);
   }
 
@@ -511,7 +665,7 @@ export class SessionManager {
         result_revision: revisionForDiagram(diagram, diagramId),
       });
     }, MANAGED_AWARENESS_ORIGIN);
-    await this.afterMutation(session, participants);
+    await this.afterMutation(session, participants, event.id);
     return readDiagram(session.doc, diagramId);
   }
 
@@ -534,7 +688,7 @@ export class SessionManager {
       }
       this.appendActivity(session.doc, { ...event, diagram_id: diagramId, base_revision: revision });
     }, MANAGED_AWARENESS_ORIGIN);
-    await this.afterMutation(session, participants);
+    await this.afterMutation(session, participants, event.id);
     return revisionFromDoc(session.doc);
   }
 
@@ -564,26 +718,34 @@ export class SessionManager {
     if (Number.isFinite(options.diskTtlMs)) {
       for (const record of await this.store.list()) {
         if (!this.sessions.has(record.id) && now - record.updatedAt >= options.diskTtlMs) {
-          await this.store.delete(record.id);
-          removed.push(record.id);
+          const deleted = await this.runSessionPersistence(record.id, async () => {
+            if (!this.sessions.has(record.id)) {
+              await this.store.delete(record.id);
+              return true;
+            }
+            return false;
+          });
+          if (deleted) removed.push(record.id);
         }
       }
     }
     return removed;
   }
 
-  async persistSession(session: SessionState): Promise<void> {
-    syncParticipantsFromAwareness(session);
-    const snapshot = this.snapshot(session);
-    await this.store.set({
-      id: snapshot.id,
-      title: snapshot.title,
-      activity: snapshot.activity,
-      participants: snapshot.participants,
-      encodedState: Buffer.from(Y.encodeStateAsUpdate(session.doc)).toString('base64'),
-      updatedAt: snapshot.updatedAt,
-    });
-    session.lastPersistedAt = snapshot.updatedAt;
+  async persistSession(session: SessionState, options: { recovery?: boolean; activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin> } = {}): Promise<DiagramRevision[]> {
+    const pending = this.capturePendingPersistence(session);
+    return this.runSessionPersistence(session.id, () => this.persistSessionLocked(session, pending, options));
+  }
+
+  private async persistSessionLocked(
+    session: SessionState,
+    pending: PendingSessionPersistence,
+    options: { recovery?: boolean; activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin> },
+  ): Promise<DiagramRevision[]> {
+    const history = await this.historyChanges(session.id, pending.snapshot, options);
+    await this.store.persistWithHistory(pending.record, history);
+    session.lastPersistedAt = Math.max(session.lastPersistedAt, pending.record.updatedAt);
+    return history.revisions;
   }
 
   async close(): Promise<void> {
@@ -625,7 +787,9 @@ export class SessionManager {
     });
     if (repairedOnLoad) {
       state.updatedAt = Date.now();
-      await this.persistSession(state);
+    }
+    if (repairedOnLoad || persisted) {
+      await this.persistSession(state, { recovery: true });
     }
     return state;
   }
@@ -637,6 +801,136 @@ export class SessionManager {
   private snapshotFromDoc(options: { id: string; doc: Y.Doc; updatedAt: number; participants: Participant[] }): SessionSnapshot {
     const diagrams = readDiagrams(options.doc);
     return { id: options.id, title: titleFromDiagrams(diagrams), diagrams, revision: revisionFromDoc(options.doc), activity: readActivity(options.doc), participants: options.participants, updatedAt: options.updatedAt };
+  }
+
+  private async historyChanges(
+    sessionId: string,
+    snapshot: HistorySnapshot,
+    options: { recovery?: boolean; activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin> },
+  ): Promise<HistoryPersistenceChange> {
+    const revisions: DiagramRevision[] = [];
+    const metadataUpdates: DiagramHistoryMetadata[] = [];
+    const deleteSequences = new Map<string, { sessionId: string; diagramId: string; sequence: number }>();
+    const diagramIds = snapshot.diagrams.map((diagram) => diagram.id);
+    const storedMetadata = await this.store.listSessionHistoryMetadata(sessionId);
+    const metadataByDiagram = new Map(storedMetadata.map((metadata) => [metadata.diagramId, metadata]));
+    const sessionHasHistory = storedMetadata.length > 0;
+
+    for (const id of diagramIds) {
+      const diagram = snapshot.diagrams.find((candidate) => candidate.id === id);
+      if (!diagram) continue;
+
+      const prior = metadataByDiagram.get(id) ?? null;
+      const events = snapshot.activity.filter((event) => isDiagramActivityEvent(event, id));
+      const processed = new Set(prior?.processedActivityIds ?? []);
+      const unseen = events.filter((event) => !processed.has(event.id));
+      let nextSequence = prior?.nextSequence ?? 0;
+      let latestRevision = prior?.latestRevision ?? '';
+      const previousFirstRetainedMutation = prior?.firstRetainedMutationSequence ?? 1;
+      const captured: DiagramRevision[] = [];
+
+      if (!prior) {
+        const creationIndex = sessionHasHistory ? unseen.findIndex((event) => event.action === 'created') : -1;
+        if (creationIndex < 0) {
+          captured.push(this.captureRevision(diagram, nextSequence, {
+            action: 'baseline',
+            actor: SYSTEM_HISTORY_ACTOR,
+            origin: 'system',
+          }));
+          nextSequence += 1;
+        }
+
+        for (const event of creationIndex < 0 ? [] : unseen.slice(creationIndex)) {
+          captured.push(this.captureRevision(diagram, nextSequence, {
+            action: event.action,
+            activity: event,
+            origin: options.activityOrigins?.get(event.id) ?? 'browser',
+          }));
+          nextSequence += 1;
+        }
+      } else {
+        for (const event of unseen) {
+          captured.push(this.captureRevision(diagram, nextSequence, {
+            action: event.action,
+            activity: event,
+            origin: options.activityOrigins?.get(event.id) ?? 'browser',
+          }));
+          nextSequence += 1;
+        }
+        if (captured.length === 0 && options.recovery && latestRevision !== diagram.revision) {
+          captured.push(this.captureRevision(diagram, nextSequence, {
+            action: 'checkpoint',
+            actor: SYSTEM_HISTORY_ACTOR,
+            origin: 'system',
+          }));
+          nextSequence += 1;
+        }
+      }
+
+      if (captured.length === 0) continue;
+      revisions.push(...captured);
+      latestRevision = captured.at(-1)!.result_revision!;
+      for (const event of unseen) processed.add(event.id);
+      const processedActivityIds = [...processed].slice(-HISTORY_PROCESSED_ACTIVITY_LIMIT);
+      const firstRetainedMutation = Math.max(1, nextSequence - HISTORY_RETAINED_MUTATIONS);
+      metadataUpdates.push({
+        sessionId,
+        diagramId: id,
+        firstRetainedMutationSequence: firstRetainedMutation,
+        nextSequence,
+        processedActivityIds,
+        latestRevision,
+      });
+
+      for (let sequence = previousFirstRetainedMutation; sequence < firstRetainedMutation; sequence += 1) {
+        deleteSequences.set(`${sessionId}:${id}:${sequence}`, { sessionId, diagramId: id, sequence });
+      }
+    }
+
+    return {
+      revisions,
+      metadata: metadataUpdates,
+      deleteSequences: [...deleteSequences.values()],
+      deleteDiagramHistory: storedMetadata
+        .filter((metadata) => !diagramIds.includes(metadata.diagramId))
+        .map((metadata) => ({ sessionId, diagramId: metadata.diagramId })),
+    };
+  }
+
+  private captureRevision(
+    diagram: DiagramHistorySnapshot,
+    sequence: number,
+    input: {
+      action: DiagramRevisionAction;
+      actor?: ActivityEvent['actor'];
+      origin: DiagramRevisionOrigin;
+      activity?: ActivityEvent;
+    },
+  ): DiagramRevision {
+    const activity = input.activity;
+    return {
+      revision_id: `revision_${sequence.toString().padStart(16, '0')}`,
+      sequence,
+      diagram_id: diagram.id,
+      name: diagram.name,
+      timestamp: activity?.timestamp ?? Date.now(),
+      actor: input.actor ?? activity?.actor ?? SYSTEM_HISTORY_ACTOR,
+      origin: input.origin,
+      action: input.action,
+      ...(activity === undefined ? {} : {
+        activity_id: activity.id,
+        base_revision: activity.base_revision,
+        restored_from_revision_id: activity.restored_from_revision_id,
+      }),
+      result_revision: activity?.result_revision ?? diagram.revision,
+      mermaid_text: diagram.mermaidText,
+      node_positions: diagram.nodePositions,
+    };
+  }
+
+  private revisionSummary(revision: DiagramRevision): DiagramRevisionSummary {
+    const { mermaid_text: _source, node_positions: _positions, ...summary } = revision;
+    return summary;
   }
 
   private assertRevision(doc: Y.Doc, revision: string): void {
@@ -667,12 +961,67 @@ export class SessionManager {
     }
   }
 
-  private async afterMutation(session: SessionState, participants?: Participant[]): Promise<void> {
+  private async afterMutation(
+    session: SessionState,
+    participants?: Participant[],
+    activityId?: string,
+    origin: Extract<DiagramRevisionOrigin, 'browser' | 'mcp'> = 'mcp',
+  ): Promise<DiagramRevision[]> {
     const now = Date.now();
     session.lastAccessedAt = now;
     session.updatedAt = now;
     if (participants !== undefined) this.setManagedParticipants(session, participants);
-    await this.persistSession(session);
+    return this.persistSession(session, {
+      activityOrigins: activityId === undefined ? undefined : new Map([[activityId, origin]]),
+    });
+  }
+
+  private historySnapshot(doc: Y.Doc, activity: ActivityEvent[]): HistorySnapshot {
+    return {
+      diagrams: orderedDiagramIds(doc).flatMap((id) => {
+        const diagram = diagramsMap(doc).get(id);
+        if (!diagram) return [];
+        return [{
+          id,
+          name: normalizeDiagramName(getDiagramName(diagram, id)),
+          mermaidText: getMermaidText(diagram).toString(),
+          nodePositions: readRevisionNodePositions(diagram),
+          revision: revisionForDiagram(diagram, id),
+        }];
+      }),
+      activity,
+    };
+  }
+
+  private capturePendingPersistence(session: SessionState): PendingSessionPersistence {
+    syncParticipantsFromAwareness(session);
+    const snapshot = this.snapshot(session);
+    return {
+      snapshot: this.historySnapshot(session.doc, snapshot.activity),
+      record: {
+        id: snapshot.id,
+        title: snapshot.title,
+        activity: snapshot.activity,
+        participants: snapshot.participants,
+        encodedState: Buffer.from(Y.encodeStateAsUpdate(session.doc)).toString('base64'),
+        updatedAt: snapshot.updatedAt,
+      },
+    };
+  }
+
+  private runSessionPersistence<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.persistenceQueues.get(sessionId);
+    const result = previous === undefined
+      ? operation()
+      : previous.catch(() => undefined).then(operation);
+    const tail = result.then(() => undefined, () => undefined);
+    this.persistenceQueues.set(sessionId, tail);
+    void tail.then(() => {
+      if (this.persistenceQueues.get(sessionId) === tail) {
+        this.persistenceQueues.delete(sessionId);
+      }
+    });
+    return result;
   }
 
   private setManagedParticipants(session: SessionState, participants: Participant[]): void {

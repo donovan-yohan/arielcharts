@@ -1,6 +1,6 @@
 'use client';
 
-import type { ActivityEvent, AwarenessState, Participant, StarterTemplateId } from '@arielcharts/shared';
+import type { ActivityEvent, AwarenessState, DiagramRevision, DiagramRevisionSummary, ListDiagramHistoryOutput, Participant, StarterTemplateId } from '@arielcharts/shared';
 import { APP_NAME, STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
@@ -15,7 +15,7 @@ import * as Y from 'yjs';
 import { DiagramCanvas } from './diagram-canvas';
 import { useTheme } from './theme-provider';
 import { WorkspaceFlyouts } from './workspace-flyouts';
-import { WorkspaceFooter } from './workspace-footer';
+import { getCompactCollaboratorOverflowCount, WorkspaceFooter } from './workspace-footer';
 import { WorkspaceSettings } from './workspace-settings';
 import { WorkspaceTabStrip, type WorkspaceDiagramTab } from './workspace-tab-strip';
 import {
@@ -25,6 +25,7 @@ import {
   type DiagramLinkType,
   type DiagramNodeShape,
   type FlowchartSnapshot,
+  type MutationResult,
 } from '../lib/diagram-mutations';
 import {
   readNodePositions,
@@ -39,10 +40,13 @@ import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManag
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
+import { listDiagramHistory, readCurrentDiagram, readDiagramRevision, restoreDiagramRevision } from '../lib/history-api';
+import { getMermaidRenderId } from '../lib/mermaid-render-id';
+import { getNextPreviewCameraLock } from '../lib/renderer-camera-policy';
 import type { ConnectionState } from '../lib/connection-state';
 import { FOCUSABLE_SELECTOR } from '../lib/focusable';
 import { getMermaidThemeVariables } from '../lib/theme';
-import { getNextWorkspaceFlyout, type WorkspaceFlyout } from '../lib/workspace-flyout-state';
+import { getActivityFlyoutViewOnOpen, getNextWorkspaceFlyout, type ActivityFlyoutView, type WorkspaceFlyout } from '../lib/workspace-flyout-state';
 
 const DIAGRAMS_KEY = 'diagrams';
 const DIAGRAM_ORDER_KEY = 'diagramOrder';
@@ -196,8 +200,41 @@ function getParticipantAvatarText(participant: Participant): string {
   return compact.slice(0, 2).toUpperCase() || '??';
 }
 
+export const AGENT_WORKFLOW_REQUIREMENTS = [
+  'First call getSession to see the named diagrams, stable IDs, and current session revision.',
+  'Create a new tab only with getSession\'s latest revision as expectedRevision.',
+  'Immediately before writeDiagram, renameDiagram, or deleteDiagram on an existing tab, call readDiagram and use its latest revision as expectedRevision.',
+  'Use listDiagramHistory and readDiagramRevision to inspect prior iterations without changing the diagram.',
+  'Immediately before restoreDiagramRevision, call readDiagram again and use that fresh revision.',
+  'On a stale-revision error, read the latest diagram, merge deliberately, and retry only with the fresh expectedRevision; never blindly retry or overwrite.',
+] as const;
+
+export function reconcileSelectionForAcceptedRender(
+  current: string[],
+  context: 'detached-preview' | 'live',
+  outcome: 'empty' | 'flowchart' | 'generic' | 'invalid',
+): string[] {
+  return context === 'live' && outcome !== 'flowchart' ? [] : current;
+}
+
+export function getLatestDiagramCheckpointId(activity: readonly ActivityEvent[], diagramId: string | null): string | null {
+  return diagramId ? activity.find((event) => event.diagram_id === diagramId)?.id ?? null : null;
+}
+
+export function shouldApplyHistoryPreviewResponse(
+  requestSequence: number,
+  latestRequestSequence: number,
+  requestedDiagramId: string,
+  activeDiagramId: string | null,
+  responseDiagramId: string,
+): boolean {
+  return requestSequence === latestRequestSequence
+    && requestedDiagramId === activeDiagramId
+    && responseDiagramId === requestedDiagramId;
+}
+
 export function getAgentWorkflowPrompt(sessionId: string, mcpUrl: string): string {
-  return `Connect to my ArielCharts session "${sessionId}" using the MCP server at ${mcpUrl}. First call getSession to see the named diagrams and stable IDs. Create a named diagram for each distinct flow by passing getSession's latest revision as expectedRevision. Before changing any existing tab, call readDiagram and pass its latest revision as expectedRevision to writeDiagram; on a stale-revision error, readDiagram again, merge the current source, and retry. Mermaid changes sync collaboratively in real-time. Look up your docs for how to add an MCP server globally.`;
+  return `Connect to my ArielCharts session "${sessionId}" using the MCP server at ${mcpUrl}. ${AGENT_WORKFLOW_REQUIREMENTS.join(' ')} Mermaid changes sync collaboratively in real-time. Look up your docs for how to add an MCP server globally.`;
 }
 
 function stripParticipantTabSuffix(name: string): string {
@@ -295,6 +332,36 @@ function upsertActivity(activityArray: Y.Array<ActivityEvent>, event: ActivityEv
   }
 }
 
+function createActivityEvent(
+  actor: ActivityEvent['actor'],
+  action: ActivityEvent['action'],
+  detail?: string,
+  diagramId?: string,
+): ActivityEvent {
+  return {
+    action,
+    actor: { name: actor.name, type: actor.type },
+    detail,
+    diagram_id: diagramId,
+    id: `${actor.name}-${Date.now()}-${randomSuffix(4)}`,
+    timestamp: Date.now(),
+  };
+}
+
+export function commitLayoutActivityCheckpoint(
+  doc: Y.Doc,
+  activityArray: Y.Array<ActivityEvent>,
+  nodePositionsMap: Y.Map<NodePosition>,
+  positions: DiagramNodePositions,
+  mode: NodePositionsSyncMode,
+  event: ActivityEvent,
+): void {
+  doc.transact(() => {
+    writeNodePositions(nodePositionsMap, positions, mode);
+    upsertActivity(activityArray, event);
+  }, event.actor.name);
+}
+
 function readDiagramTabs(diagrams: Y.Map<Y.Map<unknown>>, order: Y.Array<string>): DiagramTab[] {
   const seen = new Set<string>();
   const tabs: DiagramTab[] = [];
@@ -372,7 +439,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const editorViewRef = useRef<EditorView | null>(null);
   const editorThemeRef = useRef(new Compartment());
   const renderSequenceRef = useRef(0);
-  const activeRenderRef = useRef<{ diagramId: string; sequence: number; source: string } | null>(null);
+  const activeRenderRef = useRef<{ diagramId: string; previewKey: string; sequence: number; source: string } | null>(null);
   const previewRegistryRef = useRef(new DiagramPreviewRegistry());
   const joinedActivityRef = useRef(false);
   const editDebounceRef = useRef<number | null>(null);
@@ -388,6 +455,12 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const connectModalCloseRef = useRef<HTMLButtonElement | null>(null);
   const connectModalDialogRef = useRef<HTMLDivElement | null>(null);
   const connectModalReturnFocusRef = useRef<HTMLButtonElement | null>(null);
+  const historyRequestSequenceRef = useRef(0);
+  const historyPreviewRequestSequenceRef = useRef(0);
+  const historyRefreshCheckpointRef = useRef<string | null>(null);
+  const restoreOriginRef = useRef<HTMLButtonElement | null>(null);
+  const restoreConfirmRef = useRef<HTMLButtonElement | null>(null);
+  const activeDiagramIdRef = useRef<string | null>(null);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
@@ -410,10 +483,36 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [renamingDiagramId, setRenamingDiagramId] = useState<string | null>(null);
   const [diagramNameDraft, setDiagramNameDraft] = useState('');
   const [openFlyout, setOpenFlyout] = useState<WorkspaceFlyout>(null);
+  const [activityFlyoutView, setActivityFlyoutView] = useState<ActivityFlyoutView>('history');
+  const [diagramHistory, setDiagramHistory] = useState<ListDiagramHistoryOutput | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyPreview, setHistoryPreview] = useState<DiagramRevision | null>(null);
+  const [historyPreviewRender, setHistoryPreviewRender] = useState<DiagramPreview | null>(null);
+  const [historyPreviewError, setHistoryPreviewError] = useState<string | null>(null);
+  const [historyPreviewCameraLock, setHistoryPreviewCameraLock] = useState(false);
+  const [awaitingLivePreviewAfterHistory, setAwaitingLivePreviewAfterHistory] = useState(false);
+  const [restoreCandidate, setRestoreCandidate] = useState<DiagramRevisionSummary | null>(null);
+  const [restorePending, setRestorePending] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   const activeDiagram = useMemo(
     () => getActiveDiagramState(collaboration, activeDiagramId),
     [activeDiagramId, collaboration],
+  );
+
+  useEffect(() => {
+    activeDiagramIdRef.current = activeDiagramId;
+  }, [activeDiagramId]);
+
+  const renderedMermaidText = historyPreview?.mermaid_text ?? mermaidText;
+  const renderedPreview = historyPreview
+    ? historyPreviewRender
+    : awaitingLivePreviewAfterHistory ? null : preview;
+  const renderedNodePositions = historyPreview?.node_positions ?? nodePositions;
+  const latestDiagramCheckpointId = useMemo(
+    () => getLatestDiagramCheckpointId(activity, activeDiagramId),
+    [activeDiagramId, activity],
   );
 
   const runMutation = useCallback((mutation: Promise<unknown>) => {
@@ -422,6 +521,40 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       setMutationError(error instanceof Error ? error.message : 'The diagram update could not be applied.');
     });
   }, []);
+
+  const runVisualSourceMutation = useCallback((mutation: Promise<MutationResult>, detail = 'Updated the diagram on canvas') => {
+    const diagramId = activeDiagramId;
+    runMutation(mutation.then((result) => {
+      if (diagramId && result.nextText !== result.previousText) {
+        addActivityRef.current?.('edited', detail, diagramId);
+      }
+      return result;
+    }));
+  }, [activeDiagramId, runMutation]);
+
+  const refreshDiagramHistory = useCallback(async () => {
+    if (!activeDiagramId) {
+      return;
+    }
+    const requestSequence = historyRequestSequenceRef.current + 1;
+    historyRequestSequenceRef.current = requestSequence;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const nextHistory = await listDiagramHistory(sessionId, activeDiagramId);
+      if (historyRequestSequenceRef.current === requestSequence) {
+        setDiagramHistory(nextHistory);
+      }
+    } catch (error) {
+      if (historyRequestSequenceRef.current === requestSequence) {
+        setHistoryError(error instanceof Error ? error.message : 'Could not load revision history.');
+      }
+    } finally {
+      if (historyRequestSequenceRef.current === requestSequence) {
+        setHistoryLoading(false);
+      }
+    }
+  }, [activeDiagramId, sessionId]);
 
   const applySourceLayoutPolicy = useCallback((policy: SourceLayoutPolicy) => {
     const committer = dragCommitterRef.current;
@@ -445,8 +578,18 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
   const closeFlyout = useCallback(() => {
     pendingFlyoutReturnFocusRef.current = flyoutOriginRef.current;
+    if (historyPreview !== null) {
+      setAwaitingLivePreviewAfterHistory(true);
+    }
+    setHistoryPreview(null);
+    setHistoryPreviewRender(null);
+    setHistoryPreviewError(null);
+    setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'preview-exited'));
+    setRestoreCandidate(null);
+    setRestoreError(null);
+    historyPreviewRequestSequenceRef.current += 1;
     setOpenFlyout(null);
-  }, []);
+  }, [historyPreview]);
 
   const toggleFlyout = useCallback((flyout: Exclude<WorkspaceFlyout, null>, origin: HTMLButtonElement) => {
     const nextFlyout = getNextWorkspaceFlyout(openFlyout, flyout);
@@ -455,8 +598,23 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       return;
     }
     flyoutOriginRef.current = origin;
+    if (openFlyout === 'activity' && flyout !== 'activity') {
+      if (historyPreview !== null) {
+        setAwaitingLivePreviewAfterHistory(true);
+      }
+      setHistoryPreview(null);
+      setHistoryPreviewRender(null);
+      setHistoryPreviewError(null);
+      setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'preview-exited'));
+      setRestoreCandidate(null);
+      setRestoreError(null);
+      historyPreviewRequestSequenceRef.current += 1;
+    }
+    if (flyout === 'activity') {
+      setActivityFlyoutView(getActivityFlyoutViewOnOpen(openFlyout, flyout));
+    }
     setOpenFlyout(nextFlyout);
-  }, [closeFlyout, openFlyout]);
+  }, [closeFlyout, historyPreview, openFlyout]);
 
   useEffect(() => {
     setShareUrl(getSessionPath(sessionId));
@@ -547,14 +705,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       }
 
       doc.transact(() => {
-        upsertActivity(activityArray, {
-          action,
-          actor: { name: actor.name, type: actor.type },
-          detail,
-          diagram_id: diagramId,
-          id: `${actor.name}-${Date.now()}-${randomSuffix(4)}`,
-          timestamp: Date.now(),
-        });
+        upsertActivity(activityArray, createActivityEvent(actor, action, detail, diagramId));
       }, actor.name);
     };
 
@@ -610,6 +761,15 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [sessionId]);
 
   useEffect(() => {
+    historyPreviewRequestSequenceRef.current += 1;
+    setHistoryPreview(null);
+    setHistoryPreviewRender(null);
+    setHistoryPreviewError(null);
+    setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'diagram-changed'));
+    setAwaitingLivePreviewAfterHistory(false);
+    setRestoreCandidate(null);
+    setRestoreError(null);
+    setDiagramHistory(null);
     if (!activeDiagram) {
       dragCommitterRef.current?.destroy();
       dragCommitterRef.current = null;
@@ -749,65 +909,124 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [activeDiagram, collaboration, openFlyout]);
 
   useEffect(() => {
+    if (openFlyout !== 'activity' || !activeDiagramId) {
+      return;
+    }
+    historyRefreshCheckpointRef.current = `${activeDiagramId}:${latestDiagramCheckpointId ?? 'none'}`;
+    void refreshDiagramHistory();
+  }, [activeDiagramId, openFlyout, refreshDiagramHistory]);
+
+  useEffect(() => {
+    if (openFlyout !== 'activity' || !activeDiagramId) {
+      return;
+    }
+    const checkpointKey = `${activeDiagramId}:${latestDiagramCheckpointId ?? 'none'}`;
+    if (historyRefreshCheckpointRef.current === checkpointKey) {
+      return;
+    }
+    historyRefreshCheckpointRef.current = checkpointKey;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    const timeout = window.setTimeout(() => { void refreshDiagramHistory(); }, 180);
+    return () => { window.clearTimeout(timeout); };
+  }, [activeDiagramId, latestDiagramCheckpointId, openFlyout, refreshDiagramHistory]);
+
+  useEffect(() => {
     const renderId = renderSequenceRef.current + 1;
     renderSequenceRef.current = renderId;
     const diagramId = activeDiagramId;
-    const renderToken = diagramId ? { diagramId, sequence: renderId, source: mermaidText } : null;
+    const previewKey = historyPreview ? `${diagramId ?? 'none'}:revision:${historyPreview.revision_id}` : (diagramId ?? 'none');
+    const source = historyPreview?.mermaid_text ?? mermaidText;
+    const renderToken = diagramId ? { diagramId, previewKey, sequence: renderId, source } : null;
     activeRenderRef.current = renderToken;
 
     const isCurrentRender = () => (
       renderToken !== null
       && activeRenderRef.current?.diagramId === renderToken.diagramId
+      && activeRenderRef.current?.previewKey === renderToken.previewKey
       && activeRenderRef.current?.sequence === renderToken.sequence
       && activeRenderRef.current?.source === renderToken.source
     );
 
     const renderPreview = async () => {
-      if (!mermaidText.trim()) {
+      if (!source.trim()) {
         if (diagramId && isCurrentRender()) {
-          previewRegistryRef.current.clear(diagramId);
-          setRenderError(null);
-          setPreview(null);
-          setSelectedNodeIds([]);
-          setInteractionMode('select');
+          setSelectedNodeIds((current) => reconcileSelectionForAcceptedRender(
+            current,
+            historyPreview ? 'detached-preview' : 'live',
+            'empty',
+          ));
+          if (historyPreview) {
+            setHistoryPreviewRender(null);
+            setHistoryPreviewError(null);
+          } else {
+            previewRegistryRef.current.clear(diagramId);
+            setRenderError(null);
+            setPreview(null);
+            setInteractionMode('select');
+            setAwaitingLivePreviewAfterHistory(false);
+            setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'live-render-accepted'));
+          }
         }
         return;
       }
 
       try {
-        const parseResult = await mermaid.parse(mermaidText);
+        const parseResult = await mermaid.parse(source);
         const capability = classifyDiagramCapability(parseResult.diagramType);
-        if (capability.kind === 'generic' && diagramId && isCurrentRender()) {
+        if (!historyPreview && capability.kind === 'generic' && diagramId && isCurrentRender()) {
           applySourceLayoutPolicy(getAcceptedGenericSourceLayoutPolicy());
         }
-        const { svg } = await mermaid.render(`arielcharts-${sessionId}-${diagramId ?? 'none'}-${renderId}`, mermaidText);
+        const { svg } = await mermaid.render(getMermaidRenderId(sessionId, previewKey, renderId), source);
         let snapshot: FlowchartSnapshot | null = null;
         if (capability.kind === 'flowchart') {
           try {
-            snapshot = parseFlowchartSnapshot(mermaidText);
+            snapshot = parseFlowchartSnapshot(source);
           } catch {
             snapshot = null;
           }
         }
         if (diagramId && isCurrentRender()) {
-          const nextPreview = { capability, diagramId, flowchartSnapshot: snapshot, source: mermaidText, svg };
-          previewRegistryRef.current.set(nextPreview);
-          setPreview(nextPreview);
-          setRenderError(null);
+          setSelectedNodeIds((current) => reconcileSelectionForAcceptedRender(
+            current,
+            historyPreview ? 'detached-preview' : 'live',
+            capability.kind,
+          ));
+          const nextPreview = { capability, diagramId, flowchartSnapshot: snapshot, source, svg };
+          if (historyPreview) {
+            setHistoryPreviewRender(nextPreview);
+            setHistoryPreviewError(null);
+          } else {
+            previewRegistryRef.current.set(nextPreview);
+            setPreview(nextPreview);
+            setRenderError(null);
+            setAwaitingLivePreviewAfterHistory(false);
+          }
         }
       } catch (error) {
         if (isCurrentRender()) {
           const message = error instanceof Error ? error.message : 'Mermaid could not parse the diagram.';
-          if (diagramId) {
+          if (diagramId && !historyPreview) {
             previewRegistryRef.current.setError(diagramId, message);
           }
-          setRenderError(message);
+          if (historyPreview) {
+            setHistoryPreviewError(message);
+          } else {
+            setRenderError(message);
+            setAwaitingLivePreviewAfterHistory(false);
+            setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'live-render-accepted'));
+          }
+          setSelectedNodeIds((current) => reconcileSelectionForAcceptedRender(
+            current,
+            historyPreview ? 'detached-preview' : 'live',
+            'invalid',
+          ));
         }
       }
     };
 
     void renderPreview();
-  }, [activeDiagramId, applySourceLayoutPolicy, mermaidText, resolvedTheme, sessionId]);
+  }, [activeDiagramId, applySourceLayoutPolicy, historyPreview, mermaidText, resolvedTheme, sessionId]);
 
   useEffect(() => {
     if (shareCopyState === 'idle') {
@@ -846,6 +1065,112 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     }
   };
 
+  const cancelHistoryPreview = useCallback(() => {
+    if (historyPreview !== null) {
+      setAwaitingLivePreviewAfterHistory(true);
+    }
+    setHistoryPreview(null);
+    setHistoryPreviewRender(null);
+    setHistoryPreviewError(null);
+    setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'preview-exited'));
+    historyPreviewRequestSequenceRef.current += 1;
+  }, [historyPreview]);
+
+  const previewHistoryRevision = useCallback(async (revision: DiagramRevisionSummary) => {
+    if (!activeDiagramId || revision.diagram_id !== activeDiagramId) {
+      return;
+    }
+    const requestSequence = historyPreviewRequestSequenceRef.current + 1;
+    historyPreviewRequestSequenceRef.current = requestSequence;
+    const requestedDiagramId = activeDiagramId;
+    setHistoryPreviewError(null);
+    try {
+      const snapshot = await readDiagramRevision(sessionId, requestedDiagramId, revision.revision_id);
+      if (shouldApplyHistoryPreviewResponse(
+        requestSequence,
+        historyPreviewRequestSequenceRef.current,
+        requestedDiagramId,
+        activeDiagramIdRef.current,
+        snapshot.diagram_id,
+      )) {
+        setAwaitingLivePreviewAfterHistory(false);
+        setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'preview-entered'));
+        setHistoryPreview(snapshot);
+      }
+    } catch (error) {
+      if (requestSequence === historyPreviewRequestSequenceRef.current && activeDiagramIdRef.current === requestedDiagramId) {
+        setHistoryPreviewError(error instanceof Error ? error.message : 'Could not load that revision preview.');
+      }
+    }
+  }, [activeDiagramId, sessionId]);
+
+  const requestHistoryRestore = useCallback((revision: DiagramRevisionSummary, origin: HTMLButtonElement) => {
+    restoreOriginRef.current = origin;
+    setRestoreCandidate(revision);
+    setRestoreError(null);
+  }, []);
+
+  const returnFocusToRestoreOrigin = useCallback(() => {
+    const origin = restoreOriginRef.current;
+    window.requestAnimationFrame(() => {
+      if (origin?.isConnected) {
+        origin.focus({ preventScroll: true });
+      }
+    });
+  }, []);
+
+  const cancelHistoryRestore = useCallback(() => {
+    setRestoreCandidate(null);
+    setRestoreError(null);
+    returnFocusToRestoreOrigin();
+  }, [returnFocusToRestoreOrigin]);
+
+  useEffect(() => {
+    if (!restoreCandidate) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => { restoreConfirmRef.current?.focus({ preventScroll: true }); });
+    return () => { window.cancelAnimationFrame(frame); };
+  }, [restoreCandidate]);
+
+  const confirmHistoryRestore = useCallback(async () => {
+    const actor = currentIdentityRef.current;
+    if (!activeDiagramId || !restoreCandidate || !actor) {
+      return;
+    }
+
+    setRestorePending(true);
+    setRestoreError(null);
+    try {
+      // A restore is deliberately never retried from an old list response.
+      const current = await readCurrentDiagram(sessionId, activeDiagramId);
+      const result = await restoreDiagramRevision(
+        sessionId,
+        activeDiagramId,
+        restoreCandidate.revision_id,
+        current.revision,
+        actor,
+      );
+      if (result.status === 'stale') {
+        cancelHistoryPreview();
+        setRestoreCandidate(null);
+        setRestoreError('This diagram changed while you were reviewing it. History was refreshed; review the new head and confirm again.');
+        await refreshDiagramHistory();
+        return;
+      }
+      cancelHistoryPreview();
+      setRestoreCandidate(null);
+      await refreshDiagramHistory();
+    } catch (error) {
+      setRestoreCandidate(null);
+      setRestoreError(error instanceof Error ? `${error.message} Review the latest head before restoring.` : 'Restore could not be applied. Review the latest head before restoring.');
+      await refreshDiagramHistory();
+    } finally {
+      setRestorePending(false);
+      returnFocusToRestoreOrigin();
+    }
+  }, [activeDiagramId, cancelHistoryPreview, refreshDiagramHistory, restoreCandidate, returnFocusToRestoreOrigin, sessionId]);
+
   const getAgentPrompt = useCallback(() => {
     const mcpUrl = typeof window !== 'undefined'
       ? `${window.location.origin}/mcp`
@@ -861,6 +1186,12 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       setPromptCopyState('error');
     }
   };
+
+  const handleCanvasRenderSettled = useCallback(() => {
+    if (historyPreview === null && !awaitingLivePreviewAfterHistory) {
+      setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'live-render-accepted'));
+    }
+  }, [awaitingLivePreviewAfterHistory, historyPreview]);
 
   const closeConnectModal = useCallback(() => {
     setShowConnectModal(false);
@@ -943,6 +1274,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [openFlyout]);
 
   const activeParticipantCount = participants.length;
+  const overflowCollaboratorCount = getCompactCollaboratorOverflowCount(activeParticipantCount);
   const connectedAgentCount = countConnectedAgents(participants);
   const editorStatusLabel = getCompactConnectionLabel(connectionState);
   const activityStatusLabel = `${activeParticipantCount} collaborator${activeParticipantCount === 1 ? '' : 's'}`;
@@ -951,7 +1283,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     : connectionState === 'disconnected'
       ? 'Offline'
       : 'Saving changes…';
-  const isFlowchart = canUseFlowchartControls(mermaidText, preview);
+  const isFlowchart = canUseFlowchartControls(renderedMermaidText, renderedPreview);
   const diagramModeLabel = isFlowchart
     ? 'Flowchart · editable'
     : 'Mermaid · source only';
@@ -999,10 +1331,6 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     }, collaborationOrigins.visualLayout);
   }, [activeDiagram, collaboration]);
 
-  const handleSingleNodePositionChange = useCallback((nodeId: string, position: NodePosition) => {
-    handleNodePositionsChange({ [nodeId]: position }, 'merge');
-  }, [handleNodePositionsChange]);
-
   const handleNodeDragStart = useCallback((positions: DiagramNodePositions) => {
     const accepted = dragCommitterRef.current?.begin(Object.keys(positions)) ?? false;
     if (accepted) {
@@ -1023,23 +1351,52 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     const committer = dragCommitterRef.current;
     if (committer?.finish(positions)) {
       undoManagerRef.current?.stopCapturing();
+      if (activeDiagramId) {
+        addActivityRef.current?.('edited', 'Moved diagram nodes', activeDiagramId);
+      }
     }
-  }, []);
+  }, [activeDiagramId]);
 
   const handleAddConnectedNode = useCallback((source: string, label: string, shape: DiagramNodeShape, position: NodePosition, type: DiagramLinkType) => {
     const queue = mutationQueueRef.current;
-    if (!queue) {
+    const diagram = activeDiagram;
+    const actor = currentIdentityRef.current;
+    if (!queue || !diagram || !collaboration || !actor) {
       return;
     }
-    runMutation(queue.addConnectedNode(source, label, { shape, type })
-      .then(({ nodeId }) => {
-        if (!nodeId) {
-          return;
-        }
-        handleSingleNodePositionChange(nodeId, position);
-        setSelectedNodeIds([nodeId]);
-      }));
-  }, [handleSingleNodePositionChange, runMutation]);
+    const mutation = queue.addConnectedNode(source, label, { shape, type });
+    runMutation(mutation.then((result) => {
+      if (result.nodeId) {
+        commitLayoutActivityCheckpoint(
+          collaboration.doc,
+          collaboration.activityArray,
+          diagram.nodePositionsMap,
+          { [result.nodeId]: position },
+          'merge',
+          createActivityEvent(actor, 'edited', 'Updated the diagram on canvas', diagram.id),
+        );
+        setSelectedNodeIds([result.nodeId]);
+      }
+      return result;
+    }));
+  }, [activeDiagram, collaboration, runMutation]);
+
+  const handleResetSharedLayout = useCallback(() => {
+    const diagram = activeDiagram;
+    const actor = currentIdentityRef.current;
+    if (!diagram || !collaboration || !actor) {
+      return;
+    }
+
+    commitLayoutActivityCheckpoint(
+      collaboration.doc,
+      collaboration.activityArray,
+      diagram.nodePositionsMap,
+      {},
+      'replace',
+      createActivityEvent(actor, 'edited', 'Reset shared layout to Mermaid', diagram.id),
+    );
+  }, [activeDiagram, collaboration]);
 
   const focusDiagramTab = useCallback((diagramId: string) => {
     setActiveDiagramId(diagramId);
@@ -1145,6 +1502,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             ) : (
               <div className="workspace-avatar workspace-avatar-empty">--</div>
             )}
+            {overflowCollaboratorCount > 0 ? (
+              <span aria-label={`${overflowCollaboratorCount} more collaborators`} className="workspace-collaborator-overflow" data-testid="topbar-collaborator-overflow">+{overflowCollaboratorCount}</span>
+            ) : null}
           </div>
           <button className="workspace-share-button" data-testid="share-session-button" type="button" onClick={handleCopyShareUrl}>
             <span>{shareButtonLabel}</span>
@@ -1185,10 +1545,10 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
       <section aria-labelledby={activeDiagramId ? `diagram-tab-${activeDiagramId}` : undefined} className="workspace-main" data-testid="canvas-first-workspace" id="diagram-workspace" role="tabpanel">
         <article data-testid="preview-root" className="workspace-pane workspace-diagram-pane">
-          {renderError ? (
+          {renderError || historyPreviewError ? (
             <div data-testid="parse-error-banner" className="error-banner" role="status">
               <strong>preview kept on last valid diagram</strong>
-              <span>{renderError}</span>
+              <span>{historyPreviewError ?? renderError}</span>
             </div>
           ) : null}
 
@@ -1202,43 +1562,66 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
           <DiagramCanvas
             key={activeDiagramId ?? 'no-active-diagram'}
             className="diagram-canvas"
-            emptyMessage={mermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
-            graph={preview?.flowchartSnapshot ?? null}
+            emptyMessage={renderedMermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
+            graph={renderedPreview?.flowchartSnapshot ?? null}
             interactionMode={interactionMode}
             isFlowchart={isFlowchart}
-            nodePositions={nodePositions}
-            onAddEdge={(source, target, label, type) => mutationQueueRef.current?.addEdge(source, target, { label, type })}
-            onAddNode={(label, shape) => mutationQueueRef.current?.addNode(label, { shape })}
+            nodePositions={renderedNodePositions}
+            preserveCamera={historyPreviewCameraLock}
+            readOnly={historyPreview !== null}
+            onAddEdge={(source, target, label, type) => {
+              const queue = mutationQueueRef.current;
+              if (queue) runVisualSourceMutation(queue.addEdge(source, target, { label, type }));
+            }}
+            onAddNode={(label, shape) => {
+              const queue = mutationQueueRef.current;
+              if (queue) runVisualSourceMutation(queue.addNode(label, { shape }));
+            }}
             onAddConnectedNode={handleAddConnectedNode}
-            onChangeNodeShape={(nodeId, shape) => mutationQueueRef.current?.changeNodeShape(nodeId, shape)}
+            onChangeNodeShape={(nodeId, shape) => {
+              const queue = mutationQueueRef.current;
+              if (queue) runVisualSourceMutation(queue.changeNodeShape(nodeId, shape));
+            }}
             onDeleteNodes={(ids) => {
               for (const id of ids) {
-                void mutationQueueRef.current?.removeNode(id);
+                const queue = mutationQueueRef.current;
+                if (queue) runVisualSourceMutation(queue.removeNode(id));
               }
             }}
             onDeleteEdge={(edge) => {
               const queue = mutationQueueRef.current;
               if (queue) {
-                runMutation(queue.removeEdgeByIdentity(edge));
+                runVisualSourceMutation(queue.removeEdgeByIdentity(edge));
               }
             }}
             onEditEdgeLabel={(edge, label) => {
               const queue = mutationQueueRef.current;
               if (queue) {
-                runMutation(queue.editEdgeLabelByIdentity(edge, label));
+                runVisualSourceMutation(queue.editEdgeLabelByIdentity(edge, label));
               }
             }}
-            onEditNodeLabel={(nodeId, label) => mutationQueueRef.current?.editNodeLabel(nodeId, label)}
-            onGroupNodes={(ids, label) => mutationQueueRef.current?.groupNodes(ids, label)}
+            onEditNodeLabel={(nodeId, label) => {
+              const queue = mutationQueueRef.current;
+              if (queue) runVisualSourceMutation(queue.editNodeLabel(nodeId, label));
+            }}
+            onGroupNodes={(ids, label) => {
+              const queue = mutationQueueRef.current;
+              if (queue) runVisualSourceMutation(queue.groupNodes(ids, label));
+            }}
             onInteractionModeChange={setInteractionMode}
             onNodeDrag={handleNodeDrag}
             onNodeDragStart={handleNodeDragStart}
             onNodeDragStop={handleNodeDragStop}
             onNodePositionsChange={handleNodePositionsChange}
+            onResetSharedLayout={handleResetSharedLayout}
+            onRenderSettled={handleCanvasRenderSettled}
             onSelectedNodeIdsChange={setSelectedNodeIds}
-            onUngroupNodes={(id) => mutationQueueRef.current?.ungroupSubgraph(id)}
+            onUngroupNodes={(id) => {
+              const queue = mutationQueueRef.current;
+              if (queue) runVisualSourceMutation(queue.ungroupSubgraph(id));
+            }}
             selectedNodeIds={selectedNodeIds}
-            svg={preview?.svg ?? ''}
+            svg={renderedPreview?.svg ?? ''}
             theme={resolvedTheme}
           />
         </article>
@@ -1253,8 +1636,24 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
           getActivityColor={getActivityColor}
           getActivityDescription={describeActivityCompact}
           getTimestampLabel={formatTimestamp}
+          history={diagramHistory}
+          historyError={historyError}
+          historyLoading={historyLoading}
+          historyView={activityFlyoutView}
+          onCancelPreview={cancelHistoryPreview}
+          onHistoryViewChange={setActivityFlyoutView}
+          onPreviewRevision={previewHistoryRevision}
+          onRestoreCancel={cancelHistoryRestore}
+          onRestoreConfirm={confirmHistoryRestore}
+          onRestoreRequest={requestHistoryRestore}
           openFlyout={openFlyout}
           participants={participants}
+          previewError={historyPreviewError}
+          previewRevision={historyPreview}
+          restoreCandidate={restoreCandidate}
+          restoreError={restoreError}
+          restorePending={restorePending}
+          restoreConfirmRef={restoreConfirmRef}
         />
       </section>
 

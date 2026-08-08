@@ -18,31 +18,6 @@ export type ControlledNodeComposer<NodeType extends Node> = {
   compose: (canonicalNodes: NodeType[], runtime: ControlledNodeRuntime) => NodeType[];
 };
 
-/** Applies React Flow select diffs to the app-owned canonical selection. */
-export function applyControlledSelectionChanges<NodeType extends Node>(
-  selectedNodeIds: string[],
-  changes: NodeChange<NodeType>[],
-): string[] {
-  const nextSelection = new Set(selectedNodeIds);
-  let changed = false;
-
-  for (const change of changes) {
-    if (change.type !== 'select') {
-      continue;
-    }
-
-    if (change.selected && !nextSelection.has(change.id)) {
-      nextSelection.add(change.id);
-      changed = true;
-    }
-    if (!change.selected && nextSelection.delete(change.id)) {
-      changed = true;
-    }
-  }
-
-  return changed ? [...nextSelection] : selectedNodeIds;
-}
-
 function samePosition(left: XYPosition | undefined, right: XYPosition | undefined): boolean {
   return left?.x === right?.x && left?.y === right?.y;
 }

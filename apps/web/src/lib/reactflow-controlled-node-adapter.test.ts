@@ -2,7 +2,6 @@ import type { Node, NodeChange } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';
 import {
   applyControlledNodeChanges,
-  applyControlledSelectionChanges,
   composeControlledNodes,
   createControlledNodeComposer,
   releaseControlledNodeRuntime,
@@ -27,18 +26,22 @@ function positionChange(id: string, x: number, y: number, dragging: boolean): No
 }
 
 describe('controlled React Flow node adapter', () => {
-  it('routes React Flow select changes into app-owned Shift and ordinary click selection', () => {
-    const selectedA = applyControlledSelectionChanges([], [{ id: 'A', selected: true, type: 'select' }]);
-    const selectedAAndB = applyControlledSelectionChanges(selectedA, [{ id: 'B', selected: true, type: 'select' }]);
-    const selectedOnlyB = applyControlledSelectionChanges(selectedA, [
+  it('keeps canonical selection through preview entry and exit while retaining safe runtime measurements', () => {
+    const canonical = [{ ...node('A', 10, 20), selected: true }];
+    const enterChanges: NodeChange<TestNode>[] = [
+      { dimensions: { height: 44, width: 88 }, id: 'A', type: 'dimensions' },
       { id: 'A', selected: false, type: 'select' },
-      { id: 'B', selected: true, type: 'select' },
-    ]);
+    ];
+    const duringPreview = applyControlledNodeChanges(canonical, {}, enterChanges, new Set());
+    const afterCancel = applyControlledNodeChanges(canonical, duringPreview, [
+      { id: 'A', selected: false, type: 'select' },
+    ], new Set());
 
-    expect(selectedAAndB).toEqual(['A', 'B']);
-    expect(selectedOnlyB).toEqual(['B']);
-    expect(applyControlledSelectionChanges(selectedA, [{ id: 'A', selected: true, type: 'select' }])).toBe(selectedA);
-    expect(applyControlledSelectionChanges(selectedA, [positionChange('A', 8, 9, true)])).toBe(selectedA);
+    expect(duringPreview).toEqual({
+      A: { measured: { height: 44, width: 88 } },
+    });
+    expect(afterCancel).toBe(duringPreview);
+    expect(composeControlledNodes(canonical, afterCancel)[0]?.selected).toBe(true);
   });
 
   it('preserves measured and active positions across canonical rerenders while canonical fields win', () => {

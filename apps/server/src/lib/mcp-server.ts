@@ -1,4 +1,11 @@
-import { APP_NAME, STARTER_TEMPLATES, type StarterTemplateId } from '@arielcharts/shared';
+import {
+  APP_NAME,
+  STARTER_TEMPLATES,
+  type DiagramRevision,
+  type DiagramRevisionSummary,
+  type RestoreDiagramRevisionResult,
+  type StarterTemplateId,
+} from '@arielcharts/shared';
 import { toNodeHandler, type NodeMcpRequestHandler } from '@modelcontextprotocol/node';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -20,6 +27,30 @@ const diagramSummarySchema = z.object({
 
 const diagramSchema = diagramSummarySchema.extend({
   mermaidText: z.string(),
+});
+
+const revisionActorSchema = z.object({
+  name: z.string(),
+  type: z.enum(['human', 'agent']),
+});
+
+const diagramRevisionSummarySchema = z.object({
+  id: z.string(),
+  sequence: z.number().int().nonnegative(),
+  diagramId: z.string(),
+  diagramName: z.string(),
+  timestamp: z.number(),
+  actor: revisionActorSchema,
+  origin: z.enum(['browser', 'mcp', 'system']),
+  action: z.string(),
+  baseRevision: z.string().optional(),
+  resultRevision: z.string().optional(),
+  restoredFromRevisionId: z.string().optional(),
+});
+
+const diagramRevisionSchema = diagramRevisionSummarySchema.extend({
+  mermaidText: z.string(),
+  nodePositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })),
 });
 
 const sessionSummarySchema = z.object({
@@ -61,6 +92,48 @@ function mapActorInput(input: { actorName?: string; actorType?: 'human' | 'agent
     ...(input.actorName === undefined ? {} : { actor_name: input.actorName }),
     ...(input.actorType === undefined ? {} : { actor_type: input.actorType }),
     ...(input.detail === undefined ? {} : { detail: input.detail }),
+  };
+}
+
+type RawDiagramRevisionSummary = DiagramRevisionSummary;
+type RawDiagramRevision = DiagramRevision;
+
+function mapDiagramRevisionSummary(revision: RawDiagramRevisionSummary) {
+  return {
+    id: revision.revision_id,
+    sequence: revision.sequence,
+    diagramId: revision.diagram_id,
+    diagramName: revision.name,
+    timestamp: revision.timestamp,
+    actor: revision.actor,
+    origin: revision.origin,
+    action: revision.action,
+    ...(revision.base_revision === undefined ? {} : { baseRevision: revision.base_revision }),
+    resultRevision: revision.result_revision,
+    ...(revision.restored_from_revision_id === undefined ? {} : { restoredFromRevisionId: revision.restored_from_revision_id }),
+  };
+}
+
+function mapDiagramRevision(revision: RawDiagramRevision) {
+  return {
+    ...mapDiagramRevisionSummary(revision),
+    mermaidText: revision.mermaid_text,
+    nodePositions: revision.node_positions,
+  };
+}
+
+function createStaleToolResult(current: { id: string; name: string; revision: string }) {
+  const payload = {
+    error: {
+      code: 'STALE_DIAGRAM_REVISION',
+      message: 'The diagram changed before the restore could be applied. Read the current diagram and deliberately reconfirm before retrying.',
+      currentDiagram: mapDiagram(current),
+    },
+  };
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
+    structuredContent: payload,
+    isError: true,
   };
 }
 
@@ -169,6 +242,43 @@ function createMcpServer(manager: SessionManager): McpServer {
   );
 
   server.registerTool(
+    'listDiagramHistory',
+    {
+      title: 'List immutable history for one named diagram tab',
+      description: 'Non-mutating. After getSession and readDiagram identify the current named tab, list its immutable checkpoints. The response identifies the current live revision; readDiagram immediately before any restore.',
+      inputSchema: z.object({ sessionId: z.string(), diagramId: z.string() }),
+      outputSchema: z.object({ currentRevision: z.string(), revisions: z.array(diagramRevisionSummarySchema) }),
+    },
+    async ({ sessionId, diagramId }) => {
+      const output = await handleMcpToolCall(manager, {
+        tool: 'list_diagram_history',
+        input: { session_id: sessionId, diagram_id: diagramId },
+      }) as { current_revision: string; revisions: RawDiagramRevisionSummary[] };
+      return createToolResult({
+        currentRevision: output.current_revision,
+        revisions: output.revisions.map(mapDiagramRevisionSummary),
+      });
+    },
+  );
+
+  server.registerTool(
+    'readDiagramRevision',
+    {
+      title: 'Read one immutable Mermaid diagram revision',
+      description: 'Non-mutating. Read the exact immutable source and layout for a revision returned by listDiagramHistory. This is safe for local preview and never changes the live diagram.',
+      inputSchema: z.object({ sessionId: z.string(), diagramId: z.string(), revisionId: z.string() }),
+      outputSchema: z.object({ revision: diagramRevisionSchema }),
+    },
+    async ({ sessionId, diagramId, revisionId }) => {
+      const output = await handleMcpToolCall(manager, {
+        tool: 'read_diagram_revision',
+        input: { session_id: sessionId, diagram_id: diagramId, revision_id: revisionId },
+      }) as RawDiagramRevision;
+      return createToolResult({ revision: mapDiagramRevision(output) });
+    },
+  );
+
+  server.registerTool(
     'writeDiagram',
     {
       title: 'Replace one Mermaid diagram tab',
@@ -233,6 +343,38 @@ function createMcpServer(manager: SessionManager): McpServer {
     },
   );
 
+  server.registerTool(
+    'restoreDiagramRevision',
+    {
+      title: 'Restore an immutable revision as a new live revision',
+      description: 'Restore one previously read revision without deleting history. You MUST call readDiagram immediately before this tool and pass that exact latest revision as expectedRevision. A stale restore is a no-op: read the current diagram, review the new state, and deliberately reconfirm. Never blindly retry.',
+      inputSchema: z.object({
+        sessionId: z.string(),
+        diagramId: z.string(),
+        revisionId: z.string().describe('Immutable revision ID returned by listDiagramHistory.'),
+        expectedRevision: z.string().describe('Exact latest diagram revision from a readDiagram call made immediately before restore.'),
+        ...actorInputSchema,
+      }),
+      outputSchema: z.object({ diagram: diagramSchema, revision: diagramRevisionSummarySchema }),
+    },
+    async ({ sessionId, diagramId, revisionId, expectedRevision, actorName, actorType, detail }) => {
+      const output = await handleMcpToolCall(manager, {
+        tool: 'restore_diagram_revision',
+        input: {
+          session_id: sessionId,
+          diagram_id: diagramId,
+          revision_id: revisionId,
+          expected_revision: expectedRevision,
+          ...mapActorInput({ actorName, actorType, detail }),
+        },
+      }) as RestoreDiagramRevisionResult;
+      if (output.status === 'stale') {
+        return createStaleToolResult(output.current);
+      }
+      return createToolResult({ diagram: mapDiagram(output.diagram), revision: mapDiagramRevisionSummary(output.revision) });
+    },
+  );
+
   server.registerPrompt(
     'diagrammingWorkflow',
     {
@@ -244,7 +386,7 @@ function createMcpServer(manager: SessionManager): McpServer {
         role: 'user' as const,
         content: {
           type: 'text' as const,
-          text: 'When asked to scaffold or update an ArielCharts diagram: use the supplied sessionId (or listSessions if none was supplied), call getSession to select a tab, and use stable diagram IDs. Create a named tab only when the topic is new. For end-to-end API calls, use Mermaid sequenceDiagram with explicit actors/participants, request and response arrows, and alt/error paths when relevant. Before changing an existing tab, call readDiagram and pass its latest revision as expectedRevision to writeDiagram or renameDiagram. If a stale-revision error occurs, re-read, merge the concurrent edit, and retry. Do not rename or delete tabs unless explicitly asked.',
+          text: 'When asked to scaffold or update an ArielCharts diagram: use the supplied sessionId (or listSessions if none was supplied), then call getSession to choose a named tab by its stable ID. Create a named tab only when the topic is new. For end-to-end API calls, use Mermaid sequenceDiagram with explicit actors/participants, request and response arrows, and alt/error paths when relevant. Before changing an existing tab, call readDiagram and pass its latest revision as expectedRevision to writeDiagram or renameDiagram. If a stale write occurs, re-read, merge the concurrent edit, and retry deliberately. To inspect prior work, use getSession -> readDiagram -> listDiagramHistory -> readDiagramRevision. Before restoring, call readDiagram immediately again, then call restoreDiagramRevision with that exact expectedRevision. A stale restore is a no-op: re-read, review the new state, and deliberately reconfirm; never blindly retry it. Do not rename or delete tabs unless explicitly asked.',
         },
       }],
     }),

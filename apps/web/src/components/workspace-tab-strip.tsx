@@ -112,6 +112,7 @@ export function WorkspaceTabStrip({
           className={`workspace-source-toggle${sourceOpen ? ' is-active' : ''}`}
           data-testid="source-flyout-toggle"
           onClick={(event) => { onSourceToggle(event.currentTarget); }}
+          title="Mermaid source"
           type="button"
         ><Code2 aria-hidden="true" size={15} /><span>{sourceOpen ? 'hide source' : 'show source'}</span></button>
         <span className="workspace-diagram-mode" data-testid="diagram-mode"><span aria-hidden="true" />{diagramModeLabel}</span>

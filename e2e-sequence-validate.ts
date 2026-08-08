@@ -9,6 +9,7 @@ import {
   waitForReactFlowNodePositionMovement,
   waitForReactFlowNodePositions,
 } from './e2e/support/react-flow';
+import { createBlankDiagram } from './e2e/support/workspace';
 
 const FLOWCHART_FIXTURE = `flowchart LR
   A[Main] --> B[Done]`;
@@ -297,7 +298,7 @@ async function validateSequenceCanvas() {
     const sameTabTransition = await assertSameTabKindTransition(page);
     assertNoReactFlowError015(diagnostics.reactFlowError015, 'during a single-node drag');
 
-    await page.getByTestId('create-diagram-tab').click();
+    await createBlankDiagram(page);
     await replaceSource(page, API_SEQUENCE_FIXTURE);
     await waitForCanvas(page, 'generic');
     await closeSourceFlyout(page);

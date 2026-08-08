@@ -111,7 +111,14 @@ describe('server integration', () => {
 
     const toolsResponse = await mcpRequest({ id: 2, method: 'tools/list' });
     expect(toolsResponse.status).toBe(200);
-    const toolsPayload = await toolsResponse.json() as { result: { tools: Array<{ name: string }> } };
+    const toolsPayload = await toolsResponse.json() as {
+      result: {
+        tools: Array<{
+          name: string;
+          inputSchema?: { properties?: Record<string, { enum?: string[]; description?: string }> };
+        }>;
+      };
+    };
     expect(toolsPayload.result.tools.map((tool) => tool.name)).toEqual([
       'listSessions',
       'getSession',
@@ -121,6 +128,17 @@ describe('server integration', () => {
       'renameDiagram',
       'deleteDiagram',
     ]);
+    const createTool = toolsPayload.result.tools.find((tool) => tool.name === 'createDiagram');
+    expect(createTool?.inputSchema?.properties?.templateId?.enum).toEqual([
+      'blank',
+      'api-sequence',
+      'service-flowchart',
+      'data-model-er',
+      'state-machine',
+      'incident-timeline',
+      'deployment-architecture',
+    ]);
+    expect(createTool?.inputSchema?.properties?.templateId?.description).toContain('api-sequence: A request, response');
 
     const promptsResponse = await mcpRequest({ id: 3, method: 'prompts/list' });
     expect(promptsResponse.status).toBe(200);
@@ -142,7 +160,7 @@ describe('server integration', () => {
     const sessionRevision = sessionPayload.result.structuredContent.revision;
     expect(sessionRevision).toEqual(expect.any(String));
 
-    const createResponse = await mcpRequest({
+    const explicitSourceCreate = await mcpRequest({
       id: 6,
       method: 'tools/call',
       toolName: 'createDiagram',
@@ -150,9 +168,78 @@ describe('server integration', () => {
         name: 'createDiagram',
         arguments: {
           sessionId: 'abc123de',
-          name: 'Checkout API flow',
+          name: 'Explicit source',
           mermaidText: 'sequenceDiagram\n  Browser->>API: POST /checkout',
           expectedRevision: sessionRevision,
+        },
+      },
+    });
+    expect(explicitSourceCreate.status).toBe(200);
+    const explicitSourcePayload = await explicitSourceCreate.json() as {
+      result: { structuredContent: { diagram: { id: string; mermaidText: string; revision: string } } };
+    };
+    expect(explicitSourcePayload.result.structuredContent.diagram.mermaidText).toContain('POST /checkout');
+
+    const latestSessionResponse = await mcpRequest({
+      id: 7,
+      method: 'tools/call',
+      toolName: 'getSession',
+      params: { arguments: { sessionId: 'abc123de' }, name: 'getSession' },
+    });
+    const latestSession = await latestSessionResponse.json() as {
+      result: { structuredContent: { revision: string; diagrams: Array<{ id: string; name: string; revision: string }> } };
+    };
+    const latestRevision = latestSession.result.structuredContent.revision;
+    const catalogBeforeRejectedCreates = latestSession.result.structuredContent.diagrams;
+
+    const missingSourceCreate = await mcpRequest({
+      id: 8,
+      method: 'tools/call',
+      toolName: 'createDiagram',
+      params: { name: 'createDiagram', arguments: { sessionId: 'abc123de', name: 'Missing source', expectedRevision: latestRevision } },
+    });
+    expect(missingSourceCreate.status).toBe(200);
+    await expect(missingSourceCreate.json()).resolves.toMatchObject({ result: { isError: true } });
+
+    const ambiguousSourceCreate = await mcpRequest({
+      id: 9,
+      method: 'tools/call',
+      toolName: 'createDiagram',
+      params: {
+        name: 'createDiagram',
+        arguments: {
+          sessionId: 'abc123de',
+          name: 'Ambiguous source',
+          templateId: 'blank',
+          mermaidText: 'flowchart LR\n  A --> B',
+          expectedRevision: latestRevision,
+        },
+      },
+    });
+    expect(ambiguousSourceCreate.status).toBe(200);
+    await expect(ambiguousSourceCreate.json()).resolves.toMatchObject({ result: { isError: true } });
+
+    const afterRejectedCreates = await mcpRequest({
+      id: 10,
+      method: 'tools/call',
+      toolName: 'getSession',
+      params: { arguments: { sessionId: 'abc123de' }, name: 'getSession' },
+    });
+    await expect(afterRejectedCreates.json()).resolves.toMatchObject({
+      result: { structuredContent: { revision: latestRevision, diagrams: catalogBeforeRejectedCreates } },
+    });
+
+    const createResponse = await mcpRequest({
+      id: 11,
+      method: 'tools/call',
+      toolName: 'createDiagram',
+      params: {
+        name: 'createDiagram',
+        arguments: {
+          sessionId: 'abc123de',
+          name: 'Checkout API flow',
+          templateId: 'api-sequence',
+          expectedRevision: latestRevision,
         },
       },
     });
@@ -163,17 +250,17 @@ describe('server integration', () => {
     expect(createPayload.result.structuredContent.diagram.mermaidText).toContain('sequenceDiagram');
 
     const readResponse = await mcpRequest({
-      id: 7,
+      id: 12,
       method: 'tools/call',
       toolName: 'readDiagram',
       params: { name: 'readDiagram', arguments: { sessionId: 'abc123de', diagramId: createPayload.result.structuredContent.diagram.id } },
     });
     expect(readResponse.status).toBe(200);
     const readPayload = await readResponse.json() as { result: { structuredContent: { diagram: { revision: string; mermaidText: string } } } };
-    expect(readPayload.result.structuredContent.diagram.mermaidText).toContain('POST /checkout');
+    expect(readPayload.result.structuredContent.diagram.mermaidText).toContain('POST /orders');
 
     const writeResponse = await mcpRequest({
-      id: 8,
+      id: 13,
       method: 'tools/call',
       toolName: 'writeDiagram',
       params: {
@@ -191,7 +278,7 @@ describe('server integration', () => {
     expect(writePayload.result.structuredContent.diagram.mermaidText).toContain('GET /health');
 
     const staleWrite = await mcpRequest({
-      id: 9,
+      id: 14,
       method: 'tools/call',
       toolName: 'writeDiagram',
       params: { name: 'writeDiagram', arguments: {
@@ -205,7 +292,7 @@ describe('server integration', () => {
     await expect(staleWrite.json()).resolves.toMatchObject({ result: { isError: true } });
 
     const renamedResponse = await mcpRequest({
-      id: 10,
+      id: 15,
       method: 'tools/call',
       toolName: 'renameDiagram',
       params: { name: 'renameDiagram', arguments: {
@@ -218,7 +305,7 @@ describe('server integration', () => {
     expect(renamedPayload.result.structuredContent.diagram.name).toBe('Health flow');
 
     const canonicalRead = await mcpRequest({
-      id: 11,
+      id: 16,
       method: 'tools/call',
       toolName: 'readDiagram',
       params: { name: 'readDiagram', arguments: { sessionId: 'abc123de', diagramId: createPayload.result.structuredContent.diagram.id } },
@@ -226,7 +313,7 @@ describe('server integration', () => {
     await expect(canonicalRead.json()).resolves.toMatchObject({ result: { structuredContent: { diagram: { mermaidText: expect.stringContaining('GET /health') } } } });
 
     const deleteResponse = await mcpRequest({
-      id: 12,
+      id: 17,
       method: 'tools/call',
       toolName: 'deleteDiagram',
       params: { name: 'deleteDiagram', arguments: {

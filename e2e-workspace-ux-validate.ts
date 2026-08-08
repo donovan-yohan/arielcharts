@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import {
   DESKTOP_VIEWPORT,
   MOBILE_VIEWPORT,
@@ -21,6 +21,7 @@ import {
 } from './e2e/support/interactions.ts';
 import { ModernMcpClient } from './e2e/support/mcp.ts';
 import { withOwnedServices } from './e2e/support/owned-services.ts';
+import { STARTER_TEMPLATES } from './packages/shared/src/starter-templates.js';
 import {
   API_SEQUENCE_FIXTURE,
   FLOWCHART_FIXTURE,
@@ -28,12 +29,14 @@ import {
   activeTabName,
   canonicalSource,
   closeFlyout,
-  createBlankDiagram,
+  createDiagramFromTemplate,
   ensureFlyout,
   ensureSourceFlyoutOpen,
+  openTemplateMenu,
   renameActiveDiagram,
   replaceSource,
   selectTabByName,
+  templateMenuItem,
   visitWorkspace,
   waitForCanvas,
   waitForInvalidPreview,
@@ -80,6 +83,150 @@ async function waitForFocusedTestId(page: Page, testId: string, label: string): 
   }
 }
 
+async function waitForFocusedLocator(page: Page, target: Locator, label: string): Promise<void> {
+  try {
+    await target.waitFor({ state: 'visible', timeout: 5_000 });
+    const element = await target.elementHandle();
+    assert(element, `${label} has no focusable element.`);
+    await page.waitForFunction((candidate) => document.activeElement === candidate, element, { timeout: 5_000 });
+  } catch {
+    const active = await page.evaluate(() => ({
+      ariaLabel: document.activeElement?.getAttribute('aria-label'),
+      role: document.activeElement?.getAttribute('role'),
+      text: document.activeElement?.textContent?.trim().slice(0, 80),
+    }));
+    throw new Error(`${label} did not receive focus: active=${JSON.stringify(active)}.`);
+  }
+}
+
+async function canvasTransform(page: Page): Promise<string | null> {
+  const layer = page.locator('.diagram-canvas-svg').locator('..');
+  if (await layer.count() === 0) return null;
+  return layer.getAttribute('style');
+}
+
+async function assertTemplateIdentityAbsent(page: Page): Promise<void> {
+  const renderedDocument = await page.locator('html').innerHTML();
+  for (const { id } of STARTER_TEMPLATES) {
+    assert(!renderedDocument.includes(id), `Creation-time template identity leaked into rendered document markup: ${id}.`);
+  }
+}
+
+async function renderedCanvasTransform(page: Page, label: string): Promise<string> {
+  const transform = await canvasTransform(page);
+  assert(transform !== null, `${label} requires a rendered canvas camera layer.`);
+  return transform;
+}
+
+async function expectTemplateMenu(page: Page): Promise<string> {
+  const trigger = page.getByTestId('create-diagram-tab');
+  await assertHitTarget(page, trigger, 'always-visible template creation control');
+  const before = await snapshotAnchors(page, ANCHORS);
+  const beforeTransform = await canvasTransform(page);
+  const menu = await openTemplateMenu(page);
+  await assertDocumentHasNoHorizontalOverflow(page);
+  await assertContainedInViewport(page, menu, 'desktop starter template menu');
+  const blank = templateMenuItem(page, 'Blank sheet');
+  const apiSequence = templateMenuItem(page, 'End-to-end API sequence');
+  const deployment = templateMenuItem(page, 'Deployment architecture');
+  const labels = (await menu.getByRole('menuitem').allTextContents()).map((value) => value.trim());
+  assert(labels[0]?.startsWith('Blank sheet'), `Blank sheet is not first in the template menu: ${JSON.stringify(labels)}.`);
+  await waitForFocusedLocator(page, blank, 'Opening template menu');
+  const tabStops = await menu.getByRole('menuitem').evaluateAll((items) => items.map((item) => ({
+    tabIndex: (item as HTMLElement).tabIndex,
+    text: item.textContent?.trim() ?? '',
+  })).filter((item) => item.tabIndex === 0));
+  assert(tabStops.length === 1 && tabStops[0]?.text.startsWith('Blank sheet'),
+    `Template menu must begin with only Blank sheet in the tab order: ${JSON.stringify(tabStops)}.`);
+  await saveScreenshot(page, 'issue-15-light-template-menu');
+  await blank.press('Tab');
+  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, 'source-flyout-toggle', 'Tabbing forward out of the template menu');
+
+  await openTemplateMenu(page);
+  await waitForFocusedLocator(page, blank, 'Reopening template menu after Tab exit');
+  await blank.press('ArrowDown');
+  await waitForFocusedLocator(page, apiSequence, 'ArrowDown in template menu');
+  await apiSequence.press('ArrowUp');
+  await waitForFocusedLocator(page, blank, 'ArrowUp in template menu');
+  await blank.press('ArrowDown');
+  await waitForFocusedLocator(page, apiSequence, 'ArrowDown adjacency check in template menu');
+  await apiSequence.press('Home');
+  await waitForFocusedLocator(page, blank, 'Home in template menu');
+  await blank.press('End');
+  await waitForFocusedLocator(page, deployment, 'End in template menu');
+  await deployment.press('Escape');
+  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, 'create-diagram-tab', 'Closing template menu with Escape');
+  assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
+  assert(await canvasTransform(page) === beforeTransform, 'Opening and closing the template menu changed the canvas camera.');
+
+  await verifiedClick(page, page.getByTestId('theme-control').getByRole('button', { name: 'Dark', exact: true }), 'dark theme control for template menu');
+  await page.locator('html[data-theme="dark"]').waitFor({ state: 'attached', timeout: 5_000 });
+  await openTemplateMenu(page);
+  await saveScreenshot(page, 'issue-15-dark-template-menu');
+  await page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await verifiedClick(page, page.getByTestId('theme-control').getByRole('button', { name: 'Light', exact: true }), 'light theme control after template menu screenshots');
+  await page.locator('html[data-theme="light"]').waitFor({ state: 'attached', timeout: 5_000 });
+
+  const outsideBefore = await snapshotAnchors(page, ANCHORS);
+  const outsideBeforeTransform = await canvasTransform(page);
+  await openTemplateMenu(page);
+  await page.locator('.workspace-logo').click();
+  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, 'create-diagram-tab', 'Closing template menu from nonfocusable page chrome');
+  assertAnchorsStable(outsideBefore, await snapshotAnchors(page, ANCHORS));
+  assert(await canvasTransform(page) === outsideBeforeTransform, 'Outside-closing the template menu changed the canvas camera.');
+
+  await openTemplateMenu(page);
+  const sourceToggle = page.getByTestId('source-flyout-toggle');
+  await sourceToggle.click();
+  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+  await waitForFocusedLocator(page, page.locator('.cm-content'), 'Clicking an interactive control outside the template menu');
+  assert(await trigger.evaluate((element) => document.activeElement !== element),
+    'Clicking an interactive control outside the template menu had its focus stolen by the creation trigger.');
+  await closeFlyout(page, 'source');
+
+  const blankName = await createDiagramFromTemplate(page, 'Blank sheet');
+  await waitForFocusedLocator(page, page.getByRole('tab', { name: blankName, exact: true }), 'Creating a template diagram');
+  await ensureSourceFlyoutOpen(page);
+  assert(await canonicalSource(page) === '', 'Blank starter template did not create empty Mermaid source.');
+  await closeFlyout(page, 'source');
+  return blankName;
+}
+
+async function expectTemplateDiagramCreation(page: Page): Promise<void> {
+  const flowchartName = await createDiagramFromTemplate(page, 'Service / system flowchart');
+  await waitForCanvas(page, 'flowchart');
+  assert(await page.locator('form[aria-label="Add Mermaid node"]').count() === 1,
+    'Service flowchart template did not expose structural controls.');
+  await renameActiveDiagram(page, 'Service API flow');
+  await ensureSourceFlyoutOpen(page);
+  const flowchartSource = await canonicalSource(page);
+  await replaceSource(page, `${flowchartSource}\n  Service --> Audit[Audit log]`);
+  await waitForSource(page, `${flowchartSource}\n  Service --> Audit[Audit log]`);
+  await waitForCanvas(page, 'flowchart');
+  await closeFlyout(page, 'source');
+  await saveScreenshot(page, 'issue-15-service-flowchart');
+
+  const sequenceName = await createDiagramFromTemplate(page, 'End-to-end API sequence');
+  await waitForCanvas(page, 'generic');
+  assert(await page.locator('form[aria-label="Add Mermaid node"]').count() === 0,
+    'API sequence template retained flowchart structural controls.');
+  await renameActiveDiagram(page, 'API request timing');
+  await ensureSourceFlyoutOpen(page);
+  const sequenceSource = await canonicalSource(page);
+  await replaceSource(page, `${sequenceSource}\n  Note over Client,API: traced in live coding`);
+  await waitForSource(page, `${sequenceSource}\n  Note over Client,API: traced in live coding`);
+  await waitForCanvas(page, 'generic');
+  await closeFlyout(page, 'source');
+  await saveScreenshot(page, 'issue-15-api-sequence');
+  await assertTemplateIdentityAbsent(page);
+  assert(flowchartName !== sequenceName, 'Flowchart and sequence templates reused the same created tab.');
+}
+
 async function expectStableFlyoutAnchors(page: Page, label: string): Promise<void> {
   const before = await snapshotAnchors(page, ANCHORS);
   await ensureFlyout(page, 'source');
@@ -121,11 +268,8 @@ async function expectFlyoutFocusAndEscape(page: Page): Promise<void> {
   assert(await activityToggle.evaluate((element) => document.activeElement === element), 'Closing activity with Escape did not return focus to its toggle.');
 }
 
-async function expectTabKeyboardAndRename(page: Page): Promise<string> {
-  const created = await createBlankDiagram(page);
-  await ensureSourceFlyoutOpen(page);
-  assert(await canonicalSource(page) === '', 'A newly created diagram tab was not blank.');
-  await closeFlyout(page, 'source');
+async function expectTabKeyboardAndRename(page: Page, created: string): Promise<string> {
+  await selectTabByName(page, created);
   const renamed = 'API timing';
   await renameActiveDiagram(page, renamed);
   await saveScreenshot(page, 'issue-14-rename');
@@ -224,18 +368,17 @@ async function expectRendererKindFit(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   await closeFlyout(page, 'source');
-  const layer = page.locator('.diagram-canvas-svg').locator('..');
-  const beforeZoom = await layer.getAttribute('style');
+  const beforeZoom = await renderedCanvasTransform(page, 'Flowchart zoom verification');
   await verifiedClick(page, page.getByRole('button', { name: 'Zoom in', exact: true }), 'zoom in');
   await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeZoom, { timeout: 5_000 });
-  const zoomed = await layer.getAttribute('style');
+  const zoomed = await renderedCanvasTransform(page, 'Flowchart zoom result');
   await replaceSource(page, API_SEQUENCE_FIXTURE);
   await waitForCanvas(page, 'generic');
   await closeFlyout(page, 'source');
   await page.waitForFunction((previous) => (
     document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous
   ), zoomed, { timeout: 5_000 });
-  const staticTransform = await layer.getAttribute('style');
+  const staticTransform = await renderedCanvasTransform(page, 'Static renderer transition');
   assert(staticTransform !== zoomed, `Editable-to-static renderer transition did not fit the camera: ${zoomed}`);
   await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), 'static renderer fit diagram');
 }
@@ -417,24 +560,33 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
   await verifiedClick(page, page.getByLabel('Close source panel', { exact: true }), `${label} close source`);
   await page.getByTestId('source-flyout').waitFor({ state: 'detached', timeout: 15_000 });
+  const templateTrigger = page.getByTestId('create-diagram-tab');
+  await assertHitTarget(page, templateTrigger, `${label} template creation control`);
+  const templateMenu = await openTemplateMenu(page);
+  const blankTemplate = templateMenuItem(page, 'Blank sheet');
+  await waitForFocusedLocator(page, blankTemplate, `${label} opening starter template menu`);
+  await assertDocumentHasNoHorizontalOverflow(page);
+  await assertContainedInViewport(page, templateTrigger, `${label} template creation control`);
+  await assertContainedInViewport(page, templateMenu, `${label} starter template menu`);
+  await blankTemplate.press('Escape');
+  await templateMenu.waitFor({ state: 'detached', timeout: 15_000 });
   if (label === 'mobile-320') {
     await assertDocumentHasNoHorizontalOverflow(page);
     for (const [target, targetLabel] of [
-      [page.getByTestId('create-diagram-tab'), 'tab creation control'],
+      [templateTrigger, 'tab creation control'],
       [page.getByTestId('source-flyout-toggle'), 'source toggle'],
       [page.getByTestId('canvas-add-node-toolbar'), 'add-node toolbar'],
       [page.getByTestId('canvas-controls-toolbar'), 'canvas controls toolbar'],
     ] as const) {
       await assertContainedInViewport(page, target, `mobile-320 ${targetLabel}`);
     }
-    const layer = page.locator('.diagram-canvas-svg').locator('..');
-    const beforeZoomOut = await layer.getAttribute('style');
+    const beforeZoomOut = await renderedCanvasTransform(page, 'mobile-320 zoom-out verification');
     await verifiedClick(page, page.getByRole('button', { name: 'Zoom out', exact: true }), 'mobile-320 Zoom out');
     await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeZoomOut, { timeout: 5_000 });
-    const beforeZoomIn = await layer.getAttribute('style');
+    const beforeZoomIn = await renderedCanvasTransform(page, 'mobile-320 zoom-in verification');
     await verifiedClick(page, page.getByRole('button', { name: 'Zoom in', exact: true }), 'mobile-320 Zoom in');
     await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeZoomIn, { timeout: 5_000 });
-    const beforeFit = await layer.getAttribute('style');
+    const beforeFit = await renderedCanvasTransform(page, 'mobile-320 fit verification');
     await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), 'mobile-320 Fit diagram');
     await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeFit, { timeout: 5_000 });
     const mobileLabel = page.getByRole('textbox', { name: 'New node label', exact: true });
@@ -459,6 +611,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'system, light, and dark media resolution plus persistence');
       await verifiedClick(page, page.getByTestId('theme-control').getByRole('button', { name: 'Light', exact: true }), 'light theme control for screenshot matrix');
       await page.locator('html[data-theme="light"]').waitFor({ state: 'attached', timeout: 5_000 });
+      const blankDiagramName = await expectTemplateMenu(page);
+      record(results, 'template menu visibility, keyboard navigation, focus return, stable anchors, and blank creation');
       await expectUnstyledNodesUseNeutralThemeColors(page);
       record(results, 'unstyled flowchart nodes use monochrome-neutral theme colors');
       await expectContrastRoles(page);
@@ -475,10 +629,13 @@ async function validateWorkspaceUx(): Promise<void> {
       await closeFlyout(page, 'activity');
       await expectFlyoutFocusAndEscape(page);
       record(results, 'flyout autofocus, Escape close, and focus return');
-      const diagramName = await expectTabKeyboardAndRename(page);
+      const diagramName = await expectTabKeyboardAndRename(page, blankDiagramName);
       record(results, 'blank tab create, rename, and keyboard navigation');
       await selectTabByName(page, diagramName);
       await saveScreenshot(page, 'issue-14-blank');
+      await expectTemplateDiagramCreation(page);
+      record(results, 'flowchart and API sequence templates render, rename, edit, and remain ordinary diagrams');
+      await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');
       await expectRendererKindFit(page);

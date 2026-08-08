@@ -1,5 +1,7 @@
-import { Code2, Pencil, Plus, X } from 'lucide-react';
+import type { StarterTemplate, StarterTemplateId } from '@arielcharts/shared';
+import { Code2, Pencil, X } from 'lucide-react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { WorkspaceTemplatePicker } from './workspace-template-picker';
 
 export interface WorkspaceDiagramTab {
   id: string;
@@ -13,7 +15,7 @@ interface WorkspaceTabStripProps {
   diagrams: readonly WorkspaceDiagramTab[];
   onActiveDiagramChange: (diagramId: string) => void;
   onCommitDiagramName: () => void;
-  onCreateDiagram: () => void;
+  onCreateDiagram: (templateId: StarterTemplateId) => void;
   onDeleteDiagram: (diagramId: string) => void;
   onDiagramKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>, diagramId: string) => void;
   onDiagramNameDraftChange: (value: string) => void;
@@ -23,6 +25,7 @@ interface WorkspaceTabStripProps {
   registerTabButton: (diagramId: string, element: HTMLButtonElement | null) => void;
   renamingDiagramId: string | null;
   sourceOpen: boolean;
+  starterTemplates: readonly StarterTemplate[];
 }
 
 export function WorkspaceTabStrip({
@@ -42,11 +45,13 @@ export function WorkspaceTabStrip({
   registerTabButton,
   renamingDiagramId,
   sourceOpen,
+  starterTemplates,
 }: WorkspaceTabStripProps) {
   return (
     <nav aria-label="Session diagrams" className="workspace-diagram-tabs" data-testid="diagram-tab-bar">
-      <div aria-orientation="horizontal" className="workspace-diagram-tab-list" role="tablist">
-        {diagrams.map((diagram) => {
+      <div className="workspace-diagram-tab-scroller">
+        <div aria-orientation="horizontal" className="workspace-diagram-tab-list" role="tablist">
+          {diagrams.map((diagram) => {
           const active = diagram.id === activeDiagramId;
           const renaming = diagram.id === renamingDiagramId;
           return (
@@ -96,9 +101,10 @@ export function WorkspaceTabStrip({
               ) : null}
             </div>
           );
-        })}
-        <button aria-label="Create blank diagram" className="workspace-diagram-tab-add" data-testid="create-diagram-tab" onClick={onCreateDiagram} title="New blank diagram" type="button"><Plus aria-hidden="true" size={18} /></button>
+          })}
+        </div>
       </div>
+      <WorkspaceTemplatePicker onCreateDiagram={onCreateDiagram} templates={starterTemplates} />
       <div className="workspace-diagram-tab-tools">
         <button
           aria-controls="source-flyout"

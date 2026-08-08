@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getDefaultMermaidText, isValidSessionId, randomSessionId } from './session';
-import { getActiveDiagramName, getAgentWorkflowPrompt } from '../components/session-workspace';
+import { getActiveDiagramName, getAgentWorkflowPrompt, getTemplateDiagramCreation, getTemplateDiagramName } from '../components/session-workspace';
 
 describe('session helpers', () => {
   it('creates session ids in the expected shape', () => {
@@ -29,5 +29,26 @@ describe('session helpers', () => {
     const activeId = 'main';
     expect(getActiveDiagramName([{ id: activeId, name: 'Main' }], activeId)).toBe('Main');
     expect(getActiveDiagramName([{ id: activeId, name: 'API request flow' }], activeId)).toBe('API request flow');
+  });
+
+  it('creates an ordinary collision-safe template tab from the shared starter source', () => {
+    const creation = getTemplateDiagramCreation('api-sequence', 'diagram_1234567890abcdef', ['API sequence cdef']);
+    expect(creation.name).toBe('API sequence 90abcdef');
+    expect(creation.source).toContain('sequenceDiagram');
+    expect(creation.id).toBe('diagram_1234567890abcdef');
+  });
+
+  it('falls back to the complete stable ID if both short suffix names collide', () => {
+    expect(getTemplateDiagramName('Blank', 'diagram_1234567890abcdef', [
+      'Blank cdef',
+      'Blank 90abcdef',
+    ])).toBe('Blank diagram_1234567890abcdef');
+  });
+
+  it('normalizes template collision names without depending on the browser locale', () => {
+    expect(getTemplateDiagramName('API   sequence', 'diagram_1234567890abcdef', [
+      '  api sequence cdef  ',
+      'API sequence 90abcdef',
+    ])).toBe('API sequence diagram_1234567890abcdef');
   });
 });

@@ -91,13 +91,41 @@ export async function activeTabName(page: Page): Promise<string> {
   return name.trim();
 }
 
-export async function createBlankDiagram(page: Page): Promise<string> {
-  const before = await page.getByRole('tab').allTextContents();
-  await page.getByTestId('create-diagram-tab').click();
+function accessibleNamePattern(name: string): RegExp {
+  return new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?:\\s|$)`, 'u');
+}
+
+export function templateMenuItem(page: Page, name: string): Locator {
+  return page.getByRole('menuitem', { name: accessibleNamePattern(name) });
+}
+
+export async function openTemplateMenu(page: Page): Promise<Locator> {
+  const trigger = page.getByTestId('create-diagram-tab');
+  if (await trigger.getAttribute('aria-expanded') !== 'true') {
+    await trigger.click();
+  }
+  const menu = page.getByRole('menu', { name: 'Starter templates', exact: true });
+  await menu.waitFor({ state: 'visible', timeout: 15_000 });
+  return menu;
+}
+
+export async function selectTemplateByAccessibleName(page: Page, name: string): Promise<void> {
+  await openTemplateMenu(page);
+  await templateMenuItem(page, name).click();
+  await page.getByRole('menu', { name: 'Starter templates', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
+}
+
+export async function createDiagramFromTemplate(page: Page, name: string): Promise<string> {
+  const before = (await page.getByRole('tab').allTextContents()).map((label) => label.trim());
+  await selectTemplateByAccessibleName(page, name);
   await page.waitForFunction((count) => document.querySelectorAll('[role="tab"]').length === count + 1, before.length, { timeout: 15_000 });
-  const name = await activeTabName(page);
-  assert(!before.includes(name), `Blank tab did not become active: ${name}`);
-  return name;
+  const diagramName = await activeTabName(page);
+  assert(!before.includes(diagramName), `${name} template did not become active: ${diagramName}`);
+  return diagramName;
+}
+
+export async function createBlankDiagram(page: Page): Promise<string> {
+  return createDiagramFromTemplate(page, 'Blank sheet');
 }
 
 export async function renameActiveDiagram(page: Page, name: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { APP_NAME } from '@arielcharts/shared';
+import { APP_NAME, STARTER_TEMPLATES, type StarterTemplateId } from '@arielcharts/shared';
 import { toNodeHandler, type NodeMcpRequestHandler } from '@modelcontextprotocol/node';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -33,6 +33,12 @@ const actorInputSchema = {
   actorType: z.enum(['human', 'agent']).optional().describe('Optional activity-feed actor type. Defaults to agent.'),
   detail: z.string().optional().describe('Optional concise activity-feed description of the change.'),
 };
+
+const starterTemplateIds = STARTER_TEMPLATES.map((template) => template.id) as [StarterTemplateId, ...StarterTemplateId[]];
+const starterTemplateIdSchema = z.enum(starterTemplateIds);
+const starterTemplateDescription = STARTER_TEMPLATES
+  .map((template) => `${template.id}: ${template.description}`)
+  .join(' ');
 
 function createToolResult(payload: Record<string, unknown>) {
   return {
@@ -112,22 +118,27 @@ function createMcpServer(manager: SessionManager): McpServer {
     'createDiagram',
     {
       title: 'Create a named Mermaid diagram tab',
-      description: 'Create one new named tab in a session. First call getSession and pass its latest revision as expectedRevision. Use sequenceDiagram for end-to-end API interactions between parties; do not create a duplicate topic or alter another tab.',
+      description: 'Create one new named tab in a session. First call getSession and pass its latest revision as expectedRevision. Supply exactly one of templateId or mermaidText. Use the API sequence starter for end-to-end calls between parties; do not create a duplicate topic or alter another tab.',
       inputSchema: z.object({
         sessionId: z.string(),
         name: z.string().describe('Unique human-readable tab name within the session.'),
-        mermaidText: z.string().optional().describe('Initial full Mermaid source. Use sequenceDiagram for request/response timelines.'),
+        templateId: starterTemplateIdSchema.optional().describe(`Curated starter ID. Supply exactly one of templateId or mermaidText. ${starterTemplateDescription}`),
+        mermaidText: z.string().optional().describe('Initial full Mermaid source. Supply exactly one of mermaidText or templateId.'),
         expectedRevision: z.string().describe('Latest session revision returned by getSession.'),
         ...actorInputSchema,
-      }),
+      }).refine(
+        ({ templateId, mermaidText }) => (templateId === undefined) !== (mermaidText === undefined),
+        { message: 'Supply exactly one of templateId or mermaidText.' },
+      ),
       outputSchema: z.object({ diagram: diagramSchema }),
     },
-    async ({ sessionId, name, mermaidText, expectedRevision, actorName, actorType, detail }) => {
+    async ({ sessionId, name, templateId, mermaidText, expectedRevision, actorName, actorType, detail }) => {
       const output = await handleMcpToolCall(manager, {
         tool: 'create_diagram',
         input: {
           session_id: sessionId,
           name,
+          ...(templateId === undefined ? {} : { template_id: templateId }),
           ...(mermaidText === undefined ? {} : { mermaid_text: mermaidText }),
           revision: expectedRevision,
           ...mapActorInput({ actorName, actorType, detail }),

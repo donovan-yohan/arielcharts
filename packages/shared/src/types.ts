@@ -1,3 +1,5 @@
+import type { StarterTemplateId } from './starter-templates.js';
+
 export type ParticipantType = 'human' | 'agent';
 
 export interface Participant {
@@ -78,12 +80,14 @@ export interface ListDiagramsOutput {
   revision: string;
 }
 
-export interface CreateDiagramInput {
+export type CreateDiagramInput = {
   session_id: string;
   name: string;
-  mermaid_text?: string;
   revision: string;
-}
+} & (
+  | { mermaid_text: string; template_id?: never }
+  | { template_id: StarterTemplateId; mermaid_text?: never }
+);
 
 export interface CreateDiagramOutput {
   diagram: Diagram;

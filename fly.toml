@@ -4,6 +4,11 @@ primary_region = 'sjc'
 [build]
   dockerfile = 'apps/server/Dockerfile'
 
+[[vm]]
+  cpu_kind = 'shared'
+  cpus = 1
+  memory = '512mb'
+
 [env]
   # The browser and API live on sibling subdomains of donovanyohan.com, so
   # these Secure Lax cookies remain same-site without accepting cross-site use.

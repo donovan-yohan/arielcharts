@@ -483,23 +483,36 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await saveScreenshot(page, 'issue-14-invalid');
 }
 
-async function expectRendererKindFit(page: Page): Promise<void> {
+async function expectRendererTransitionPreservesCamera(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   await closeFlyout(page, 'source');
-  const beforeZoom = await renderedCanvasTransform(page, 'Flowchart zoom verification');
+  const beforeZoom = await waitForStableCanvasTransform(page, 'Flowchart zoom verification');
   await verifiedClick(page, page.getByRole('button', { name: 'Zoom in', exact: true }), 'zoom in');
-  await page.waitForFunction((previous) => document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous, beforeZoom, { timeout: 5_000 });
-  const zoomed = await renderedCanvasTransform(page, 'Flowchart zoom result');
+  await page.waitForFunction((previous) => {
+    const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
+    return layer instanceof HTMLElement && layer.style.transform !== previous;
+  }, beforeZoom, { timeout: 5_000 });
+  const zoomed = await waitForStableCanvasTransform(page, 'Flowchart zoom result');
+  assert(zoomed !== beforeZoom, `Zoom in did not change the flowchart camera: ${beforeZoom}`);
   await replaceSource(page, API_SEQUENCE_FIXTURE);
   await waitForCanvas(page, 'generic');
   await closeFlyout(page, 'source');
-  await page.waitForFunction((previous) => (
-    document.querySelector('.diagram-canvas-svg')?.parentElement?.getAttribute('style') !== previous
-  ), zoomed, { timeout: 5_000 });
-  const staticTransform = await renderedCanvasTransform(page, 'Static renderer transition');
-  assert(staticTransform !== zoomed, `Editable-to-static renderer transition did not fit the camera: ${zoomed}`);
+  const staticTransform = await waitForStableCanvasTransform(page, 'Static renderer transition');
+  assert(staticTransform === zoomed, `Editable-to-static renderer transition changed the camera: ${zoomed} -> ${staticTransform}`);
   await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), 'static renderer fit diagram');
+  await page.waitForFunction((previous) => {
+    const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
+    return layer instanceof HTMLElement && layer.style.transform !== previous;
+  }, staticTransform, { timeout: 5_000 });
+  const fittedTransform = await waitForStableCanvasTransform(page, 'Static renderer explicit Fit result');
+  assert(fittedTransform !== staticTransform, `Explicit Fit did not change the static renderer camera: ${staticTransform}`);
+  await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForCanvas(page, 'flowchart');
+  await closeFlyout(page, 'source');
+  const restoredFlowchartTransform = await waitForStableCanvasTransform(page, 'Flowchart renderer restoration');
+  assert(restoredFlowchartTransform === fittedTransform,
+    `Static-to-editable renderer transition changed the camera: ${fittedTransform} -> ${restoredFlowchartTransform}`);
 }
 
 async function expectRemoteUpdateWithoutAnchorJump(page: Page, mcp: ModernMcpClient, sessionId: string, diagramName: string): Promise<void> {
@@ -512,9 +525,13 @@ async function expectRemoteUpdateWithoutAnchorJump(page: Page, mcp: ModernMcpCli
   const diagram = session.diagrams.find((candidate) => candidate.name === diagramName);
   assert(diagram, `MCP did not expose diagram ${diagramName}.`);
   const before = await snapshotAnchors(page, ANCHORS);
+  const beforeCamera = await waitForStableCanvasTransform(page, 'Remote flowchart update camera baseline');
   const remoteSource = `${FLOWCHART_FIXTURE}\n  Gateway --> Audit[Audit]`;
   await mcp.writeLatest(sessionId, diagram.id, remoteSource);
   await waitForSource(page, remoteSource);
+  await page.locator('.mermaid-flow-node').filter({ hasText: 'Audit' }).first().waitFor({ state: 'visible', timeout: 15_000 });
+  const afterCamera = await waitForStableCanvasTransform(page, 'Remote flowchart update camera result');
+  assert(afterCamera === beforeCamera, `Same-renderer remote update changed the camera: ${beforeCamera} -> ${afterCamera}`);
   assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
 }
 
@@ -1666,8 +1683,8 @@ async function validateWorkspaceUx(): Promise<void> {
       await expectFlatChrome(page);
       record(results, 'flat monochrome chrome has no product shadows while focus and selection remain visible');
       await selectThemePreference(page, 'light');
-      await expectRendererKindFit(page);
-      record(results, 'editable/static renderer transition fits camera');
+      await expectRendererTransitionPreservesCamera(page);
+      record(results, 'editable/static renderer transition preserves camera and explicit Fit changes it');
       await expectRemoteUpdateWithoutAnchorJump(page, mcp, sessionId, diagramName);
       record(results, 'remote update leaves desktop anchors stable');
       await saveScreenshot(page, 'workspace-ux-desktop');

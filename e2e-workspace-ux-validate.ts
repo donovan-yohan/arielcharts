@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
 import {
@@ -24,6 +24,7 @@ import {
 import { ModernMcpClient } from './e2e/support/mcp.ts';
 import { withOwnedServices } from './e2e/support/owned-services.ts';
 import { STARTER_TEMPLATES } from './packages/shared/src/starter-templates.js';
+import { getWebsocketServerUrl } from './apps/web/src/lib/session.ts';
 import {
   API_SEQUENCE_FIXTURE,
   FLOWCHART_FIXTURE,
@@ -35,6 +36,7 @@ import {
   ensureFlyout,
   ensureSourceFlyoutOpen,
   openTemplateMenu,
+  openWorkspaceSettings,
   renameActiveDiagram,
   replaceSource,
   selectTabByName,
@@ -126,16 +128,6 @@ async function renderedCanvasTransform(page: Page, label: string): Promise<strin
   return transform;
 }
 
-async function openWorkspaceSettings(page: Page): Promise<Locator> {
-  const trigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
-  if (await trigger.getAttribute('aria-expanded') !== 'true') {
-    await verifiedClick(page, trigger, 'workspace settings trigger');
-  }
-  const dialog = page.getByTestId(SETTINGS_DIALOG_TEST_ID);
-  await dialog.waitFor({ state: 'visible', timeout: 15_000 });
-  return dialog;
-}
-
 async function closeWorkspaceSettings(page: Page): Promise<void> {
   const dialog = page.getByTestId(SETTINGS_DIALOG_TEST_ID);
   if (await dialog.count() > 0) {
@@ -146,21 +138,41 @@ async function closeWorkspaceSettings(page: Page): Promise<void> {
 
 async function selectThemePreference(page: Page, preference: 'system' | 'light' | 'dark'): Promise<void> {
   await selectWorkspaceTheme(page, preference);
-  const resolvedTheme = preference === 'dark' ? 'dark' : 'light';
+  const resolvedTheme = preference === 'system'
+    ? await page.evaluate(() => window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : preference;
   await page.locator(`html[data-theme="${resolvedTheme}"]`).waitFor({ state: 'attached', timeout: 5_000 });
   await closeWorkspaceSettings(page);
 }
 
-function connectAgentPresence(mcpUrl: string, sessionId: string): AgentPresence {
-  const endpoint = new URL(mcpUrl);
-  endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:';
-  endpoint.pathname = '/ws';
-  endpoint.search = '';
+async function connectAgentPresence(mcpUrl: string, sessionId: string): Promise<AgentPresence> {
+  const endpoint = getWebsocketServerUrl(new URL(mcpUrl).origin);
   const doc = new Y.Doc();
-  const provider = new WebsocketProvider(endpoint.toString(), sessionId, doc, {
+  const provider = new WebsocketProvider(endpoint, sessionId, doc, {
     maxBackoffTime: 2_500,
     resyncInterval: 10_000,
   });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        provider.off('status', handleStatus);
+        reject(new Error(`Agent awareness provider did not connect to ${endpoint} within 5 seconds.`));
+      }, 5_000);
+      const handleStatus = ({ status }: { status: 'connected' | 'connecting' | 'disconnected' }) => {
+        if (status !== 'connected') {
+          return;
+        }
+        clearTimeout(timeout);
+        provider.off('status', handleStatus);
+        resolve();
+      };
+      provider.on('status', handleStatus);
+    });
+  } catch (error) {
+    provider.destroy();
+    doc.destroy();
+    throw error;
+  }
   provider.awareness.setLocalState({
     user: { color: '#111111', name: 'E2E agent', type: 'agent' },
   });
@@ -484,6 +496,7 @@ async function expectThemeContract(page: Page): Promise<void> {
   await page.locator('html[data-theme="dark"]').waitFor({ state: 'attached', timeout: 5_000 });
   await page.reload({ waitUntil: 'domcontentloaded' });
   assert(await page.evaluate(() => window.localStorage.getItem('arielcharts.theme.v1')) === 'system', 'System theme preference did not persist across reload.');
+  await selectThemePreference(page, 'system');
 }
 
 async function openAgentConnectionModal(page: Page, actionLabel: 'Connect my agent' | 'Connection details'): Promise<Locator> {
@@ -530,7 +543,7 @@ async function expectAgentConnectionModal(page: Page, mcpUrl: string, sessionId:
   await closeButtonModal.waitFor({ state: 'detached', timeout: 15_000 });
   await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Closing agent connection modal');
 
-  const agent = connectAgentPresence(mcpUrl, sessionId);
+  const agent = await connectAgentPresence(mcpUrl, sessionId);
   try {
     const settings = await openWorkspaceSettings(page);
     await page.waitForFunction(() => document.querySelector('[data-testid="workspace-agent-status"]')?.textContent?.includes('1 MCP agent working') ?? false, undefined, { timeout: 15_000 });
@@ -545,7 +558,9 @@ async function expectAgentConnectionModal(page: Page, mcpUrl: string, sessionId:
     await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Escaping active-agent connection details');
   } finally {
     agent.destroy();
-    await page.waitForFunction(() => !document.querySelector('[data-testid="workspace-agent-status"]')?.textContent?.includes('MCP agent working'), undefined, { timeout: 15_000 });
+    const settings = await openWorkspaceSettings(page);
+    await expect(settings.getByTestId('workspace-agent-status')).not.toContainText('MCP agent working', { timeout: 15_000 });
+    await closeWorkspaceSettings(page);
   }
 }
 
@@ -588,6 +603,16 @@ async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: st
   const reopenedAfterCancel = await openWorkspaceSettings(page);
   const escapedInput = reopenedAfterCancel.getByRole('textbox', { name: 'Display name', exact: true });
   assert(await escapedInput.inputValue() === savedName, 'Cancelling display-name edit changed the saved value.');
+  const draftName = 'Draft survives agent presence';
+  await escapedInput.fill(draftName);
+  const draftAgent = await connectAgentPresence(mcpUrl, sessionId);
+  try {
+    await expect(reopenedAfterCancel.getByTestId('workspace-agent-status')).toContainText('1 MCP agent working', { timeout: 15_000 });
+    assert(await escapedInput.inputValue() === draftName, 'An unrelated collaboration rerender reset the in-progress display-name draft.');
+  } finally {
+    draftAgent.destroy();
+    await expect(reopenedAfterCancel.getByTestId('workspace-agent-status')).not.toContainText('MCP agent working', { timeout: 15_000 });
+  }
   await escapedInput.fill('Discarded by escape');
   await page.keyboard.press('Escape');
   await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
@@ -689,7 +714,7 @@ async function expectFlatChrome(page: Page): Promise<void> {
     hoveredOuterNode: '.diagram-reactflow-layer .react-flow__node:hover',
   });
   await verifiedClick(page, outerNode, 'outer React Flow node selection for flat chrome audit');
-  await page.waitForFunction((element) => element.classList.contains('is-selected'), await visibleNode.elementHandle(), { timeout: 5_000 });
+  await expect(visibleNode).toHaveClass(/is-selected/u, { timeout: 5_000 });
   const selectedNodeStyles = await outerNode.evaluate((element) => {
     const visibleNode = element.querySelector<HTMLElement>('.mermaid-flow-node');
     if (!visibleNode) throw new Error('Selected outer React Flow node has no visible Mermaid node.');
@@ -713,7 +738,7 @@ async function expectFlatChrome(page: Page): Promise<void> {
   await edgeInteraction.evaluate((element) => {
     element.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, cancelable: true, view: window }));
   });
-  await page.waitForFunction((element) => element.classList.contains('selected'), await selectedEdge.elementHandle(), { timeout: 5_000 });
+  await expect(selectedEdge).toHaveClass(/selected/u, { timeout: 5_000 });
   await selectedEdge.evaluate((element) => {
     if (!element.classList.contains('selected')) {
       throw new Error('React Flow edge did not enter its selected state.');
@@ -920,6 +945,23 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   }
   const settings = await openWorkspaceSettings(page);
   await assertContainedInViewport(page, settings, `${label} workspace settings dialog`);
+  if (label.startsWith('mobile')) {
+    for (const [target, targetLabel] of [
+      [settings.getByRole('button', { name: 'Close', exact: true }), 'close settings'],
+      [settings.getByRole('button', { name: 'Cancel', exact: true }), 'cancel display-name edit'],
+      [settings.getByRole('button', { name: 'Save name', exact: true }), 'save display name'],
+      [settings.getByRole('button', { name: /^(Connect my agent|Connection details)$/u }), 'agent connection'],
+      [settings.getByRole('textbox', { name: 'Display name', exact: true }), 'display-name input'],
+      [settings.locator('.workspace-settings-theme-option').first(), 'System theme option'],
+      [settings.locator('.workspace-settings-theme-option').nth(1), 'Light theme option'],
+      [settings.locator('.workspace-settings-theme-option').nth(2), 'Dark theme option'],
+    ] as const) {
+      await assertHitTarget(page, target, `${label} ${targetLabel}`);
+      const bounds = await target.boundingBox();
+      assert(bounds !== null && bounds.height >= 44,
+        `${label} ${targetLabel} must provide a 44px touch target: ${JSON.stringify(bounds)}.`);
+    }
+  }
   await saveScreenshot(page, `issue-28-${label}-settings`);
   await closeWorkspaceSettings(page);
   await verifiedClick(page, page.getByTestId('source-flyout-toggle'), `${label} source toggle`);

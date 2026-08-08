@@ -2,10 +2,10 @@
 
 import { Settings } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import type { ConnectionState } from '../lib/connection-state';
+import { FOCUSABLE_SELECTOR } from '../lib/focusable';
 import type { ResolvedTheme, ThemePreference } from '../lib/theme';
 import { useTheme } from './theme-provider';
-
-type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 const THEME_OPTIONS: ReadonlyArray<{
   description: string;
@@ -78,16 +78,6 @@ export function shouldReturnFocusAfterOutsidePointer(isInteractiveTarget: boolea
   return !isInteractiveTarget;
 }
 
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled]):not([type="hidden"]):not([type="radio"])',
-  'input[type="radio"]:checked:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',');
-
 const INTERACTIVE_TARGET_SELECTOR = [
   'a[href]',
   'button',
@@ -134,6 +124,12 @@ export function WorkspaceSettings({
 
     setDraftName(displayName);
     window.requestAnimationFrame(() => { displayNameInputRef.current?.focus({ preventScroll: true }); });
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (shouldInterceptWorkspaceSettingsEscape(event.key, isOpen)) {
@@ -169,7 +165,7 @@ export function WorkspaceSettings({
       document.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('pointerdown', handlePointerDown);
     };
-  }, [close, displayName, isOpen]);
+  }, [close, isOpen]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -205,7 +201,7 @@ export function WorkspaceSettings({
 
       {isOpen ? (
         <div
-          aria-label="Workspace settings"
+          aria-labelledby="workspace-settings-title"
           className="workspace-settings-dialog"
           data-testid="workspace-settings-dialog"
           id="workspace-settings-dialog"
@@ -214,7 +210,7 @@ export function WorkspaceSettings({
           tabIndex={-1}
         >
           <div className="workspace-settings-heading">
-            <h2>Settings</h2>
+            <h2 id="workspace-settings-title">Settings</h2>
             <button className="workspace-settings-close" onClick={() => { close(); }} type="button">Close</button>
           </div>
 

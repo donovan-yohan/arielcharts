@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getDefaultMermaidText, isValidSessionId, randomSessionId } from './session';
+import { getDefaultMermaidText, getWebsocketServerUrl, isValidSessionId, randomSessionId } from './session';
 import {
   getActiveDiagramName,
   getAgentCountLabel,
@@ -21,6 +21,11 @@ describe('session helpers', () => {
 
   it('returns starter mermaid text', () => {
     expect(getDefaultMermaidText()).toContain('flowchart LR');
+  });
+
+  it('derives the websocket endpoint for browser and integration clients', () => {
+    expect(getWebsocketServerUrl('http://charts.test')).toBe('ws://charts.test/ws');
+    expect(getWebsocketServerUrl('https://charts.test/base/')).toBe('wss://charts.test/base/ws');
   });
 
   it('copies a modern MCP prompt that requires a fresh revision before writes', () => {

@@ -1041,9 +1041,8 @@ code {
 .diagram-reactflow-layer .react-flow {
   height: 100%;
   width: 100%;
-  --xy-controls-box-shadow: none;
-  --xy-node-boxshadow-hover: none;
-  --xy-node-boxshadow-selected: none;
+  --xy-node-boxshadow-hover-default: none;
+  --xy-node-boxshadow-selected-default: none;
 }
 
 .diagram-reactflow-layer .react-flow,
@@ -1627,6 +1626,17 @@ code {
   .workspace-settings-trigger {
     width: 44px;
     height: 44px;
+  }
+
+  .workspace-settings-close,
+  .workspace-settings-actions button,
+  .workspace-settings-connect {
+    min-height: 44px;
+  }
+
+  .workspace-settings-name-input,
+  .workspace-settings-theme-option {
+    min-height: 44px;
   }
 
   .workspace-settings-dialog {

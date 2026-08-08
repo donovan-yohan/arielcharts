@@ -39,6 +39,8 @@ import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManag
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
+import type { ConnectionState } from '../lib/connection-state';
+import { FOCUSABLE_SELECTOR } from '../lib/focusable';
 import { getMermaidThemeVariables } from '../lib/theme';
 import { getNextWorkspaceFlyout, type WorkspaceFlyout } from '../lib/workspace-flyout-state';
 
@@ -62,9 +64,6 @@ const connectionLabels: Record<ConnectionState, string> = {
   reconnecting: 'Reconnecting',
 };
 
-const MODAL_FOCUSABLE_SELECTOR = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 type CollaborationState = {
   activityArray: Y.Array<ActivityEvent>;
   awareness: AwarenessLike;
@@ -392,6 +391,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const [displayName, setDisplayName] = useState('Human');
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [diagrams, setDiagrams] = useState<DiagramTab[]>([]);
   const [activeDiagramId, setActiveDiagramId] = useState<string | null>(null);
@@ -495,6 +495,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     const activityArray = doc.getArray<ActivityEvent>(ACTIVITY_KEY);
     const localIdentity = getOrCreateIdentity();
     currentIdentityRef.current = localIdentity;
+    setDisplayName(stripParticipantTabSuffix(localIdentity.name));
     awareness.setLocalState({ user: localIdentity });
 
     const syncActivity = () => {
@@ -600,6 +601,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       doc.destroy();
       addActivityRef.current = null;
       currentIdentityRef.current = null;
+      setDisplayName('Human');
       joinedActivityRef.current = false;
       setCollaboration(null);
       setDiagrams([]);
@@ -892,7 +894,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       if (event.key !== 'Tab' || !connectModalDialogRef.current?.contains(document.activeElement)) {
         return;
       }
-      const focusableElements = [...connectModalDialogRef.current.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)];
+      const focusableElements = [...connectModalDialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)];
       const activeElementIndex = focusableElements.indexOf(document.activeElement as HTMLElement);
       const nextIndex = getModalWrappedFocusIndex(activeElementIndex, focusableElements.length, event.shiftKey);
       if (nextIndex !== null) {
@@ -967,6 +969,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
     updateStoredIdentity(nextBaseName, updatedIdentity.color);
     currentIdentityRef.current = updatedIdentity;
+    setDisplayName(stripParticipantTabSuffix(updatedIdentity.name));
     collaboration.awareness.setLocalStateField('user', updatedIdentity);
   }, [collaboration]);
 
@@ -1150,7 +1153,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
           <WorkspaceSettings
             agentCount={connectedAgentCount}
             connectionState={connectionState}
-            displayName={stripParticipantTabSuffix(currentIdentityRef.current?.name ?? 'Human')}
+            displayName={displayName}
             onConnectAgent={openConnectModal}
             onDisplayNameSave={saveDisplayName}
           />

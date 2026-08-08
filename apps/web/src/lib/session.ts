@@ -21,8 +21,12 @@ export function getServerHttpUrl(): string {
   return (process.env.NEXT_PUBLIC_SERVER_URL ?? 'http://localhost:4000').replace(/\/$/u, '');
 }
 
-export function getWebsocketServerUrl(): string {
-  return `${(process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:4000').replace(/\/$/u, '')}/ws`;
+export function getWebsocketServerUrl(baseUrl = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:4000'): string {
+  const endpoint = new URL(baseUrl);
+  endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:';
+  endpoint.pathname = `${endpoint.pathname.replace(/\/$/u, '')}/ws`;
+  endpoint.search = '';
+  return endpoint.toString();
 }
 
 export function getSessionPath(sessionId: string): string {

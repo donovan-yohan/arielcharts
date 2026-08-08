@@ -27,7 +27,7 @@ pnpm monorepo with three packages:
 
 1. **Mermaid text is the diagram source of truth.** Named tabs, source, and layout membership live in the Yjs session document; private room access and history do not.
 2. **Flowchart first for visual structure editing.** Other Mermaid types, including sequence diagrams, remain source-editable and render in the generic preview.
-3. **Two-way sync.** Visual edits serialize back to text; text edits update the visual overlay.
+3. **Two-way sync.** Visual flowchart edits serialize back to text; source edits update their preview.
 4. **Roundtrip fidelity over formatting.** Text must not get mangled by visual edits.
 
 ### Dependencies

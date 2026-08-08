@@ -76,7 +76,7 @@ canonical; the SVG and flowchart interaction model derive from it.
    mutation path, atomically replaces source and prunes accepted obsolete
    layout, then appends activity, persists, and broadcasts through the same
    Yjs document.
-4. A stale MCP revision is a conflict signal: re-read, merge the current
+5. A stale MCP revision is a conflict signal: re-read, merge the current
    source, and retry. It must never result in a blind full-source overwrite or
    restore retry. Restore is a fresh-head checked copy-forward transaction: it
    retains the current name and prior records while creating one new revision.

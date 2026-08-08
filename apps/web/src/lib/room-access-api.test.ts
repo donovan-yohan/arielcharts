@@ -13,6 +13,7 @@ import {
   RoomAccessApiError,
   rotateRoomKey,
 } from './room-access-api';
+import { getServerHttpUrl } from './session';
 
 const fetchMock = vi.fn();
 
@@ -27,7 +28,7 @@ describe('room access API', () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session_id: 'abc123de', room_key: 'raw key' }), { status: 201 }));
 
     await expect(createRoom()).resolves.toEqual({ sessionId: 'abc123de', roomKey: 'raw key' });
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:4000/api/rooms', {
+    expect(fetchMock).toHaveBeenCalledWith(`${getServerHttpUrl()}/api/rooms`, {
       credentials: 'include',
       method: 'POST',
       signal: undefined,
@@ -46,15 +47,15 @@ describe('room access API', () => {
     await expect(rotateRoomKey('abc123de')).resolves.toBe('replacement');
 
     expect(fetchMock.mock.calls).toEqual([
-      ['http://localhost:4000/api/rooms/abc123de/access', { credentials: 'include', signal: undefined }],
-      ['http://localhost:4000/api/rooms/abc123de/access', {
+      [`${getServerHttpUrl()}/api/rooms/abc123de/access`, { credentials: 'include', signal: undefined }],
+      [`${getServerHttpUrl()}/api/rooms/abc123de/access`, {
         body: JSON.stringify({ room_key: 'raw key' }),
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
         method: 'POST',
         signal: undefined,
       }],
-      ['http://localhost:4000/api/rooms/abc123de/rotate', { credentials: 'include', method: 'POST', signal: undefined }],
+      [`${getServerHttpUrl()}/api/rooms/abc123de/rotate`, { credentials: 'include', method: 'POST', signal: undefined }],
     ]);
   });
 

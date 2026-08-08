@@ -1217,11 +1217,16 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   }, []);
 
   const resetRoomKey = useCallback(async () => {
-    const replacement = await rotateRoomKey(sessionId);
-    setRoomKey(replacement);
-    setShareCopyState('idle');
-    setPromptCopyState('idle');
-    setRoomKeyAnnouncement('Room key reset. All previously authorized browsers and agents were revoked; share the replacement key to reconnect them.');
+    try {
+      const replacement = await rotateRoomKey(sessionId);
+      setRoomKey(replacement);
+      setShareCopyState('idle');
+      setPromptCopyState('idle');
+      setRoomKeyAnnouncement('Room key reset. All previously authorized browsers and agents were revoked; share the replacement key to reconnect them.');
+    } catch (error) {
+      setRoomKeyAnnouncement('The room key could not be reset. Try again.');
+      throw error;
+    }
   }, [sessionId]);
 
   useEffect(() => {

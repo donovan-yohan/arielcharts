@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { canMountProtectedWorkspace, RoomGateView, type RoomGateState } from './room-gate';
+import { canMountProtectedWorkspace, RoomGateView, shouldClearRoomKeyFragmentAfterExchangeError, type RoomGateState } from './room-gate';
+import { RoomAccessApiError } from '../lib/room-access-api';
 import { SessionWorkspace } from './session-workspace';
 
 vi.mock('./session-workspace', () => ({
@@ -15,6 +16,12 @@ beforeEach(() => {
 });
 
 describe('RoomGate', () => {
+  it('clears a fragment only after a genuine room-key rejection', () => {
+    expect(shouldClearRoomKeyFragmentAfterExchangeError(new RoomAccessApiError(401))).toBe(true);
+    expect(shouldClearRoomKeyFragmentAfterExchangeError(new RoomAccessApiError(500))).toBe(false);
+    expect(shouldClearRoomKeyFragmentAfterExchangeError(new TypeError('network unavailable'))).toBe(false);
+  });
+
   it.each<RoomGateState>([
     { status: 'checking' },
     { status: 'locked', failed: false },

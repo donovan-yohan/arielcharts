@@ -84,6 +84,7 @@ async function clickFirstVisibleEdge(page: Page): Promise<boolean> {
 async function validate() {
   const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
+  try {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const results: Array<{ test: string; pass: boolean }> = [];
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
@@ -91,6 +92,8 @@ async function validate() {
   const room = await createRoom(new URL(mcpUrl).origin, baseUrl);
   const roomAccess = await exchangeRoomAccess(new URL(mcpUrl).origin, baseUrl, room);
   const durableObserver = await openYjsSessionObserver(mcpUrl, room.sessionId, { cookie: roomAccess.cookie, origin: baseUrl });
+
+  try {
 
   page.on('console', (msg) => {
     if (msg.type() === 'error') console.log(`[console.error] ${msg.text()}`);
@@ -580,11 +583,14 @@ async function validate() {
   console.log('='.repeat(40));
   console.log(allPassed ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED');
 
-  await browser.close();
-  durableObserver.destroy();
-
-  if (!allPassed) {
-    process.exit(1);
+    if (!allPassed) {
+      process.exitCode = 1;
+    }
+  } finally {
+    durableObserver.destroy();
+  }
+  } finally {
+    await browser.close();
   }
 }
 

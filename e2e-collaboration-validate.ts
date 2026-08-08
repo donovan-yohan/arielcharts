@@ -9,7 +9,7 @@ import {
   waitForReactFlowNodePositionMatch,
   waitForReactFlowNodePositionMovement,
 } from './e2e/support/react-flow';
-import { postModernMcp } from './e2e/support/mcp';
+import { ModernMcpClient, postModernMcp, type Diagram } from './e2e/support/mcp';
 import { withOwnedServices, type E2eEndpoints } from './e2e/support/owned-services';
 import {
   createRoom,
@@ -21,7 +21,6 @@ import {
 } from './e2e/support/room-access';
 import { openYjsSessionObserver, type YjsSessionObserver } from './e2e/support/yjs-session';
 
-const MCP_PROTOCOL_VERSION = '2026-07-28';
 const BASE_FLOWCHART = `flowchart LR
   Browser[Browser] --> Gateway[Gateway]
   Gateway --> Service[Service]
@@ -37,18 +36,26 @@ const PENDING_PRUNE_REMOVED = `flowchart LR
   B[Bridge] --> C[Keep]`;
 const NEGATIVE_OBSERVATION_WINDOW_MS = 300;
 
-type Diagram = { id: string; mermaidText: string; name: string; revision: string };
-type McpPayload = {
-  error?: { message?: string };
-  result?: {
-    content?: Array<{ text?: string }>;
-    isError?: boolean;
-    structuredContent?: Record<string, unknown>;
-  };
-};
-
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+async function writeDiagram(
+  mcp: ModernMcpClient,
+  sessionId: string,
+  diagramId: string,
+  mermaidText: string,
+  expectedRevision: string,
+) {
+  return mcp.tool('writeDiagram', {
+    sessionId,
+    diagramId,
+    mermaidText,
+    expectedRevision,
+    actorName: 'E2E agent',
+    actorType: 'agent',
+    detail: 'Merged concurrent browser edit',
+  });
 }
 
 function sourceEditor(page: Page): Locator {
@@ -314,6 +321,7 @@ async function expectProtectedRoomAccess(browser: Browser, endpoints: E2eEndpoin
   const browserB = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const pageA = await browserA.newPage();
   const pageB = await browserB.newPage();
+  let activeSocket: Awaited<ReturnType<typeof openAuthorizedWebsocket>> | null = null;
   try {
     await Promise.all([
       pageA.goto(shareUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 }),
@@ -351,10 +359,11 @@ async function expectProtectedRoomAccess(browser: Browser, endpoints: E2eEndpoin
     assert(!foreignMcp.ok || Boolean(foreignMcpPayload?.error) || foreignMcpPayload?.result?.isError === true,
       `Room-A MCP bearer accessed room B: status=${foreignMcp.status} body=${JSON.stringify(foreignMcpPayload)}.`);
 
-    const activeSocket = await openAuthorizedWebsocket(serverUrl, baseUrl, room.sessionId, roomAccess.cookie);
+    const socket = await openAuthorizedWebsocket(serverUrl, baseUrl, room.sessionId, roomAccess.cookie);
+    activeSocket = socket;
     const rotated = await rotateRoomAccess(serverUrl, baseUrl, roomAccess);
     await Promise.all([
-      activeSocket.closed,
+      socket.closed,
       waitForBrowserSocketRevocation(pageA, 'authorized browser A socket'),
       waitForBrowserSocketRevocation(pageB, 'authorized browser B socket'),
     ]);
@@ -381,99 +390,15 @@ async function expectProtectedRoomAccess(browser: Browser, endpoints: E2eEndpoin
       await replacementContext.close();
     }
   } finally {
+    activeSocket?.terminate();
     await Promise.all([browserB.close(), browserA.close()]);
-  }
-}
-
-class ModernMcpClient {
-  private nextId = 1;
-
-  constructor(
-    private readonly endpoint: string,
-    private readonly origin: string,
-    private readonly room: RoomCredentials,
-  ) {}
-
-  async tool(name: string, args: Record<string, unknown>): Promise<McpPayload> {
-    const sessionId = typeof args.sessionId === 'string' ? args.sessionId : null;
-    if (sessionId && sessionId !== this.room.sessionId) {
-      throw new Error(`Authenticated MCP ${name} request targeted ${sessionId}, not bound room ${this.room.sessionId}.`);
-    }
-    const method = 'tools/call';
-    const response = await fetch(this.endpoint, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${this.room.sessionId}.${this.room.roomKey}`,
-        'content-type': 'application/json',
-        'mcp-method': method,
-        'mcp-name': name,
-        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-        origin: this.origin,
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: this.nextId++,
-        method,
-        params: {
-          name,
-          arguments: args,
-          _meta: {
-            'io.modelcontextprotocol/clientCapabilities': {},
-            'io.modelcontextprotocol/clientInfo': { name: 'arielcharts-collaboration-e2e', version: '1.0.0' },
-            'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION,
-          },
-        },
-      }),
-    });
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`MCP ${name} returned HTTP ${response.status}: ${body}`);
-    }
-    return response.json() as Promise<McpPayload>;
-  }
-
-  expectContent<T>(payload: McpPayload, action: string): T {
-    assert(!payload.error, `MCP ${action} JSON-RPC error: ${payload.error?.message ?? 'unknown error'}`);
-    assert(!payload.result?.isError, `MCP ${action} tool error: ${payload.result?.content?.map((item) => item.text).join('\n') ?? 'unknown error'}`);
-    assert(payload.result?.structuredContent, `MCP ${action} omitted structuredContent.`);
-    return payload.result.structuredContent as T;
-  }
-
-  async getSession(sessionId: string): Promise<{ diagrams: Array<Pick<Diagram, 'id' | 'name' | 'revision'>>; revision: string }> {
-    return this.expectContent(await this.tool('getSession', { sessionId }), 'getSession');
-  }
-
-  async readDiagram(sessionId: string, diagramId: string): Promise<Diagram> {
-    return this.expectContent<{ diagram: Diagram }>(await this.tool('readDiagram', { sessionId, diagramId }), 'readDiagram').diagram;
-  }
-
-  async createDiagramWithLatestRevision(sessionId: string, name: string, mermaidText: string): Promise<Diagram> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const session = await this.getSession(sessionId);
-      const payload = await this.tool('createDiagram', {
-        sessionId, name, mermaidText, expectedRevision: session.revision, actorName: 'E2E agent', actorType: 'agent', detail: 'Prepared local-view isolation tab',
-      });
-      if (!payload.result?.isError) {
-        return this.expectContent<{ diagram: Diagram }>(payload, 'createDiagram').diagram;
-      }
-      const detail = payload.result.content?.map((item) => item.text ?? '').join('\n') ?? '';
-      if (!/stale session revision/i.test(detail) || attempt === 1) {
-        return this.expectContent<{ diagram: Diagram }>(payload, 'createDiagram').diagram;
-      }
-    }
-    throw new Error('Unreachable createDiagram retry state.');
-  }
-
-  async writeDiagram(sessionId: string, diagramId: string, mermaidText: string, expectedRevision: string): Promise<McpPayload> {
-    return this.tool('writeDiagram', {
-      sessionId, diagramId, mermaidText, expectedRevision, actorName: 'E2E agent', actorType: 'agent', detail: 'Merged concurrent browser edit',
-    });
   }
 }
 
 async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoints): Promise<void> {
   const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
+  try {
   const browserA = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const browserB = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const pageA = await browserA.newPage();
@@ -486,7 +411,6 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
   const sessionId = room.sessionId;
   const mcp = new ModernMcpClient(mcpUrl, baseUrl, room);
 
-  try {
     await expectProtectedRoomAccess(browser, { baseUrl, mcpUrl, serverUrl });
     await Promise.all([
       pageA.goto(roomShareUrl(baseUrl, room), { waitUntil: 'domcontentloaded', timeout: 30_000 }),
@@ -537,14 +461,14 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     assert(afterHuman.revision !== staleRevision, 'Browser source write did not advance the MCP diagram revision.');
     assert(afterHuman.mermaidText.includes(HUMAN_EDGE.trim()), 'MCP re-read did not observe the browser edit.');
 
-    const staleWrite = await mcp.writeDiagram(sessionId, main.id, `${BASE_FLOWCHART}\n${AGENT_EDGE}`, staleRevision);
+    const staleWrite = await writeDiagram(mcp, sessionId, main.id, `${BASE_FLOWCHART}\n${AGENT_EDGE}`, staleRevision);
     const staleText = `${staleWrite.result?.content?.map((item) => item.text ?? '').join('\n') ?? ''}\n${staleWrite.error?.message ?? ''}`;
     const staleRejected = staleWrite.result?.isError === true && /stale diagram revision/i.test(staleText);
     assert(staleRejected, `Stale modern MCP write was not rejected: ${staleText}`);
 
     const reread = await mcp.readDiagram(sessionId, main.id);
     const mergedSource = `${reread.mermaidText}\n${AGENT_EDGE}`;
-    const retriedWrite = await mcp.writeDiagram(sessionId, main.id, mergedSource, reread.revision);
+    const retriedWrite = await writeDiagram(mcp, sessionId, main.id, mergedSource, reread.revision);
     const merged = mcp.expectContent<{ diagram: Diagram }>(retriedWrite, 'writeDiagram').diagram;
     assert(merged.mermaidText === mergedSource, 'MCP retry did not write the exact merged source.');
 

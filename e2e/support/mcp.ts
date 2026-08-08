@@ -38,7 +38,7 @@ function isRevisionConflict(payload: McpPayload): boolean {
     ...payload.result?.content?.map((item) => item.text) ?? [],
   ].filter((value): value is string => Boolean(value)).join('\n');
 
-  return /stale (?:diagram )?revision|revision conflict/i.test(message);
+  return /stale (?:(?:diagram|session) )?revision|revision conflict/i.test(message);
 }
 
 export async function postModernMcp(
@@ -91,15 +91,16 @@ export class ModernMcpClient {
     if (argumentSessionId && argumentSessionId !== this.room.sessionId) {
       throw new Error(`Authenticated MCP ${name} request targeted ${argumentSessionId}, not bound room ${this.room.sessionId}.`);
     }
+    let response: Response;
     try {
-      const response = await postModernMcp(this.endpoint, this.origin, this.room, name, args, this.nextId++);
-      if (!response.ok) {
-        throw new Error(`MCP ${name} returned HTTP ${response.status}: ${await response.text()}`);
-      }
-      return response.json() as Promise<McpPayload>;
+      response = await postModernMcp(this.endpoint, this.origin, this.room, name, args, this.nextId++);
     } catch (error) {
       throw new Error(`MCP ${name} request failed within ${MCP_FETCH_TIMEOUT_MS / 1_000}s`, { cause: error });
     }
+    if (!response.ok) {
+      throw new Error(`MCP ${name} returned HTTP ${response.status}: ${await response.text()}`);
+    }
+    return response.json() as Promise<McpPayload>;
   }
 
   expectContent<T>(payload: McpPayload, action: string): T {
@@ -152,9 +153,9 @@ export class ModernMcpClient {
   }
 
   async createDiagramWithLatestRevision(sessionId: string, name: string, mermaidText: string): Promise<Diagram> {
-    const session = await this.getSession(sessionId);
-    return this.expectContent<{ diagram: Diagram }>(
-      await this.tool('createDiagram', {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const session = await this.getSession(sessionId);
+      const payload = await this.tool('createDiagram', {
         sessionId,
         name,
         mermaidText,
@@ -162,9 +163,12 @@ export class ModernMcpClient {
         actorName: 'UX harness',
         actorType: 'agent',
         detail: 'Prepared revision-history browser coverage',
-      }),
-      'createDiagram',
-    ).diagram;
+      });
+      if (!isRevisionConflict(payload) || attempt === 1) {
+        return this.expectContent<{ diagram: Diagram }>(payload, 'createDiagram').diagram;
+      }
+    }
+    throw new Error('Unreachable createDiagram retry state.');
   }
 
   async writeLatest(sessionId: string, diagramId: string, mermaidText: string, detail = 'Remote UX anchor update'): Promise<Diagram> {

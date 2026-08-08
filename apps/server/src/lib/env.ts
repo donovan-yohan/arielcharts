@@ -12,7 +12,9 @@ function parseNumber(value: string | undefined, fallback: number): number {
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
-  return value === 'true';
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error('ROOM_COOKIE_SECURE must be true or false.');
 }
 
 function parseClientAddressProfile(value: string | undefined, legacyTrustProxy: string | undefined): 'none' | 'fly' {

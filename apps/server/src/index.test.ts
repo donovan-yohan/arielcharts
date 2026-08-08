@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { createApp } from './index.js';
 import { createActivityEvent } from './lib/activity.js';
@@ -177,6 +177,56 @@ describe('server integration', () => {
     });
     expect(crossRoom.status).toBe(200);
     await expect(crossRoom.json()).resolves.toMatchObject({ result: { isError: true } });
+  });
+
+  it('binds each modern MCP request to its current bearer', async () => {
+    const otherRoom = await app.createRoom('other123');
+    const getSession = (id: number, sessionId: string, authorization?: string) => mcpRequest({
+      id,
+      method: 'tools/call',
+      toolName: 'getSession',
+      ...(authorization === undefined ? {} : { authorization }),
+      params: { name: 'getSession', arguments: { sessionId } },
+    });
+
+    const firstRoom = await getSession(930, 'abc123de');
+    const secondRoom = await getSession(931, 'other123', `Bearer other123.${otherRoom.roomKey}`);
+    const firstRoomAgain = await getSession(932, 'abc123de');
+    expect(firstRoom.status).toBe(200);
+    expect(secondRoom.status).toBe(200);
+    expect(firstRoomAgain.status).toBe(200);
+    await expect(firstRoom.json()).resolves.toMatchObject({ result: { structuredContent: { sessionId: 'abc123de' } } });
+    await expect(secondRoom.json()).resolves.toMatchObject({ result: { structuredContent: { sessionId: 'other123' } } });
+    await expect(firstRoomAgain.json()).resolves.toMatchObject({ result: { structuredContent: { sessionId: 'abc123de' } } });
+  });
+
+  it('keeps invalid room requests generic but reports unexpected room-access failures', async () => {
+    const accessUrl = `http://127.0.0.1:${port}/api/rooms/abc123de/access`;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const invalidSession = await fetch(`http://127.0.0.1:${port}/api/rooms/no/access`, {
+        headers: { origin: 'http://allowed.test' },
+      });
+      expect(invalidSession.status).toBe(401);
+      await expect(invalidSession.json()).resolves.toEqual({ error: 'Room access denied.' });
+
+      vi.spyOn(app.roomAccess, 'authenticateBrowserCookie').mockRejectedValueOnce(new Error('LevelDB unavailable'));
+      const failedAccess = await fetch(accessUrl, { headers: { origin: 'http://allowed.test', cookie: roomCookie } });
+      expect(failedAccess.status).toBe(500);
+      await expect(failedAccess.json()).resolves.toEqual({ error: 'Room access unavailable.' });
+
+      vi.spyOn(app.roomAccess, 'rotate').mockRejectedValueOnce(new Error('LevelDB unavailable'));
+      const failedRotation = await fetch(`http://127.0.0.1:${port}/api/rooms/abc123de/rotate`, {
+        method: 'POST',
+        headers: { origin: 'http://allowed.test', cookie: roomCookie },
+      });
+      expect(failedRotation.status).toBe(500);
+      await expect(failedRotation.json()).resolves.toEqual({ error: 'Room access unavailable.' });
+      expect(log).toHaveBeenCalledTimes(2);
+    } finally {
+      log.mockRestore();
+      vi.restoreAllMocks();
+    }
   });
 
   it('serves every room-bound modern tool without an MCP transport session or room enumeration', async () => {

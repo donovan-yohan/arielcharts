@@ -309,7 +309,7 @@ export function WorkspaceSettings({
                 Reset room key
               </button>
             )}
-            {keyResetMessage ? <p aria-live="polite" className="workspace-settings-status">{keyResetMessage}</p> : null}
+            <p aria-live="polite" className="workspace-settings-status">{keyResetMessage ?? ''}</p>
           </section>
 
           <fieldset className="workspace-settings-section workspace-settings-appearance">

@@ -1628,11 +1628,11 @@ async function validateWorkspaceUx(): Promise<void> {
   }
   await withOwnedServices(async ({ baseUrl, mcpUrl, serverUrl }) => {
     const browser = await launchBrowserHarness();
-    const room = await createRoom(serverUrl, baseUrl);
-    const roomAccess = await exchangeRoomAccess(serverUrl, baseUrl, room);
-    const sessionId = room.sessionId;
-    const mcp = new ModernMcpClient(mcpUrl, baseUrl, room);
     try {
+      const room = await createRoom(serverUrl, baseUrl);
+      const roomAccess = await exchangeRoomAccess(serverUrl, baseUrl, room);
+      const sessionId = room.sessionId;
+      const mcp = new ModernMcpClient(mcpUrl, baseUrl, room);
       if (slice === 'history') {
         const { page: seedPage } = await browser.newPage(DESKTOP_VIEWPORT);
         await visitWorkspace(seedPage, baseUrl, sessionId, room.roomKey);
@@ -1647,6 +1647,8 @@ async function validateWorkspaceUx(): Promise<void> {
         record(results, 'fragment-derived room key exposes a copyable MCP bearer prompt');
         await expectThemeContract(page);
         record(results, 'system, light, and dark media resolution plus persistence');
+        // The theme contract already reloads after the fragment exchange, so the
+        // following check exercises cookie-only access without another navigation.
         await expectAgentConnectionModal(page, mcpUrl, sessionId, roomAccess.cookie, 'cookie-only');
         record(results, 'cookie-only reload hides raw key material and offers reset guidance');
         await selectThemePreference(page, 'light');

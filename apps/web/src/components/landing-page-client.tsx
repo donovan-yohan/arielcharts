@@ -65,6 +65,8 @@ export function LandingPageClient() {
             Session ID or share link
           </label>
           <input
+            aria-describedby="session-id-help"
+            aria-invalid={!joinValueIsValid}
             data-testid="join-session-input"
             id="session-id-input"
             autoCapitalize="none"
@@ -79,7 +81,7 @@ export function LandingPageClient() {
             spellCheck={false}
             value={joinValue}
           />
-          <p className={`field-help${joinValueIsValid ? '' : ' error-text'}`}>
+          <p className={`field-help${joinValueIsValid ? '' : ' error-text'}`} id="session-id-help">
             IDs use 6–32 letters, digits, <code>_</code>, or <code>-</code>. Share links include the room key privately after <code>#</code>.
           </p>
           <button data-testid="join-session-button" className="primary-button" disabled={parsedJoin === null} type="submit">

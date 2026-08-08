@@ -23,8 +23,19 @@ export interface ActivityEvent {
     name: string;
     type: ParticipantType;
   };
-  action: 'joined' | 'left' | 'edited' | 'replaced';
+  action: 'joined' | 'left' | 'edited' | 'replaced' | 'created' | 'renamed' | 'deleted';
   detail?: string;
+  diagram_id?: string;
+}
+
+export interface DiagramSummary {
+  id: string;
+  name: string;
+  revision: string;
+}
+
+export interface Diagram extends DiagramSummary {
+  mermaid_text: string;
 }
 
 export interface SessionSummary {
@@ -35,20 +46,78 @@ export interface SessionSummary {
 
 export interface ReadDiagramInput {
   session_id: string;
+  diagram_id: string;
 }
 
 export interface ReadDiagramOutput {
-  mermaid_text: string;
+  diagram: Diagram;
   participants: Participant[];
 }
 
 export interface WriteDiagramInput {
   session_id: string;
+  diagram_id: string;
   mermaid_text: string;
+  revision: string;
+  name?: string;
 }
 
 export interface WriteDiagramOutput {
-  success: boolean;
+  diagram: Diagram;
+}
+
+export interface ListDiagramsInput {
+  session_id: string;
+}
+
+export interface ListDiagramsOutput {
+  diagrams: DiagramSummary[];
+  participants: Participant[];
+  revision: string;
+}
+
+export interface CreateDiagramInput {
+  session_id: string;
+  name: string;
+  mermaid_text?: string;
+  revision: string;
+}
+
+export interface CreateDiagramOutput {
+  diagram: Diagram;
+}
+
+export interface RenameDiagramInput {
+  session_id: string;
+  diagram_id: string;
+  name: string;
+  revision: string;
+}
+
+export interface RenameDiagramOutput {
+  diagram: Diagram;
+}
+
+export interface DeleteDiagramInput {
+  session_id: string;
+  diagram_id: string;
+  revision: string;
+}
+
+export interface DeleteDiagramOutput {
+  deleted: { id: string };
+  revision: string;
+}
+
+export interface GetSessionInput {
+  session_id: string;
+}
+
+export interface GetSessionOutput {
+  session_id: string;
+  diagrams: DiagramSummary[];
+  participants: Participant[];
+  revision: string;
 }
 
 export interface ListSessionsOutput {

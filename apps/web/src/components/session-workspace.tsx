@@ -4,10 +4,11 @@ import type { ActivityEvent, AwarenessState, Participant } from '@arielcharts/sh
 import { APP_NAME } from '@arielcharts/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
+import { Activity, Check, ChevronDown, Code2, Pencil, Plus, X } from 'lucide-react';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
@@ -29,13 +30,17 @@ import {
 } from '../lib/diagram-layout';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
 
-const MERMAID_TEXT_KEY = 'mermaid';
-const NODE_POSITIONS_KEY = 'nodePositions';
+const DIAGRAMS_KEY = 'diagrams';
+const DIAGRAM_ORDER_KEY = 'diagramOrder';
+const DIAGRAM_NAME_KEY = 'name';
+const DIAGRAM_MERMAID_TEXT_KEY = 'mermaid';
+const DIAGRAM_NODE_POSITIONS_KEY = 'nodePositions';
 const ACTIVITY_KEY = 'activity';
 const MAX_ACTIVITY_EVENTS = 100;
 const EDIT_ACTIVITY_DEBOUNCE_MS = 900;
 const NAME_STORAGE_KEY = 'arielcharts.identity.v1';
 const TAB_STORAGE_KEY = 'arielcharts.tab.v1';
+const ACTIVE_DIAGRAM_STORAGE_PREFIX = 'arielcharts.active-diagram.v1:';
 const PARTICIPANT_COLORS = ['#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#f59e0b', '#fb7185'];
 
 const connectionLabels: Record<ConnectionState, string> = {
@@ -46,13 +51,23 @@ const connectionLabels: Record<ConnectionState, string> = {
 };
 
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
+type WorkspaceFlyout = 'source' | 'activity' | null;
 
 type CollaborationState = {
   activityArray: Y.Array<ActivityEvent>;
   awareness: AwarenessLike;
+  diagramsMap: Y.Map<Y.Map<unknown>>;
+  diagramOrder: Y.Array<string>;
   doc: Y.Doc;
-  nodePositionsMap: Y.Map<NodePosition>;
   provider: WebsocketProvider;
+};
+
+type DiagramTab = { id: string; name: string };
+
+type ActiveDiagramState = {
+  id: string;
+  name: string;
+  nodePositionsMap: Y.Map<NodePosition>;
   yText: Y.Text;
 };
 
@@ -170,13 +185,17 @@ function getParticipantAvatarText(participant: Participant): string {
   return compact.slice(0, 2).toUpperCase() || '??';
 }
 
-function isFlowchartSyntax(text: string): boolean {
+export function isFlowchartSyntax(text: string): boolean {
   const trimmed = text.trimStart();
   return trimmed.startsWith('flowchart') || trimmed.startsWith('graph');
 }
 
-function canBuildFlowchartFromCanvas(text: string): boolean {
+export function canBuildFlowchartFromCanvas(text: string): boolean {
   return text.trim().length === 0 || isFlowchartSyntax(text);
+}
+
+export function getAgentWorkflowPrompt(sessionId: string, mcpUrl: string): string {
+  return `Connect to my ArielCharts session "${sessionId}" using the MCP server at ${mcpUrl}. First call getSession to see the named diagrams and stable IDs. Create a named diagram for each distinct flow by passing getSession's latest revision as expectedRevision. Before changing any existing tab, call readDiagram and pass its latest revision as expectedRevision to writeDiagram; on a stale-revision error, readDiagram again, merge the current source, and retry. Mermaid changes sync collaboratively in real-time. Look up your docs for how to add an MCP server globally.`;
 }
 
 function stripParticipantTabSuffix(name: string): string {
@@ -253,6 +272,43 @@ function upsertActivity(activityArray: Y.Array<ActivityEvent>, event: ActivityEv
   }
 }
 
+function readDiagramTabs(diagrams: Y.Map<Y.Map<unknown>>, order: Y.Array<string>): DiagramTab[] {
+  const seen = new Set<string>();
+  const tabs: DiagramTab[] = [];
+  for (const id of order.toArray()) {
+    const diagram = diagrams.get(id);
+    if (!diagram || seen.has(id)) continue;
+    const name = diagram.get(DIAGRAM_NAME_KEY);
+    tabs.push({ id, name: typeof name === 'string' && name.trim() ? name : `Diagram ${id}` });
+    seen.add(id);
+  }
+  for (const [id, diagram] of diagrams.entries()) {
+    if (seen.has(id)) continue;
+    const name = diagram.get(DIAGRAM_NAME_KEY);
+    tabs.push({ id, name: typeof name === 'string' && name.trim() ? name : `Diagram ${id}` });
+  }
+  return tabs;
+}
+
+export function getActiveDiagramName(diagrams: readonly DiagramTab[], diagramId: string | null): string | null {
+  return diagramId ? diagrams.find((diagram) => diagram.id === diagramId)?.name ?? null : null;
+}
+
+function getActiveDiagramState(collaboration: CollaborationState | null, diagramId: string | null): ActiveDiagramState | null {
+  if (!collaboration || !diagramId) return null;
+  const diagram = collaboration.diagramsMap.get(diagramId);
+  if (!diagram) return null;
+  const yText = diagram.get(DIAGRAM_MERMAID_TEXT_KEY);
+  const nodePositionsMap = diagram.get(DIAGRAM_NODE_POSITIONS_KEY);
+  if (!(yText instanceof Y.Text) || !(nodePositionsMap instanceof Y.Map)) return null;
+  const name = diagram.get(DIAGRAM_NAME_KEY);
+  return { id: diagramId, name: typeof name === 'string' ? name : `Diagram ${diagramId}`, yText, nodePositionsMap: nodePositionsMap as Y.Map<NodePosition> };
+}
+
+function createDiagramId(): string {
+  return `diagram_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`;
+}
+
 export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const editorViewRef = useRef<EditorView | null>(null);
@@ -263,18 +319,20 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const currentIdentityRef = useRef<LocalIdentity | null>(null);
   const addActivityRef = useRef<((action: ActivityEvent['action'], detail?: string) => void) | null>(null);
   const mutationQueueRef = useRef<MutationQueue | null>(null);
+  const diagramTabRefs = useRef(new Map<string, HTMLButtonElement>());
   const renameCancelledRef = useRef(false);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [diagrams, setDiagrams] = useState<DiagramTab[]>([]);
+  const [activeDiagramId, setActiveDiagramId] = useState<string | null>(null);
   const [mermaidText, setMermaidText] = useState('');
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [lastValidSvg, setLastValidSvg] = useState('');
   const [renderError, setRenderError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [shareCopyState, setShareCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
-  const [sessionIdCopyState, setSessionIdCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [promptCopyState, setPromptCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [shareUrl, setShareUrl] = useState(() => getSessionPath(sessionId));
   const [showConnectModal, setShowConnectModal] = useState(false);
@@ -284,6 +342,21 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [interactionMode, setInteractionMode] = useState<'select' | 'connect'>('select');
   const [renamingParticipantName, setRenamingParticipantName] = useState<string | null>(null);
   const [displayNameDraft, setDisplayNameDraft] = useState('');
+  const [renamingDiagramId, setRenamingDiagramId] = useState<string | null>(null);
+  const [diagramNameDraft, setDiagramNameDraft] = useState('');
+  const [openFlyout, setOpenFlyout] = useState<WorkspaceFlyout>(null);
+
+  const activeDiagram = useMemo(
+    () => getActiveDiagramState(collaboration, activeDiagramId),
+    [activeDiagramId, collaboration],
+  );
+
+  const runMutation = useCallback((mutation: Promise<unknown>) => {
+    setMutationError(null);
+    observeMutationFailure(mutation, (error) => {
+      setMutationError(error instanceof Error ? error.message : 'The diagram update could not be applied.');
+    });
+  }, []);
 
   useEffect(() => {
     setShareUrl(getSessionPath(sessionId));
@@ -292,6 +365,11 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       setShareUrl(new URL(getSessionPath(sessionId), window.location.origin).toString());
     }
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!activeDiagramId) return;
+    window.localStorage.setItem(`${ACTIVE_DIAGRAM_STORAGE_PREFIX}${sessionId}`, activeDiagramId);
+  }, [activeDiagramId, sessionId]);
 
   useEffect(() => {
     mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
@@ -304,25 +382,25 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       resyncInterval: 10_000,
     });
     const awareness = provider.awareness as AwarenessLike;
-    const yText = doc.getText(MERMAID_TEXT_KEY);
-    const nodePositionsMap = doc.getMap<NodePosition>(NODE_POSITIONS_KEY);
-    const queue = new MutationQueue(yText, { transactionOrigin: 'visual' });
-    mutationQueueRef.current = queue;
+    const diagramsMap = doc.getMap<Y.Map<unknown>>(DIAGRAMS_KEY);
+    const diagramOrder = doc.getArray<string>(DIAGRAM_ORDER_KEY);
     const activityArray = doc.getArray<ActivityEvent>(ACTIVITY_KEY);
     const localIdentity = getOrCreateIdentity();
     currentIdentityRef.current = localIdentity;
     awareness.setLocalState({ user: localIdentity });
 
-    const syncText = () => {
-      setMermaidText(yText.toString());
-    };
-
     const syncActivity = () => {
       setActivity(activityArray.toArray().slice().reverse());
     };
 
-    const syncNodePositions = () => {
-      setNodePositions(readNodePositions(nodePositionsMap));
+    const syncDiagrams = () => {
+      const tabs = readDiagramTabs(diagramsMap, diagramOrder);
+      setDiagrams(tabs);
+      setActiveDiagramId((current) => {
+        if (current && tabs.some((tab) => tab.id === current)) return current;
+        const stored = window.localStorage.getItem(`${ACTIVE_DIAGRAM_STORAGE_PREFIX}${sessionId}`);
+        return tabs.some((tab) => tab.id === stored) ? stored : (tabs[0]?.id ?? null);
+      });
     };
 
     const syncParticipants = () => {
@@ -369,14 +447,13 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       }, actor.name);
     };
 
-    syncText();
     syncActivity();
-    syncNodePositions();
+    syncDiagrams();
     syncParticipants();
 
-    yText.observe(syncText);
     activityArray.observe(syncActivity);
-    nodePositionsMap.observe(syncNodePositions);
+    diagramsMap.observeDeep(syncDiagrams);
+    diagramOrder.observe(syncDiagrams);
     awareness.on('change', syncParticipants);
     provider.on('status', handleStatus);
     provider.on('connection-close', handleReconnectSignal);
@@ -388,7 +465,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       }
     });
 
-    setCollaboration({ activityArray, awareness, doc, nodePositionsMap, provider, yText });
+    setCollaboration({ activityArray, awareness, diagramsMap, diagramOrder, doc, provider });
 
     return () => {
       if (editDebounceRef.current !== null) {
@@ -401,22 +478,58 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       provider.off('status', handleStatus);
       provider.off('connection-close', handleReconnectSignal);
       provider.off('connection-error', handleReconnectSignal);
-      yText.unobserve(syncText);
       activityArray.unobserve(syncActivity);
-      nodePositionsMap.unobserve(syncNodePositions);
+      diagramsMap.unobserveDeep(syncDiagrams);
+      diagramOrder.unobserve(syncDiagrams);
       awareness.setLocalState(null);
       provider.destroy();
       doc.destroy();
       addActivityRef.current = null;
       currentIdentityRef.current = null;
-      mutationQueueRef.current = null;
       joinedActivityRef.current = false;
       setCollaboration(null);
+      setDiagrams([]);
+      setActiveDiagramId(null);
     };
   }, [sessionId]);
 
   useEffect(() => {
-    if (!collaboration || !editorHostRef.current) {
+    if (!activeDiagram) {
+      mutationQueueRef.current = null;
+      setMermaidText('');
+      setNodePositions({});
+      setLastValidSvg('');
+      setFlowchartSnapshot(null);
+      setSelectedNodeIds([]);
+      setInteractionMode('select');
+      return;
+    }
+
+    const syncText = () => {
+      setMermaidText(activeDiagram.yText.toString());
+    };
+    const syncNodePositions = () => {
+      setNodePositions(readNodePositions(activeDiagram.nodePositionsMap));
+    };
+    syncText();
+    syncNodePositions();
+    setLastValidSvg('');
+    setFlowchartSnapshot(null);
+    setSelectedNodeIds([]);
+    setInteractionMode('select');
+    mutationQueueRef.current = new MutationQueue(activeDiagram.yText, { transactionOrigin: 'visual' });
+    activeDiagram.yText.observe(syncText);
+    activeDiagram.nodePositionsMap.observe(syncNodePositions);
+
+    return () => {
+      activeDiagram.yText.unobserve(syncText);
+      activeDiagram.nodePositionsMap.unobserve(syncNodePositions);
+      mutationQueueRef.current = null;
+    };
+  }, [activeDiagram]);
+
+  useEffect(() => {
+    if (openFlyout !== 'source' || !collaboration || !activeDiagram || !editorHostRef.current) {
       return;
     }
 
@@ -464,14 +577,14 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     });
 
     const editorState = EditorState.create({
-      doc: collaboration.yText.toString(),
+      doc: activeDiagram.yText.toString(),
       extensions: [
         basicSetup,
         markdown(),
         EditorView.lineWrapping,
         keymap.of(yUndoManagerKeymap),
         editorThemeRef.current.of(editorTheme),
-        yCollab(collaboration.yText, collaboration.awareness, { undoManager: new Y.UndoManager(collaboration.yText) }),
+        yCollab(activeDiagram.yText, collaboration.awareness, { undoManager: new Y.UndoManager(activeDiagram.yText, { trackedOrigins: new Set([null]) }) }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && update.transactions.some((tr) => tr.isUserEvent('input'))) {
             handleLocalEdit();
@@ -491,7 +604,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       editorView.destroy();
       editorViewRef.current = null;
     };
-  }, [collaboration]);
+  }, [activeDiagram, collaboration, openFlyout]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -512,7 +625,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
       try {
         await mermaid.parse(mermaidText);
-        const { svg } = await mermaid.render(`arielcharts-${sessionId}-${renderId}`, mermaidText);
+        const { svg } = await mermaid.render(`arielcharts-${sessionId}-${activeDiagramId ?? 'none'}-${renderId}`, mermaidText);
         let snapshot: FlowchartSnapshot | null = null;
         if (isFlowchartSyntax(mermaidText)) {
           try {
@@ -538,7 +651,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     return () => {
       isCancelled = true;
     };
-  }, [mermaidText, sessionId]);
+  }, [activeDiagramId, mermaidText, sessionId]);
 
   useEffect(() => {
     if (shareCopyState === 'idle') {
@@ -553,20 +666,6 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       window.clearTimeout(timeout);
     };
   }, [shareCopyState]);
-
-  useEffect(() => {
-    if (sessionIdCopyState === 'idle') {
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setSessionIdCopyState('idle');
-    }, 1_500);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [sessionIdCopyState]);
 
   useEffect(() => {
     if (promptCopyState === 'idle') {
@@ -591,20 +690,11 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     }
   };
 
-  const handleCopySessionId = async () => {
-    try {
-      await navigator.clipboard.writeText(sessionId);
-      setSessionIdCopyState('copied');
-    } catch {
-      setSessionIdCopyState('error');
-    }
-  };
-
   const getAgentPrompt = useCallback(() => {
     const mcpUrl = typeof window !== 'undefined'
       ? `${window.location.origin}/mcp`
       : 'https://arielcharts.donovanyohan.com/mcp';
-    return `Connect to my ArielCharts session "${sessionId}" using the MCP server at ${mcpUrl}. You can read and write Mermaid diagrams collaboratively in real-time. Look up your docs for how to add an MCP server globally.`;
+    return getAgentWorkflowPrompt(sessionId, mcpUrl);
   }, [sessionId]);
 
   const handleCopyAgentPrompt = async () => {
@@ -633,12 +723,28 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     };
   }, [showConnectModal]);
 
+  useEffect(() => {
+    if (!openFlyout) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenFlyout(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => { document.removeEventListener('keydown', handleKeyDown); };
+  }, [openFlyout]);
+
   const activeParticipantCount = participants.length;
   const connectedAgentCount = countConnectedAgents(participants);
   const editorStatusLabel = getCompactConnectionLabel(connectionState);
   const activityStatusLabel = `${activeParticipantCount} collaborator${activeParticipantCount === 1 ? '' : 's'}`;
+  const saveStatusLabel = connectionState === 'connected'
+    ? 'All changes saved'
+    : connectionState === 'disconnected'
+      ? 'Offline'
+      : 'Saving changes…';
+  const diagramModeLabel = mermaidText.trim().length === 0 || isFlowchartSyntax(mermaidText)
+    ? 'Flowchart · editable'
+    : 'Mermaid · source only';
   const shareButtonLabel = shareCopyState === 'copied' ? 'copied' : shareCopyState === 'error' ? 'copy failed' : 'share';
-  const sessionIdCopyLabel = sessionIdCopyState === 'copied' ? 'copied' : sessionIdCopyState === 'error' ? 'copy failed' : 'copy';
   const promptCopyLabel = promptCopyState === 'copied' ? 'copied' : promptCopyState === 'error' ? 'copy failed' : 'copy';
 
   const commitDisplayName = useCallback(() => {
@@ -680,32 +786,24 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
       return { ...current, ...positions };
     });
 
-    if (!collaboration) {
+    if (!collaboration || !activeDiagram) {
       return;
     }
 
     collaboration.doc.transact(() => {
-      writeNodePositions(collaboration.nodePositionsMap, positions, mode);
+      writeNodePositions(activeDiagram.nodePositionsMap, positions, mode);
     }, 'visual-layout');
-  }, [collaboration]);
+  }, [activeDiagram, collaboration]);
 
   const handleSingleNodePositionChange = useCallback((nodeId: string, position: NodePosition) => {
     handleNodePositionsChange({ [nodeId]: position }, 'merge');
   }, [handleNodePositionsChange]);
-
-  const runMutation = useCallback((mutation: Promise<unknown>) => {
-    setMutationError(null);
-    observeMutationFailure(mutation, (error) => {
-      setMutationError(error instanceof Error ? error.message : 'The diagram update could not be applied.');
-    });
-  }, []);
 
   const handleAddConnectedNode = useCallback((source: string, label: string, shape: DiagramNodeShape, position: NodePosition, type: DiagramLinkType) => {
     const queue = mutationQueueRef.current;
     if (!queue) {
       return;
     }
-
     runMutation(queue.addConnectedNode(source, label, { shape, type })
       .then(({ nodeId }) => {
         if (!nodeId) {
@@ -715,6 +813,75 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
         setSelectedNodeIds([nodeId]);
       }));
   }, [handleSingleNodePositionChange, runMutation]);
+
+  const focusDiagramTab = useCallback((diagramId: string) => {
+    setActiveDiagramId(diagramId);
+    window.requestAnimationFrame(() => { diagramTabRefs.current.get(diagramId)?.focus(); });
+  }, []);
+
+  const handleDiagramTabKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>, diagramId: string) => {
+    const index = diagrams.findIndex((diagram) => diagram.id === diagramId);
+    if (index < 0) return;
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % diagrams.length;
+    if (event.key === 'ArrowLeft') nextIndex = (index - 1 + diagrams.length) % diagrams.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = diagrams.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    focusDiagramTab(diagrams[nextIndex]!.id);
+  }, [diagrams, focusDiagramTab]);
+
+  const createBlankDiagram = useCallback(() => {
+    if (!collaboration) return;
+    const id = createDiagramId();
+    // The stable-ID suffix keeps independently created blank tabs uniquely
+    // named even when two collaborators click + before their CRDT updates meet.
+    const name = `Untitled ${id.slice(-4)}`;
+    collaboration.doc.transact(() => {
+      const diagram = new Y.Map<unknown>();
+      diagram.set(DIAGRAM_NAME_KEY, name);
+      diagram.set(DIAGRAM_MERMAID_TEXT_KEY, new Y.Text());
+      diagram.set(DIAGRAM_NODE_POSITIONS_KEY, new Y.Map<NodePosition>());
+      collaboration.diagramsMap.set(id, diagram);
+      collaboration.diagramOrder.push([id]);
+    }, 'tab-create');
+    setActiveDiagramId(id);
+    addActivityRef.current?.('created', `Created ${name}`);
+  }, [collaboration]);
+
+  const commitDiagramName = useCallback(() => {
+    if (!collaboration || !renamingDiagramId) return;
+    const normalizedName = diagramNameDraft.trim().replace(/\s+/gu, ' ');
+    const current = diagrams.find((diagram) => diagram.id === renamingDiagramId);
+    const isDuplicate = diagrams.some((diagram) => diagram.id !== renamingDiagramId && diagram.name.toLocaleLowerCase() === normalizedName.toLocaleLowerCase());
+    if (!normalizedName || isDuplicate || !current) {
+      setRenamingDiagramId(null);
+      setDiagramNameDraft('');
+      return;
+    }
+    collaboration.doc.transact(() => {
+      collaboration.diagramsMap.get(renamingDiagramId)?.set(DIAGRAM_NAME_KEY, normalizedName);
+    }, 'tab-rename');
+    addActivityRef.current?.('renamed', `Renamed ${current.name} to ${normalizedName}`);
+    setRenamingDiagramId(null);
+    setDiagramNameDraft('');
+  }, [collaboration, diagramNameDraft, diagrams, renamingDiagramId]);
+
+  const deleteActiveDiagram = useCallback((diagramId: string) => {
+    if (!collaboration || diagrams.length <= 1) return;
+    const index = diagrams.findIndex((diagram) => diagram.id === diagramId);
+    const deleted = diagrams[index];
+    collaboration.doc.transact(() => {
+      collaboration.diagramsMap.delete(diagramId);
+      const orderIndex = collaboration.diagramOrder.toArray().indexOf(diagramId);
+      if (orderIndex >= 0) collaboration.diagramOrder.delete(orderIndex, 1);
+    }, 'tab-delete');
+    if (activeDiagramId === diagramId) {
+      setActiveDiagramId(diagrams[index + 1]?.id ?? diagrams[index - 1]?.id ?? null);
+    }
+    if (deleted) addActivityRef.current?.('deleted', `Deleted ${deleted.name}`);
+  }, [activeDiagramId, collaboration, diagrams]);
 
   return (
     <main className="workspace-shell">
@@ -728,21 +895,11 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
           >
             connect my agent
           </button>
-          <div data-testid="share-url-control" className="workspace-session-chip">
-            <span className="workspace-session-url monospace">{sessionId}</span>
-            <button
-              className="workspace-copy-button"
-              data-testid="copy-session-id-button"
-              type="button"
-              onClick={handleCopySessionId}
-            >
-              {sessionIdCopyLabel}
-            </button>
-          </div>
           {connectedAgentCount > 0 ? (
-            <div className="workspace-mcp-status" aria-label={`MCP: ${connectedAgentCount} agents connected`}>
+            <div className="workspace-mcp-status" aria-label={`MCP: ${connectedAgentCount} agents connected`} data-testid="mcp-status">
               <span className="workspace-mcp-dot" />
-              <span>{`MCP: ${connectedAgentCount} agent${connectedAgentCount === 1 ? '' : 's'} connected`}</span>
+              <span>{connectedAgentCount === 1 ? 'MCP agent working' : `${connectedAgentCount} MCP agents working`}</span>
+              <ChevronDown aria-hidden="true" size={14} />
             </div>
           ) : null}
         </div>
@@ -820,27 +977,86 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
               <div className="workspace-avatar workspace-avatar-empty">--</div>
             )}
           </div>
-          <button className="workspace-share-button" type="button" onClick={handleCopyShareUrl}>
-            {shareButtonLabel}
+          <button className="workspace-share-button" data-testid="share-session-button" type="button" onClick={handleCopyShareUrl}>
+            <span>{shareButtonLabel}</span>
+            {shareCopyState === 'copied' ? <Check aria-hidden="true" size={13} /> : null}
           </button>
         </div>
       </header>
 
-      <section className="workspace-main">
-        <article data-testid="editor-root" className="workspace-pane workspace-editor-pane">
-          <div className="workspace-pane-header">
-            <span>mermaid source</span>
-            <span data-testid="connection-status-badge">{editorStatusLabel}</span>
-          </div>
-          <div className="editor-host" ref={editorHostRef} />
-        </article>
+      <nav aria-label="Session diagrams" className="workspace-diagram-tabs" data-testid="diagram-tab-bar">
+        <div aria-orientation="horizontal" className="workspace-diagram-tab-list" role="tablist">
+          {diagrams.map((diagram) => {
+            const active = diagram.id === activeDiagramId;
+            const renaming = diagram.id === renamingDiagramId;
+            return (
+              <div className={`workspace-diagram-tab${active ? ' is-active' : ''}`} key={diagram.id} role="presentation">
+                {renaming ? (
+                  <input
+                    aria-label="Diagram name"
+                    autoFocus
+                    className="workspace-diagram-tab-input"
+                    onBlur={commitDiagramName}
+                    onChange={(event) => { setDiagramNameDraft(event.target.value); }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') commitDiagramName();
+                      if (event.key === 'Escape') { setRenamingDiagramId(null); setDiagramNameDraft(''); }
+                    }}
+                    value={diagramNameDraft}
+                  />
+                ) : (
+                  <button
+                    aria-controls="diagram-workspace"
+                    aria-selected={active}
+                    className="workspace-diagram-tab-button"
+                    id={`diagram-tab-${diagram.id}`}
+                    onClick={() => { setActiveDiagramId(diagram.id); }}
+                    onDoubleClick={() => { setRenamingDiagramId(diagram.id); setDiagramNameDraft(diagram.name); }}
+                    onKeyDown={(event) => { handleDiagramTabKeyDown(event, diagram.id); }}
+                    ref={(element) => {
+                      if (element) diagramTabRefs.current.set(diagram.id, element);
+                      else diagramTabRefs.current.delete(diagram.id);
+                    }}
+                    role="tab"
+                    tabIndex={active ? 0 : -1}
+                    title={`${diagram.name} (${diagram.id}) — double click to rename`}
+                    type="button"
+                  >
+                    {active ? <span aria-hidden="true" className="workspace-tab-active-dot" /> : null}
+                    <span>{diagram.name}</span>
+                  </button>
+                )}
+                {active && !renaming ? (
+                  <button
+                    aria-label={`Rename ${diagram.name}`}
+                    className="workspace-diagram-tab-action"
+                    onClick={() => { setRenamingDiagramId(diagram.id); setDiagramNameDraft(diagram.name); }}
+                    type="button"
+                  ><Pencil aria-hidden="true" size={13} /></button>
+                ) : null}
+                {active && !renaming && diagrams.length > 1 ? (
+                  <button aria-label={`Delete ${diagram.name}`} className="workspace-diagram-tab-action workspace-diagram-tab-delete" onClick={() => { deleteActiveDiagram(diagram.id); }} type="button"><X aria-hidden="true" size={14} /></button>
+                ) : null}
+              </div>
+            );
+          })}
+          <button aria-label="Create blank diagram" className="workspace-diagram-tab-add" data-testid="create-diagram-tab" onClick={createBlankDiagram} title="New blank diagram" type="button"><Plus aria-hidden="true" size={18} /></button>
+        </div>
+        <div className="workspace-diagram-tab-tools">
+          <button
+            aria-controls="source-flyout"
+            aria-expanded={openFlyout === 'source'}
+            className={`workspace-source-toggle${openFlyout === 'source' ? ' is-active' : ''}`}
+            data-testid="source-flyout-toggle"
+            onClick={() => { setOpenFlyout((current) => current === 'source' ? null : 'source'); }}
+            type="button"
+          ><Code2 aria-hidden="true" size={15} /><span>{openFlyout === 'source' ? 'hide source' : 'show source'}</span></button>
+          <span className="workspace-diagram-mode" data-testid="diagram-mode"><span aria-hidden="true" />{diagramModeLabel}</span>
+        </div>
+      </nav>
 
+      <section aria-labelledby={activeDiagramId ? `diagram-tab-${activeDiagramId}` : undefined} className="workspace-main" data-testid="canvas-first-workspace" id="diagram-workspace" role="tabpanel">
         <article data-testid="preview-root" className="workspace-pane workspace-diagram-pane">
-          <div className="workspace-pane-header">
-            <span>preview</span>
-            <span>live</span>
-          </div>
-
           {renderError ? (
             <div data-testid="parse-error-banner" className="error-banner" role="status">
               <strong>preview kept on last valid diagram</strong>
@@ -892,39 +1108,78 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             selectedNodeIds={selectedNodeIds}
             svg={lastValidSvg}
           />
-
         </article>
+
+        {openFlyout === 'source' ? (
+          <aside aria-label="Mermaid source" className="workspace-flyout" data-testid="source-flyout" id="source-flyout">
+            <header className="workspace-flyout-header">
+              <div><Code2 aria-hidden="true" size={16} /><span>Mermaid source</span></div>
+              <button aria-label="Close source panel" className="workspace-icon-button" onClick={() => { setOpenFlyout(null); }} type="button"><X aria-hidden="true" size={16} /></button>
+            </header>
+            <div className="workspace-flyout-meta">
+              <span>{getActiveDiagramName(diagrams, activeDiagramId) ?? 'No diagram selected'}</span>
+              <span data-testid="connection-status-badge">{editorStatusLabel}</span>
+            </div>
+            <div className="editor-host workspace-flyout-editor" data-testid="editor-root" ref={editorHostRef} />
+          </aside>
+        ) : null}
+
+        {openFlyout === 'activity' ? (
+          <aside aria-label="Activity history" className="workspace-flyout workspace-activity-flyout" data-testid="activity-flyout" id="activity-flyout">
+            <header className="workspace-flyout-header">
+              <div><Activity aria-hidden="true" size={16} /><span>Activity history</span></div>
+              <button aria-label="Close activity history" className="workspace-icon-button" onClick={() => { setOpenFlyout(null); }} type="button"><X aria-hidden="true" size={16} /></button>
+            </header>
+            <div className="workspace-flyout-meta"><span>Latest activity</span><span>{activity.length}</span></div>
+            {activity.length > 0 ? (
+              <ol className="activity-list" data-testid="activity-feed">
+                {activity.map((event, index) => (
+                  <li className={`activity-item${index === 0 ? ' is-current' : ''}`} key={event.id}>
+                    <span aria-hidden="true" className="activity-timeline-marker" style={{ borderColor: getActivityColor(event, participants) }} />
+                    <div className="activity-item-content">
+                      <div className="activity-item-heading">
+                        <span className={event.actor.type === 'agent' ? 'activity-agent-badge' : ''}>{event.actor.name}</span>
+                        <time className="activity-time" dateTime={new Date(event.timestamp).toISOString()}>{formatTimestamp(event.timestamp)}</time>
+                      </div>
+                      <strong>{describeActivityCompact(event)}</strong>
+                      {event.detail ? <span className="activity-detail">{event.detail}</span> : null}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : <div className="empty-inline">no activity yet</div>}
+          </aside>
+        ) : null}
       </section>
 
-      <section data-testid="activity-feed" className="workspace-pane workspace-activity-pane">
-        <div className="workspace-pane-header">
-          <span>activity</span>
-          <span>{activityStatusLabel}</span>
-        </div>
-
-        {activity.length > 0 ? (
-          <ol className="activity-list">
-            {activity.map((event) => (
-              <li className="activity-item" key={event.id}>
-                <time className="activity-time" dateTime={new Date(event.timestamp).toISOString()}>
-                  {formatTimestamp(event.timestamp)}
-                </time>
-                <span className="activity-dot" style={{ backgroundColor: getActivityColor(event, participants) }} />
-                <span className="activity-text">
-                  {event.actor.type === 'agent' ? (
-                    <span className="activity-agent-badge">{event.actor.name}</span>
-                  ) : (
-                    <strong>{event.actor.name}</strong>
-                  )}{' '}
-                  {describeActivityCompact(event)}
-                </span>
-              </li>
+      <footer className="workspace-footer" data-testid="workspace-footer">
+        <div className="workspace-footer-left">
+          <button
+            aria-controls="activity-flyout"
+            aria-expanded={openFlyout === 'activity'}
+            className={`workspace-footer-toggle${openFlyout === 'activity' ? ' is-active' : ''}`}
+            data-testid="activity-flyout-toggle"
+            onClick={() => { setOpenFlyout((current) => current === 'activity' ? null : 'activity'); }}
+            type="button"
+          ><Activity aria-hidden="true" size={15} /><span>activity</span><b>{activity.length}</b><ChevronDown aria-hidden="true" size={14} /></button>
+          <span className="workspace-collaborator-count">{activityStatusLabel}</span>
+          <div aria-label="Active collaborators" className="workspace-footer-avatars">
+            {participants.map((participant) => (
+              <span
+                aria-label={`${getParticipantDisplayName(participant)}, ${participant.type}`}
+                className={`workspace-footer-avatar workspace-footer-avatar-${participant.type}`}
+                key={`${participant.name}-${participant.type}-footer`}
+                style={{ backgroundColor: participant.type === 'agent' ? '#5b2a86' : participant.color }}
+                title={getParticipantDisplayName(participant)}
+              >{getParticipantAvatarText(participant)}</span>
             ))}
-          </ol>
-        ) : (
-          <div className="empty-inline">no activity yet</div>
-        )}
-      </section>
+          </div>
+        </div>
+        <div aria-live="polite" className="workspace-save-status" data-testid="live-save-status">
+          <span aria-hidden="true" className={`workspace-save-dot workspace-save-dot-${connectionState}`} />
+          <span>{saveStatusLabel}</span><span className="workspace-live-label">live</span>
+        </div>
+      </footer>
 
       {showConnectModal ? (
         <div className="modal-backdrop" onClick={() => { setShowConnectModal(false); }}>

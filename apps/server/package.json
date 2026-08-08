@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@arielcharts/shared": "workspace:*",
-    "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/node": "2.0.0-beta.5",
+    "@modelcontextprotocol/server": "2.0.0",
     "level": "10.0.0",
     "lib0": "^0.2.117",
     "ws": "8.18.3",

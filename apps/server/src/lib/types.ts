@@ -1,4 +1,4 @@
-import type { ActivityEvent, Participant, SessionSummary } from '@arielcharts/shared';
+import type { ActivityEvent, Diagram, Participant, SessionSummary } from '@arielcharts/shared';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { WebSocket } from 'ws';
@@ -8,7 +8,6 @@ import type * as Y from 'yjs';
 export interface SessionRecord {
   id: string;
   title: string;
-  mermaidText: string;
   activity: ActivityEvent[];
   participants: Participant[];
   encodedState: string;
@@ -18,7 +17,8 @@ export interface SessionRecord {
 export interface SessionSnapshot {
   id: string;
   title: string;
-  mermaidText: string;
+  diagrams: Diagram[];
+  revision: string;
   activity: ActivityEvent[];
   participants: Participant[];
   updatedAt: number;

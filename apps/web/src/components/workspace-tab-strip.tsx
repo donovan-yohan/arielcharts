@@ -91,13 +91,14 @@ export function WorkspaceTabStrip({
               {active && !renaming ? (
                 <button
                   aria-label={`Rename ${diagram.name}`}
-                  className="workspace-diagram-tab-action"
+                  className="workspace-diagram-tab-action workspace-touch-label"
+                  data-touch-label="Rename"
                   onClick={() => { onRenameDiagram(diagram); }}
                   type="button"
                 ><Pencil aria-hidden="true" size={13} /></button>
               ) : null}
               {active && !renaming && diagrams.length > 1 ? (
-                <button aria-label={`Delete ${diagram.name}`} className="workspace-diagram-tab-action workspace-diagram-tab-delete" onClick={() => { onDeleteDiagram(diagram.id); }} type="button"><X aria-hidden="true" size={14} /></button>
+                <button aria-label={`Delete ${diagram.name}`} className="workspace-diagram-tab-action workspace-diagram-tab-delete workspace-touch-label" data-touch-label="Delete" onClick={() => { onDeleteDiagram(diagram.id); }} type="button"><X aria-hidden="true" size={14} /></button>
               ) : null}
             </div>
           );
@@ -109,7 +110,8 @@ export function WorkspaceTabStrip({
         <button
           aria-controls="source-flyout"
           aria-expanded={sourceOpen}
-          className={`workspace-source-toggle${sourceOpen ? ' is-active' : ''}`}
+          className={`workspace-source-toggle workspace-touch-label${sourceOpen ? ' is-active' : ''}`}
+          data-touch-label={sourceOpen ? 'Hide source' : 'Show source'}
           data-testid="source-flyout-toggle"
           onClick={(event) => { onSourceToggle(event.currentTarget); }}
           title="Mermaid source"

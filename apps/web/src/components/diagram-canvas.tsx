@@ -30,11 +30,13 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DiagramEdgeIdentity, DiagramLink, DiagramLinkType, DiagramNode, DiagramNodeShape, DiagramSubgraph, FlowchartSnapshot } from '../lib/diagram-mutations';
 import { getDiagramEdgeIdentity, resolveDiagramEdgeIndex } from '../lib/diagram-mutations';
 import { measureUnobscuredCanvasViewport, type ViewportRect } from '../lib/canvas-viewport';
 import { shouldCanvasHandleEscape } from '../lib/canvas-keyboard-ownership';
+import { getCanvasToolbarStackGeometry } from '../lib/canvas-toolbar-stack';
+import { applyCanvasTouchGesture, CanvasTouchGestureController, type CanvasTouchGesture } from '../lib/canvas-touch-gesture';
 import { getConnectNodeActivation } from '../lib/diagram-connect-state';
 import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
@@ -158,7 +160,6 @@ const MAX_ZOOM = 4;
 const EDITOR_MIN_ZOOM = 0.4;
 const FIT_PADDING = 64;
 const BOTTOM_TOOLBAR_INSET = 12;
-const BOTTOM_CONTROLS_HEIGHT = 34;
 const BOTTOM_TOOLBAR_GAP = 8;
 const DEFAULT_NEW_NODE_LABEL = 'New Node';
 const DEFAULT_NEW_NODE_SHAPE: DiagramNodeShape = 'rect';
@@ -214,6 +215,18 @@ const TOOLBAR_BUTTON_STYLE: CSSProperties = {
   width: 24,
 };
 
+function canStartTouchCanvasGesture(target: EventTarget | null, root: HTMLDivElement): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  if (target.closest('a, button, input, select, textarea, [contenteditable="true"], [role="button"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle')) {
+    return false;
+  }
+
+  return root.contains(target);
+}
+
 export function DiagramCanvas({
   className,
   emptyMessage = 'start typing mermaid syntax',
@@ -247,11 +260,14 @@ export function DiagramCanvas({
 }: DiagramCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgContainerRef = useRef<HTMLDivElement | null>(null);
+  const controlsToolbarRef = useRef<HTMLDivElement | null>(null);
+  const touchGestureRef = useRef(new CanvasTouchGestureController());
   const nodeButtonRefs = useRef(new Map<string, HTMLElement | null>());
   const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
   const [mermaidPresentation, setMermaidPresentation] = useState<MermaidPresentation>({ edges: [], nodes: new Map() });
   const [canvasViewport, setCanvasViewport] = useState<ViewportRect>({ height: 0, width: 0, x: 0, y: 0 });
   const [canvasSize, setCanvasSize] = useState({ height: 0, width: 0 });
+  const [controlsToolbarHeight, setControlsToolbarHeight] = useState(0);
   const [uncontrolledNodePositions, setUncontrolledNodePositions] = useState<DiagramNodePositions>({});
   const [liveNodePositions, setLiveNodePositions] = useState<DiagramNodePositions>({});
   const [flowNodeRuntime, setFlowNodeRuntime] = useState<ControlledNodeRuntime>({});
@@ -575,7 +591,7 @@ export function DiagramCanvas({
   }, [connectionPreviewSourceId, cursorPoint, readOnly, viewport]);
 
   const displayedToolbarRect = screenSelectionBounds ?? { height: 0, width: 0, x: 16, y: 16 };
-  const canvasViewportBottomOffset = canvasSize.height - (canvasViewport.y + canvasViewport.height);
+  const canvasToolbarStack = useMemo(() => getCanvasToolbarStackGeometry(canvasSize, canvasViewport, BOTTOM_TOOLBAR_INSET), [canvasSize, canvasViewport]);
   const selectedToolbarPosition = getSafeToolbarPosition({
     anchor: {
       x: displayedToolbarRect.x + (displayedToolbarRect.width / 2),
@@ -788,6 +804,25 @@ export function DiagramCanvas({
     };
   }, []);
 
+  useLayoutEffect(() => {
+    const toolbar = controlsToolbarRef.current;
+    if (!toolbar) {
+      setControlsToolbarHeight(0);
+      return;
+    }
+
+    const updateHeight = () => {
+      setControlsToolbarHeight((current) => {
+        const next = toolbar.getBoundingClientRect().height;
+        return current === next ? current : next;
+      });
+    };
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(toolbar);
+    return () => { observer.disconnect(); };
+  }, [hasPersistedLayout, isFlowchart, readOnly]);
+
   useEffect(() => {
     if (!graph || !isFlowchart) {
       activeDragNodeIdsRef.current.clear();
@@ -995,6 +1030,57 @@ export function DiagramCanvas({
     });
   }, [viewport.panX, viewport.panY, viewport.zoom]);
 
+  const applyTouchGesture = useCallback((gesture: CanvasTouchGesture) => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const rect = container.getBoundingClientRect();
+    setAnimateTransform(false);
+    setViewport((current) => applyCanvasTouchGesture(current, gesture, rect, MIN_ZOOM, MAX_ZOOM));
+  }, []);
+
+  const handleTouchPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const canvas = containerRef.current;
+    if (event.pointerType !== 'touch' || !canvas || !canStartTouchCanvasGesture(event.target, canvas)) {
+      return;
+    }
+
+    if (!touchGestureRef.current.begin(event.pointerId, { x: event.clientX, y: event.clientY })) {
+      return;
+    }
+
+    canvas.setPointerCapture(event.pointerId);
+  }, []);
+
+  const handleTouchPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') {
+      return;
+    }
+
+    const gesture = touchGestureRef.current.move(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (!gesture) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsPanning(true);
+    applyTouchGesture(gesture);
+  }, [applyTouchGesture]);
+
+  const handleTouchPointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') {
+      return false;
+    }
+
+    const remainingPointers = touchGestureRef.current.end(event.pointerId);
+    if (remainingPointers === 0) {
+      setIsPanning(false);
+    }
+    return true;
+  }, []);
+
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if ((event.button !== 1 && !spacePressed) || !containerRef.current) {
       return;
@@ -1041,6 +1127,12 @@ export function DiagramCanvas({
     dragStateRef.current = null;
     setIsPanning(false);
   }, []);
+
+  const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!handleTouchPointerEnd(event)) {
+      stopPanning();
+    }
+  }, [handleTouchPointerEnd, stopPanning]);
 
   const handleCanvasClick = useCallback(() => {
     if (isPanning) {
@@ -1348,9 +1440,12 @@ export function DiagramCanvas({
         }
       }}
       onPointerDown={handlePointerDown}
+      onPointerDownCapture={handleTouchPointerDown}
       onPointerLeave={() => { setCursorPoint(null); }}
       onPointerMove={handlePointerMove}
-      onPointerUp={stopPanning}
+      onPointerMoveCapture={handleTouchPointerMove}
+      onPointerCancel={handlePointerUp}
+      onPointerUp={handlePointerUp}
       onWheel={handleWheel}
       onFocus={(event) => {
         if (event.target === event.currentTarget && orderedNodeIds[0]) {
@@ -1366,6 +1461,7 @@ export function DiagramCanvas({
         minHeight: 0,
         overflow: 'hidden',
         position: 'relative',
+        touchAction: 'none',
       }}
       tabIndex={0}
     >
@@ -1614,12 +1710,12 @@ export function DiagramCanvas({
               display: 'flex',
               flexWrap: 'wrap',
               gap: 8,
-              left: canvasViewport.x + BOTTOM_TOOLBAR_INSET,
+              left: canvasToolbarStack.left,
               maxWidth: canvasViewport.width > 0 ? Math.max(1, canvasViewport.width - (BOTTOM_TOOLBAR_INSET * 2)) : 'calc(100% - 24px)',
               padding: '8px 10px',
               pointerEvents: 'auto',
               position: 'absolute',
-              bottom: canvasViewportBottomOffset + BOTTOM_TOOLBAR_INSET + BOTTOM_CONTROLS_HEIGHT + BOTTOM_TOOLBAR_GAP,
+              bottom: `calc(${canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP}px + env(safe-area-inset-bottom))`,
               zIndex: 20,
             }}
           >
@@ -1820,12 +1916,13 @@ export function DiagramCanvas({
         {!readOnly ? (
           <div
             data-testid="canvas-controls-toolbar"
+            ref={controlsToolbarRef}
             style={{
               alignItems: 'center',
               background: 'var(--control-surface)',
               border: '1px solid var(--control-border)',
               borderRadius: 8,
-              bottom: canvasViewportBottomOffset + BOTTOM_TOOLBAR_INSET,
+              bottom: `calc(${canvasToolbarStack.bottom}px + env(safe-area-inset-bottom))`,
               color: 'var(--ink-muted)',
               display: 'inline-flex',
               gap: 6,
@@ -1833,7 +1930,7 @@ export function DiagramCanvas({
               padding: '4px 6px',
               pointerEvents: 'auto',
               position: 'absolute',
-              right: Math.max(BOTTOM_TOOLBAR_INSET, canvasSize.width - (canvasViewport.x + canvasViewport.width) + BOTTOM_TOOLBAR_INSET),
+              right: canvasToolbarStack.right,
             }}
           >
             {isFlowchart && hasPersistedLayout ? (
@@ -2158,7 +2255,7 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
 
 function ToolbarButton({ children, label, onClick }: { children: ReactNode; label: string; onClick: () => void }) {
   return (
-    <button aria-label={label} data-testid={`canvas-action-${toTestId(label)}`} onClick={onClick} style={TOOLBAR_BUTTON_STYLE} title={label} type="button">
+    <button aria-label={label} className="canvas-toolbar-button" data-testid={`canvas-action-${toTestId(label)}`} onClick={onClick} style={TOOLBAR_BUTTON_STYLE} title={label} type="button">
       {children}
     </button>
   );

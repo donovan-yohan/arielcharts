@@ -99,7 +99,8 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, templates }: Workspac
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label="Create diagram from template"
-        className="workspace-diagram-tab-add"
+        className="workspace-diagram-tab-add workspace-touch-label"
+        data-touch-label="New diagram"
         data-testid="create-diagram-tab"
         onClick={() => {
           if (open) {

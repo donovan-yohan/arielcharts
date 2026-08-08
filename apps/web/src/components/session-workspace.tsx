@@ -8,11 +8,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
-import { Activity, Check, ChevronDown, Code2, Pencil, Plus, X } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
 import { DiagramCanvas } from './diagram-canvas';
+import { ThemeControl } from './theme-control';
+import { useTheme } from './theme-provider';
+import { WorkspaceFlyouts } from './workspace-flyouts';
+import { WorkspaceFooter } from './workspace-footer';
+import { WorkspaceTabStrip, type WorkspaceDiagramTab } from './workspace-tab-strip';
 import {
   MutationQueue,
   observeMutationFailure,
@@ -33,6 +38,8 @@ import { canUseFlowchartControls, DiagramPreviewRegistry, type DiagramPreview } 
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter } from '../lib/drag-layout';
 import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
+import { getMermaidThemeVariables } from '../lib/theme';
+import { getNextWorkspaceFlyout, type WorkspaceFlyout } from '../lib/workspace-flyout-state';
 
 const DIAGRAMS_KEY = 'diagrams';
 const DIAGRAM_ORDER_KEY = 'diagramOrder';
@@ -55,8 +62,6 @@ const connectionLabels: Record<ConnectionState, string> = {
 };
 
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
-type WorkspaceFlyout = 'source' | 'activity' | null;
-
 type CollaborationState = {
   activityArray: Y.Array<ActivityEvent>;
   awareness: AwarenessLike;
@@ -66,7 +71,7 @@ type CollaborationState = {
   provider: WebsocketProvider;
 };
 
-type DiagramTab = { id: string; name: string };
+type DiagramTab = WorkspaceDiagramTab;
 
 type ActiveDiagramState = {
   id: string;
@@ -256,7 +261,7 @@ function getCompactConnectionLabel(connectionState: ConnectionState): string {
 
 function getActivityColor(event: ActivityEvent, participants: Participant[]): string {
   const actorParticipant = participants.find((participant) => participant.name === event.actor.name);
-  return actorParticipant?.color ?? (event.actor.type === 'agent' ? '#3fb950' : '#58a6ff');
+  return actorParticipant?.color ?? (event.actor.type === 'agent' ? 'var(--agent-accent)' : 'var(--interactive-hover)');
 }
 
 function upsertActivity(activityArray: Y.Array<ActivityEvent>, event: ActivityEvent) {
@@ -305,6 +310,7 @@ function createDiagramId(): string {
 }
 
 export function SessionWorkspace({ sessionId }: { sessionId: string }) {
+  const { resolvedTheme } = useTheme();
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const editorThemeRef = useRef(new Compartment());
@@ -319,6 +325,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const undoManagerRef = useRef<Y.UndoManager | null>(null);
   const dragCommitterRef = useRef<DragLayoutCommitter | null>(null);
   const diagramTabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const flyoutOriginRef = useRef<HTMLButtonElement | null>(null);
+  const pendingFlyoutReturnFocusRef = useRef<HTMLButtonElement | null>(null);
+  const activityCloseRef = useRef<HTMLButtonElement | null>(null);
   const renameCancelledRef = useRef(false);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
@@ -356,6 +365,21 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     });
   }, []);
 
+  const closeFlyout = useCallback(() => {
+    pendingFlyoutReturnFocusRef.current = flyoutOriginRef.current;
+    setOpenFlyout(null);
+  }, []);
+
+  const toggleFlyout = useCallback((flyout: Exclude<WorkspaceFlyout, null>, origin: HTMLButtonElement) => {
+    const nextFlyout = getNextWorkspaceFlyout(openFlyout, flyout);
+    if (!nextFlyout) {
+      closeFlyout();
+      return;
+    }
+    flyoutOriginRef.current = origin;
+    setOpenFlyout(nextFlyout);
+  }, [closeFlyout, openFlyout]);
+
   useEffect(() => {
     setShareUrl(getSessionPath(sessionId));
     previewRegistryRef.current.reset();
@@ -373,8 +397,13 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [activeDiagramId, sessionId]);
 
   useEffect(() => {
-    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
-  }, []);
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'base',
+      themeVariables: getMermaidThemeVariables(resolvedTheme),
+      securityLevel: 'strict',
+    });
+  }, [resolvedTheme]);
 
   useEffect(() => {
     const doc = new Y.Doc();
@@ -575,34 +604,34 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
 
     const editorTheme = EditorView.theme({
       '&': {
-        backgroundColor: '#0b1325',
-        color: '#e2e8f0',
+        backgroundColor: 'var(--surface-inset)',
+        color: 'var(--ink)',
         fontSize: '14px',
         height: '100%',
       },
       '.cm-content': {
-        caretColor: '#f8fafc',
+        caretColor: 'var(--ink-strong)',
         fontFamily: 'var(--font-mono)',
         minHeight: '100%',
         padding: '1rem',
       },
       '.cm-gutters': {
-        backgroundColor: '#111c33',
-        borderRight: '1px solid rgba(148, 163, 184, 0.15)',
-        color: '#94a3b8',
+        backgroundColor: 'var(--surface-muted)',
+        borderRight: '1px solid var(--line-subtle)',
+        color: 'var(--ink-muted)',
       },
       '.cm-activeLine, .cm-activeLineGutter': {
-        backgroundColor: 'rgba(56, 189, 248, 0.08)',
+        backgroundColor: 'var(--selection-muted)',
       },
       '.cm-selectionBackground': {
-        backgroundColor: 'rgba(96, 165, 250, 0.22) !important',
+        backgroundColor: 'var(--selection-shadow) !important',
       },
       '.cm-cursor, .cm-dropCursor': {
-        borderLeftColor: '#f8fafc',
+        borderLeftColor: 'var(--ink-strong)',
       },
       '.cm-panels': {
-        backgroundColor: '#111c33',
-        color: '#e2e8f0',
+        backgroundColor: 'var(--surface-muted)',
+        color: 'var(--ink)',
       },
     });
 
@@ -629,6 +658,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     });
 
     editorViewRef.current = editorView;
+    window.requestAnimationFrame(() => { editorView.focus(); });
 
     return () => {
       editorView.destroy();
@@ -692,7 +722,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     };
 
     void renderPreview();
-  }, [activeDiagramId, mermaidText, sessionId]);
+  }, [activeDiagramId, mermaidText, resolvedTheme, sessionId]);
 
   useEffect(() => {
     if (shareCopyState === 'idle') {
@@ -767,10 +797,34 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (!openFlyout) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpenFlyout(null);
+      if (event.key === 'Escape') closeFlyout();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => { document.removeEventListener('keydown', handleKeyDown); };
+  }, [closeFlyout, openFlyout]);
+
+  useEffect(() => {
+    if (openFlyout !== null) {
+      return;
+    }
+    const origin = pendingFlyoutReturnFocusRef.current;
+    if (!origin) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      pendingFlyoutReturnFocusRef.current = null;
+      if (origin.isConnected) {
+        origin.focus({ preventScroll: true });
+      }
+    });
+    return () => { window.cancelAnimationFrame(frame); };
+  }, [openFlyout]);
+
+  useEffect(() => {
+    if (openFlyout !== 'activity') {
+      return;
+    }
+    window.requestAnimationFrame(() => { activityCloseRef.current?.focus(); });
   }, [openFlyout]);
 
   const activeParticipantCount = participants.length;
@@ -966,6 +1020,7 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
         </div>
 
         <div className="workspace-topbar-right">
+          <ThemeControl />
           <div data-testid="presence-bar" className="workspace-presence-avatars" aria-label="Session presence">
             {participants.length > 0 ? (
               participants.map((participant, index) => (
@@ -985,8 +1040,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
                           setRenamingParticipantName((current) => current === participant.name ? null : participant.name);
                         }}
                         style={{
-                          backgroundColor: participant.type === 'agent' ? '#0d1117' : participant.color,
-                          borderColor: participant.type === 'agent' ? '#3fb950' : '#0d1117',
+                          backgroundColor: participant.type === 'agent' ? 'var(--agent-surface)' : participant.color,
+                          borderColor: participant.type === 'agent' ? 'var(--agent-border)' : 'var(--surface-inset)',
                           borderStyle: getParticipantBorderStyle(participant.type),
                           zIndex: participants.length - index,
                         }}
@@ -1022,8 +1077,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
                     <div
                       className={`workspace-avatar workspace-avatar-${participant.type}`}
                       style={{
-                        backgroundColor: participant.type === 'agent' ? '#0d1117' : participant.color,
-                        borderColor: participant.type === 'agent' ? '#3fb950' : '#0d1117',
+                        backgroundColor: participant.type === 'agent' ? 'var(--agent-surface)' : participant.color,
+                        borderColor: participant.type === 'agent' ? 'var(--agent-border)' : 'var(--surface-inset)',
                         borderStyle: getParticipantBorderStyle(participant.type),
                         zIndex: participants.length - index,
                       }}
@@ -1045,76 +1100,27 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
         </div>
       </header>
 
-      <nav aria-label="Session diagrams" className="workspace-diagram-tabs" data-testid="diagram-tab-bar">
-        <div aria-orientation="horizontal" className="workspace-diagram-tab-list" role="tablist">
-          {diagrams.map((diagram) => {
-            const active = diagram.id === activeDiagramId;
-            const renaming = diagram.id === renamingDiagramId;
-            return (
-              <div className={`workspace-diagram-tab${active ? ' is-active' : ''}`} key={diagram.id} role="presentation">
-                {renaming ? (
-                  <input
-                    aria-label="Diagram name"
-                    autoFocus
-                    className="workspace-diagram-tab-input"
-                    onBlur={commitDiagramName}
-                    onChange={(event) => { setDiagramNameDraft(event.target.value); }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') commitDiagramName();
-                      if (event.key === 'Escape') { setRenamingDiagramId(null); setDiagramNameDraft(''); }
-                    }}
-                    value={diagramNameDraft}
-                  />
-                ) : (
-                  <button
-                    aria-controls="diagram-workspace"
-                    aria-selected={active}
-                    className="workspace-diagram-tab-button"
-                    id={`diagram-tab-${diagram.id}`}
-                    onClick={() => { setActiveDiagramId(diagram.id); }}
-                    onDoubleClick={() => { setRenamingDiagramId(diagram.id); setDiagramNameDraft(diagram.name); }}
-                    onKeyDown={(event) => { handleDiagramTabKeyDown(event, diagram.id); }}
-                    ref={(element) => {
-                      if (element) diagramTabRefs.current.set(diagram.id, element);
-                      else diagramTabRefs.current.delete(diagram.id);
-                    }}
-                    role="tab"
-                    tabIndex={active ? 0 : -1}
-                    title={`${diagram.name} (${diagram.id}) — double click to rename`}
-                    type="button"
-                  >
-                    {active ? <span aria-hidden="true" className="workspace-tab-active-dot" /> : null}
-                    <span>{diagram.name}</span>
-                  </button>
-                )}
-                {active && !renaming ? (
-                  <button
-                    aria-label={`Rename ${diagram.name}`}
-                    className="workspace-diagram-tab-action"
-                    onClick={() => { setRenamingDiagramId(diagram.id); setDiagramNameDraft(diagram.name); }}
-                    type="button"
-                  ><Pencil aria-hidden="true" size={13} /></button>
-                ) : null}
-                {active && !renaming && diagrams.length > 1 ? (
-                  <button aria-label={`Delete ${diagram.name}`} className="workspace-diagram-tab-action workspace-diagram-tab-delete" onClick={() => { deleteActiveDiagram(diagram.id); }} type="button"><X aria-hidden="true" size={14} /></button>
-                ) : null}
-              </div>
-            );
-          })}
-          <button aria-label="Create blank diagram" className="workspace-diagram-tab-add" data-testid="create-diagram-tab" onClick={createBlankDiagram} title="New blank diagram" type="button"><Plus aria-hidden="true" size={18} /></button>
-        </div>
-        <div className="workspace-diagram-tab-tools">
-          <button
-            aria-controls="source-flyout"
-            aria-expanded={openFlyout === 'source'}
-            className={`workspace-source-toggle${openFlyout === 'source' ? ' is-active' : ''}`}
-            data-testid="source-flyout-toggle"
-            onClick={() => { setOpenFlyout((current) => current === 'source' ? null : 'source'); }}
-            type="button"
-          ><Code2 aria-hidden="true" size={15} /><span>{openFlyout === 'source' ? 'hide source' : 'show source'}</span></button>
-          <span className="workspace-diagram-mode" data-testid="diagram-mode"><span aria-hidden="true" />{diagramModeLabel}</span>
-        </div>
-      </nav>
+      <WorkspaceTabStrip
+        activeDiagramId={activeDiagramId}
+        diagramModeLabel={diagramModeLabel}
+        diagramNameDraft={diagramNameDraft}
+        diagrams={diagrams}
+        onActiveDiagramChange={setActiveDiagramId}
+        onCommitDiagramName={commitDiagramName}
+        onCreateDiagram={createBlankDiagram}
+        onDeleteDiagram={deleteActiveDiagram}
+        onDiagramKeyDown={handleDiagramTabKeyDown}
+        onDiagramNameDraftChange={setDiagramNameDraft}
+        onRenameDiagram={(diagram) => { setRenamingDiagramId(diagram.id); setDiagramNameDraft(diagram.name); }}
+        onRenameDismiss={() => { setRenamingDiagramId(null); setDiagramNameDraft(''); }}
+        onSourceToggle={(origin) => { toggleFlyout('source', origin); }}
+        registerTabButton={(diagramId, element) => {
+          if (element) diagramTabRefs.current.set(diagramId, element);
+          else diagramTabRefs.current.delete(diagramId);
+        }}
+        renamingDiagramId={renamingDiagramId}
+        sourceOpen={openFlyout === 'source'}
+      />
 
       <section aria-labelledby={activeDiagramId ? `diagram-tab-${activeDiagramId}` : undefined} className="workspace-main" data-testid="canvas-first-workspace" id="diagram-workspace" role="tabpanel">
         <article data-testid="preview-root" className="workspace-pane workspace-diagram-pane">
@@ -1172,79 +1178,36 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             onUngroupNodes={(id) => mutationQueueRef.current?.ungroupSubgraph(id)}
             selectedNodeIds={selectedNodeIds}
             svg={preview?.svg ?? ''}
+            theme={resolvedTheme}
           />
         </article>
 
-        {openFlyout === 'source' ? (
-          <aside aria-label="Mermaid source" className="workspace-flyout" data-testid="source-flyout" id="source-flyout">
-            <header className="workspace-flyout-header">
-              <div><Code2 aria-hidden="true" size={16} /><span>Mermaid source</span></div>
-              <button aria-label="Close source panel" className="workspace-icon-button" onClick={() => { setOpenFlyout(null); }} type="button"><X aria-hidden="true" size={16} /></button>
-            </header>
-            <div className="workspace-flyout-meta">
-              <span>{getActiveDiagramName(diagrams, activeDiagramId) ?? 'No diagram selected'}</span>
-              <span data-testid="connection-status-badge">{editorStatusLabel}</span>
-            </div>
-            <div className="editor-host workspace-flyout-editor" data-testid="editor-root" ref={editorHostRef} />
-          </aside>
-        ) : null}
-
-        {openFlyout === 'activity' ? (
-          <aside aria-label="Activity history" className="workspace-flyout workspace-activity-flyout" data-testid="activity-flyout" id="activity-flyout">
-            <header className="workspace-flyout-header">
-              <div><Activity aria-hidden="true" size={16} /><span>Activity history</span></div>
-              <button aria-label="Close activity history" className="workspace-icon-button" onClick={() => { setOpenFlyout(null); }} type="button"><X aria-hidden="true" size={16} /></button>
-            </header>
-            <div className="workspace-flyout-meta"><span>Latest activity</span><span>{activity.length}</span></div>
-            {activity.length > 0 ? (
-              <ol className="activity-list" data-testid="activity-feed">
-                {activity.map((event, index) => (
-                  <li className={`activity-item${index === 0 ? ' is-current' : ''}`} key={event.id}>
-                    <span aria-hidden="true" className="activity-timeline-marker" style={{ borderColor: getActivityColor(event, participants) }} />
-                    <div className="activity-item-content">
-                      <div className="activity-item-heading">
-                        <span className={event.actor.type === 'agent' ? 'activity-agent-badge' : ''}>{event.actor.name}</span>
-                        <time className="activity-time" dateTime={new Date(event.timestamp).toISOString()}>{formatTimestamp(event.timestamp)}</time>
-                      </div>
-                      <strong>{describeActivityCompact(event)}</strong>
-                      {event.detail ? <span className="activity-detail">{event.detail}</span> : null}
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            ) : <div className="empty-inline">no activity yet</div>}
-          </aside>
-        ) : null}
+        <WorkspaceFlyouts
+          activeDiagramName={getActiveDiagramName(diagrams, activeDiagramId) ?? 'No diagram selected'}
+          activity={activity}
+          activityCloseRef={activityCloseRef}
+          closeFlyout={closeFlyout}
+          editorHostRef={editorHostRef}
+          editorStatusLabel={editorStatusLabel}
+          getActivityColor={getActivityColor}
+          getActivityDescription={describeActivityCompact}
+          getTimestampLabel={formatTimestamp}
+          openFlyout={openFlyout}
+          participants={participants}
+        />
       </section>
 
-      <footer className="workspace-footer" data-testid="workspace-footer">
-        <div className="workspace-footer-left">
-          <button
-            aria-controls="activity-flyout"
-            aria-expanded={openFlyout === 'activity'}
-            className={`workspace-footer-toggle${openFlyout === 'activity' ? ' is-active' : ''}`}
-            data-testid="activity-flyout-toggle"
-            onClick={() => { setOpenFlyout((current) => current === 'activity' ? null : 'activity'); }}
-            type="button"
-          ><Activity aria-hidden="true" size={15} /><span>activity</span><b>{activity.length}</b><ChevronDown aria-hidden="true" size={14} /></button>
-          <span className="workspace-collaborator-count">{activityStatusLabel}</span>
-          <div aria-label="Active collaborators" className="workspace-footer-avatars">
-            {participants.map((participant) => (
-              <span
-                aria-label={`${getParticipantDisplayName(participant)}, ${participant.type}`}
-                className={`workspace-footer-avatar workspace-footer-avatar-${participant.type}`}
-                key={`${participant.name}-${participant.type}-footer`}
-                style={{ backgroundColor: participant.type === 'agent' ? '#5b2a86' : participant.color }}
-                title={getParticipantDisplayName(participant)}
-              >{getParticipantAvatarText(participant)}</span>
-            ))}
-          </div>
-        </div>
-        <div aria-live="polite" className="workspace-save-status" data-testid="live-save-status">
-          <span aria-hidden="true" className={`workspace-save-dot workspace-save-dot-${connectionState}`} />
-          <span>{saveStatusLabel}</span><span className="workspace-live-label">live</span>
-        </div>
-      </footer>
+      <WorkspaceFooter
+        activityCount={activity.length}
+        activityOpen={openFlyout === 'activity'}
+        activityStatusLabel={activityStatusLabel}
+        connectionState={connectionState}
+        getAvatarText={getParticipantAvatarText}
+        getParticipantName={getParticipantDisplayName}
+        onActivityToggle={(origin) => { toggleFlyout('activity', origin); }}
+        participants={participants}
+        saveStatusLabel={saveStatusLabel}
+      />
 
       {showConnectModal ? (
         <div className="modal-backdrop" onClick={() => { setShowConnectModal(false); }}>

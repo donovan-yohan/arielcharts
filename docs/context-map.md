@@ -23,6 +23,7 @@ canonical; the SVG and flowchart interaction model derive from it.
 | Source editing and undo | Per-tab CodeMirror/Yjs binding; UndoManager tracks local-human origins only | `apps/web/src/components/session-workspace.tsx`, `apps/web/src/lib/collaboration-origins.ts` | `apps/web/src/lib/session.test.ts`, `apps/web/src/lib/collaboration-origins.test.ts` |
 | Drag collaboration | Local active-node overlay with 120 ms durable batches and unconditional final flush | `apps/web/src/components/session-workspace.tsx`, `apps/web/src/lib/drag-layout.ts` | `apps/web/src/lib/drag-layout.test.ts`, `e2e-collaboration-validate.ts` (`pnpm test:e2e-collaboration`) |
 | Render/navigation | Mermaid parser result classifies flowcharts; a local per-diagram registry holds derived SVG, kind, and parse errors | `session-workspace.tsx`, `diagram-preview.ts`, `diagram-canvas.tsx`, `svg-hit-map.ts` | `diagram-preview.test.ts`, `pnpm test:e2e-sequence`, `/tmp/arielcharts-sequence.png`, `/tmp/arielcharts-sequence-isolation.png` |
+| Workspace UX/theme | One provider resolves local system/light/dark preference; semantic shell tokens and source-owned Mermaid item styles remain separate | `theme-provider.tsx`, `theme.ts`, `globals.css`, `workspace-*.tsx` | `theme.test.ts`, `workspace-flyout-state.test.ts`, `pnpm test:e2e-workspace-ux` |
 | Flowchart mutations | Mermaid AST -> mutation -> minimal Y.Text diff | `apps/web/src/lib/diagram-mutations.ts` | `diagram-mutations.test.ts`, `diagram-flow-identity.test.ts` |
 | Persistence | LevelDB stores encoded Yjs state and derived session metadata | `apps/server/src/lib/persistence.ts`, `session-manager.ts` | `session-manager.test.ts` |
 
@@ -34,8 +35,9 @@ canonical; the SVG and flowchart interaction model derive from it.
 | MCP revision | Request-time concurrency guard | SessionManager | Create checks the session revision; existing-tab mutations check that tab's revision. |
 | Activity | Durable but bounded feed | Server-managed Yjs document | Browser UI renders it; retain at most 100 events. It cannot substitute for version history. |
 | Presence/cursors | Ephemeral collaboration | Yjs awareness with per-socket client-id ownership | The server filters stale/idempotent echoes and rejects foreign advances; awareness is not an authorization system or browser UI store. |
-| Active tab, camera, selection, toolbar, flyout, drafts | Browser local | React/local storage where appropriate | Never move these into Yjs merely to make UI react to remote edits. |
-| Parsed SVG, kind, parse error, hit map, flowchart snapshot | Derived browser state | Mermaid/mermaid-ast and local preview registry | Per-diagram last-valid state is isolated by stable diagram id; only an exact, representable current flowchart enables structural controls. |
+| Active tab, camera, selection, toolbar, flyout, drafts | Browser local | React/local storage where appropriate | Flyouts are exclusive overlays and cannot mutate outer anchors, camera, or remote state. |
+| Theme preference and system resolution | Browser local | One `ThemeProvider`; versioned local storage plus media query | Resolved theme is a derived Mermaid/React Flow render input, never shared diagram state. |
+| Parsed SVG, kind, parse error, hit map, flowchart snapshot | Derived browser state | Mermaid/mermaid-ast and local preview registry | Per-diagram last-valid state is isolated by stable diagram id; theme changes rerender it without changing source. |
 
 ## Ingress and concurrency flow
 
@@ -62,6 +64,8 @@ canonical; the SVG and flowchart interaction model derive from it.
 | Human/MCP collaboration | Reuse Yjs plus server revision checks | They already converge document operations and prevent stale agent replacement. Do not add a second realtime database, lock service, or transport-session identity. |
 | Interaction lifecycle | Extract only where an invariant cannot be tested in `session-workspace.tsx` | It currently binds provider, active-tab state, CodeMirror, rendering, activity, and local UI. Pull out focused tab/render or transaction-origin helpers before adding more cross-cutting effects, not a framework-wide rewrite. |
 | Undo, drag, and remote updates | Explicit origin and coalescing seams | Per-diagram undo is human-only; drag writes batch at 120 ms and final-flush while a local overlay prevents remote jitter. |
+| Theme and item color | Semantic shell tokens plus neutral graphical fallbacks | Authored Mermaid `classDef`/`style` colors override item fallbacks; shell state colors never rewrite source. |
+| Overlay and camera geometry | Measure the unobscured canvas | Flyouts overlay; Fit and toolbar placement use measured viewport bounds without opening-state camera mutation. |
 | Activity versus history | Keep them separate | The bounded feed identifies collaboration events; issue #17 must use revision snapshots/restore-as-new-revision rather than replaying activity text. |
 
 ## Scaling boundaries and current debt
@@ -75,6 +79,8 @@ canonical; the SVG and flowchart interaction model derive from it.
 - `session-workspace.tsx` is the coordination point, not a universal feature
   bucket. A new behavior that needs both local UI and durable state must name
   its ownership and test seam before being added there.
+- No deeper nested `AGENTS.md` is justified: theme, overlays, and viewport
+  invariants span the existing web boundary.
 - Awareness client-id ownership prevents cross-socket mutation but does not
   authenticate a person. Any future authorization must remain a separate
   boundary.
@@ -95,6 +101,9 @@ For browser interaction work, start the server and web app, then run
 `npx tsx e2e-validate.ts`; for Mermaid type/canvas coverage also run
 `pnpm test:e2e-sequence`. Inspect `/tmp/arielcharts-sequence.png` and
 `/tmp/arielcharts-sequence-isolation.png`.
+`pnpm test:e2e-workspace-ux` is the exact production browser gate for theme,
+flyout focus/exclusivity, responsive layout, visible toolbars, Fit, and stable
+outer anchors/camera; CI runs it.
 For human/MCP concurrency, local UI ownership, active-drag stability, and
 eventual layout convergence, run `pnpm test:e2e-collaboration`; nested update,
 awareness, reconnect, and persisted reload coverage lives in

@@ -1,0 +1,134 @@
+import type { Locator, Page } from '@playwright/test';
+import { assert } from './assert.ts';
+
+export const FLOWCHART_FIXTURE = `flowchart LR
+  Browser[Browser] --> Gateway[Gateway]
+  Gateway --> Service[Service]
+  Service --> Database[(Database)]`;
+
+export const API_SEQUENCE_FIXTURE = `sequenceDiagram
+  autonumber
+  participant Browser
+  participant Gateway
+  participant Service
+  participant Database
+  Browser->>Gateway: POST /orders
+  Gateway->>Service: create order
+  Service->>Database: INSERT order
+  Database-->>Service: order id
+  Service-->>Gateway: 201 Created
+  Gateway-->>Browser: 201 Created`;
+
+export const INVALID_MERMAID_FIXTURE = 'this is not valid Mermaid syntax';
+
+export function sourceEditor(page: Page): Locator {
+  return page.locator('.cm-content');
+}
+
+export async function visitWorkspace(page: Page, baseUrl: string, sessionId: string): Promise<void> {
+  await page.goto(`${baseUrl}/s/${sessionId}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.getByRole('tab', { name: 'Main', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+}
+
+export async function ensureFlyout(page: Page, kind: 'source' | 'activity'): Promise<Locator> {
+  const toggle = page.getByTestId(`${kind}-flyout-toggle`);
+  if (await toggle.getAttribute('aria-expanded') !== 'true') {
+    await toggle.click();
+  }
+  const flyout = page.getByTestId(`${kind}-flyout`);
+  await flyout.waitFor({ state: 'visible', timeout: 15_000 });
+  return flyout;
+}
+
+export async function closeFlyout(page: Page, kind: 'source' | 'activity'): Promise<void> {
+  const toggle = page.getByTestId(`${kind}-flyout-toggle`);
+  if (await toggle.getAttribute('aria-expanded') === 'true') {
+    await toggle.click();
+    await page.getByTestId(`${kind}-flyout`).waitFor({ state: 'detached', timeout: 15_000 });
+  }
+}
+
+export async function ensureSourceFlyoutOpen(page: Page): Promise<Locator> {
+  await ensureFlyout(page, 'source');
+  const editor = sourceEditor(page);
+  await editor.waitFor({ state: 'visible', timeout: 15_000 });
+  return editor;
+}
+
+export async function replaceSource(page: Page, source: string): Promise<void> {
+  const editor = await ensureSourceFlyoutOpen(page);
+  await editor.click();
+  await page.keyboard.press('Control+A');
+  await page.keyboard.insertText(source);
+}
+
+export async function canonicalSource(page: Page): Promise<string> {
+  return page.locator('.cm-line').evaluateAll((lines) => lines.map((line) => {
+    const copy = line.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll('.cm-ySelectionCaret, .cm-widgetBuffer').forEach((node) => node.remove());
+    return copy.textContent ?? '';
+  }).join('\n'));
+}
+
+export async function waitForSource(page: Page, expected: string): Promise<void> {
+  await page.waitForFunction((source) => {
+    const lines = [...document.querySelectorAll('.cm-line')];
+    return lines.map((line) => {
+      const copy = line.cloneNode(true) as HTMLElement;
+      copy.querySelectorAll('.cm-ySelectionCaret, .cm-widgetBuffer').forEach((node) => node.remove());
+      return copy.textContent ?? '';
+    }).join('\n') === source;
+  }, expected, { timeout: 15_000 });
+}
+
+export async function selectTabByName(page: Page, name: string): Promise<void> {
+  const tab = page.getByRole('tab', { name, exact: true });
+  await tab.click();
+  await page.waitForFunction((tabName) => [...document.querySelectorAll<HTMLElement>('[role="tab"]')]
+    .some((candidate) => candidate.textContent?.trim() === tabName && candidate.getAttribute('aria-selected') === 'true'), name, { timeout: 15_000 });
+}
+
+export async function activeTabName(page: Page): Promise<string> {
+  const name = await page.locator('[role="tab"][aria-selected="true"]').textContent();
+  assert(name, 'The workspace has no active tab.');
+  return name.trim();
+}
+
+export async function createBlankDiagram(page: Page): Promise<string> {
+  const before = await page.getByRole('tab').allTextContents();
+  await page.getByTestId('create-diagram-tab').click();
+  await page.waitForFunction((count) => document.querySelectorAll('[role="tab"]').length === count + 1, before.length, { timeout: 15_000 });
+  const name = await activeTabName(page);
+  assert(!before.includes(name), `Blank tab did not become active: ${name}`);
+  return name;
+}
+
+export async function renameActiveDiagram(page: Page, name: string): Promise<void> {
+  const current = await activeTabName(page);
+  await page.getByRole('button', { name: `Rename ${current}`, exact: true }).click();
+  const input = page.getByRole('textbox', { name: 'Diagram name', exact: true });
+  await input.fill(name);
+  await input.press('Enter');
+  await page.getByRole('tab', { name, exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+  assert(await activeTabName(page) === name, `Renamed tab was not active: ${name}`);
+}
+
+export async function waitForCanvas(page: Page, mode: 'flowchart' | 'generic'): Promise<void> {
+  await page.waitForFunction((expectedMode) => {
+    const label = document.querySelector('[data-testid="diagram-mode"]')?.textContent ?? '';
+    const svg = document.querySelector('.diagram-canvas-svg svg');
+    const structureToolbar = document.querySelector('form[aria-label="Add Mermaid node"]');
+    return !!svg?.getAttribute('viewBox')
+      && (expectedMode === 'flowchart' ? label.includes('editable') && !!structureToolbar : label.includes('source only') && !structureToolbar);
+  }, mode, { timeout: 15_000 });
+}
+
+export async function waitForInvalidPreview(page: Page): Promise<void> {
+  await page.getByTestId('parse-error-banner').waitFor({ state: 'visible', timeout: 15_000 });
+  assert(await page.locator('.diagram-canvas-svg svg').count() > 0, 'Invalid Mermaid removed the last valid visual preview.');
+}
+
+export async function waitForSyncedSource(page: Page): Promise<void> {
+  await page.getByTestId('connection-status-badge').filter({ hasText: /^synced$/i }).waitFor({ state: 'visible', timeout: 15_000 });
+}

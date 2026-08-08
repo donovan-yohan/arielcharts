@@ -181,10 +181,19 @@ async function waitForStableCanvasTransform(page: Page, label: string): Promise<
 
 async function closeWorkspaceSettings(page: Page): Promise<void> {
   const dialog = page.getByTestId(SETTINGS_DIALOG_TEST_ID);
-  if (await dialog.count() > 0) {
+  for (let attempt = 0; attempt < 3 && await dialog.count() > 0; attempt += 1) {
+    await page.evaluate(async () => {
+      await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
+    });
     await page.keyboard.press('Escape');
-    await dialog.waitFor({ state: 'detached', timeout: 15_000 });
+    try {
+      await dialog.waitFor({ state: 'detached', timeout: 1_000 });
+      return;
+    } catch {
+      // Theme and presence rerenders can briefly replace the document listener.
+    }
   }
+  await dialog.waitFor({ state: 'detached', timeout: 15_000 });
 }
 
 async function selectThemePreference(page: Page, preference: 'system' | 'light' | 'dark'): Promise<void> {
@@ -1583,6 +1592,8 @@ async function expectRevisionHistoryCollaboration(
     'A stale restore appended an immutable restored revision.');
     assert(restoredActivityCountAfterStale === restoredActivityCountBeforeStale,
       'A stale restore appended an activity event instead of remaining a no-op.');
+    await staleConfirmation.waitFor({ state: 'detached', timeout: 15_000 });
+    await expect(staleItem.getByRole('button', { name: 'Restore', exact: true })).toBeEnabled({ timeout: 15_000 });
 
     await closeFlyout(page, 'activity');
     await expectHistoryFlyoutSafety(page, 'desktop', historical.revision.id);

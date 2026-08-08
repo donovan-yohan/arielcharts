@@ -93,6 +93,48 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
         with:
           version: '0.4.80'
+      - name: Provision canonical API certificate
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          hostname='api.arielcharts.donovanyohan.com'
+          certificates="$(flyctl certs list --app arielcharts-server --json)"
+          if jq -e --arg hostname "$hostname" \
+            '.[] | select(.hostname == $hostname and .acme_requested)' \
+            <<<"$certificates" >/dev/null; then
+            echo "Fly ACME certificate request already exists for $hostname."
+          else
+            flyctl certs add "$hostname" --app arielcharts-server
+          fi
+
+          max_attempts=30
+          sleep_seconds=10
+          for ((attempt = 1; attempt <= max_attempts; attempt += 1)); do
+            if certificate="$(flyctl certs check "$hostname" --app arielcharts-server --json)"; then
+              if jq -e '
+                .acme_requested == true
+                and .configured == true
+                and .status == "active"
+                and any(.certificates[]?; .source == "fly" and .status == "active")
+              ' <<<"$certificate" >/dev/null; then
+                echo "Fly ACME certificate is active for $hostname."
+                exit 0
+              fi
+
+              state="$(jq -r '[.acme_requested, .configured, .status, ([.certificates[]? | select(.source == "fly") | .status] | join(","))] | @tsv' <<<"$certificate")"
+              echo "Waiting for Fly ACME certificate ($attempt/$max_attempts): acme_requested, configured, status, fly_status = $state"
+            else
+              echo "Fly certificate status check failed ($attempt/$max_attempts); retrying."
+            fi
+
+            if (( attempt < max_attempts )); then
+              sleep "$sleep_seconds"
+            fi
+          done
+
+          echo "::error::Fly ACME certificate for $hostname was not active after $((max_attempts * sleep_seconds)) seconds."
+          exit 1
       - name: Stage the room-cookie signing secret
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

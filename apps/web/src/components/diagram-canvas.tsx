@@ -11,7 +11,6 @@ import {
   type Edge,
   type FinalConnectionState,
   type Node,
-  type NodeChange,
   type NodeProps,
   type NodeTypes,
   type OnConnectEnd,
@@ -66,6 +65,9 @@ export interface DiagramCanvasProps {
   onEditNodeLabel?: (nodeId: string, newLabel: string) => void;
   onGroupNodes?: (nodeIds: string[], label: string) => void;
   onInteractionModeChange?: (mode: 'select' | 'connect') => void;
+  onNodeDrag?: (nodeId: string, position: SvgPoint) => void;
+  onNodeDragStart?: (nodeId: string, position: SvgPoint) => void;
+  onNodeDragStop?: (nodeId: string, position: SvgPoint) => void;
   onNodePositionsChange?: (positions: DiagramNodePositions, mode?: NodePositionsSyncMode) => void;
   onSelectedNodeIdsChange?: (nodeIds: string[]) => void;
   onUngroupNodes?: (subgraphId: string) => void;
@@ -167,6 +169,9 @@ export function DiagramCanvas({
   onEditNodeLabel,
   onGroupNodes,
   onInteractionModeChange,
+  onNodeDrag,
+  onNodeDragStart,
+  onNodeDragStop,
   onNodePositionsChange,
   onSelectedNodeIdsChange,
   onUngroupNodes,
@@ -180,6 +185,7 @@ export function DiagramCanvas({
   const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
   const [uncontrolledNodePositions, setUncontrolledNodePositions] = useState<DiagramNodePositions>({});
   const [liveNodePositions, setLiveNodePositions] = useState<DiagramNodePositions>({});
+  const activeDragNodeIdsRef = useRef(new Set<string>());
   const persistedNodePositions = nodePositions ?? uncontrolledNodePositions;
   const persistedNodePositionsRef = useRef<DiagramNodePositions>(persistedNodePositions);
   const hasAutoFitInitialRenderRef = useRef(false);
@@ -993,40 +999,44 @@ export function DiagramCanvas({
     setMode('select');
   }, [canEditStructure, onAddEdge, pendingEdge, selectedConnectionType, setMode]);
 
-  const handleFlowNodesChange = useCallback((changes: NodeChange<MermaidFlowNode>[]) => {
+  const handleFlowNodeDragStart = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node) => {
     if (!canEditStructure) {
       return;
     }
-    const movedNodes = changes.filter((change) => change.type === 'position' && change.position);
-    if (movedNodes.length === 0) {
+    activeDragNodeIdsRef.current.add(node.id);
+    setLiveNodePositions((current) => {
+      return { ...current, [node.id]: node.position };
+    });
+    onNodeDragStart?.(node.id, node.position);
+  }, [canEditStructure, onNodeDragStart]);
+
+  const handleFlowNodeDrag = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node) => {
+    if (!canEditStructure || !activeDragNodeIdsRef.current.has(node.id)) {
       return;
     }
-
-    setLiveNodePositions((current) => {
-      const next = { ...current };
-      movedNodes.forEach((change) => {
-        if (change.type === 'position' && change.position) {
-          next[change.id] = change.position;
-        }
-      });
-      return next;
-    });
-  }, [canEditStructure]);
+    setLiveNodePositions((current) => ({ ...current, [node.id]: node.position }));
+    onNodeDrag?.(node.id, node.position);
+  }, [canEditStructure, onNodeDrag]);
 
   const handleFlowNodeDragStop = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node) => {
     if (!canEditStructure) {
       return;
     }
-    setNodePositions((current) => ({
-      ...current,
-      [node.id]: node.position,
-    }), 'merge', { [node.id]: node.position });
+    activeDragNodeIdsRef.current.delete(node.id);
+    if (onNodeDragStop) {
+      onNodeDragStop(node.id, node.position);
+    } else {
+      setNodePositions((current) => ({
+        ...current,
+        [node.id]: node.position,
+      }), 'merge', { [node.id]: node.position });
+    }
     setLiveNodePositions((current) => {
       const next = { ...current };
       delete next[node.id];
       return next;
     });
-  }, [canEditStructure, setNodePositions]);
+  }, [canEditStructure, onNodeDragStop, setNodePositions]);
 
   const handleFlowConnectStart = useCallback<OnConnectStart>((_event, params) => {
     if (!canEditStructure) {
@@ -1346,8 +1356,9 @@ export function DiagramCanvas({
                   openNodeEditor(diagramNode);
                 }
               }}
+              onNodeDrag={handleFlowNodeDrag}
+              onNodeDragStart={handleFlowNodeDragStart}
               onNodeDragStop={handleFlowNodeDragStop}
-              onNodesChange={handleFlowNodesChange}
               onMove={(_event, nextViewport) => {
                 setAnimateTransform(false);
                 setViewport((current) => ({

@@ -85,6 +85,168 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     expect(new Set(names.map((name) => name.toLocaleLowerCase())).size).toBe(names.length);
   });
 
+  it('repairs raw removal of every tab by reseeding one reachable main diagram', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const browser = new Y.Doc();
+    Y.applyUpdate(browser, Y.encodeStateAsUpdate(state.doc));
+    browser.transact(() => {
+      browser.getMap('diagrams').delete('main');
+      const order = browser.getArray<string>('diagramOrder');
+      order.delete(0, order.length);
+    });
+
+    Y.applyUpdate(state.doc, Y.encodeStateAsUpdate(browser, Y.encodeStateVector(state.doc)));
+
+    await expect(manager.getSession('abc123de')).resolves.toMatchObject({
+      diagrams: [{ id: 'main', name: 'Main' }],
+    });
+  });
+
+  it('repairs and persists a malformed stored catalog on a lazy session read', async () => {
+    await manager.close();
+    const malformed = new Y.Doc();
+    malformed.getMap('diagrams');
+    malformed.getArray<string>('diagramOrder').push(['orphan']);
+    const store = new SessionStore(resources.dataDir);
+    await store.set({
+      id: 'abc123de',
+      title: 'Broken',
+      activity: [],
+      participants: [],
+      encodedState: Buffer.from(Y.encodeStateAsUpdate(malformed)).toString('base64'),
+      updatedAt: 1,
+    });
+    await store.close();
+    manager = resources.createManager();
+
+    await expect(manager.getSession('abc123de')).resolves.toMatchObject({
+      diagrams: [{ id: 'main', name: 'Main' }],
+    });
+    await manager.close();
+    manager = resources.createManager();
+    await expect(manager.getSession('abc123de')).resolves.toMatchObject({
+      diagrams: [{ id: 'main', name: 'Main' }],
+    });
+  });
+
+  it('repairs combined malformed structure, order, and duplicate names before snapshot and reload', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const browser = new Y.Doc();
+    Y.applyUpdate(browser, Y.encodeStateAsUpdate(state.doc));
+    browser.transact(() => {
+      const diagrams = browser.getMap<Y.Map<unknown>>('diagrams');
+      const main = diagrams.get('main')!;
+      main.set('name', ' Duplicate ');
+      main.set('mermaid', 'sequenceDiagram\n  Browser->>API: request');
+      main.set('nodePositions', ['not', 'a', 'map']);
+      diagrams.set('invalid', 'not-a-diagram' as unknown as Y.Map<unknown>);
+      const concurrent = new Y.Map<unknown>();
+      concurrent.set('name', 'duplicate');
+      concurrent.set('mermaid', new Y.Text('flowchart LR\n  Browser-->Gateway'));
+      concurrent.set('nodePositions', new Y.Map());
+      diagrams.set('concurrent', concurrent);
+      browser.getArray<string>('diagramOrder').push(['invalid', 'concurrent', 'main', 'concurrent']);
+    });
+
+    Y.applyUpdate(state.doc, Y.encodeStateAsUpdate(browser, Y.encodeStateVector(state.doc)));
+
+    const live = await manager.getSession('abc123de');
+    expect(live.diagrams.map((diagram) => diagram.id)).toEqual(['main', 'concurrent']);
+    expect(new Set(live.diagrams.map((diagram) => diagram.name.toLocaleLowerCase())).size).toBe(2);
+    await expect(manager.readDiagram('abc123de', 'main')).resolves.toMatchObject({
+      diagram: { name: 'Duplicate (main)', mermaid_text: 'sequenceDiagram\n  Browser->>API: request' },
+    });
+    await expect(manager.readDiagram('abc123de', 'concurrent')).resolves.toMatchObject({
+      diagram: { name: 'duplicate', mermaid_text: 'flowchart LR\n  Browser-->Gateway' },
+    });
+
+    await manager.persistSession(state);
+    await manager.close();
+    manager = resources.createManager();
+    await expect(manager.getSession('abc123de')).resolves.toMatchObject({
+      diagrams: [
+        { id: 'main', name: 'Duplicate (main)' },
+        { id: 'concurrent', name: 'duplicate' },
+      ],
+    });
+  });
+
+  it('does not reseed a malformed main entry when a valid concurrent tab remains', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const browser = new Y.Doc();
+    Y.applyUpdate(browser, Y.encodeStateAsUpdate(state.doc));
+    browser.transact(() => {
+      const diagrams = browser.getMap<Y.Map<unknown>>('diagrams');
+      diagrams.set('main', 'malformed-main' as unknown as Y.Map<unknown>);
+      const concurrent = new Y.Map<unknown>();
+      concurrent.set('name', 'Concurrent');
+      concurrent.set('mermaid', new Y.Text('sequenceDiagram\n  Browser->>API: request'));
+      concurrent.set('nodePositions', new Y.Map());
+      diagrams.set('concurrent', concurrent);
+      const order = browser.getArray<string>('diagramOrder');
+      order.delete(0, order.length);
+      order.insert(0, ['main', 'concurrent']);
+    });
+
+    Y.applyUpdate(state.doc, Y.encodeStateAsUpdate(browser, Y.encodeStateVector(state.doc)));
+
+    await expect(manager.getSession('abc123de')).resolves.toMatchObject({
+      diagrams: [{ id: 'concurrent', name: 'Concurrent' }],
+    });
+  });
+
+  it('canonicalizes raw duplicate and orphan order entries without dropping live diagrams', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const initial = await manager.getSession('abc123de');
+    const first = await manager.createDiagram('abc123de', 'First', '', initial.revision, activity('created'));
+    const afterFirst = await manager.getSession('abc123de');
+    const second = await manager.createDiagram('abc123de', 'Second', '', afterFirst.revision, activity('created'));
+    const browser = new Y.Doc();
+    Y.applyUpdate(browser, Y.encodeStateAsUpdate(state.doc));
+    browser.transact(() => {
+      const order = browser.getArray<string>('diagramOrder');
+      order.delete(0, order.length);
+      order.insert(0, [second.id, 'orphan', second.id]);
+    });
+
+    Y.applyUpdate(state.doc, Y.encodeStateAsUpdate(browser, Y.encodeStateVector(state.doc)));
+
+    const ids = (await manager.getSession('abc123de')).diagrams.map((diagram) => diagram.id);
+    expect(ids).toEqual([second.id, ...['main', first.id].sort((left, right) => left.localeCompare(right))]);
+  });
+
+  it('preserves a concurrent raw creation while repairing a raw last-tab deletion', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const deletion = new Y.Doc();
+    const creation = new Y.Doc();
+    const baseline = Y.encodeStateAsUpdate(state.doc);
+    Y.applyUpdate(deletion, baseline);
+    Y.applyUpdate(creation, baseline);
+
+    deletion.transact(() => {
+      deletion.getMap('diagrams').delete('main');
+      const order = deletion.getArray<string>('diagramOrder');
+      order.delete(0, order.length);
+    });
+    creation.transact(() => {
+      const diagram = new Y.Map<unknown>();
+      diagram.set('name', 'Concurrent');
+      diagram.set('mermaid', new Y.Text('sequenceDiagram\n  Browser->>API: request'));
+      diagram.set('nodePositions', new Y.Map());
+      creation.getMap<Y.Map<unknown>>('diagrams').set('concurrent', diagram);
+      creation.getArray<string>('diagramOrder').push(['concurrent']);
+    });
+
+    Y.applyUpdate(state.doc, Y.encodeStateAsUpdate(deletion, Y.encodeStateVector(state.doc)));
+    Y.applyUpdate(state.doc, Y.encodeStateAsUpdate(creation, Y.encodeStateVector(state.doc)));
+
+    const diagrams = (await manager.getSession('abc123de')).diagrams;
+    expect(diagrams).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'main', name: 'Main' }),
+      expect.objectContaining({ id: 'concurrent', name: 'Concurrent' }),
+    ]));
+  });
+
   it('preserves browser and MCP activity appended from concurrent document states', async () => {
     const state = await manager.getOrCreateSession('abc123de');
     const browser = new Y.Doc();

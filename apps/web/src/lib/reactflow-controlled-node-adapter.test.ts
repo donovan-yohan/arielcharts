@@ -37,6 +37,8 @@ describe('controlled React Flow node adapter', () => {
 
     expect(selectedAAndB).toEqual(['A', 'B']);
     expect(selectedOnlyB).toEqual(['B']);
+    expect(applyControlledSelectionChanges(selectedA, [{ id: 'A', selected: true, type: 'select' }])).toBe(selectedA);
+    expect(applyControlledSelectionChanges(selectedA, [positionChange('A', 8, 9, true)])).toBe(selectedA);
   });
 
   it('preserves measured and active positions across canonical rerenders while canonical fields win', () => {

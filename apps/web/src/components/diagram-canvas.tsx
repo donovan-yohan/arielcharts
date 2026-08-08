@@ -241,7 +241,9 @@ export function DiagramCanvas({
   const [internalSelection, setInternalSelection] = useState<string[]>(selectedNodeIds ?? []);
   const selection = isControlledSelection ? selectedNodeIds : internalSelection;
   const selectionRef = useRef(selection);
-  selectionRef.current = selection;
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
   const [internalMode, setInternalMode] = useState<'select' | 'connect'>(interactionMode ?? 'select');
   const mode = interactionMode ?? internalMode;
   const [viewport, setViewport] = useState<ViewportState>({ panX: 24, panY: 24, zoom: 1 });

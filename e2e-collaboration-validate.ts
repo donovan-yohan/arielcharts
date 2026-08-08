@@ -1,5 +1,13 @@
 import { existsSync } from 'node:fs';
 import { chromium, type Locator, type Page } from '@playwright/test';
+import {
+  assertNoPageErrors,
+  assertNoReactFlowError015,
+  collectReactFlowDiagnostics,
+  getReactFlowNodePosition,
+  waitForReactFlowNodePositionMatch,
+  waitForReactFlowNodePositionMovement,
+} from './e2e/support/react-flow';
 
 const MCP_PROTOCOL_VERSION = '2026-07-28';
 const BASE_FLOWCHART = `flowchart LR
@@ -20,40 +28,6 @@ type McpPayload = {
     structuredContent?: Record<string, unknown>;
   };
 };
-
-type ReactFlowError015Diagnostic = {
-  channel: string;
-  text: string;
-};
-
-const REACT_FLOW_ERROR_015 = /(?:\bReact Flow\b[\s\S]*?(?:error#015|(?:error(?: code)?\s*)?#?015\b)|trying to drag a node that is not initialized)/iu;
-
-function collectReactFlowError015(page: Page): ReactFlowError015Diagnostic[] {
-  const diagnostics: ReactFlowError015Diagnostic[] = [];
-  const collect = (channel: string, text: string) => {
-    if (REACT_FLOW_ERROR_015.test(text)) diagnostics.push({ channel, text });
-  };
-
-  page.on('console', (message) => collect(`console.${message.type()}`, message.text()));
-  page.on('pageerror', (error) => collect('pageerror', error.stack ?? error.message));
-  return diagnostics;
-}
-
-function assertNoReactFlowError015(diagnostics: ReactFlowError015Diagnostic[], context: string): void {
-  if (diagnostics.length === 0) return;
-  const detail = diagnostics.map(({ channel, text }) => `${channel}: ${text}`).join('\n');
-  throw new Error(`React Flow #015 was emitted ${context}:\n${detail}`);
-}
-
-function collectPageErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('pageerror', (error) => errors.push(error.stack ?? error.message));
-  return errors;
-}
-
-function assertNoPageErrors(errors: string[], context: string): void {
-  if (errors.length > 0) throw new Error(`Browser page errors were emitted ${context}:\n${errors.join('\n')}`);
-}
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -150,54 +124,6 @@ async function boxOf(locator: Locator, message: string) {
   return box;
 }
 
-async function dataPositionOf(locator: Locator, message: string): Promise<{ transform: string; x: number; y: number }> {
-  const position = await locator.evaluate((element) => {
-    const transform = element.getAttribute('style')?.match(/transform:\s*([^;]+)/u)?.[1]
-      ?? getComputedStyle(element).transform;
-    const translate = transform.match(/translate(?:3d)?\(\s*(-?[\d.]+)px(?:,\s*|\s+)(-?[\d.]+)px/u);
-    const matrix = transform.match(/^matrix\([^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*(-?[\d.]+),\s*(-?[\d.]+)\)$/u);
-    if (translate) return { transform, x: Number(translate[1]), y: Number(translate[2]) };
-    if (matrix) return { transform, x: Number(matrix[1]), y: Number(matrix[2]) };
-    return null;
-  });
-  assert(position, `${message}: could not parse local node transform.`);
-  return position;
-}
-
-async function waitForPositionMovement(
-  page: Page,
-  nodeId: string,
-  from: { x: number; y: number },
-  minimumDistance = 8,
-): Promise<void> {
-  await page.waitForFunction(({ id, initial, minimum }) => {
-    const node = [...document.querySelectorAll<HTMLElement>('.react-flow__node')]
-      .find((element) => element.dataset.id === id);
-    const transform = node?.getAttribute('style')?.match(/transform:\s*([^;]+)/u)?.[1]
-      ?? (node ? getComputedStyle(node).transform : '');
-    const translate = transform.match(/translate(?:3d)?\(\s*(-?[\d.]+)px(?:,\s*|\s+)(-?[\d.]+)px/u);
-    if (!translate) return false;
-    return Math.hypot(Number(translate[1]) - initial.x, Number(translate[2]) - initial.y) >= minimum;
-  }, { id: nodeId, initial: from, minimum: minimumDistance }, { timeout: 5_000 });
-}
-
-async function waitForPositionMatch(
-  page: Page,
-  nodeId: string,
-  target: { x: number; y: number },
-): Promise<void> {
-  await page.waitForFunction(({ id, expected }) => {
-    const node = [...document.querySelectorAll<HTMLElement>('.react-flow__node')]
-      .find((element) => element.dataset.id === id);
-    const transform = node?.getAttribute('style')?.match(/transform:\s*([^;]+)/u)?.[1]
-      ?? (node ? getComputedStyle(node).transform : '');
-    const translate = transform.match(/translate(?:3d)?\(\s*(-?[\d.]+)px(?:,\s*|\s+)(-?[\d.]+)px/u);
-    if (!translate) return false;
-    return Math.abs(Number(translate[1]) - expected.x) <= 2
-      && Math.abs(Number(translate[2]) - expected.y) <= 2;
-  }, { id: nodeId, expected: target }, { timeout: 15_000 });
-}
-
 async function nudgeNode(page: Page, locator: Locator, dx: number, dy: number, hold = false): Promise<void> {
   const box = await boxOf(locator, 'Node has no drag bounds.');
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -290,10 +216,8 @@ async function validateCollaboration(): Promise<void> {
   const browserB = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const pageA = await browserA.newPage();
   const pageB = await browserB.newPage();
-  const reactFlowError015A = collectReactFlowError015(pageA);
-  const reactFlowError015B = collectReactFlowError015(pageB);
-  const pageErrorsA = collectPageErrors(pageA);
-  const pageErrorsB = collectPageErrors(pageB);
+  const diagnosticsA = collectReactFlowDiagnostics(pageA);
+  const diagnosticsB = collectReactFlowDiagnostics(pageB);
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
   const mcpUrl = process.env.E2E_MCP_URL ?? 'http://localhost:4000/mcp';
   const sessionId = `e2e-collaboration-${Date.now()}`;
@@ -384,10 +308,10 @@ async function validateCollaboration(): Promise<void> {
     const activeDragNode = nodeById(pageA, dragNodeId);
     const remoteNode = nodeById(pageB, remoteNodeId);
     await nudgeNode(pageA, activeDragNode, 110, 34, true);
-    assertNoReactFlowError015(reactFlowError015A, 'when browser A began its node drag');
+    assertNoReactFlowError015(diagnosticsA.reactFlowError015, 'when browser A began its node drag');
     const heldBeforeRemote = await boxOf(activeDragNode, 'Active drag node disappeared before remote update.');
     await nudgeNode(pageB, remoteNode, -84, 46);
-    assertNoReactFlowError015(reactFlowError015B, 'when browser B completed its node drag');
+    assertNoReactFlowError015(diagnosticsB.reactFlowError015, 'when browser B completed its node drag');
     await pageA.waitForTimeout(500);
     const heldAfterRemote = await boxOf(activeDragNode, 'Active drag node disappeared during remote update.');
     const activeDragStable = Math.abs(heldAfterRemote.x - heldBeforeRemote.x) <= 2
@@ -395,25 +319,25 @@ async function validateCollaboration(): Promise<void> {
     assert(activeDragStable, `Remote layout update jittered active drag overlay: before=${JSON.stringify(heldBeforeRemote)} after=${JSON.stringify(heldAfterRemote)}`);
     await pageA.mouse.up();
     await pageA.waitForTimeout(700);
-    assertNoReactFlowError015(reactFlowError015A, 'when browser A completed its node drag');
-    const finalA = await dataPositionOf(nodeById(pageA, dragNodeId), 'Dragged node disappeared after drag stop');
-    const finalB = await dataPositionOf(nodeById(pageB, dragNodeId), 'Remote replica dragged node disappeared after drag stop');
+    assertNoReactFlowError015(diagnosticsA.reactFlowError015, 'when browser A completed its node drag');
+    const finalA = await getReactFlowNodePosition(nodeById(pageA, dragNodeId), 'Dragged node disappeared after drag stop');
+    const finalB = await getReactFlowNodePosition(nodeById(pageB, dragNodeId), 'Remote replica dragged node disappeared after drag stop');
     const replicasConverged = Math.abs(finalA.x - finalB.x) <= 2 && Math.abs(finalA.y - finalB.y) <= 2;
     assert(replicasConverged, `Drag replicas did not converge: A=${JSON.stringify(finalA)} B=${JSON.stringify(finalB)}`);
 
     const releasedPosition = finalB;
     await nudgeNode(pageB, nodeById(pageB, dragNodeId), -72, 52);
-    assertNoReactFlowError015(reactFlowError015B, 'when browser B dragged the released node');
-    await waitForPositionMovement(pageB, dragNodeId, releasedPosition);
-    const winnerB = await dataPositionOf(nodeById(pageB, dragNodeId), 'Browser B winner node disappeared after post-release drag');
+    assertNoReactFlowError015(diagnosticsB.reactFlowError015, 'when browser B dragged the released node');
+    await waitForReactFlowNodePositionMovement(pageB, dragNodeId, releasedPosition);
+    const winnerB = await getReactFlowNodePosition(nodeById(pageB, dragNodeId), 'Browser B winner node disappeared after post-release drag');
     const postReleaseWinnerMoved = Math.hypot(winnerB.x - releasedPosition.x, winnerB.y - releasedPosition.y) >= 8;
     assert(postReleaseWinnerMoved, `Post-release same-node drag did not establish a new winner: before=${JSON.stringify(releasedPosition)} after=${JSON.stringify(winnerB)}`);
-    await waitForPositionMatch(pageA, dragNodeId, winnerB);
-    const winnerA = await dataPositionOf(nodeById(pageA, dragNodeId), 'Browser A replica lost the post-release winner node');
+    await waitForReactFlowNodePositionMatch(pageA, dragNodeId, winnerB);
+    const winnerA = await getReactFlowNodePosition(nodeById(pageA, dragNodeId), 'Browser A replica lost the post-release winner node');
     const postReleaseReplicasConverged = Math.abs(winnerA.x - winnerB.x) <= 2 && Math.abs(winnerA.y - winnerB.y) <= 2;
     assert(postReleaseReplicasConverged, `Post-release same-node winner did not converge: A=${JSON.stringify(winnerA)} B=${JSON.stringify(winnerB)}`);
-    assertNoPageErrors(pageErrorsA, 'in collaboration browser A');
-    assertNoPageErrors(pageErrorsB, 'in collaboration browser B');
+    assertNoPageErrors(diagnosticsA.pageErrors, 'in collaboration browser A');
+    assertNoPageErrors(diagnosticsB.pageErrors, 'in collaboration browser B');
     await pageA.screenshot({ path: '/tmp/arielcharts-collaboration.png' });
 
     console.log(`modern MCP stale write rejected=${staleRejected}`);

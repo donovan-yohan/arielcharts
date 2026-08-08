@@ -23,6 +23,8 @@ export interface WorkspaceSettingsProps {
   displayName: string;
   onConnectAgent: (returnFocusTarget: HTMLButtonElement) => void;
   onDisplayNameSave: (displayName: string) => void;
+  onResetRoomKey: () => Promise<void>;
+  roomKey: string | null;
 }
 
 export function getSettingsDisplayName(displayName: string): string {
@@ -102,6 +104,8 @@ export function WorkspaceSettings({
   displayName,
   onConnectAgent,
   onDisplayNameSave,
+  onResetRoomKey,
+  roomKey,
 }: WorkspaceSettingsProps) {
   const { preference, resolvedTheme, setPreference } = useTheme();
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -109,9 +113,16 @@ export function WorkspaceSettings({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [draftName, setDraftName] = useState(displayName);
+  const [confirmKeyReset, setConfirmKeyReset] = useState(false);
+  const [keyResetPending, setKeyResetPending] = useState(false);
+  const [keyResetMessage, setKeyResetMessage] = useState<string | null>(null);
+  const [keyCopyState, setKeyCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
 
   const close = useCallback((returnFocus = true) => {
     setIsOpen(false);
+    setConfirmKeyReset(false);
+    setKeyResetMessage(null);
+    setKeyCopyState('idle');
     if (returnFocus) {
       window.requestAnimationFrame(() => { triggerRef.current?.focus({ preventScroll: true }); });
     }
@@ -182,6 +193,36 @@ export function WorkspaceSettings({
     onConnectAgent(returnFocusTarget);
   };
 
+  const handleCopyRoomKey = async () => {
+    if (!roomKey) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(roomKey);
+      setKeyCopyState('copied');
+    } catch {
+      setKeyCopyState('error');
+    }
+  };
+
+  const handleResetRoomKey = async () => {
+    if (keyResetPending) {
+      return;
+    }
+    setKeyResetPending(true);
+    setKeyResetMessage(null);
+    try {
+      await onResetRoomKey();
+      setConfirmKeyReset(false);
+      setKeyCopyState('idle');
+      setKeyResetMessage('Room key reset. All previously authorized browsers and agents were revoked.');
+    } catch {
+      setKeyResetMessage('The room key could not be reset. Try again.');
+    } finally {
+      setKeyResetPending(false);
+    }
+  };
+
   return (
     <div className="workspace-settings">
       <button
@@ -238,6 +279,37 @@ export function WorkspaceSettings({
             <button className="workspace-settings-connect" onClick={handleConnectAgent} type="button">
               {getConnectionActionLabel(agentCount)}
             </button>
+          </section>
+
+          <section aria-labelledby="workspace-room-access-heading" className="workspace-settings-section">
+            <h3 id="workspace-room-access-heading">Room access</h3>
+            {roomKey ? (
+              <div className="workspace-room-key">
+                <span>Pasteable room key</span>
+                <code>{roomKey}</code>
+                <button onClick={() => { void handleCopyRoomKey(); }} type="button">
+                  {keyCopyState === 'copied' ? 'Copied' : keyCopyState === 'error' ? 'Copy failed' : 'Copy key'}
+                </button>
+              </div>
+            ) : (
+              <p className="workspace-settings-status">The shareable key is not available after a cookie-only reload. Reset it to share this room again.</p>
+            )}
+            {confirmKeyReset ? (
+              <div className="workspace-key-reset-confirm" role="alert">
+                <p>Resetting immediately revokes every other browser and MCP agent. They will need the replacement key.</p>
+                <div className="workspace-settings-actions">
+                  <button disabled={keyResetPending} onClick={() => { setConfirmKeyReset(false); }} type="button">Cancel</button>
+                  <button disabled={keyResetPending} onClick={() => { void handleResetRoomKey(); }} type="button">
+                    {keyResetPending ? 'Resetting…' : 'Reset and revoke'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button className="workspace-settings-reset-key" onClick={() => { setConfirmKeyReset(true); setKeyResetMessage(null); }} type="button">
+                Reset room key
+              </button>
+            )}
+            {keyResetMessage ? <p aria-live="polite" className="workspace-settings-status">{keyResetMessage}</p> : null}
           </section>
 
           <fieldset className="workspace-settings-section workspace-settings-appearance">

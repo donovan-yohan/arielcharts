@@ -28,7 +28,7 @@ import {
   PRESENCE_KEY,
 } from './constants.js';
 import { SessionStore } from './persistence.js';
-import type { CleanupOptions, DiagramHistoryMetadata, HistoryPersistenceChange, SessionRecord, SessionSnapshot, SessionState, StoredSessionSummary } from './types.js';
+import type { CleanupOptions, DiagramHistoryMetadata, HistoryPersistenceChange, RoomAccessRecord, SessionRecord, SessionSnapshot, SessionState } from './types.js';
 
 const MANAGED_AWARENESS_ORIGIN = 'session-manager';
 const CATALOG_REPAIR_ORIGIN = 'catalog-repair';
@@ -447,6 +447,49 @@ export class SessionManager {
     return next;
   }
 
+  /** Explicit protected-room creation. Network ingress must use requireSession instead. */
+  async createProtectedSession(sessionId: string, access: RoomAccessRecord): Promise<SessionState> {
+    if (this.sessions.has(sessionId) || await this.store.get(sessionId)) {
+      throw new Error(`Session already exists: ${sessionId}`);
+    }
+    const loading = this.loadingSessions.get(sessionId);
+    if (loading) {
+      await loading;
+      throw new Error(`Session already exists: ${sessionId}`);
+    }
+    const next = this.loadSession(sessionId, { allowCreate: true, initialRoomAccess: access }).then((state) => {
+      this.sessions.set(sessionId, state);
+      this.loadingSessions.delete(sessionId);
+      return state;
+    }, (error) => {
+      this.loadingSessions.delete(sessionId);
+      throw error;
+    });
+    this.loadingSessions.set(sessionId, next);
+    return next;
+  }
+
+  /** Loads an existing persisted/live room without creating state as a side effect. */
+  async requireSession(sessionId: string): Promise<SessionState> {
+    const existing = this.sessions.get(sessionId);
+    if (existing) {
+      existing.lastAccessedAt = Date.now();
+      return existing;
+    }
+    const loading = this.loadingSessions.get(sessionId);
+    if (loading) return loading;
+    const next = this.loadSession(sessionId, { allowCreate: false }).then((state) => {
+      this.sessions.set(sessionId, state);
+      this.loadingSessions.delete(sessionId);
+      return state;
+    }, (error) => {
+      this.loadingSessions.delete(sessionId);
+      throw error;
+    });
+    this.loadingSessions.set(sessionId, next);
+    return next;
+  }
+
   async readSession(sessionId: string): Promise<SessionSnapshot | null> {
     const live = this.sessions.get(sessionId);
     if (live) {
@@ -519,7 +562,7 @@ export class SessionManager {
   }
 
   async listDiagramHistory(sessionId: string, diagramId: string): Promise<{ revisions: DiagramRevisionSummary[]; current_revision: string }> {
-    const session = await this.getOrCreateSession(sessionId);
+    const session = await this.requireSession(sessionId);
     const diagram = readDiagram(session.doc, diagramId);
     const revisions = await this.store.listDiagramHistory(sessionId, diagramId);
     return {
@@ -529,7 +572,7 @@ export class SessionManager {
   }
 
   async readDiagramRevision(sessionId: string, diagramId: string, revisionId: string): Promise<DiagramRevision> {
-    const session = await this.getOrCreateSession(sessionId);
+    const session = await this.requireSession(sessionId);
     readDiagram(session.doc, diagramId);
     const revision = await this.store.getDiagramRevision(sessionId, diagramId, revisionId);
     if (!revision) {
@@ -547,7 +590,7 @@ export class SessionManager {
     participants?: Participant[],
     origin: Extract<DiagramRevisionOrigin, 'browser' | 'mcp'> = 'mcp',
   ): Promise<RestoreDiagramRevisionResult> {
-    const session = await this.getOrCreateSession(sessionId);
+    const session = await this.requireSession(sessionId);
     const current = readDiagram(session.doc, diagramId);
     if (expectedRevision !== current.revision) {
       return { status: 'stale', current, current_revision: current.revision };
@@ -599,7 +642,7 @@ export class SessionManager {
   }
 
   async createDiagram(sessionId: string, name: string, mermaidText: string, revision: string, event: ActivityEvent, participants?: Participant[]): Promise<Diagram> {
-    const session = await this.getOrCreateSession(sessionId);
+    const session = await this.requireSession(sessionId);
     this.assertRevision(session.doc, revision);
     const id = diagramId();
     const normalizedName = normalizeDiagramName(name);
@@ -620,7 +663,7 @@ export class SessionManager {
 
   async writeDiagram(sessionId: string, diagramId: string, mermaidText: string, revision: string, event: ActivityEvent, participants?: Participant[], name?: string): Promise<Diagram> {
     const sourceLayoutPolicy = await resolveSourceLayoutPolicy(mermaidText);
-    const session = await this.getOrCreateSession(sessionId);
+    const session = await this.requireSession(sessionId);
     const diagram = diagramsMap(session.doc).get(diagramId);
     if (!diagram) {
       throw new Error(`Diagram not found: ${diagramId}`);
@@ -648,7 +691,7 @@ export class SessionManager {
   }
 
   async renameDiagram(sessionId: string, diagramId: string, name: string, revision: string, event: ActivityEvent, participants?: Participant[]): Promise<Diagram> {
-    const session = await this.getOrCreateSession(sessionId);
+    const session = await this.requireSession(sessionId);
     const diagram = diagramsMap(session.doc).get(diagramId);
     if (!diagram) {
       throw new Error(`Diagram not found: ${diagramId}`);
@@ -670,7 +713,7 @@ export class SessionManager {
   }
 
   async deleteDiagram(sessionId: string, diagramId: string, revision: string, event: ActivityEvent, participants?: Participant[]): Promise<string> {
-    const session = await this.getOrCreateSession(sessionId);
+    const session = await this.requireSession(sessionId);
     const diagrams = diagramsMap(session.doc);
     if (!diagrams.has(diagramId)) {
       throw new Error(`Diagram not found: ${diagramId}`);
@@ -690,19 +733,6 @@ export class SessionManager {
     }, MANAGED_AWARENESS_ORIGIN);
     await this.afterMutation(session, participants, event.id);
     return revisionFromDoc(session.doc);
-  }
-
-  async listSessions(): Promise<StoredSessionSummary[]> {
-    const persisted = await this.store.list();
-    const summaries = new Map<string, StoredSessionSummary>();
-    for (const record of persisted) {
-      summaries.set(record.id, { id: record.id, title: record.title, participants: record.participants.length, updatedAt: record.updatedAt });
-    }
-    for (const state of this.sessions.values()) {
-      const snapshot = this.snapshot(state);
-      summaries.set(snapshot.id, { id: snapshot.id, title: snapshot.title, participants: snapshot.participants.length, updatedAt: snapshot.updatedAt });
-    }
-    return [...summaries.values()].sort((left, right) => right.updatedAt - left.updatedAt);
   }
 
   async cleanupExpiredSessions(options: CleanupOptions): Promise<string[]> {
@@ -732,7 +762,7 @@ export class SessionManager {
     return removed;
   }
 
-  async persistSession(session: SessionState, options: { recovery?: boolean; activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin> } = {}): Promise<DiagramRevision[]> {
+  async persistSession(session: SessionState, options: { recovery?: boolean; activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin>; initialRoomAccess?: RoomAccessRecord } = {}): Promise<DiagramRevision[]> {
     const pending = this.capturePendingPersistence(session);
     return this.runSessionPersistence(session.id, () => this.persistSessionLocked(session, pending, options));
   }
@@ -740,10 +770,11 @@ export class SessionManager {
   private async persistSessionLocked(
     session: SessionState,
     pending: PendingSessionPersistence,
-    options: { recovery?: boolean; activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin> },
+    options: { recovery?: boolean; activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin>; initialRoomAccess?: RoomAccessRecord },
   ): Promise<DiagramRevision[]> {
     const history = await this.historyChanges(session.id, pending.snapshot, options);
-    await this.store.persistWithHistory(pending.record, history);
+    const persisted = await this.store.persistWithHistory(pending.record, history, { initialRoomAccess: options.initialRoomAccess });
+    if (persisted === false) throw new Error(`Session already exists: ${session.id}`);
     session.lastPersistedAt = Math.max(session.lastPersistedAt, pending.record.updatedAt);
     return history.revisions;
   }
@@ -763,8 +794,17 @@ export class SessionManager {
     return { id: snapshot.id, title: snapshot.title, participants: snapshot.participants.length };
   }
 
-  private async loadSession(sessionId: string): Promise<SessionState> {
+  private async loadSession(
+    sessionId: string,
+    options: { allowCreate?: boolean; initialRoomAccess?: RoomAccessRecord } = {},
+  ): Promise<SessionState> {
     const persisted = await this.store.get(sessionId);
+    if (persisted && options.initialRoomAccess) {
+      throw new Error(`Session already exists: ${sessionId}`);
+    }
+    if (!persisted && options.allowCreate === false) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
     const doc = new Y.Doc();
     if (persisted) Y.applyUpdate(doc, Buffer.from(persisted.encodedState, 'base64'));
     const repairedOnLoad = repairCatalogAndNames(doc);
@@ -789,7 +829,7 @@ export class SessionManager {
       state.updatedAt = Date.now();
     }
     if (repairedOnLoad || persisted) {
-      await this.persistSession(state, { recovery: true });
+      await this.persistSession(state, { recovery: true, initialRoomAccess: options.initialRoomAccess });
     }
     return state;
   }

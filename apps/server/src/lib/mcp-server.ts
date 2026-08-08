@@ -53,12 +53,6 @@ const diagramRevisionSchema = diagramRevisionSummarySchema.extend({
   nodePositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })),
 });
 
-const sessionSummarySchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  participants: z.number(),
-});
-
 const actorInputSchema = {
   actorName: z.string().optional().describe('Optional display name recorded in the ArielCharts activity feed.'),
   actorType: z.enum(['human', 'agent']).optional().describe('Optional activity-feed actor type. Defaults to agent.'),
@@ -137,25 +131,10 @@ function createStaleToolResult(current: { id: string; name: string; revision: st
   };
 }
 
-function createMcpServer(manager: SessionManager): McpServer {
+function createMcpServer(manager: SessionManager, authorizedSessionId: string): McpServer {
   const server = new McpServer(
     { name: APP_NAME, version: '0.1.0' },
     { capabilities: { prompts: {}, tools: {} } },
-  );
-
-  server.registerTool(
-    'listSessions',
-    {
-      title: 'List ArielCharts sessions',
-      description: 'List available ArielCharts workspaces. Use this only when no sessionId was supplied; then call getSession before mutating a diagram.',
-      outputSchema: z.object({ sessions: z.array(sessionSummarySchema) }),
-    },
-    async () => {
-      const output = await handleMcpToolCall(manager, { tool: 'list_sessions', input: {} }) as {
-        sessions: Array<{ id: string; title: string; participants: number }>;
-      };
-      return createToolResult(output);
-    },
   );
 
   server.registerTool(
@@ -172,7 +151,7 @@ function createMcpServer(manager: SessionManager): McpServer {
       }),
     },
     async ({ sessionId }) => {
-      const output = await handleMcpToolCall(manager, { tool: 'get_session', input: { session_id: sessionId } }) as {
+      const output = await handleMcpToolCall(manager, { tool: 'get_session', input: { session_id: sessionId } }, authorizedSessionId) as {
         session_id: string;
         diagrams: Array<{ id: string; name: string; revision: string }>;
         participants: Array<{ name: string; color: string; type: 'human' | 'agent' }>;
@@ -216,7 +195,7 @@ function createMcpServer(manager: SessionManager): McpServer {
           revision: expectedRevision,
           ...mapActorInput({ actorName, actorType, detail }),
         },
-      }) as { diagram: { id: string; name: string; revision: string; mermaid_text: string } };
+      }, authorizedSessionId) as { diagram: { id: string; name: string; revision: string; mermaid_text: string } };
       return createToolResult({ diagram: mapDiagram(output.diagram) });
     },
   );
@@ -233,7 +212,7 @@ function createMcpServer(manager: SessionManager): McpServer {
       const output = await handleMcpToolCall(manager, {
         tool: 'read_diagram',
         input: { session_id: sessionId, diagram_id: diagramId },
-      }) as {
+      }, authorizedSessionId) as {
         diagram: { id: string; name: string; revision: string; mermaid_text: string };
         participants: Array<{ name: string; color: string; type: 'human' | 'agent' }>;
       };
@@ -253,7 +232,7 @@ function createMcpServer(manager: SessionManager): McpServer {
       const output = await handleMcpToolCall(manager, {
         tool: 'list_diagram_history',
         input: { session_id: sessionId, diagram_id: diagramId },
-      }) as { current_revision: string; revisions: RawDiagramRevisionSummary[] };
+      }, authorizedSessionId) as { current_revision: string; revisions: RawDiagramRevisionSummary[] };
       return createToolResult({
         currentRevision: output.current_revision,
         revisions: output.revisions.map(mapDiagramRevisionSummary),
@@ -273,7 +252,7 @@ function createMcpServer(manager: SessionManager): McpServer {
       const output = await handleMcpToolCall(manager, {
         tool: 'read_diagram_revision',
         input: { session_id: sessionId, diagram_id: diagramId, revision_id: revisionId },
-      }) as RawDiagramRevision;
+      }, authorizedSessionId) as RawDiagramRevision;
       return createToolResult({ revision: mapDiagramRevision(output) });
     },
   );
@@ -304,7 +283,7 @@ function createMcpServer(manager: SessionManager): McpServer {
           ...(name === undefined ? {} : { name }),
           ...mapActorInput({ actorName, actorType, detail }),
         },
-      }) as { diagram: { id: string; name: string; revision: string; mermaid_text: string } };
+      }, authorizedSessionId) as { diagram: { id: string; name: string; revision: string; mermaid_text: string } };
       return createToolResult({ diagram: mapDiagram(output.diagram) });
     },
   );
@@ -321,7 +300,7 @@ function createMcpServer(manager: SessionManager): McpServer {
       const output = await handleMcpToolCall(manager, {
         tool: 'rename_diagram',
         input: { session_id: sessionId, diagram_id: diagramId, name, revision: expectedRevision, ...mapActorInput({ actorName, actorType, detail }) },
-      }) as { diagram: { id: string; name: string; revision: string; mermaid_text: string } };
+      }, authorizedSessionId) as { diagram: { id: string; name: string; revision: string; mermaid_text: string } };
       return createToolResult({ diagram: mapDiagram(output.diagram) });
     },
   );
@@ -338,7 +317,7 @@ function createMcpServer(manager: SessionManager): McpServer {
       const output = await handleMcpToolCall(manager, {
         tool: 'delete_diagram',
         input: { session_id: sessionId, diagram_id: diagramId, revision: expectedRevision, ...mapActorInput({ actorName, actorType, detail }) },
-      }) as { deleted: { id: string }; revision: string };
+      }, authorizedSessionId) as { deleted: { id: string }; revision: string };
       return createToolResult(output);
     },
   );
@@ -367,7 +346,7 @@ function createMcpServer(manager: SessionManager): McpServer {
           expected_revision: expectedRevision,
           ...mapActorInput({ actorName, actorType, detail }),
         },
-      }) as RestoreDiagramRevisionResult;
+      }, authorizedSessionId) as RestoreDiagramRevisionResult;
       if (output.status === 'stale') {
         return createStaleToolResult(output.current);
       }
@@ -386,7 +365,7 @@ function createMcpServer(manager: SessionManager): McpServer {
         role: 'user' as const,
         content: {
           type: 'text' as const,
-          text: 'When asked to scaffold or update an ArielCharts diagram: use the supplied sessionId (or listSessions if none was supplied), then call getSession to choose a named tab by its stable ID. Create a named tab only when the topic is new. For end-to-end API calls, use Mermaid sequenceDiagram with explicit actors/participants, request and response arrows, and alt/error paths when relevant. Before changing an existing tab, call readDiagram and pass its latest revision as expectedRevision to writeDiagram or renameDiagram. If a stale write occurs, re-read, merge the concurrent edit, and retry deliberately. To inspect prior work, use getSession -> readDiagram -> listDiagramHistory -> readDiagramRevision. Before restoring, call readDiagram immediately again, then call restoreDiagramRevision with that exact expectedRevision. A stale restore is a no-op: re-read, review the new state, and deliberately reconfirm; never blindly retry it. Do not rename or delete tabs unless explicitly asked.',
+          text: 'When asked to scaffold or update an ArielCharts diagram: use the supplied sessionId, then call getSession to choose a named tab by its stable ID. Create a named tab only when the topic is new. For end-to-end API calls, use Mermaid sequenceDiagram with explicit actors/participants, request and response arrows, and alt/error paths when relevant. Before changing an existing tab, call readDiagram and pass its latest revision as expectedRevision to writeDiagram or renameDiagram. If a stale write occurs, re-read, merge the concurrent edit, and retry deliberately. To inspect prior work, use getSession -> readDiagram -> listDiagramHistory -> readDiagramRevision. Before restoring, call readDiagram immediately again, then call restoreDiagramRevision with that exact expectedRevision. A stale restore is a no-op: re-read, review the new state, and deliberately reconfirm; never blindly retry it. Do not rename or delete tabs unless explicitly asked.',
         },
       }],
     }),
@@ -402,7 +381,11 @@ export interface ModernMcpRequestHandler {
 
 export function createModernMcpRequestHandler(manager: SessionManager): ModernMcpRequestHandler {
   const handler = createMcpHandler(
-    () => createMcpServer(manager),
+    (context) => {
+      const authorizedSessionId = context.authInfo?.extra?.roomSessionId;
+      if (typeof authorizedSessionId !== 'string') throw new Error('Room access denied.');
+      return createMcpServer(manager, authorizedSessionId);
+    },
     { legacy: 'reject' },
   );
 

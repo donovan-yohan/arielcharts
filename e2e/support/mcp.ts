@@ -4,6 +4,7 @@ const MCP_PROTOCOL_VERSION = '2026-07-28';
 const MCP_FETCH_TIMEOUT_MS = 15_000;
 
 export type Diagram = { id: string; mermaidText: string; name: string; revision: string };
+export type McpRoomAccess = { roomKey: string; sessionId: string };
 export type DiagramRevisionSummary = {
   id: string;
   sequence: number;
@@ -40,38 +41,58 @@ function isRevisionConflict(payload: McpPayload): boolean {
   return /stale (?:diagram )?revision|revision conflict/i.test(message);
 }
 
+export async function postModernMcp(
+  endpoint: string,
+  origin: string,
+  room: McpRoomAccess,
+  name: string,
+  args: Record<string, unknown>,
+  id = 1,
+): Promise<Response> {
+  return fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${room.sessionId}.${room.roomKey}`,
+      'content-type': 'application/json',
+      'mcp-method': 'tools/call',
+      'mcp-name': name,
+      'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+      origin,
+    },
+    signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: {
+        name,
+        arguments: args,
+        _meta: {
+          'io.modelcontextprotocol/clientCapabilities': {},
+          'io.modelcontextprotocol/clientInfo': { name: 'arielcharts-workspace-ux-e2e', version: '1.0.0' },
+          'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION,
+        },
+      },
+    }),
+  });
+}
+
 export class ModernMcpClient {
   private nextId = 1;
 
-  constructor(private readonly endpoint: string, private readonly origin: string) {}
+  constructor(
+    private readonly endpoint: string,
+    private readonly origin: string,
+    private readonly room: McpRoomAccess,
+  ) {}
 
   async tool(name: string, args: Record<string, unknown>): Promise<McpPayload> {
+    const argumentSessionId = typeof args.sessionId === 'string' ? args.sessionId : null;
+    if (argumentSessionId && argumentSessionId !== this.room.sessionId) {
+      throw new Error(`Authenticated MCP ${name} request targeted ${argumentSessionId}, not bound room ${this.room.sessionId}.`);
+    }
     try {
-      const response = await fetch(this.endpoint, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'mcp-method': 'tools/call',
-          'mcp-name': name,
-          'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-          origin: this.origin,
-        },
-        signal: AbortSignal.timeout(MCP_FETCH_TIMEOUT_MS),
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: this.nextId++,
-          method: 'tools/call',
-          params: {
-            name,
-            arguments: args,
-            _meta: {
-              'io.modelcontextprotocol/clientCapabilities': {},
-              'io.modelcontextprotocol/clientInfo': { name: 'arielcharts-workspace-ux-e2e', version: '1.0.0' },
-              'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION,
-            },
-          },
-        }),
-      });
+      const response = await postModernMcp(this.endpoint, this.origin, this.room, name, args, this.nextId++);
       if (!response.ok) {
         throw new Error(`MCP ${name} returned HTTP ${response.status}: ${await response.text()}`);
       }

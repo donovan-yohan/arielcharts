@@ -5,10 +5,10 @@
 ## System shape
 
 ```text
-Browser (Next.js) ── Yjs websocket ──> SessionManager ──> LevelDB snapshot + private revision journal
-       │                                      ▲
-       └─ Mermaid render / CodeMirror          │
-MCP client ── POST /mcp ──> MCP tools ─────────┘
+Browser (Next.js) ── RoomGate/cookie ── Yjs websocket ──> SessionManager ──> LevelDB snapshot + private revision journal
+       │                                                  ▲
+       └─ Mermaid render / CodeMirror                      │
+MCP client ── Bearer room capability ── POST /mcp ──> MCP tools ─────────┘
 ```
 
 The browser and MCP tools write the same session document. Mermaid source is
@@ -19,7 +19,8 @@ canonical; the SVG and flowchart interaction model derive from it.
 | Session catalog | Durable Yjs `diagrams` map plus `diagramOrder`; server repairs structure/order/names and retains at least one valid tab | `apps/server/src/lib/session-manager.ts`, `packages/shared/src/types.ts` | `apps/server/src/lib/session-manager.test.ts` |
 | Diagram content | Per-diagram `mermaid: Y.Text`, `name`, and `nodePositions: Y.Map`; shared source policy makes accepted source authoritative for durable layout membership | `packages/shared/src/source-layout.ts`, `session-manager.ts`, `apps/web/src/components/session-workspace.tsx`, `apps/web/src/lib/diagram-layout.ts` | `source-layout.test.ts`, `mcp.test.ts`, `diagram-layout.test.ts` |
 | Realtime | Yjs nested-document convergence plus socket-owned, filtered awareness | `apps/web/src/components/session-workspace.tsx`, `apps/server/src/lib/websocket.ts` | `apps/server/src/lib/websocket.test.ts`, `e2e-collaboration-validate.ts` (`pnpm test:e2e-collaboration`) |
-| MCP writes | Modern-only HTTP tools require current server-derived revisions before mutation; accepted source reconciliation prunes obsolete layout in the same replacement transaction | `apps/server/src/lib/mcp-server.ts`, `apps/server/src/lib/mcp.ts`, `apps/server/src/lib/session-manager.ts` | `apps/server/src/lib/mcp.test.ts`, `apps/server/src/index.test.ts` |
+| Room access | `RoomAccessService` stores salted verifier/access-version records outside Yjs, signs browser cookies, rate-limits attempts, and authenticates all ingress before the manager. Only protected creation creates a session; rotation advances the version and terminates room sockets. | `apps/server/src/lib/room-access.ts`, `apps/server/src/index.ts`, `apps/web/src/components/room-gate.tsx` | `room-access.test.ts`, `index.test.ts`, `websocket.test.ts`, `pnpm test:e2e-collaboration` |
+| MCP writes | Modern-only HTTP tools require a room-scoped bearer and current server-derived revisions before mutation; the request-bound capability rejects cross-room inputs, while accepted source reconciliation prunes obsolete layout in the same replacement transaction | `apps/server/src/lib/mcp-server.ts`, `apps/server/src/lib/mcp.ts`, `apps/server/src/lib/session-manager.ts` | `apps/server/src/lib/mcp.test.ts`, `apps/server/src/index.test.ts`, `pnpm test:e2e-collaboration` |
 | Revision history | Server-private immutable per-diagram journal; each identity covers normalized name, source, and sorted finite layout. `SessionManager` alone reads, checkpoints, compacts, and copy-forwards restores | `apps/server/src/lib/persistence.ts`, `apps/server/src/lib/session-manager.ts`, `packages/shared/src/types.ts` | `session-manager.test.ts`, `mcp.test.ts`, `index.test.ts` |
 | Starter creation | Immutable shared starter registry resolves a selected template to ordinary Mermaid source before the existing browser or revision-checked MCP creation owner runs; template identity is never durable state | `packages/shared/src/starter-templates.ts`, `apps/server/src/lib/mcp.ts`, `apps/server/src/lib/mcp-server.ts` | `starter-templates.test.ts`, `mcp.test.ts`, `index.test.ts` |
 | Source editing and undo | Per-tab CodeMirror/Yjs binding; UndoManager tracks local-human origins only | `apps/web/src/components/session-workspace.tsx`, `apps/web/src/lib/collaboration-origins.ts` | `apps/web/src/lib/session.test.ts`, `apps/web/src/lib/collaboration-origins.test.ts` |
@@ -38,6 +39,8 @@ canonical; the SVG and flowchart interaction model derive from it.
 | Starter template identity | Creation-time input only | Shared immutable registry | Browser and MCP resolve it to ordinary source before one creation transaction; it is not stored in Yjs, activity, or tool outputs. |
 | Activity | Durable but bounded feed | Server-managed Yjs document | Browser UI renders it; retain at most 100 events. It cannot substitute for version history. |
 | Revision journal | Durable/session | Server-private LevelDB; `SessionManager` | Immutable records retain a system baseline plus the latest 99 revisions per diagram. Browser activity ids are idempotent checkpoint boundaries, not a second history authority. |
+| Room verifier and access version | Durable/session | Server-private LevelDB; `RoomAccessService` | A salted scrypt verifier and monotonically increasing access version are never Yjs, history, activity, or URL query state. |
+| Raw room key | Ephemeral browser/agent input | User capability | The browser receives it in a `#roomKey` fragment, exchanges it for an HttpOnly cookie, clears the fragment before mounting, and retains it in memory only for sharing or agent setup. The MCP form is `<sessionId>.<roomKey>`. |
 | Presence/cursors | Ephemeral collaboration | Yjs awareness with per-socket client-id ownership | The server filters stale/idempotent echoes and rejects foreign advances; awareness is not an authorization system or browser UI store. |
 | Active tab, camera, selection, toolbar, flyout, drafts | Browser local | React/local storage where appropriate | Flyouts are exclusive overlays and cannot mutate outer anchors, camera, or remote state. |
 | React Flow measurement and active drag positions | Ephemeral browser view | Controlled-node adapter keyed by stable Mermaid node id | Mermaid/parser output owns structure and membership; the workspace reconciles that membership with durable layout, while the canvas retains only presentation-local measurement and active positions. On normal drag finish, the valid final flush precedes local runtime release; source invalidation may leave a valid pending sibling to finish after the canvas clears runtime. |
@@ -46,19 +49,28 @@ canonical; the SVG and flowchart interaction model derive from it.
 
 ## Ingress and concurrency flow
 
-1. A browser attaches a `WebsocketProvider` to `/ws/:sessionId`; Yjs updates
-   converge on the authoritative nested document. The server repairs the
+1. `POST /api/rooms` atomically creates a protected session and its private
+   verifier record. A shared `#roomKey` fragment is exchanged through the
+   RoomGate for a signed HttpOnly cookie and cleared before `SessionWorkspace`
+   mounts. The cookie authorizes Yjs, diagram-history HTTP, and key rotation;
+   failure reveals no room content.
+2. A browser with that cookie attaches a `WebsocketProvider` to
+   `/ws/:sessionId`; Yjs updates converge on the authoritative nested
+   document. The server repairs the
    catalog, relays accepted updates, filters awareness, and serializes
    per-session snapshot persistence. New browser activity ids create one
    idempotent checkpoint from converged canonical state.
-2. The browser switches only its local active-tab binding. CodeMirror writes
+3. The browser switches only its local active-tab binding. CodeMirror writes
    the active diagram's Y.Text; visual flowchart edits use `MutationQueue` so
    the latest source is parsed and minimally diffed before the Yjs write.
-3. An MCP client discovers tools, calls `getSession` to choose a stable id,
-   then supplies exactly one `templateId` or `mermaidText` to `createDiagram`,
-   or `readDiagram` before a replacement/rename/delete. It uses JSON history
-   routes or matching MCP list/read tools for detached inspection, and rereads
-   the head immediately before a restore. The MCP boundary resolves a valid
+4. An MCP client supplies `Authorization: Bearer <sessionId>.<roomKey>` and
+   can access only that session; there is no room-list discovery tool. It calls
+   `getSession` before creation, then supplies exactly one `templateId` or
+   `mermaidText` to `createDiagram` with the fresh session revision. It calls
+   `readDiagram` immediately before replacement/rename/delete/restore and
+   uses JSON history routes or matching MCP list/read tools for detached
+   inspection. A stale revision requires an explicit re-read and deliberate
+   merge before one retry. The MCP boundary resolves a valid
    template to source before the session manager
    resolves source membership, checks the supplied current revision inside the
    mutation path, atomically replaces source and prunes accepted obsolete
@@ -94,14 +106,23 @@ canonical; the SVG and flowchart interaction model derive from it.
 - Browser clients can make raw Yjs updates that bypass MCP command validation.
   The authoritative server repairs structure/order/names and protects all
   server command mutations with revision checks.
+- The canonical production topology is
+  `arielcharts.donovanyohan.com` (browser) plus
+  `api.arielcharts.donovanyohan.com` (HTTP/WebSocket/MCP). Exact browser-origin
+  CORS, `Secure; SameSite=Lax` cookies, and
+  `CLIENT_ADDRESS_PROFILE=fly` keep those same-site subdomains usable without
+  cross-site cookies. That profile accepts only one valid `Fly-Client-IP` and
+  ignores `X-Forwarded-For`; local/default mode trusts neither. A production
+  deployment must provide `ROOM_COOKIE_SECRET`; do not fall back to wildcard
+  origins or query-string keys.
 - `session-workspace.tsx` is the coordination point, not a universal feature
   bucket. A new behavior that needs both local UI and durable state must name
   its ownership and test seam before being added there.
 - No deeper nested `AGENTS.md` is justified: theme, overlays, and viewport
   invariants span the existing web boundary.
-- Awareness client-id ownership prevents cross-socket mutation but does not
-  authenticate a person. Any future authorization must remain a separate
-  boundary.
+- Room capability authenticates room ingress, while awareness client-id
+  ownership prevents cross-socket mutation within an authorized room. It is
+  deliberately not an identity or roles system.
 
 ## Verification and evidence
 
@@ -126,5 +147,20 @@ For human/MCP concurrency, local UI ownership, active-drag stability, and
 eventual layout convergence, run `pnpm test:e2e-collaboration`; nested update,
 awareness, reconnect, and persisted reload coverage lives in
 `apps/server/src/lib/websocket.test.ts`.
+This command additionally proves RoomGate fragment clearing, cookie-gated
+browser access, room-scoped MCP bearer rejection, and rotation revocation. The
+production deployment check exercises the canonical DNS/cookie topology and
+refuses non-canonical targets:
+
+```bash
+E2E_PRODUCTION_SMOKE=1 \
+E2E_BASE_URL=https://arielcharts.donovanyohan.com \
+E2E_MCP_URL=https://api.arielcharts.donovanyohan.com/mcp \
+pnpm test:e2e-production-smoke
+```
+
+It creates and rotates a real protected room, checks `Secure; HttpOnly;
+SameSite=Lax` host-only cookies, validates browser/API/WebSocket/MCP access,
+and proves the old cookie and MCP bearer are revoked after rotation.
 The CI contract is `.github/workflows/ci.yml`; architecture evidence comes
 from the named source and test files above.

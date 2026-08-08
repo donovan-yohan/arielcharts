@@ -25,6 +25,12 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
   selection, or camera state. Restore always reads the current server head
   immediately before its one explicit revision-checked request; stale restore
   is never retried automatically.
+- `room-gate.tsx` is the sole browser room-authentication boundary. It must
+  authorize the HttpOnly cookie before `SessionWorkspace` mounts, so protected
+  history and WebSocket lifecycles cannot start early. A raw room key may live
+  only in the URL fragment and current-page React memory; never persist it in
+  browser storage, Yjs/activity/history, logs, or tool arguments. MCP setup
+  derives the separate `sessionId.roomKey` bearer only when copying the prompt.
 - Shell semantic tokens are separate from Mermaid source-owned item styles.
   Authored item colors override the neutral accessible fallbacks.
 

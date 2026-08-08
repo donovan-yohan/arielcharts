@@ -9,6 +9,7 @@ import {
   waitForReactFlowNodePositionMovement,
   waitForReactFlowNodePositions,
 } from './e2e/support/react-flow';
+import { createRoom, roomShareUrl } from './e2e/support/room-access';
 import { createBlankDiagram } from './e2e/support/workspace';
 
 const FLOWCHART_FIXTURE = `flowchart LR
@@ -277,17 +278,18 @@ async function validateSequenceCanvas() {
   const page = await context.newPage();
   const diagnostics = collectReactFlowDiagnostics(page);
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
-  const sessionName = `e2e-sequence-${Date.now()}`;
+  const mcpUrl = process.env.E2E_MCP_URL ?? 'http://localhost:4000/mcp';
+  const room = await createRoom(new URL(mcpUrl).origin, baseUrl);
 
   try {
-    await page.goto(`${baseUrl}/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(roomShareUrl(baseUrl, room), { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await replaceSource(page, FLOWCHART_FIXTURE);
     await waitForCanvas(page, 'flowchart');
     const peer = await page.context().newPage();
     const peerDiagnostics = collectReactFlowDiagnostics(peer);
     let multiSelectedDrag: boolean;
     try {
-      await peer.goto(`${baseUrl}/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await peer.goto(roomShareUrl(baseUrl, room), { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await waitForCanvas(peer, 'flowchart');
       multiSelectedDrag = await assertMultiSelectedNodeDrag(page, peer, diagnostics.reactFlowError015);
       assertNoPageErrors(peerDiagnostics.pageErrors, 'in the fresh persistence peer');

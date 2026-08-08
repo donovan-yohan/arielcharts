@@ -1,28 +1,39 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
-import Link from 'next/link';
+import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { APP_NAME } from '@arielcharts/shared';
-import { getSessionPath, isValidSessionId, randomSessionId } from '../lib/session';
+import { createRoom, getRoomReferencePath, getRoomSharePath, parseRoomReference } from '../lib/room-access-api';
 
-export function LandingPageClient({ suggestedSessionId }: { suggestedSessionId: string }) {
+export function LandingPageClient() {
   const router = useRouter();
-  const [joinId, setJoinId] = useState('');
-  const normalizedJoinId = joinId.trim().toLowerCase();
-  const joinIdIsValid = normalizedJoinId.length === 0 || isValidSessionId(normalizedJoinId);
+  const [joinValue, setJoinValue] = useState('');
+  const [createPending, setCreatePending] = useState(false);
+  const [createFailed, setCreateFailed] = useState(false);
+  const parsedJoin = useMemo(() => parseRoomReference(joinValue), [joinValue]);
+  const joinValueIsValid = joinValue.trim().length === 0 || parsedJoin !== null;
 
-  const handleCreate = () => {
-    router.push(getSessionPath(randomSessionId()));
+  const handleCreate = async () => {
+    if (createPending) {
+      return;
+    }
+    setCreatePending(true);
+    setCreateFailed(false);
+    try {
+      const room = await createRoom();
+      router.push(getRoomSharePath(room.sessionId, room.roomKey));
+    } catch {
+      setCreateFailed(true);
+      setCreatePending(false);
+    }
   };
 
   const handleJoin = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isValidSessionId(normalizedJoinId)) {
+    if (!parsedJoin) {
       return;
     }
-
-    router.push(getSessionPath(normalizedJoinId));
+    router.push(getRoomReferencePath(parsedJoin));
   };
 
   return (
@@ -36,29 +47,22 @@ export function LandingPageClient({ suggestedSessionId }: { suggestedSessionId: 
         </p>
 
         <div className="landing-actions">
-          <button data-testid="create-session-cta" className="primary-button" type="button" onClick={handleCreate}>
-            Create new session
+          <button data-testid="create-session-cta" className="primary-button" disabled={createPending} type="button" onClick={() => { void handleCreate(); }}>
+            {createPending ? 'Creating private room…' : 'Create private room'}
           </button>
-          <Link data-testid="open-suggested-session-cta" className="secondary-button" href={getSessionPath(suggestedSessionId)}>
-            Open suggested session
-          </Link>
         </div>
-
-        <div className="landing-hint">
-          <span>Suggested ID</span>
-          <code data-testid="suggested-session-id">{suggestedSessionId}</code>
-        </div>
+        {createFailed ? <p className="field-help error-text" role="alert">The private room could not be created. Try again.</p> : null}
       </section>
 
       <section className="landing-panel card">
         <div>
           <h2>Join an existing session</h2>
-          <p>Paste a session ID or share link suffix to reconnect to an existing workspace.</p>
+          <p>Paste a session ID or the full private share link.</p>
         </div>
 
         <form className="join-form" onSubmit={handleJoin}>
           <label className="field-label" htmlFor="session-id-input">
-            Session ID
+            Session ID or share link
           </label>
           <input
             data-testid="join-session-input"
@@ -69,17 +73,17 @@ export function LandingPageClient({ suggestedSessionId }: { suggestedSessionId: 
             className="text-input"
             inputMode="text"
             onChange={(event) => {
-              setJoinId(event.target.value);
+              setJoinValue(event.target.value);
             }}
-            placeholder="a7x9k2mn"
+            placeholder="a7x9k2mn or https://…/s/a7x9k2mn#roomKey=…"
             spellCheck={false}
-            value={joinId}
+            value={joinValue}
           />
-          <p className={`field-help${joinIdIsValid ? '' : ' error-text'}`}>
-            Use 6-32 lowercase letters, digits, <code>_</code>, or <code>-</code>.
+          <p className={`field-help${joinValueIsValid ? '' : ' error-text'}`}>
+            IDs use 6–32 letters, digits, <code>_</code>, or <code>-</code>. Share links include the room key privately after <code>#</code>.
           </p>
-          <button data-testid="join-session-button" className="primary-button" disabled={!isValidSessionId(normalizedJoinId)} type="submit">
-            Join session
+          <button data-testid="join-session-button" className="primary-button" disabled={parsedJoin === null} type="submit">
+            Open room
           </button>
         </form>
       </section>

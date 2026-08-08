@@ -87,3 +87,22 @@ export function createCorsHeaders(
 
   return headers;
 }
+
+export function createCredentialedCorsHeaders(
+  origin: string,
+  requestedHeaders: string | undefined,
+  allowedMethods: string,
+): OutgoingHttpHeaders {
+  const requested = requestedHeaders
+    ?.split(',')
+    .map((header) => header.trim().toLowerCase())
+    .filter(Boolean) ?? [];
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-credentials': 'true',
+    'access-control-allow-headers': [...new Set(['content-type', ...requested])].join(', '),
+    'access-control-allow-methods': allowedMethods,
+    'access-control-max-age': '86400',
+    vary: 'Origin, Access-Control-Request-Headers',
+  };
+}

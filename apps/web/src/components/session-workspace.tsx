@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
-import { Check } from 'lucide-react';
+import { Check, KeyRound, Share2 } from 'lucide-react';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
@@ -39,7 +39,7 @@ import { canUseFlowchartControls, DiagramPreviewRegistry, type DiagramPreview } 
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
-import { getSessionPath, getWebsocketServerUrl } from '../lib/session';
+import { getServerHttpUrl, getWebsocketServerUrl } from '../lib/session';
 import { listDiagramHistory, readCurrentDiagram, readDiagramRevision, restoreDiagramRevision } from '../lib/history-api';
 import { getMermaidRenderId } from '../lib/mermaid-render-id';
 import { getNextPreviewCameraLock } from '../lib/renderer-camera-policy';
@@ -47,6 +47,7 @@ import type { ConnectionState } from '../lib/connection-state';
 import { FOCUSABLE_SELECTOR } from '../lib/focusable';
 import { getMermaidThemeVariables } from '../lib/theme';
 import { getActivityFlyoutViewOnOpen, getNextWorkspaceFlyout, type ActivityFlyoutView, type WorkspaceFlyout } from '../lib/workspace-flyout-state';
+import { getMcpRoomBearer, getRoomShareUrl, rotateRoomKey } from '../lib/room-access-api';
 
 const DIAGRAMS_KEY = 'diagrams';
 const DIAGRAM_ORDER_KEY = 'diagramOrder';
@@ -233,8 +234,9 @@ export function shouldApplyHistoryPreviewResponse(
     && responseDiagramId === requestedDiagramId;
 }
 
-export function getAgentWorkflowPrompt(sessionId: string, mcpUrl: string): string {
-  return `Connect to my ArielCharts session "${sessionId}" using the MCP server at ${mcpUrl}. ${AGENT_WORKFLOW_REQUIREMENTS.join(' ')} Mermaid changes sync collaboratively in real-time. Look up your docs for how to add an MCP server globally.`;
+export function getAgentWorkflowPrompt(sessionId: string, mcpUrl: string, roomKey: string): string {
+  const bearer = getMcpRoomBearer(sessionId, roomKey);
+  return `Connect to my ArielCharts session "${sessionId}" using the MCP server at ${mcpUrl}. Configure that MCP server with the HTTP header "Authorization: Bearer ${bearer}". This session-scoped MCP bearer is distinct from the raw room key people paste into the browser. ${AGENT_WORKFLOW_REQUIREMENTS.join(' ')} Mermaid changes sync collaboratively in real-time. Look up your docs for how to add an MCP server globally.`;
 }
 
 function stripParticipantTabSuffix(name: string): string {
@@ -433,7 +435,7 @@ export function getTemplateDiagramCreation(templateId: StarterTemplateId, diagra
   };
 }
 
-export function SessionWorkspace({ sessionId }: { sessionId: string }) {
+export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey: string | null; sessionId: string }) {
   const { resolvedTheme } = useTheme();
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const editorViewRef = useRef<EditorView | null>(null);
@@ -475,7 +477,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [shareCopyState, setShareCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [promptCopyState, setPromptCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
-  const [shareUrl, setShareUrl] = useState(() => getSessionPath(sessionId));
+  const [roomKey, setRoomKey] = useState<string | null>(initialRoomKey);
+  const [roomKeyAnnouncement, setRoomKeyAnnouncement] = useState('');
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [nodePositions, setNodePositions] = useState<DiagramNodePositions>({});
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
@@ -617,15 +620,12 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [closeFlyout, historyPreview, openFlyout]);
 
   useEffect(() => {
-    setShareUrl(getSessionPath(sessionId));
+    setRoomKey(initialRoomKey);
+    setRoomKeyAnnouncement('');
     previewRegistryRef.current.reset();
     setPreview(null);
     setRenderError(null);
-
-    if (typeof window !== 'undefined') {
-      setShareUrl(new URL(getSessionPath(sessionId), window.location.origin).toString());
-    }
-  }, [sessionId]);
+  }, [initialRoomKey, sessionId]);
 
   useEffect(() => {
     if (!activeDiagramId) return;
@@ -1057,8 +1057,11 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [promptCopyState]);
 
   const handleCopyShareUrl = async () => {
+    if (!roomKey) {
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(shareUrl);
+      await navigator.clipboard.writeText(getRoomShareUrl(window.location.origin, sessionId, roomKey));
       setShareCopyState('copied');
     } catch {
       setShareCopyState('error');
@@ -1172,15 +1175,20 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   }, [activeDiagramId, cancelHistoryPreview, refreshDiagramHistory, restoreCandidate, returnFocusToRestoreOrigin, sessionId]);
 
   const getAgentPrompt = useCallback(() => {
-    const mcpUrl = typeof window !== 'undefined'
-      ? `${window.location.origin}/mcp`
-      : 'https://arielcharts.donovanyohan.com/mcp';
-    return getAgentWorkflowPrompt(sessionId, mcpUrl);
-  }, [sessionId]);
+    if (!roomKey) {
+      return null;
+    }
+    const mcpUrl = `${getServerHttpUrl()}/mcp`;
+    return getAgentWorkflowPrompt(sessionId, mcpUrl, roomKey);
+  }, [roomKey, sessionId]);
 
   const handleCopyAgentPrompt = async () => {
+    const prompt = getAgentPrompt();
+    if (!prompt) {
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(getAgentPrompt());
+      await navigator.clipboard.writeText(prompt);
       setPromptCopyState('copied');
     } catch {
       setPromptCopyState('error');
@@ -1207,6 +1215,14 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     connectModalReturnFocusRef.current = returnFocusTarget;
     setShowConnectModal(true);
   }, []);
+
+  const resetRoomKey = useCallback(async () => {
+    const replacement = await rotateRoomKey(sessionId);
+    setRoomKey(replacement);
+    setShareCopyState('idle');
+    setPromptCopyState('idle');
+    setRoomKeyAnnouncement('Room key reset. All previously authorized browsers and agents were revoked; share the replacement key to reconnect them.');
+  }, [sessionId]);
 
   useEffect(() => {
     if (!showConnectModal) {
@@ -1287,7 +1303,9 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
   const diagramModeLabel = isFlowchart
     ? 'Flowchart · editable'
     : 'Mermaid · source only';
-  const shareButtonLabel = shareCopyState === 'copied' ? 'copied' : shareCopyState === 'error' ? 'copy failed' : 'share';
+  const shareButtonLabel = !roomKey
+    ? 'reset key to share'
+    : shareCopyState === 'copied' ? 'copied' : shareCopyState === 'error' ? 'copy failed' : 'share';
   const promptCopyLabel = promptCopyState === 'copied' ? 'copied' : promptCopyState === 'error' ? 'copy failed' : 'copy';
 
   const saveDisplayName = useCallback((displayName: string) => {
@@ -1506,7 +1524,16 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
               <span aria-label={`${overflowCollaboratorCount} more collaborators`} className="workspace-collaborator-overflow" data-testid="topbar-collaborator-overflow">+{overflowCollaboratorCount}</span>
             ) : null}
           </div>
-          <button className="workspace-share-button" data-testid="share-session-button" type="button" onClick={handleCopyShareUrl}>
+          <button
+            aria-label={roomKey ? 'Copy private room link' : 'Room key unavailable. Reset it in Settings to share'}
+            className="workspace-share-button"
+            data-testid="share-session-button"
+            disabled={!roomKey}
+            title={roomKey ? 'Copy private room link' : 'Reset the room key in Settings before sharing'}
+            type="button"
+            onClick={handleCopyShareUrl}
+          >
+            {roomKey ? <Share2 aria-hidden="true" size={15} /> : <KeyRound aria-hidden="true" size={15} />}
             <span>{shareButtonLabel}</span>
             {shareCopyState === 'copied' ? <Check aria-hidden="true" size={13} /> : null}
           </button>
@@ -1516,6 +1543,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
             displayName={displayName}
             onConnectAgent={openConnectModal}
             onDisplayNameSave={saveDisplayName}
+            onResetRoomKey={resetRoomKey}
+            roomKey={roomKey}
           />
         </div>
       </header>
@@ -1669,6 +1698,8 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
         saveStatusLabel={saveStatusLabel}
       />
 
+      <p aria-live="polite" className="visually-hidden">{roomKeyAnnouncement}</p>
+
       {showConnectModal ? (
         <div className="modal-backdrop" onClick={closeConnectModal}>
           <div className="modal-dialog" ref={connectModalDialogRef} role="dialog" aria-modal="true" aria-labelledby="connect-agent-title" onClick={(event) => { event.stopPropagation(); }}>
@@ -1683,12 +1714,18 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
                 <p><span>Session status</span><strong>{connectionLabels[connectionState]}</strong></p>
                 <p><span>Agents</span><strong>{getAgentCountLabel(connectedAgentCount)}</strong></p>
               </div>
-              <div className="modal-prompt-block">
-                <pre className="modal-prompt-text">{getAgentPrompt()}</pre>
-                <button className="workspace-copy-button modal-prompt-copy" type="button" onClick={handleCopyAgentPrompt}>
-                  {promptCopyLabel}
-                </button>
-              </div>
+              {roomKey ? (
+                <div className="modal-prompt-block">
+                  <pre className="modal-prompt-text">{getAgentPrompt()}</pre>
+                  <button className="workspace-copy-button modal-prompt-copy" type="button" onClick={handleCopyAgentPrompt}>
+                    {promptCopyLabel}
+                  </button>
+                </div>
+              ) : (
+                <p className="modal-key-unavailable" role="status">
+                  This browser has room access through its cookie, but no shareable key in memory. Open Settings and reset the room key before copying agent instructions.
+                </p>
+              )}
             </div>
           </div>
         </div>

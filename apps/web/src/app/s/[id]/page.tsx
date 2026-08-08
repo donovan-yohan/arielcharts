@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { SessionWorkspace } from '../../../components/session-workspace';
+import { RoomGate } from '../../../components/room-gate';
 import { isValidSessionId } from '../../../lib/session';
 
 export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
@@ -9,5 +9,5 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
     notFound();
   }
 
-  return <SessionWorkspace sessionId={id} />;
+  return <RoomGate sessionId={id} />;
 }

@@ -21,10 +21,13 @@ async function responseBody(response: Response): Promise<string> {
   }
 }
 
-function cookieFrom(response: Response, description: string): string {
-  const setCookie = response.headers.get('set-cookie');
-  assert(setCookie, `${description} did not set a room access cookie.`);
-  const cookie = setCookie.split(';', 1)[0];
+function cookieFrom(response: Response, description: string, sessionId: string): string {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+  const setCookies = headers.getSetCookie?.() ?? [response.headers.get('set-cookie')].filter((value): value is string => Boolean(value));
+  const expectedName = `arielcharts_room_${sessionId}=`;
+  const roomCookies = setCookies.filter((setCookie) => setCookie.startsWith(expectedName));
+  assert(roomCookies.length === 1, `${description} did not set exactly one room access cookie for ${sessionId}.`);
+  const cookie = roomCookies[0]?.split(';', 1)[0];
   assert(cookie && cookie.includes('='), `${description} returned an invalid room access cookie.`);
   return cookie;
 }
@@ -70,7 +73,7 @@ export async function exchangeRoomAccess(
   if (response.status !== 204) {
     throw new Error(`Room access exchange returned ${response.status}: ${await responseBody(response)}`);
   }
-  return { ...credentials, cookie: cookieFrom(response, 'Room access exchange') };
+  return { ...credentials, cookie: cookieFrom(response, 'Room access exchange', credentials.sessionId) };
 }
 
 export async function getRoomAccess(
@@ -99,5 +102,5 @@ export async function rotateRoomAccess(
   const payload = await response.json() as Partial<{ room_key: unknown }>;
   assert(typeof payload.room_key === 'string' && payload.room_key.length > 0,
     'Room key rotation omitted a room_key.');
-  return { sessionId: access.sessionId, roomKey: payload.room_key, cookie: cookieFrom(response, 'Room key rotation') };
+  return { sessionId: access.sessionId, roomKey: payload.room_key, cookie: cookieFrom(response, 'Room key rotation', access.sessionId) };
 }

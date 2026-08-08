@@ -1,7 +1,7 @@
 'use client';
 
 import React, { FormEvent, useEffect, useState } from 'react';
-import { checkRoomAccess, clearRoomKeyFragment, exchangeRoomKey, readRoomKeyFragment } from '../lib/room-access-api';
+import { checkRoomAccess, clearRoomKeyFragment, exchangeRoomKey, readRoomKeyFragment, RoomAccessApiError } from '../lib/room-access-api';
 import { SessionWorkspace } from './session-workspace';
 
 export type RoomGateState =
@@ -11,6 +11,10 @@ export type RoomGateState =
 
 export function canMountProtectedWorkspace(state: RoomGateState): state is Extract<RoomGateState, { status: 'authorized' }> {
   return state.status === 'authorized';
+}
+
+export function shouldClearRoomKeyFragmentAfterExchangeError(error: unknown): boolean {
+  return error instanceof RoomAccessApiError && error.status === 401;
 }
 
 export function RoomGateView({
@@ -95,11 +99,13 @@ export function RoomGate({ sessionId }: { sessionId: string }) {
             setGateState({ status: 'authorized', roomKey: fragmentKey });
           }
           return;
-        } catch {
+        } catch (error) {
           if (controller.signal.aborted) {
             return;
           }
-          clearRoomKeyFragment(window.location, window.history);
+          if (shouldClearRoomKeyFragmentAfterExchangeError(error)) {
+            clearRoomKeyFragment(window.location, window.history);
+          }
           // A stale shared key must not lock out a browser whose current
           // HttpOnly cookie is still valid.
           try {

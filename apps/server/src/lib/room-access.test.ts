@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { IncomingMessage } from 'node:http';
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadServerEnv } from './env.js';
 import { SessionStore } from './persistence.js';
@@ -64,10 +65,53 @@ describe('RoomAccessService', () => {
     await expect(access.authenticateBrowserCookie('abc123de', request({ cookie: cookiePair }))).resolves.toEqual({ sessionId: 'abc123de', accessVersion: 1 });
     const tamperedCookie = `${cookiePair.slice(0, -1)}${cookiePair.endsWith('a') ? 'b' : 'a'}`;
     await expect(access.authenticateBrowserCookie('abc123de', request({ cookie: tamperedCookie }))).rejects.toMatchObject({ status: 401 });
-    now += 1_001;
+    const rotated = await access.rotate('abc123de', 1);
+    expect(rotated.record).toEqual(expect.objectContaining({ accessVersion: 2, createdAt: grant.record.createdAt }));
+    await expect(access.authenticateBearer(request({ authorization: `Bearer abc123de.${grant.roomKey}` }))).rejects.toMatchObject({ status: 401 });
+    await expect(access.authenticateBearer(request({ authorization: `Bearer abc123de.${rotated.roomKey}` }))).resolves.toEqual({ sessionId: 'abc123de', accessVersion: 2 });
     await expect(access.authenticateBrowserCookie('abc123de', request({ cookie: cookiePair }))).rejects.toMatchObject({ status: 401 });
+    const rotatedCookiePair = (access.browserCookieHeaders('abc123de', 2)['set-cookie'] as string).split(';')[0]!;
+    await expect(access.authenticateBrowserCookie('abc123de', request({ cookie: rotatedCookiePair }))).resolves.toEqual({ sessionId: 'abc123de', accessVersion: 2 });
+    now += 1_001;
+    await expect(access.authenticateBrowserCookie('abc123de', request({ cookie: rotatedCookiePair }))).rejects.toMatchObject({ status: 401 });
     const secureAccess = new RoomAccessService(store, { cryptoProfile: 'test', cookieSecret: 'test-secret', secureCookie: true, sameSite: 'None' });
     expect(secureAccess.browserCookieHeaders('abc123de', 1)['set-cookie']).toContain('SameSite=None; Secure');
+  });
+
+  it('coalesces and bounds successful bearer proofs without weakening rotation', async () => {
+    let derivations = 0;
+    const derive = async (key: string, salt: string) => {
+      derivations += 1;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      return createHash('sha512').update(key).update('\u0000').update(salt).digest();
+    };
+    const access = new RoomAccessService(store, { cookieSecret: 'test-secret', derive, maxBearerProofs: 2 });
+    const first = await access.createGrant();
+    const second = await access.createGrant();
+    const third = await access.createGrant();
+    await store.setRoomAccess('abc123de', first.record);
+    await store.setRoomAccess('second12', second.record);
+    await store.setRoomAccess('third123', third.record);
+    derivations = 0;
+
+    const firstBearer = `Bearer abc123de.${first.roomKey}`;
+    await access.authenticateBearer(request({ authorization: firstBearer }));
+    await access.authenticateBearer(request({ authorization: firstBearer }));
+    expect(derivations).toBe(1);
+
+    const secondBearer = `Bearer second12.${second.roomKey}`;
+    await Promise.all(Array.from({ length: 6 }, () => access.authenticateBearer(request({ authorization: secondBearer }))));
+    expect(derivations).toBe(2);
+
+    await access.authenticateBearer(request({ authorization: `Bearer third123.${third.roomKey}` }));
+    await access.authenticateBearer(request({ authorization: firstBearer }));
+    expect(derivations).toBe(4);
+
+    const rotated = await access.rotate('abc123de', 1);
+    const afterRotation = derivations;
+    await expect(access.authenticateBearer(request({ authorization: firstBearer }))).rejects.toMatchObject({ status: 401 });
+    expect(derivations).toBe(afterRotation + 1);
+    await expect(access.authenticateBearer(request({ authorization: `Bearer abc123de.${rotated.roomKey}` }))).resolves.toEqual({ sessionId: 'abc123de', accessVersion: 2 });
   });
 
   it('rejects attempts before derivation after the room or IP bucket is exhausted', async () => {
@@ -177,6 +221,8 @@ describe('room access environment', () => {
     expect(() => loadServerEnv({ NODE_ENV: 'production', ALLOWED_ORIGINS: 'https://app.example.com' })).toThrow('ROOM_COOKIE_SECRET');
     expect(() => loadServerEnv({ NODE_ENV: 'production', ROOM_COOKIE_SECRET: 'secret', ALLOWED_ORIGINS: '*' })).toThrow('ALLOWED_ORIGINS');
     expect(() => loadServerEnv({ ROOM_COOKIE_SAME_SITE: 'None', ROOM_COOKIE_SECURE: 'false' })).toThrow('requires ROOM_COOKIE_SECURE');
+    expect(() => loadServerEnv({ ROOM_COOKIE_SECURE: 'TRUE' })).toThrow('ROOM_COOKIE_SECURE must be true or false');
+    expect(() => loadServerEnv({ ROOM_COOKIE_SECURE: 'yes' })).toThrow('ROOM_COOKIE_SECURE must be true or false');
     expect(() => loadServerEnv({ NODE_ENV: 'production', ROOM_COOKIE_SECRET: 'secret', ALLOWED_ORIGINS: 'https://app.example.com', ROOM_ACCESS_CRYPTO_PROFILE: 'test' })).toThrow('ROOM_ACCESS_CRYPTO_PROFILE');
     expect(() => loadServerEnv({ TRUST_PROXY: 'true' })).toThrow('TRUST_PROXY is not supported');
     expect(() => loadServerEnv({ CLIENT_ADDRESS_PROFILE: 'proxy' })).toThrow('CLIENT_ADDRESS_PROFILE must be none or fly');

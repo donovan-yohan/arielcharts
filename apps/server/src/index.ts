@@ -104,6 +104,22 @@ function sendRoomAccessError(response: ServerResponse, error: unknown, headers: 
   });
 }
 
+function sendUnexpectedRoomAccessError(response: ServerResponse, error: unknown, headers: Record<string, unknown> = {}): void {
+  console.error('Room access request failed:', error);
+  sendJson(response, 500, { error: 'Room access unavailable.' }, {
+    ...headers,
+    'cache-control': 'no-store',
+  });
+}
+
+function sendRoomAccessFailure(response: ServerResponse, error: unknown, headers: Record<string, unknown> = {}): void {
+  if (error instanceof RoomAccessError) {
+    sendRoomAccessError(response, error, headers);
+    return;
+  }
+  sendUnexpectedRoomAccessError(response, error, headers);
+}
+
 export function createApp(env = loadServerEnv()) {
   if (process.env.NODE_ENV === 'production' && !env.roomCookieSecret) {
     throw new Error('ROOM_COOKIE_SECRET is required in production.');
@@ -190,22 +206,37 @@ export function createApp(env = loadServerEnv()) {
         sendEmpty(response, 204, corsHeaders);
         return;
       }
-      try {
-        assertValidSessionId(accessSessionId);
-        if (request.method === 'GET') {
+      if (!isValidSessionId(accessSessionId)) {
+        sendRoomAccessError(response, new RoomAccessError(401), corsHeaders);
+        return;
+      }
+      if (request.method === 'GET') {
+        try {
           await roomAccess.authenticateBrowserCookie(accessSessionId, request);
           sendEmpty(response, 204, { ...corsHeaders, 'cache-control': 'no-store' });
+        } catch (error) {
+          sendRoomAccessFailure(response, error, corsHeaders);
+        }
+        return;
+      }
+      if (request.method === 'POST') {
+        let body: unknown;
+        try {
+          body = await readJsonBody(request);
+          if (!isRecord(body) || typeof body.room_key !== 'string') {
+            sendRoomAccessError(response, new RoomAccessError(401), corsHeaders);
+            return;
+          }
+        } catch {
+          sendRoomAccessError(response, new RoomAccessError(401), corsHeaders);
           return;
         }
-        if (request.method === 'POST') {
-          const body = await readJsonBody(request);
-          if (!isRecord(body) || typeof body.room_key !== 'string') throw new RoomAccessError(401);
+        try {
           const authorized = await roomAccess.authenticateRoomKey(accessSessionId, body.room_key, request);
           sendEmpty(response, 204, { ...corsHeaders, ...roomAccess.browserCookieHeaders(accessSessionId, authorized.accessVersion), 'cache-control': 'no-store' });
-          return;
+        } catch (error) {
+          sendRoomAccessFailure(response, error, corsHeaders);
         }
-      } catch (error) {
-        sendRoomAccessError(response, error, corsHeaders);
         return;
       }
       sendJson(response, 405, { error: 'Method not allowed.' }, corsHeaders);
@@ -227,8 +258,11 @@ export function createApp(env = loadServerEnv()) {
         sendJson(response, 405, { error: 'Method not allowed.' }, corsHeaders);
         return;
       }
+      if (!isValidSessionId(rotateSessionId)) {
+        sendRoomAccessError(response, new RoomAccessError(401), corsHeaders);
+        return;
+      }
       try {
-        assertValidSessionId(rotateSessionId);
         const authorized = await roomAccess.authenticateBrowserCookie(rotateSessionId, request);
         const grant = await roomAccess.rotate(rotateSessionId, authorized.accessVersion);
         await websocketServer.closeRoom(rotateSessionId);
@@ -238,7 +272,7 @@ export function createApp(env = loadServerEnv()) {
           'cache-control': 'no-store',
         });
       } catch (error) {
-        sendRoomAccessError(response, error, corsHeaders);
+        sendRoomAccessFailure(response, error, corsHeaders);
       }
       return;
     }
@@ -395,8 +429,19 @@ export function createApp(env = loadServerEnv()) {
       socket.destroy();
       return;
     }
+    const rejectRawSocketError = () => socket.destroy();
+    const clearRawSocketGuard = () => {
+      socket.removeListener('error', rejectRawSocketError);
+      socket.removeListener('close', clearRawSocketGuard);
+    };
+    socket.once('error', rejectRawSocketError);
+    socket.once('close', clearRawSocketGuard);
     void roomAccess.authenticateBrowserCookie(sessionId, request)
-      .then(() => websocketServer.upgrade({ request, socket, head, sessionId }))
+      .then(() => {
+        if (socket.destroyed) return;
+        clearRawSocketGuard();
+        websocketServer.upgrade({ request, socket, head, sessionId });
+      })
       .catch(() => socket.destroy());
   });
 

@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, OutgoingHttpHeaders } from 'node:http';
 import { isIP } from 'node:net';
 import { SessionStore } from './persistence.js';
@@ -9,6 +9,7 @@ const ROOM_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const DEFAULT_COOKIE_TTL_MS = 8 * 60 * 60 * 1000;
 const COOKIE_NAME_PREFIX = 'arielcharts_room_';
 const GENERIC_AUTH_ERROR = 'Room access denied.';
+const MAX_BEARER_PROOFS = 256;
 
 export interface RoomAccessOptions {
   cookieSecret?: string;
@@ -20,6 +21,8 @@ export interface RoomAccessOptions {
   now?: () => number;
   /** Test seam for admission-control coverage; production uses Node scrypt. */
   derive?: (key: string, salt: string) => Promise<Buffer>;
+  /** Test seam for bounded successful-bearer proof coverage. */
+  maxBearerProofs?: number;
 }
 
 export interface RoomAccessGrant {
@@ -56,6 +59,11 @@ interface TokenBucket {
 interface RateLimitDecision {
   allowed: boolean;
   retryAfterSeconds?: number;
+}
+
+interface BearerProof {
+  recordFingerprint: string;
+  accessVersion: number;
 }
 
 class BoundedTokenBuckets {
@@ -142,6 +150,11 @@ export class RoomAccessService {
   private readonly attemptIpBuckets: BoundedTokenBuckets;
   private readonly deriveOverride?: RoomAccessOptions['derive'];
   private readonly rotations = new Map<string, Promise<RoomAccessGrant | null>>();
+  /** LRU of successful bearer proofs; keys are digests, never capabilities. */
+  private readonly bearerProofs = new Map<string, BearerProof>();
+  /** Coalesces identical cold proof checks without retaining a raw capability. */
+  private readonly pendingBearerProofs = new Map<string, Promise<boolean>>();
+  private readonly maxBearerProofs: number;
   private readonly dummySalt = randomBytes(16).toString('base64url');
   private readonly dummyKey = randomBytes(ROOM_KEY_BYTES).toString('base64url');
 
@@ -163,6 +176,10 @@ export class RoomAccessService {
     this.accessAttemptBuckets = new BoundedTokenBuckets(this.now);
     this.attemptIpBuckets = new BoundedTokenBuckets(this.now);
     this.deriveOverride = options.derive;
+    this.maxBearerProofs = options.maxBearerProofs ?? MAX_BEARER_PROOFS;
+    if (!Number.isSafeInteger(this.maxBearerProofs) || this.maxBearerProofs < 1) {
+      throw new Error('maxBearerProofs must be a positive integer.');
+    }
   }
 
   async createGrant(): Promise<RoomAccessGrant> {
@@ -216,7 +233,9 @@ export class RoomAccessService {
     const address = this.clientAddress(request);
     this.consumeAttempt('bearer', sessionId, address);
     const record = token ? await this.store.getRoomAccess(sessionId) : null;
-    const matched = await this.matches(record, roomKey);
+    const matched = token && record
+      ? await this.matchesBearer(token[0], record, roomKey)
+      : await this.matches(record, roomKey);
     if (!token || !record || !matched) {
       throw new RoomAccessError(401);
     }
@@ -281,6 +300,54 @@ export class RoomAccessService {
       return false;
     }
     return safeEqual(derived, expected);
+  }
+
+  /**
+   * Re-check the current durable record on every request so an access-version
+   * rotation invalidates cached proof immediately, while avoiding repeated
+   * expensive scrypt work for an unchanged successful bearer.
+   */
+  private async matchesBearer(bearer: string, record: RoomAccessRecord, key: string): Promise<boolean> {
+    const bearerFingerprint = this.fingerprint(bearer);
+    const recordFingerprint = this.recordFingerprint(record);
+    const cached = this.bearerProofs.get(bearerFingerprint);
+    if (cached?.recordFingerprint === recordFingerprint && cached.accessVersion === record.accessVersion) {
+      this.bearerProofs.delete(bearerFingerprint);
+      this.bearerProofs.set(bearerFingerprint, cached);
+      return true;
+    }
+    if (cached) this.bearerProofs.delete(bearerFingerprint);
+
+    const pendingKey = `${bearerFingerprint}:${recordFingerprint}`;
+    let pending = this.pendingBearerProofs.get(pendingKey);
+    if (!pending) {
+      pending = this.matches(record, key).then((matched) => {
+        if (matched) this.rememberBearerProof(bearerFingerprint, { recordFingerprint, accessVersion: record.accessVersion });
+        return matched;
+      }).finally(() => {
+        this.pendingBearerProofs.delete(pendingKey);
+      });
+      this.pendingBearerProofs.set(pendingKey, pending);
+    }
+    return pending;
+  }
+
+  private rememberBearerProof(key: string, proof: BearerProof): void {
+    this.bearerProofs.delete(key);
+    this.bearerProofs.set(key, proof);
+    while (this.bearerProofs.size > this.maxBearerProofs) {
+      const oldest = this.bearerProofs.keys().next().value;
+      if (!oldest) return;
+      this.bearerProofs.delete(oldest);
+    }
+  }
+
+  private recordFingerprint(record: RoomAccessRecord): string {
+    return this.fingerprint(`${record.accessVersion}:${record.salt}:${record.verifier}`);
+  }
+
+  private fingerprint(value: string): string {
+    return createHash('sha256').update(value).digest('base64url');
   }
 
   private async derive(key: string, salt: string): Promise<Buffer> {

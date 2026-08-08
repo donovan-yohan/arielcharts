@@ -16,6 +16,7 @@ import {
   type OnConnectEnd,
   type OnConnectStart,
   type OnNodeDrag,
+  type OnNodesChange,
   type Viewport,
 } from '@xyflow/react';
 import {
@@ -37,6 +38,14 @@ import { shouldCanvasHandleEscape } from '../lib/canvas-keyboard-ownership';
 import { getConnectNodeActivation } from '../lib/diagram-connect-state';
 import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
+import {
+  applyControlledNodeChanges,
+  applyControlledSelectionChanges,
+  createControlledNodeComposer,
+  reconcileControlledNodeRuntime,
+  releaseControlledNodeRuntime,
+  type ControlledNodeRuntime,
+} from '../lib/reactflow-controlled-node-adapter';
 import {
   extractMermaidPresentation,
   getCanvasEdgeMarker,
@@ -78,9 +87,9 @@ export interface DiagramCanvasProps {
   onEditNodeLabel?: (nodeId: string, newLabel: string) => void;
   onGroupNodes?: (nodeIds: string[], label: string) => void;
   onInteractionModeChange?: (mode: 'select' | 'connect') => void;
-  onNodeDrag?: (nodeId: string, position: SvgPoint) => void;
+  onNodeDrag?: (positions: DiagramNodePositions) => void;
   onNodeDragStart?: (nodeId: string, position: SvgPoint) => void;
-  onNodeDragStop?: (nodeId: string, position: SvgPoint) => void;
+  onNodeDragStop?: (positions: DiagramNodePositions) => void;
   onNodePositionsChange?: (positions: DiagramNodePositions, mode?: NodePositionsSyncMode) => void;
   onSelectedNodeIdsChange?: (nodeIds: string[]) => void;
   onUngroupNodes?: (subgraphId: string) => void;
@@ -120,6 +129,14 @@ interface FlowNodeInteractionContextValue {
 const FLOW_NODE_TYPES: NodeTypes = {
   mermaidFlowNode: MermaidReactFlowNode,
 };
+
+function getDraggedNodePositions(node: MermaidFlowNode, nodes: MermaidFlowNode[]): DiagramNodePositions {
+  const positions: DiagramNodePositions = {};
+  for (const draggedNode of [...nodes, node]) {
+    positions[draggedNode.id] = { x: draggedNode.position.x, y: draggedNode.position.y };
+  }
+  return positions;
+}
 const FLOW_PRO_OPTIONS = { hideAttribution: true };
 const FLOW_EDGE_COLOR = 'var(--diagram-item-stroke-fallback)';
 const FLOW_HANDLE_POSITIONS = [Position.Top, Position.Right, Position.Bottom, Position.Left] as const;
@@ -205,7 +222,9 @@ export function DiagramCanvas({
   const [canvasSize, setCanvasSize] = useState({ height: 0, width: 0 });
   const [uncontrolledNodePositions, setUncontrolledNodePositions] = useState<DiagramNodePositions>({});
   const [liveNodePositions, setLiveNodePositions] = useState<DiagramNodePositions>({});
+  const [flowNodeRuntime, setFlowNodeRuntime] = useState<ControlledNodeRuntime>({});
   const activeDragNodeIdsRef = useRef(new Set<string>());
+  const controlledNodeComposer = useMemo(() => createControlledNodeComposer<MermaidFlowNode>(), []);
   const persistedNodePositions = nodePositions ?? uncontrolledNodePositions;
   const persistedNodePositionsRef = useRef<DiagramNodePositions>(persistedNodePositions);
   const hasAutoFitInitialRenderRef = useRef(false);
@@ -221,6 +240,8 @@ export function DiagramCanvas({
   const isControlledSelection = selectedNodeIds !== undefined;
   const [internalSelection, setInternalSelection] = useState<string[]>(selectedNodeIds ?? []);
   const selection = isControlledSelection ? selectedNodeIds : internalSelection;
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
   const [internalMode, setInternalMode] = useState<'select' | 'connect'>(interactionMode ?? 'select');
   const mode = interactionMode ?? internalMode;
   const [viewport, setViewport] = useState<ViewportState>({ panX: 24, panY: 24, zoom: 1 });
@@ -427,6 +448,10 @@ export function DiagramCanvas({
   ])], [mermaidPresentation.edges]);
 
   const useReactFlowRenderer = isFlowchart && flowNodes.length > 0;
+  const controlledFlowNodes = useMemo(
+    () => controlledNodeComposer.compose(flowNodes, flowNodeRuntime),
+    [controlledNodeComposer, flowNodeRuntime, flowNodes],
+  );
   const flowViewport = useMemo<Viewport>(() => ({
     x: viewport.panX,
     y: viewport.panY,
@@ -548,6 +573,7 @@ export function DiagramCanvas({
   };
 
   const setSelection = useCallback((nodeIds: string[]) => {
+    selectionRef.current = nodeIds;
     onSelectedNodeIdsChange?.(nodeIds);
     if (!isControlledSelection) {
       setInternalSelection(nodeIds);
@@ -741,6 +767,7 @@ export function DiagramCanvas({
     if (!graph) {
       setNodePositions((current) => (Object.keys(current).length > 0 ? {} : current), 'merge', null);
       setLiveNodePositions({});
+      setFlowNodeRuntime({});
       return;
     }
 
@@ -762,6 +789,10 @@ export function DiagramCanvas({
       Object.entries(current).filter(([nodeId]) => currentNodeIds.has(nodeId)),
     ));
   }, [graph, setNodePositions]);
+
+  useEffect(() => {
+    setFlowNodeRuntime((current) => reconcileControlledNodeRuntime(flowNodes, current));
+  }, [flowNodes]);
 
   useEffect(() => {
     if (selection.length === 0) {
@@ -1026,7 +1057,7 @@ export function DiagramCanvas({
     setEditingNodeId(null);
   }, [isPanning, setSelection]);
 
-  const handleNodeClick = useCallback((nodeId: string, shiftKey: boolean) => {
+  const handleNodeActivation = useCallback((nodeId: string) => {
     if (!isFlowchart) {
       return;
     }
@@ -1051,15 +1082,19 @@ export function DiagramCanvas({
       return;
     }
 
-    if (shiftKey) {
-      setSelection(selection.includes(nodeId)
-        ? selection.filter((id) => id !== nodeId)
-        : [...selection, nodeId]);
-      return;
-    }
+  }, [connectSourceId, interactiveNodeBounds, isFlowchart, mode]);
 
-    setSelection([nodeId]);
-  }, [connectSourceId, interactiveNodeBounds, isFlowchart, mode, selection, setSelection]);
+  const handleNodeClick = useCallback((nodeId: string, shiftKey: boolean) => {
+    const currentSelection = selectionRef.current;
+    if (shiftKey) {
+      setSelection(currentSelection.includes(nodeId)
+        ? currentSelection.filter((id) => id !== nodeId)
+        : [...currentSelection, nodeId]);
+    } else {
+      setSelection([nodeId]);
+    }
+    handleNodeActivation(nodeId);
+  }, [handleNodeActivation, setSelection]);
 
   const commitNodeEdit = useCallback(() => {
     if (!canEditStructure || !editingNodeId) {
@@ -1102,41 +1137,59 @@ export function DiagramCanvas({
     setMode('select');
   }, [canEditStructure, onAddEdge, pendingEdge, selectedConnectionType, setMode]);
 
-  const handleFlowNodeDragStart = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node) => {
+  const handleFlowNodesChange = useCallback<OnNodesChange<MermaidFlowNode>>((changes) => {
+    const currentSelection = selectionRef.current;
+    const nextSelection = applyControlledSelectionChanges(currentSelection, changes);
+    if (nextSelection !== currentSelection) {
+      setSelection(nextSelection);
+    }
+    setFlowNodeRuntime((current) => applyControlledNodeChanges(
+      flowNodes,
+      current,
+      changes,
+      activeDragNodeIdsRef.current,
+    ));
+  }, [flowNodes, setSelection]);
+
+  const handleFlowNodeDragStart = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node, nodes) => {
     if (!canEditStructure) {
       return;
     }
-    activeDragNodeIdsRef.current.add(node.id);
+    const positions = getDraggedNodePositions(node, nodes);
+    Object.keys(positions).forEach((nodeId) => activeDragNodeIdsRef.current.add(nodeId));
     setLiveNodePositions((current) => {
-      return { ...current, [node.id]: node.position };
+      return { ...current, ...positions };
     });
     onNodeDragStart?.(node.id, node.position);
   }, [canEditStructure, onNodeDragStart]);
 
-  const handleFlowNodeDrag = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node) => {
-    if (!canEditStructure || !activeDragNodeIdsRef.current.has(node.id)) {
+  const handleFlowNodeDrag = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node, nodes) => {
+    const positions = getDraggedNodePositions(node, nodes);
+    if (!canEditStructure || !Object.keys(positions).some((nodeId) => activeDragNodeIdsRef.current.has(nodeId))) {
       return;
     }
-    setLiveNodePositions((current) => ({ ...current, [node.id]: node.position }));
-    onNodeDrag?.(node.id, node.position);
+    setLiveNodePositions((current) => ({ ...current, ...positions }));
+    onNodeDrag?.(positions);
   }, [canEditStructure, onNodeDrag]);
 
-  const handleFlowNodeDragStop = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node) => {
+  const handleFlowNodeDragStop = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node, nodes) => {
     if (!canEditStructure) {
       return;
     }
-    activeDragNodeIdsRef.current.delete(node.id);
+    const positions = getDraggedNodePositions(node, nodes);
+    Object.keys(positions).forEach((nodeId) => activeDragNodeIdsRef.current.delete(nodeId));
     if (onNodeDragStop) {
-      onNodeDragStop(node.id, node.position);
+      onNodeDragStop(positions);
     } else {
       setNodePositions((current) => ({
         ...current,
-        [node.id]: node.position,
-      }), 'merge', { [node.id]: node.position });
+        ...positions,
+      }), 'merge', positions);
     }
+    setFlowNodeRuntime((current) => releaseControlledNodeRuntime(current, Object.keys(positions)));
     setLiveNodePositions((current) => {
       const next = { ...current };
-      delete next[node.id];
+      Object.keys(positions).forEach((nodeId) => delete next[nodeId]);
       return next;
     });
   }, [canEditStructure, onNodeDragStop, setNodePositions]);
@@ -1423,7 +1476,8 @@ export function DiagramCanvas({
               fitView={false}
               maxZoom={MAX_ZOOM}
               minZoom={MIN_ZOOM}
-              nodes={flowNodes}
+              multiSelectionKeyCode="Shift"
+              nodes={controlledFlowNodes}
               nodesConnectable={canEditStructure}
               nodesDraggable={canEditStructure}
               nodeTypes={FLOW_NODE_TYPES}
@@ -1452,7 +1506,7 @@ export function DiagramCanvas({
               }}
               onNodeClick={(event, node) => {
                 event.stopPropagation();
-                handleNodeClick(node.id, event.shiftKey);
+                handleNodeActivation(node.id);
               }}
               onNodeDoubleClick={(event, node) => {
                 event.stopPropagation();
@@ -1464,6 +1518,7 @@ export function DiagramCanvas({
               onNodeDrag={handleFlowNodeDrag}
               onNodeDragStart={handleFlowNodeDragStart}
               onNodeDragStop={handleFlowNodeDragStop}
+              onNodesChange={handleFlowNodesChange}
               onMove={(_event, nextViewport) => {
                 setAnimateTransform(false);
                 setViewport((current) => ({

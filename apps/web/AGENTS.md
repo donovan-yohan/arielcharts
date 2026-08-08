@@ -27,6 +27,10 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
 - Mermaid parser-result classification decides whether controls are structural.
   Derived SVG, kind, and errors are kept in a local per-diagram preview
   registry; stale or invalid source remains source-only.
+- React Flow is a controlled view: Mermaid/parser output owns stable node ids,
+  structure, and membership; app state owns selection; Yjs `nodePositions`
+  owns durable layout. Its adapter may retain only measurement and positions
+  for stable ids in the active local drag, including a multi-node drag batch.
 - Resolved theme is a derived input to Mermaid rendering and React Flow color
   mode. Theme changes rerender previews; they do not change diagram source.
 - Fit and floating toolbars use the measured unobscured canvas viewport; no
@@ -34,10 +38,11 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
 - Undo is per diagram and tracks only explicit local-human source/visual/layout
   origins. Remote, MCP, initialization, and reconciliation updates never enter
   that stack; keep `src/lib/collaboration-origins.test.ts` authoritative.
-- `DragLayoutCommitter` batches durable writes at 120 ms, always flushes the
-  final position, and leaves the active node on a local overlay while remote
-  layout updates merge. Keep `src/lib/drag-layout.test.ts` and
-  `test:e2e-collaboration` green.
+- `DragLayoutCommitter` is the sole durable drag-write path: it batches at 120
+  ms and flushes every final group position before local runtime ownership is
+  released. After release, the canonical Yjs position wins. Keep
+  `src/lib/drag-layout.test.ts`, `src/lib/reactflow-controlled-node-adapter.test.ts`,
+  `test:e2e-sequence`, and `test:e2e-collaboration` green.
 
 Run `pnpm --filter @arielcharts/web test` for focused changes. Run
 `npx tsx e2e-validate.ts` for legacy canvas coverage and

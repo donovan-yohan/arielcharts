@@ -28,6 +28,40 @@ const API_SEQUENCE_FIXTURE = `sequenceDiagram
   Auth-->>Gateway: 401 Unauthorized
   Gateway-->>Browser: 401 Unauthorized`;
 
+type ReactFlowError015Diagnostic = {
+  channel: string;
+  text: string;
+};
+
+const REACT_FLOW_ERROR_015 = /(?:\bReact Flow\b[\s\S]*?(?:error#015|(?:error(?: code)?\s*)?#?015\b)|trying to drag a node that is not initialized)/iu;
+
+function collectReactFlowError015(page: Page): ReactFlowError015Diagnostic[] {
+  const diagnostics: ReactFlowError015Diagnostic[] = [];
+  const collect = (channel: string, text: string) => {
+    if (REACT_FLOW_ERROR_015.test(text)) diagnostics.push({ channel, text });
+  };
+
+  page.on('console', (message) => collect(`console.${message.type()}`, message.text()));
+  page.on('pageerror', (error) => collect('pageerror', error.stack ?? error.message));
+  return diagnostics;
+}
+
+function assertNoReactFlowError015(diagnostics: ReactFlowError015Diagnostic[], context: string): void {
+  if (diagnostics.length === 0) return;
+  const detail = diagnostics.map(({ channel, text }) => `${channel}: ${text}`).join('\n');
+  throw new Error(`React Flow #015 was emitted ${context}:\n${detail}`);
+}
+
+function collectPageErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.stack ?? error.message));
+  return errors;
+}
+
+function assertNoPageErrors(errors: string[], context: string): void {
+  if (errors.length > 0) throw new Error(`Browser page errors were emitted ${context}:\n${errors.join('\n')}`);
+}
+
 async function ensureSourceFlyoutOpen(page: Page): Promise<Locator> {
   const toggle = page.getByTestId('source-flyout-toggle');
   if (await toggle.getAttribute('aria-expanded') !== 'true') {
@@ -106,8 +140,122 @@ async function getGenericFitBounds(page: Page): Promise<GenericFitBounds> {
   });
 }
 
+async function nodePosition(locator: Locator): Promise<{ x: number; y: number }> {
+  const position = await locator.evaluate((element) => {
+    const transform = element.getAttribute('style')?.match(/transform:\s*([^;]+)/u)?.[1]
+      ?? getComputedStyle(element).transform;
+    const translate = transform.match(/translate(?:3d)?\(\s*(-?[\d.]+)px(?:,\s*|\s+)(-?[\d.]+)px/u);
+    const matrix = transform.match(/^matrix\([^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*(-?[\d.]+),\s*(-?[\d.]+)\)$/u);
+    if (translate) return { x: Number(translate[1]), y: Number(translate[2]) };
+    if (matrix) return { x: Number(matrix[1]), y: Number(matrix[2]) };
+    return null;
+  });
+  if (!position) throw new Error('Could not parse selected node position.');
+  return position;
+}
+
+function nodeById(page: Page, id: string): Locator {
+  return page.locator(`.react-flow__node[data-id=${JSON.stringify(id)}]`);
+}
+
+async function waitForNodePositions(
+  page: Page,
+  expected: Record<string, { x: number; y: number }>,
+): Promise<void> {
+  await page.waitForFunction((positions) => {
+    for (const [nodeId, target] of Object.entries(positions)) {
+      const node = [...document.querySelectorAll<HTMLElement>('.react-flow__node')]
+        .find((element) => element.dataset.id === nodeId);
+      if (!node) return false;
+      const transform = node.getAttribute('style')?.match(/transform:\s*([^;]+)/u)?.[1]
+        ?? getComputedStyle(node).transform;
+      const translate = transform.match(/translate(?:3d)?\(\s*(-?[\d.]+)px(?:,\s*|\s+)(-?[\d.]+)px/u);
+      const matrix = transform.match(/^matrix\([^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*(-?[\d.]+),\s*(-?[\d.]+)\)$/u);
+      const actual = translate
+        ? { x: Number(translate[1]), y: Number(translate[2]) }
+        : matrix
+          ? { x: Number(matrix[1]), y: Number(matrix[2]) }
+          : null;
+      if (actual === null
+        || Math.abs(actual.x - target.x) > 2
+        || Math.abs(actual.y - target.y) > 2) return false;
+    }
+    return true;
+  }, expected, { timeout: 15_000 });
+}
+
+async function assertMultiSelectedNodeDrag(
+  page: Page,
+  peer: Page,
+  reactFlowError015: ReactFlowError015Diagnostic[],
+): Promise<boolean> {
+  const first = page.locator('.react-flow__node').nth(0);
+  const second = page.locator('.react-flow__node').nth(1);
+  const firstId = await first.getAttribute('data-id');
+  const secondId = await second.getAttribute('data-id');
+  if (!firstId || !secondId || firstId === secondId) throw new Error('Group-drag fixture requires two stable node IDs.');
+  await Promise.all([
+    nodeById(peer, firstId).waitFor({ state: 'visible', timeout: 15_000 }),
+    nodeById(peer, secondId).waitFor({ state: 'visible', timeout: 15_000 }),
+  ]);
+  await first.click();
+  await page.waitForFunction((selectedId) => {
+    const selected = [...document.querySelectorAll<HTMLElement>('.react-flow__node.selected')];
+    return selected.length === 1 && selected[0]?.dataset.id === selectedId;
+  }, firstId, { timeout: 5_000 });
+  await second.click({ modifiers: ['Shift'] });
+  await page.waitForFunction((selectedIds) => {
+    const selected = [...document.querySelectorAll<HTMLElement>('.react-flow__node.selected')]
+      .map((node) => node.dataset.id)
+      .sort();
+    return selected.length === 2 && selected.every((id, index) => id === selectedIds[index]);
+  }, [firstId, secondId].sort(), { timeout: 5_000 });
+
+  const beforeFirst = await nodePosition(first);
+  const beforeSecond = await nodePosition(second);
+  const bounds = await first.boundingBox();
+  if (!bounds) throw new Error('Selected node has no drag bounds.');
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width / 2 + 96, bounds.y + bounds.height / 2 + 28, { steps: 8 });
+  await page.mouse.up();
+  assertNoReactFlowError015(reactFlowError015, 'during a multi-selected node drag');
+  await page.waitForFunction(({ nodeId, position }) => {
+    const node = [...document.querySelectorAll<HTMLElement>('.react-flow__node')]
+      .find((element) => element.dataset.id === nodeId);
+    const transform = node?.getAttribute('style')?.match(/transform:\s*([^;]+)/u)?.[1]
+      ?? (node ? getComputedStyle(node).transform : '');
+    const translate = transform.match(/translate(?:3d)?\(\s*(-?[\d.]+)px(?:,\s*|\s+)(-?[\d.]+)px/u);
+    if (!translate) return false;
+    return Math.hypot(Number(translate[1]) - position.x, Number(translate[2]) - position.y) >= 8;
+  }, { nodeId: firstId, position: beforeFirst }, { timeout: 5_000 });
+
+  const afterFirst = await nodePosition(first);
+  const afterSecond = await nodePosition(second);
+  const firstDelta = { x: afterFirst.x - beforeFirst.x, y: afterFirst.y - beforeFirst.y };
+  const secondDelta = { x: afterSecond.x - beforeSecond.x, y: afterSecond.y - beforeSecond.y };
+  const primaryMoved = Math.hypot(firstDelta.x, firstDelta.y) >= 8;
+  const groupMovedTogether = Math.abs(firstDelta.x - secondDelta.x) <= 2
+    && Math.abs(firstDelta.y - secondDelta.y) <= 2;
+  if (!primaryMoved || !groupMovedTogether) {
+    throw new Error(`Multi-selected nodes did not drag together: first=${JSON.stringify(firstDelta)} second=${JSON.stringify(secondDelta)}`);
+  }
+  await waitForNodePositions(peer, { [firstId]: afterFirst, [secondId]: afterSecond });
+  return true;
+}
+
 async function assertSameTabKindTransition(page: Page): Promise<boolean> {
   const node = page.locator('.react-flow__node').first();
+  const nodeId = await node.getAttribute('data-id');
+  if (!nodeId) throw new Error('Single-node drag fixture requires a stable node ID.');
+  await closeSourceFlyout(page);
+  await page.locator('.react-flow__pane').click({ position: { x: 8, y: 8 } });
+  await page.waitForFunction(() => document.querySelectorAll('.react-flow__node.selected').length === 0, undefined, { timeout: 5_000 });
+  await node.click();
+  await page.waitForFunction((selectedId) => {
+    const selected = [...document.querySelectorAll<HTMLElement>('.react-flow__node.selected')];
+    return selected.length === 1 && selected[0]?.dataset.id === selectedId;
+  }, nodeId, { timeout: 5_000 });
   const nodeBounds = await node.boundingBox();
   if (!nodeBounds) return false;
 
@@ -132,7 +280,10 @@ async function assertSameTabKindTransition(page: Page): Promise<boolean> {
 async function validateSequenceCanvas() {
   const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
-  const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await context.newPage();
+  const reactFlowError015 = collectReactFlowError015(page);
+  const pageErrors = collectPageErrors(page);
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
   const sessionName = `e2e-sequence-${Date.now()}`;
 
@@ -140,7 +291,20 @@ async function validateSequenceCanvas() {
     await page.goto(`${baseUrl}/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await replaceSource(page, FLOWCHART_FIXTURE);
     await waitForCanvas(page, 'flowchart');
+    const peer = await page.context().newPage();
+    const peerPageErrors = collectPageErrors(peer);
+    let multiSelectedDrag: boolean;
+    try {
+      await peer.goto(`${baseUrl}/s/${sessionName}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await waitForCanvas(peer, 'flowchart');
+      multiSelectedDrag = await assertMultiSelectedNodeDrag(page, peer, reactFlowError015);
+      assertNoPageErrors(peerPageErrors, 'in the fresh persistence peer');
+    } finally {
+      await peer.close();
+    }
+    assertNoReactFlowError015(reactFlowError015, 'during a multi-selected node drag');
     const sameTabTransition = await assertSameTabKindTransition(page);
+    assertNoReactFlowError015(reactFlowError015, 'during a single-node drag');
 
     await page.getByTestId('create-diagram-tab').click();
     await replaceSource(page, API_SEQUENCE_FIXTURE);
@@ -191,6 +355,7 @@ async function validateSequenceCanvas() {
     const invalidDoesNotLeak = await page.getByTestId('parse-error-banner').count() === 0;
 
     await page.screenshot({ path: '/tmp/arielcharts-sequence-isolation.png' });
+    assertNoPageErrors(pageErrors, 'during the sequence canvas gate');
 
     const zoomChangedTransform = fittedTransform !== afterZoomTransform;
     const fitChangedTransform = baselineTransform !== fittedTransform;
@@ -201,6 +366,7 @@ async function validateSequenceCanvas() {
       && panChangedTransform
       && genericFitBounds.fits
       && fitRestoredTransform
+      && multiSelectedDrag
       && sameTabTransition
       && flowchartRestored
       && invalidPreviewRetained
@@ -209,6 +375,7 @@ async function validateSequenceCanvas() {
     console.log(`generic Fit transform changed=${fitChangedTransform} restored=${fitRestoredTransform}`);
     console.log(`generic Fit bounds=${genericFitBounds.fits} transform=${fittedTransform} viewBox=${genericFitBounds.viewBox} style=${genericFitBounds.svgStyle} svg=${JSON.stringify(genericFitBounds.svg)} canvas=${JSON.stringify(genericFitBounds.canvas)}`);
     console.log(`generic Space-drag transform changed=${panChangedTransform}`);
+    console.log(`multi-selected nodes drag together and persist to fresh peer=${multiSelectedDrag}`);
     console.log(`same-tab flowchart/sequence transition=${sameTabTransition}`);
     console.log(`flowchart controls restore=${flowchartRestored}`);
     console.log(`invalid generic preview retained=${invalidPreviewRetained}`);
@@ -216,7 +383,11 @@ async function validateSequenceCanvas() {
     console.log(passed ? 'SEQUENCE E2E PASSED' : 'SEQUENCE E2E FAILED');
     if (!passed) process.exitCode = 1;
   } finally {
-    await browser.close();
+    try {
+      await context.close();
+    } finally {
+      await browser.close();
+    }
   }
 }
 

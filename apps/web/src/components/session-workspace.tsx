@@ -899,20 +899,24 @@ export function SessionWorkspace({ sessionId }: { sessionId: string }) {
     undoManagerRef.current?.stopCapturing();
   }, []);
 
-  const handleNodeDrag = useCallback((nodeId: string, position: NodePosition) => {
-    dragCommitterRef.current?.update(nodeId, position);
-  }, []);
-
-  const handleNodeDragStop = useCallback((nodeId: string, position: NodePosition) => {
+  const handleNodeDrag = useCallback((positions: DiagramNodePositions) => {
     const committer = dragCommitterRef.current;
     if (!committer) {
-      handleSingleNodePositionChange(nodeId, position);
       return;
     }
-    committer.update(nodeId, position);
+    Object.entries(positions).forEach(([nodeId, position]) => committer.update(nodeId, position));
+  }, []);
+
+  const handleNodeDragStop = useCallback((positions: DiagramNodePositions) => {
+    const committer = dragCommitterRef.current;
+    if (!committer) {
+      handleNodePositionsChange(positions);
+      return;
+    }
+    Object.entries(positions).forEach(([nodeId, position]) => committer.update(nodeId, position));
     committer.flush();
     undoManagerRef.current?.stopCapturing();
-  }, [handleSingleNodePositionChange]);
+  }, [handleNodePositionsChange]);
 
   const handleAddConnectedNode = useCallback((source: string, label: string, shape: DiagramNodeShape, position: NodePosition, type: DiagramLinkType) => {
     const queue = mutationQueueRef.current;

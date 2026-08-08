@@ -1,5 +1,13 @@
 import { existsSync } from 'node:fs';
 import { chromium, type Locator, type Page } from '@playwright/test';
+import {
+  assertNoPageErrors,
+  assertNoReactFlowError015,
+  collectReactFlowDiagnostics,
+  getReactFlowNodePosition,
+  waitForReactFlowNodePositionMatch,
+  waitForReactFlowNodePositionMovement,
+} from './e2e/support/react-flow';
 
 const MCP_PROTOCOL_VERSION = '2026-07-28';
 const BASE_FLOWCHART = `flowchart LR
@@ -116,20 +124,6 @@ async function boxOf(locator: Locator, message: string) {
   return box;
 }
 
-async function dataPositionOf(locator: Locator, message: string): Promise<{ transform: string; x: number; y: number }> {
-  const position = await locator.evaluate((element) => {
-    const transform = element.getAttribute('style')?.match(/transform:\s*([^;]+)/u)?.[1]
-      ?? getComputedStyle(element).transform;
-    const translate = transform.match(/translate(?:3d)?\(\s*(-?[\d.]+)px(?:,\s*|\s+)(-?[\d.]+)px/u);
-    const matrix = transform.match(/^matrix\([^,]+,\s*[^,]+,\s*[^,]+,\s*[^,]+,\s*(-?[\d.]+),\s*(-?[\d.]+)\)$/u);
-    if (translate) return { transform, x: Number(translate[1]), y: Number(translate[2]) };
-    if (matrix) return { transform, x: Number(matrix[1]), y: Number(matrix[2]) };
-    return null;
-  });
-  assert(position, `${message}: could not parse local node transform.`);
-  return position;
-}
-
 async function nudgeNode(page: Page, locator: Locator, dx: number, dy: number, hold = false): Promise<void> {
   const box = await boxOf(locator, 'Node has no drag bounds.');
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -222,6 +216,8 @@ async function validateCollaboration(): Promise<void> {
   const browserB = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const pageA = await browserA.newPage();
   const pageB = await browserB.newPage();
+  const diagnosticsA = collectReactFlowDiagnostics(pageA);
+  const diagnosticsB = collectReactFlowDiagnostics(pageB);
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
   const mcpUrl = process.env.E2E_MCP_URL ?? 'http://localhost:4000/mcp';
   const sessionId = `e2e-collaboration-${Date.now()}`;
@@ -312,8 +308,10 @@ async function validateCollaboration(): Promise<void> {
     const activeDragNode = nodeById(pageA, dragNodeId);
     const remoteNode = nodeById(pageB, remoteNodeId);
     await nudgeNode(pageA, activeDragNode, 110, 34, true);
+    assertNoReactFlowError015(diagnosticsA.reactFlowError015, 'when browser A began its node drag');
     const heldBeforeRemote = await boxOf(activeDragNode, 'Active drag node disappeared before remote update.');
     await nudgeNode(pageB, remoteNode, -84, 46);
+    assertNoReactFlowError015(diagnosticsB.reactFlowError015, 'when browser B completed its node drag');
     await pageA.waitForTimeout(500);
     const heldAfterRemote = await boxOf(activeDragNode, 'Active drag node disappeared during remote update.');
     const activeDragStable = Math.abs(heldAfterRemote.x - heldBeforeRemote.x) <= 2
@@ -321,16 +319,32 @@ async function validateCollaboration(): Promise<void> {
     assert(activeDragStable, `Remote layout update jittered active drag overlay: before=${JSON.stringify(heldBeforeRemote)} after=${JSON.stringify(heldAfterRemote)}`);
     await pageA.mouse.up();
     await pageA.waitForTimeout(700);
-    const finalA = await dataPositionOf(nodeById(pageA, dragNodeId), 'Dragged node disappeared after drag stop');
-    const finalB = await dataPositionOf(nodeById(pageB, dragNodeId), 'Remote replica dragged node disappeared after drag stop');
+    assertNoReactFlowError015(diagnosticsA.reactFlowError015, 'when browser A completed its node drag');
+    const finalA = await getReactFlowNodePosition(nodeById(pageA, dragNodeId), 'Dragged node disappeared after drag stop');
+    const finalB = await getReactFlowNodePosition(nodeById(pageB, dragNodeId), 'Remote replica dragged node disappeared after drag stop');
     const replicasConverged = Math.abs(finalA.x - finalB.x) <= 2 && Math.abs(finalA.y - finalB.y) <= 2;
     assert(replicasConverged, `Drag replicas did not converge: A=${JSON.stringify(finalA)} B=${JSON.stringify(finalB)}`);
+
+    const releasedPosition = finalB;
+    await nudgeNode(pageB, nodeById(pageB, dragNodeId), -72, 52);
+    assertNoReactFlowError015(diagnosticsB.reactFlowError015, 'when browser B dragged the released node');
+    await waitForReactFlowNodePositionMovement(pageB, dragNodeId, releasedPosition);
+    const winnerB = await getReactFlowNodePosition(nodeById(pageB, dragNodeId), 'Browser B winner node disappeared after post-release drag');
+    const postReleaseWinnerMoved = Math.hypot(winnerB.x - releasedPosition.x, winnerB.y - releasedPosition.y) >= 8;
+    assert(postReleaseWinnerMoved, `Post-release same-node drag did not establish a new winner: before=${JSON.stringify(releasedPosition)} after=${JSON.stringify(winnerB)}`);
+    await waitForReactFlowNodePositionMatch(pageA, dragNodeId, winnerB);
+    const winnerA = await getReactFlowNodePosition(nodeById(pageA, dragNodeId), 'Browser A replica lost the post-release winner node');
+    const postReleaseReplicasConverged = Math.abs(winnerA.x - winnerB.x) <= 2 && Math.abs(winnerA.y - winnerB.y) <= 2;
+    assert(postReleaseReplicasConverged, `Post-release same-node winner did not converge: A=${JSON.stringify(winnerA)} B=${JSON.stringify(winnerB)}`);
+    assertNoPageErrors(diagnosticsA.pageErrors, 'in collaboration browser A');
+    assertNoPageErrors(diagnosticsB.pageErrors, 'in collaboration browser B');
     await pageA.screenshot({ path: '/tmp/arielcharts-collaboration.png' });
 
     console.log(`modern MCP stale write rejected=${staleRejected}`);
     console.log(`browser/MCP merged source converged=${merged.mermaidText.includes(HUMAN_EDGE.trim()) && merged.mermaidText.includes(AGENT_EDGE.trim())}`);
     console.log(`remote local-state isolation tab=${activeTabPreserved} flyouts=${sourceFlyoutsPreserved} selection=${localSelectionPreserved} mode=${localConnectModePreserved} camera=${localCameraPreserved}`);
     console.log(`concurrent drag active overlay stable=${activeDragStable} replicas converged=${replicasConverged}`);
+    console.log(`post-release same-node winner moved=${postReleaseWinnerMoved} replicas converged=${postReleaseReplicasConverged}`);
     console.log('COLLABORATION E2E PASSED');
   } finally {
     await browser.close();

@@ -1137,6 +1137,74 @@ async function prepareSettingsTargetForTouch(
   await assertHitTarget(page, target, label);
 }
 
+async function assertStickySettingsHeading(
+  page: Page,
+  settings: Locator,
+  close: Locator,
+  label: string,
+): Promise<void> {
+  const heading = settings.locator('.workspace-settings-heading');
+  await expect.poll(async () => heading.evaluate((element) => {
+    const dialog = element.closest('[data-testid="workspace-settings-dialog"]');
+    const closeButton = element.querySelector('.workspace-settings-close');
+    if (!(dialog instanceof HTMLElement) || !(closeButton instanceof HTMLElement)) {
+      return {
+        closeCenterHit: false,
+        closeContained: false,
+        headingCenterHit: false,
+        headingContained: false,
+        hit: 'missing settings heading ancestors',
+      };
+    }
+    const dialogBounds = dialog.getBoundingClientRect();
+    const headingBounds = element.getBoundingClientRect();
+    const closeBounds = closeButton.getBoundingClientRect();
+    const headingHit = document.elementFromPoint(
+      headingBounds.left + (headingBounds.width / 2),
+      headingBounds.top + (headingBounds.height / 2),
+    );
+    const closeHit = document.elementFromPoint(
+      closeBounds.left + (closeBounds.width / 2),
+      closeBounds.top + (closeBounds.height / 2),
+    );
+    const headingContained = headingBounds.top >= dialogBounds.top - 0.5
+      && headingBounds.bottom <= dialogBounds.bottom + 0.5
+      && headingBounds.left >= dialogBounds.left - 0.5
+      && headingBounds.right <= dialogBounds.right + 0.5;
+    const closeContained = closeBounds.top >= dialogBounds.top - 0.5
+      && closeBounds.bottom <= dialogBounds.bottom + 0.5
+      && closeBounds.left >= dialogBounds.left - 0.5
+      && closeBounds.right <= dialogBounds.right + 0.5;
+    return {
+      close: { bottom: closeBounds.bottom, left: closeBounds.left, right: closeBounds.right, top: closeBounds.top },
+      closeCenterHit: closeHit instanceof Node && closeButton.contains(closeHit),
+      closeContained,
+      closeHit: closeHit instanceof Element
+        ? `${closeHit.tagName.toLowerCase()}[class=${closeHit.getAttribute('class') ?? ''}]`
+        : 'none',
+      dialog: { bottom: dialogBounds.bottom, left: dialogBounds.left, right: dialogBounds.right, top: dialogBounds.top },
+      heading: { bottom: headingBounds.bottom, left: headingBounds.left, right: headingBounds.right, top: headingBounds.top },
+      headingCenterHit: headingHit instanceof Node && element.contains(headingHit),
+      headingContained,
+      headingHit: headingHit instanceof Element
+        ? `${headingHit.tagName.toLowerCase()}[class=${headingHit.getAttribute('class') ?? ''}]`
+        : 'none',
+    };
+  }), {
+    message: `${label} did not keep the Settings heading and Close action sticky and unobscured.`,
+    timeout: 5_000,
+  }).toMatchObject({
+    closeCenterHit: true,
+    closeContained: true,
+    headingCenterHit: true,
+    headingContained: true,
+  });
+  await assertContainedInViewport(page, heading, `${label} heading`);
+  await assertHitTarget(page, heading, `${label} heading`);
+  await assertContainedInViewport(page, close, `${label} Close`);
+  await assertHitTarget(page, close, `${label} Close`);
+}
+
 async function expectResponsiveControls(page: Page, label: string, diagramName: string): Promise<void> {
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
   await selectTabByName(page, diagramName);
@@ -1183,8 +1251,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   await assertContainedInViewport(page, settings, `${label} workspace settings dialog`);
   if (label.startsWith('mobile')) {
     const closeSettings = settings.getByRole('button', { name: 'Close', exact: true });
-    await assertContainedInViewport(page, closeSettings, `${label} close settings initial state`);
-    await assertHitTarget(page, closeSettings, `${label} close settings initial state`);
+    await assertStickySettingsHeading(page, settings, closeSettings, `${label} settings initial state`);
     const closeBounds = await closeSettings.boundingBox();
     assert(closeBounds !== null && closeBounds.height >= 44,
       `${label} close settings must provide a 44px touch target: ${JSON.stringify(closeBounds)}.`);
@@ -1198,6 +1265,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
       [settings.locator('.workspace-settings-theme-option').nth(2), 'Dark theme option'],
     ] as const) {
       await prepareSettingsTargetForTouch(page, target, `${label} ${targetLabel}`);
+      await assertStickySettingsHeading(page, settings, closeSettings, `${label} after scrolling to ${targetLabel}`);
       const bounds = await target.boundingBox();
       assert(bounds !== null && bounds.height >= 44,
         `${label} ${targetLabel} must provide a 44px touch target: ${JSON.stringify(bounds)}.`);

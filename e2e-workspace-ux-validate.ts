@@ -1230,6 +1230,13 @@ async function tapTarget(page: Page, target: Locator, label: string): Promise<vo
   await page.touchscreen.tap(box.x + (box.width / 2), box.y + (box.height / 2));
 }
 
+async function expectTouchLabelStatus(page: Page, expected: string, label: string): Promise<void> {
+  const status = page.getByTestId('workspace-touch-label-status');
+  await expect(status, `${label} did not preserve its touch label outside the action subtree.`).toHaveText(expected);
+  await expect(status, `${label} touch label was not visibly presented.`).toHaveClass(/\bis-visible\b/u);
+  await assertContainedInViewport(page, status, `${label} touch label`);
+}
+
 async function waitForCameraChange(page: Page, previous: string, label: string): Promise<string> {
   await page.waitForFunction((before) => {
     const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
@@ -1380,11 +1387,18 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   await assertPhoneSurface(page, label, 'presence-and-footer');
 
   const sourceCamera = await renderedCanvasCameraTransform(page, `${label} source baseline`);
-  await ensureSourceFlyoutOpen(page);
+  const sourceToggle = page.getByTestId('source-flyout-toggle');
+  await tapTarget(page, sourceToggle, `${label} source toggle`);
+  await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(page.getByTestId('source-flyout')).toHaveCount(1);
+  await expectTouchLabelStatus(page, 'Show source', `${label} source toggle`);
   assert(await renderedCanvasCameraTransform(page, `${label} source open`) === sourceCamera,
     `${label} opening source changed the local canvas camera.`);
   await assertPhoneSurface(page, label, 'source');
-  await closeFlyout(page, 'source');
+  const sourceClose = page.getByRole('button', { name: 'Close source panel', exact: true });
+  await tapTarget(page, sourceClose, `${label} source close`);
+  await page.getByTestId('source-flyout').waitFor({ state: 'detached', timeout: 15_000 });
+  await expectTouchLabelStatus(page, 'Close', `${label} source close`);
   assert(await renderedCanvasCameraTransform(page, `${label} source close`) === sourceCamera,
     `${label} closing source changed the local canvas camera.`);
 
@@ -1405,6 +1419,12 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
     await assertPhoneSurface(page, label, 'tab-overflow');
     await renameActiveDiagram(page, 'Phone scratchpad');
     await assertActiveTabVisible(page, `${label} renamed tab`);
+    const tabCountBeforeDelete = await page.getByRole('tab').count();
+    const deleteTab = page.getByRole('button', { name: 'Delete Phone scratchpad', exact: true });
+    await tapTarget(page, deleteTab, `${label} delete tab`);
+    await page.waitForFunction((count) => document.querySelectorAll('[role="tab"]').length === count - 1, tabCountBeforeDelete, { timeout: 15_000 });
+    await expect(page.getByRole('tab', { name: 'Phone scratchpad', exact: true })).toHaveCount(0);
+    await expectTouchLabelStatus(page, 'Delete', `${label} delete tab`);
   } else {
     await templateMenu.press('Escape');
     await templateMenu.waitFor({ state: 'detached', timeout: 15_000 });
@@ -1413,7 +1433,11 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   await selectTabByName(page, diagramName);
   await waitForCanvas(page, 'flowchart');
   const settingsCamera = await renderedCanvasCameraTransform(page, `${label} settings baseline`);
-  await openWorkspaceSettings(page);
+  const settingsTrigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
+  await tapTarget(page, settingsTrigger, `${label} settings`);
+  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(page.getByTestId(SETTINGS_DIALOG_TEST_ID)).toHaveCount(1);
+  await expectTouchLabelStatus(page, 'Settings', `${label} settings`);
   assert(await renderedCanvasCameraTransform(page, `${label} settings open`) === settingsCamera,
     `${label} opening settings changed the local canvas camera.`);
   await assertPhoneSurface(page, label, 'settings');

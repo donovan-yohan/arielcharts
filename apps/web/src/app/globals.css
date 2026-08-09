@@ -1855,6 +1855,30 @@ code {
   overflow: auto;
 }
 
+.workspace-touch-label-status {
+  position: fixed;
+  left: 50%;
+  bottom: calc(68px + env(safe-area-inset-bottom));
+  z-index: 90;
+  max-width: calc(100vw - 24px);
+  padding: 6px 9px;
+  border: 1px solid var(--control-border);
+  border-radius: 5px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: 600 12px/1.2 var(--font-sans);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  white-space: nowrap;
+}
+
+.workspace-touch-label-status.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 @media (max-width: 960px) {
   .workspace-topbar {
     height: auto;

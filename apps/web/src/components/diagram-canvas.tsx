@@ -1715,7 +1715,7 @@ export function DiagramCanvas({
               padding: '8px 10px',
               pointerEvents: 'auto',
               position: 'absolute',
-              bottom: `calc(${canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP}px + env(safe-area-inset-bottom))`,
+              bottom: canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP,
               zIndex: 20,
             }}
           >
@@ -1922,7 +1922,7 @@ export function DiagramCanvas({
               background: 'var(--control-surface)',
               border: '1px solid var(--control-border)',
               borderRadius: 8,
-              bottom: `calc(${canvasToolbarStack.bottom}px + env(safe-area-inset-bottom))`,
+              bottom: canvasToolbarStack.bottom,
               color: 'var(--ink-muted)',
               display: 'inline-flex',
               gap: 6,

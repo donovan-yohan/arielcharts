@@ -510,7 +510,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
   useEffect(() => {
     activeDiagramIdRef.current = activeDiagramId;
-  }, [activeDiagramId, diagrams]);
+  }, [activeDiagramId]);
 
   useEffect(() => () => {
     if (touchLabelTimeoutRef.current !== null) {
@@ -1439,7 +1439,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     if (!activeDiagramId) {
       return;
     }
-    const frame = window.requestAnimationFrame(() => {
+    let frame = 0;
+    const revealActiveTab = () => {
       const tab = diagramTabRefs.current.get(activeDiagramId);
       const tabContainer = tab?.closest<HTMLElement>('.workspace-diagram-tab');
       const scroller = tabContainer?.closest<HTMLElement>('.workspace-diagram-tab-scroller');
@@ -1458,9 +1459,23 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       } else if (tabLeft < visibleLeft) {
         scroller.scrollLeft = tabLeft;
       }
-    });
-    return () => { window.cancelAnimationFrame(frame); };
-  }, [activeDiagramId]);
+    };
+    const scheduleReveal = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(revealActiveTab);
+    };
+    const tab = diagramTabRefs.current.get(activeDiagramId);
+    const tabContainer = tab?.closest<HTMLElement>('.workspace-diagram-tab');
+    const scroller = tabContainer?.closest<HTMLElement>('.workspace-diagram-tab-scroller');
+    const resizeObserver = new ResizeObserver(scheduleReveal);
+    if (tabContainer) resizeObserver.observe(tabContainer);
+    if (scroller) resizeObserver.observe(scroller);
+    scheduleReveal();
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+    };
+  }, [activeDiagramId, diagrams]);
 
   const focusDiagramTab = useCallback((diagramId: string) => {
     setActiveDiagramId(diagramId);

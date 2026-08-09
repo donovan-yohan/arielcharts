@@ -1239,30 +1239,31 @@ async function assertActiveTabVisible(page: Page, label: string): Promise<void> 
   const activeTab = page.locator('[role="tab"][aria-selected="true"]');
   await activeTab.waitFor({ state: 'visible', timeout: 15_000 });
   let geometry: { scrollerLeft: number; scrollerRight: number; tabLeft: number; tabRight: number } | null = null;
-  await expect.poll(async () => {
-    geometry = await activeTab.evaluate((tab) => {
-      const scroller = tab.closest('[data-testid="diagram-tab-bar"]')?.querySelector('.workspace-diagram-tab-scroller');
-      if (!(scroller instanceof HTMLElement)) {
-        throw new Error('The active diagram tab has no scroll container.');
-      }
-      const tabContainer = tab.closest('.workspace-diagram-tab');
-      if (!(tabContainer instanceof HTMLElement)) {
-        throw new Error('The active diagram tab has no action container.');
-      }
-      const tabRect = tabContainer.getBoundingClientRect();
-      const scrollerRect = scroller.getBoundingClientRect();
-      return {
-        scrollerLeft: scrollerRect.left,
-        scrollerRight: scrollerRect.right,
-        tabLeft: tabRect.left,
-        tabRight: tabRect.right,
-      };
-    });
-    return geometry.tabLeft >= geometry.scrollerLeft - 1 && geometry.tabRight <= geometry.scrollerRight + 1;
-  }, {
-    message: `${label} active tab or its actions remained clipped in the overflow scroller: ${JSON.stringify(geometry)}.`,
-    timeout: 5_000,
-  }).toBe(true);
+  try {
+    await expect.poll(async () => {
+      geometry = await activeTab.evaluate((tab) => {
+        const scroller = tab.closest('[data-testid="diagram-tab-bar"]')?.querySelector('.workspace-diagram-tab-scroller');
+        if (!(scroller instanceof HTMLElement)) {
+          throw new Error('The active diagram tab has no scroll container.');
+        }
+        const tabContainer = tab.closest('.workspace-diagram-tab');
+        if (!(tabContainer instanceof HTMLElement)) {
+          throw new Error('The active diagram tab has no action container.');
+        }
+        const tabRect = tabContainer.getBoundingClientRect();
+        const scrollerRect = scroller.getBoundingClientRect();
+        return {
+          scrollerLeft: scrollerRect.left,
+          scrollerRight: scrollerRect.right,
+          tabLeft: tabRect.left,
+          tabRight: tabRect.right,
+        };
+      });
+      return geometry.tabLeft >= geometry.scrollerLeft - 1 && geometry.tabRight <= geometry.scrollerRight + 1;
+    }, { timeout: 5_000 }).toBe(true);
+  } catch (error) {
+    throw new Error(`${label} active tab or its actions remained clipped in the overflow scroller: ${JSON.stringify(geometry)}.`, { cause: error });
+  }
 }
 
 async function tapTarget(page: Page, target: Locator, label: string): Promise<void> {

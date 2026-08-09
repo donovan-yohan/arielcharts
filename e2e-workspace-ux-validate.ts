@@ -1384,6 +1384,16 @@ async function expectTouchLabelStatus(page: Page, expected: string, label: strin
   await expect(status, `${label} did not preserve its touch label outside the action subtree.`).toHaveText(expected);
   await expect(status, `${label} touch label was not visibly presented.`).toHaveClass(/\bis-visible\b/u);
   await assertContainedInViewport(page, status, `${label} touch label`);
+  await expect(page.locator('.workspace-touch-label[data-touch-label-visible="true"]'),
+    `${label} retained a duplicate anchored touch label after pointer release.`).toHaveCount(0);
+}
+
+async function waitForTouchLabelPresentationToClear(page: Page, label: string): Promise<void> {
+  const status = page.getByTestId('workspace-touch-label-status');
+  await expect(status, `${label} persistent touch label did not clear.`).toHaveText('', { timeout: 3_000 });
+  await expect(status, `${label} persistent touch label remained visible.`).not.toHaveClass(/\bis-visible\b/u);
+  await expect(page.locator('.workspace-touch-label[data-touch-label-visible="true"]'),
+    `${label} retained an anchored touch label.`).toHaveCount(0);
 }
 
 async function waitForCameraChange(page: Page, previous: string, label: string): Promise<string> {
@@ -1591,6 +1601,7 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   await expectTouchLabelStatus(page, 'Settings', `${label} settings`);
   assert(await renderedCanvasCameraTransform(page, `${label} settings open`) === settingsCamera,
     `${label} opening settings changed the local canvas camera.`);
+  await waitForTouchLabelPresentationToClear(page, `${label} settings screenshot`);
   await assertPhoneSurface(page, label, 'settings');
   await closeWorkspaceSettings(page);
   assert(await renderedCanvasCameraTransform(page, `${label} settings close`) === settingsCamera,

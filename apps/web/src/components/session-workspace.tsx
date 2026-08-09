@@ -1581,8 +1581,24 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     }, 1_200);
   }, []);
 
+  const handleTouchLabelPointerRelease = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (event.pointerType !== 'touch') {
+      return;
+    }
+    const labelTarget = activeTouchLabelRef.current;
+    labelTarget?.removeAttribute('data-touch-label-visible');
+    if (activeTouchLabelRef.current === labelTarget) {
+      activeTouchLabelRef.current = null;
+    }
+  }, []);
+
   return (
-    <main className="workspace-shell" onPointerDownCapture={handleTouchLabelPointerDown}>
+    <main
+      className="workspace-shell"
+      onPointerCancelCapture={handleTouchLabelPointerRelease}
+      onPointerDownCapture={handleTouchLabelPointerDown}
+      onPointerUpCapture={handleTouchLabelPointerRelease}
+    >
       <header className="workspace-topbar">
         <div className="workspace-topbar-left">
           <span className="workspace-logo">{APP_NAME}</span>

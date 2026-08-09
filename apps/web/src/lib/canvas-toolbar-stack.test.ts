@@ -17,6 +17,7 @@ describe('getCanvasToolbarStackGeometry', () => {
   });
 
   it('hides controls rather than pushing them outside a fully occluded canvas', () => {
+    expect(getCanvasToolbarVisibility(0, 0, 0, 12, 12, false)).toEqual({ addNode: true, controls: true });
     expect(getCanvasToolbarVisibility(1, 54, 52)).toEqual({ addNode: false, controls: false });
     expect(getCanvasToolbarVisibility(154, 54, 52)).toEqual({ addNode: true, controls: true });
   });

@@ -18,7 +18,11 @@ export function getCanvasToolbarVisibility(
   addNodeHeight: number,
   inset = 12,
   gap = 12,
+  viewportMeasured = true,
 ): CanvasToolbarVisibility {
+  if (!viewportMeasured) {
+    return { addNode: true, controls: true };
+  }
   const controls = viewportHeight >= controlsHeight + (inset * 2);
   return {
     addNode: controls && viewportHeight >= controlsHeight + gap + addNodeHeight + (inset * 2),

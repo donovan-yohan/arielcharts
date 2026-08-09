@@ -267,6 +267,7 @@ export function DiagramCanvas({
   const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
   const [mermaidPresentation, setMermaidPresentation] = useState<MermaidPresentation>({ edges: [], nodes: new Map() });
   const [canvasViewport, setCanvasViewport] = useState<ViewportRect>({ height: 0, width: 0, x: 0, y: 0 });
+  const [canvasViewportMeasured, setCanvasViewportMeasured] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ height: 0, width: 0 });
   const [addNodeToolbarHeight, setAddNodeToolbarHeight] = useState(0);
   const [controlsToolbarHeight, setControlsToolbarHeight] = useState(0);
@@ -600,6 +601,7 @@ export function DiagramCanvas({
     addNodeToolbarHeight,
     BOTTOM_TOOLBAR_INSET,
     BOTTOM_TOOLBAR_GAP,
+    canvasViewportMeasured,
   );
   const selectedToolbarPosition = getSafeToolbarPosition({
     anchor: {
@@ -789,25 +791,40 @@ export function DiagramCanvas({
     };
   }, [graph?.nodes, graph?.subgraphs, onRenderSettled, svg]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return;
     }
 
+    let frameId = 0;
     const updateViewport = () => {
       const next = measureUnobscuredCanvasViewport(container);
       setCanvasSize((current) => current.height === container.clientHeight && current.width === container.clientWidth
         ? current
         : { height: container.clientHeight, width: container.clientWidth });
       setCanvasViewport((current) => areViewportRectsEqual(current, next) ? current : next);
+      setCanvasViewportMeasured(true);
+    };
+    const scheduleViewportUpdate = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateViewport);
     };
     updateViewport();
-    const resizeObserver = new ResizeObserver(updateViewport);
+    const resizeObserver = new ResizeObserver(scheduleViewportUpdate);
     resizeObserver.observe(container);
-    const mutationObserver = new MutationObserver(updateViewport);
-    mutationObserver.observe(container.closest('.workspace-main') ?? container.parentElement ?? container, { childList: true });
+    const scope = container.closest('.workspace-main') ?? container.parentElement ?? container;
+    const observeFlyouts = () => {
+      scope.querySelectorAll<HTMLElement>('.workspace-flyout').forEach((flyout) => { resizeObserver.observe(flyout); });
+    };
+    observeFlyouts();
+    const mutationObserver = new MutationObserver(() => {
+      observeFlyouts();
+      scheduleViewportUpdate();
+    });
+    mutationObserver.observe(scope, { childList: true });
     return () => {
+      window.cancelAnimationFrame(frameId);
       mutationObserver.disconnect();
       resizeObserver.disconnect();
     };

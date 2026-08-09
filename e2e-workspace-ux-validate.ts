@@ -1091,6 +1091,52 @@ async function expectNoDevelopmentIndicator(page: Page): Promise<void> {
   assert(!hasIndicator, 'Browser evidence is running with a Next.js development indicator; use the production owned-services mode for screenshots.');
 }
 
+async function prepareSettingsTargetForTouch(
+  page: Page,
+  target: Locator,
+  label: string,
+): Promise<void> {
+  await target.waitFor({ state: 'visible', timeout: 15_000 });
+  await target.scrollIntoViewIfNeeded();
+  await target.evaluate((element) => {
+    const dialog = element.closest('[data-testid="workspace-settings-dialog"]');
+    if (!(dialog instanceof HTMLElement)) return;
+    const dialogBounds = dialog.getBoundingClientRect();
+    const targetBounds = element.getBoundingClientRect();
+    dialog.scrollTop += targetBounds.top - dialogBounds.top
+      - ((dialog.clientHeight - targetBounds.height) / 2);
+  });
+  await expect.poll(async () => target.evaluate((element) => {
+    const dialog = element.closest('[data-testid="workspace-settings-dialog"]');
+    if (!(dialog instanceof HTMLElement)) {
+      return { centerHit: false, contained: false, hit: 'missing settings dialog' };
+    }
+    const dialogBounds = dialog.getBoundingClientRect();
+    const targetBounds = element.getBoundingClientRect();
+    const centerX = targetBounds.left + (targetBounds.width / 2);
+    const centerY = targetBounds.top + (targetBounds.height / 2);
+    const hit = document.elementFromPoint(centerX, centerY);
+    const contained = targetBounds.top >= dialogBounds.top - 0.5
+      && targetBounds.bottom <= dialogBounds.bottom + 0.5
+      && targetBounds.left >= dialogBounds.left - 0.5
+      && targetBounds.right <= dialogBounds.right + 0.5;
+    return {
+      centerHit: hit instanceof Node && element.contains(hit),
+      contained,
+      dialog: { bottom: dialogBounds.bottom, left: dialogBounds.left, right: dialogBounds.right, top: dialogBounds.top },
+      hit: hit instanceof Element
+        ? `${hit.tagName.toLowerCase()}[data-testid=${hit.getAttribute('data-testid') ?? ''}][class=${hit.getAttribute('class') ?? ''}]`
+        : 'none',
+      target: { bottom: targetBounds.bottom, left: targetBounds.left, right: targetBounds.right, top: targetBounds.top },
+    };
+  }), {
+    message: `${label} did not settle fully inside the scrollable settings dialog with an unobscured center hit.`,
+    timeout: 5_000,
+  }).toMatchObject({ centerHit: true, contained: true });
+  await assertContainedInViewport(page, target, label);
+  await assertHitTarget(page, target, label);
+}
+
 async function expectResponsiveControls(page: Page, label: string, diagramName: string): Promise<void> {
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
   await selectTabByName(page, diagramName);
@@ -1136,8 +1182,13 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   const settings = await openWorkspaceSettings(page);
   await assertContainedInViewport(page, settings, `${label} workspace settings dialog`);
   if (label.startsWith('mobile')) {
+    const closeSettings = settings.getByRole('button', { name: 'Close', exact: true });
+    await assertContainedInViewport(page, closeSettings, `${label} close settings initial state`);
+    await assertHitTarget(page, closeSettings, `${label} close settings initial state`);
+    const closeBounds = await closeSettings.boundingBox();
+    assert(closeBounds !== null && closeBounds.height >= 44,
+      `${label} close settings must provide a 44px touch target: ${JSON.stringify(closeBounds)}.`);
     for (const [target, targetLabel] of [
-      [settings.getByRole('button', { name: 'Close', exact: true }), 'close settings'],
       [settings.getByRole('button', { name: 'Cancel', exact: true }), 'cancel display-name edit'],
       [settings.getByRole('button', { name: 'Save name', exact: true }), 'save display name'],
       [settings.getByRole('button', { name: /^(Connect my agent|Connection details)$/u }), 'agent connection'],
@@ -1146,7 +1197,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
       [settings.locator('.workspace-settings-theme-option').nth(1), 'Light theme option'],
       [settings.locator('.workspace-settings-theme-option').nth(2), 'Dark theme option'],
     ] as const) {
-      await assertHitTarget(page, target, `${label} ${targetLabel}`);
+      await prepareSettingsTargetForTouch(page, target, `${label} ${targetLabel}`);
       const bounds = await target.boundingBox();
       assert(bounds !== null && bounds.height >= 44,
         `${label} ${targetLabel} must provide a 44px touch target: ${JSON.stringify(bounds)}.`);

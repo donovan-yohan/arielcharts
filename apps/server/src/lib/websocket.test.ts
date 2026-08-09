@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, type RawData } from 'ws';
 import * as Y from 'yjs';
 import { createApp } from '../index.js';
@@ -345,5 +345,60 @@ describe('SessionWebSocketServer', () => {
     });
 
     await replacement.close();
+  });
+
+  it('revokes an upgraded socket while its session registration is pending', async () => {
+    const sessionId = 'abc123de';
+    const session = await app.manager.requireSession(sessionId);
+    const originalRequireSession = app.manager.requireSession.bind(app.manager);
+    let releaseRegistration!: () => void;
+    let markRegistrationPending!: () => void;
+    const registrationGate = new Promise<void>((resolve) => {
+      releaseRegistration = resolve;
+    });
+    const registrationPending = new Promise<void>((resolve) => {
+      markRegistrationPending = resolve;
+    });
+    let deferNextSessionLookup = true;
+    const requireSession = vi.spyOn(app.manager, 'requireSession').mockImplementation(async (requestedSessionId) => {
+      if (requestedSessionId === sessionId && deferNextSessionLookup) {
+        deferNextSessionLookup = false;
+        markRegistrationPending();
+        await registrationGate;
+      }
+      return originalRequireSession(requestedSessionId);
+    });
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws/${sessionId}`, {
+      headers: { origin: 'http://allowed.test', cookie: roomCookie },
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', resolve);
+        socket.once('error', reject);
+      });
+      await registrationPending;
+      expect(socket.readyState).toBe(WebSocket.OPEN);
+      expect(session.sockets.size).toBe(0);
+
+      const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+      const rotated = await fetch(`http://127.0.0.1:${port}/api/rooms/${sessionId}/rotate`, {
+        method: 'POST',
+        headers: { origin: 'http://allowed.test', cookie: roomCookie },
+      });
+      expect(rotated.status).toBe(200);
+      await closed;
+
+      releaseRegistration();
+      await waitFor(() => {
+        expect(session.sockets.size).toBe(0);
+      });
+    } finally {
+      releaseRegistration();
+      requireSession.mockRestore();
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CLOSING) {
+        socket.terminate();
+      }
+    }
   });
 });

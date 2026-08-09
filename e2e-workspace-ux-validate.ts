@@ -1589,6 +1589,54 @@ function historyItem(page: Page, revisionId: string): Locator {
   return page.getByTestId(`history-revision-${revisionId}`);
 }
 
+async function prepareHistoryActionForClick(
+  page: Page,
+  item: Locator,
+  action: Locator,
+  label: string,
+): Promise<void> {
+  const list = page.getByTestId('diagram-history-list');
+  await list.waitFor({ state: 'visible', timeout: 15_000 });
+  await item.waitFor({ state: 'visible', timeout: 15_000 });
+  await item.evaluate((element) => {
+    element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
+  });
+  await action.scrollIntoViewIfNeeded();
+  await expect.poll(async () => action.evaluate((element) => {
+    const itemElement = element.closest('.history-item');
+    const listElement = element.closest('.history-list');
+    if (!(itemElement instanceof HTMLElement) || !(listElement instanceof HTMLElement)) {
+      return { actionContained: false, centerHit: false, hit: 'missing history ancestors', itemContained: false };
+    }
+    const actionBounds = element.getBoundingClientRect();
+    const itemBounds = itemElement.getBoundingClientRect();
+    const listBounds = listElement.getBoundingClientRect();
+    const centerX = actionBounds.left + (actionBounds.width / 2);
+    const centerY = actionBounds.top + (actionBounds.height / 2);
+    const hit = document.elementFromPoint(centerX, centerY);
+    const withinList = (bounds: DOMRect) => bounds.top >= listBounds.top - 0.5
+      && bounds.bottom <= listBounds.bottom + 0.5
+      && bounds.left >= listBounds.left - 0.5
+      && bounds.right <= listBounds.right + 0.5;
+    return {
+      action: { bottom: actionBounds.bottom, left: actionBounds.left, right: actionBounds.right, top: actionBounds.top },
+      actionContained: withinList(actionBounds),
+      centerHit: hit instanceof Node && element.contains(hit),
+      hit: hit instanceof Element
+        ? `${hit.tagName.toLowerCase()}[data-testid=${hit.getAttribute('data-testid') ?? ''}][class=${hit.getAttribute('class') ?? ''}]`
+        : 'none',
+      item: { bottom: itemBounds.bottom, left: itemBounds.left, right: itemBounds.right, top: itemBounds.top },
+      itemContained: withinList(itemBounds),
+      list: { bottom: listBounds.bottom, left: listBounds.left, right: listBounds.right, top: listBounds.top },
+    };
+  }), {
+    message: `${label} did not settle fully inside the history list with an unobscured center hit.`,
+    timeout: 5_000,
+  }).toMatchObject({ actionContained: true, centerHit: true, itemContained: true });
+  await assertContainedInViewport(page, action, label);
+  await assertHitTarget(page, action, label);
+}
+
 function snapshotsMatch(left: YjsSessionSnapshot, right: YjsSessionSnapshot): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -1974,7 +2022,9 @@ async function expectRevisionHistoryCollaboration(
     await ensureFlyout(page, 'activity');
     const staleItem = historyItem(page, historical.revision.id);
     await staleItem.waitFor({ state: 'visible', timeout: 15_000 });
-    await verifiedClick(page, staleItem.getByRole('button', { name: 'Restore', exact: true }), 'stale layout-only restore candidate');
+    const staleRestore = staleItem.getByRole('button', { name: 'Restore', exact: true });
+    await prepareHistoryActionForClick(page, staleItem, staleRestore, 'stale layout-only restore candidate');
+    await verifiedClick(page, staleRestore, 'stale layout-only restore candidate');
     const staleConfirmation = page.getByTestId('history-restore-confirmation');
     await staleConfirmation.waitFor({ state: 'visible', timeout: 15_000 });
     const staleRestoreRequests: Array<{ method: string; path: string }> = [];

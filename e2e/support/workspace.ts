@@ -68,7 +68,7 @@ export async function replaceSource(page: Page, source: string): Promise<void> {
 export async function canonicalSource(page: Page): Promise<string> {
   return page.locator('.cm-line').evaluateAll((lines) => lines.map((line) => {
     const copy = line.cloneNode(true) as HTMLElement;
-    copy.querySelectorAll('[class*="cm-ySelectionCaret"], .cm-ySelectionInfo, .cm-widgetBuffer').forEach((node) => node.remove());
+    copy.querySelectorAll('[contenteditable="false"], .cm-widgetBuffer').forEach((node) => node.remove());
     return (copy.textContent ?? '').replaceAll('\u2060', '');
   }).join('\n'));
 }

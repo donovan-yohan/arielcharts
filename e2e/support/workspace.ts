@@ -62,7 +62,17 @@ export async function replaceSource(page: Page, source: string): Promise<void> {
   const editor = await ensureSourceFlyoutOpen(page);
   await editor.click();
   await page.keyboard.press('ControlOrMeta+A');
-  await page.keyboard.insertText(source);
+  const pasteHandled = await editor.evaluate((element, text) => {
+    const clipboard = new DataTransfer();
+    clipboard.setData('text/plain', text);
+    const event = new ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: clipboard,
+    });
+    return !element.dispatchEvent(event);
+  }, source);
+  assert(pasteHandled, 'CodeMirror did not handle the source replacement paste event.');
 }
 
 export async function canonicalSource(page: Page): Promise<string> {

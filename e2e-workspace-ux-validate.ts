@@ -98,9 +98,45 @@ const SAFE_FLYOUT_MARGIN = 16;
 
 type AgentPresence = { destroy: () => void };
 
+type ComputedNodeColors = {
+  background: string;
+  border: string;
+  text: string;
+};
+
 function record(results: string[], name: string): void {
   results.push(name);
   console.log(`PASS ${name}`);
+}
+
+async function readNodeColors(node: Locator): Promise<ComputedNodeColors> {
+  return node.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, border: style.borderTopColor, text: style.color };
+  });
+}
+
+async function waitForNodeColors(
+  node: Locator,
+  expected: ComputedNodeColors,
+  label: string,
+): Promise<ComputedNodeColors> {
+  let settled: ComputedNodeColors | null = null;
+  await expect.poll(async () => {
+    if (await node.count() === 0) return null;
+    settled = await readNodeColors(node);
+    return settled;
+  }, {
+    message: `${label} did not settle to the source-owned Mermaid colors.`,
+    timeout: 15_000,
+  }).toEqual(expected);
+  assert(settled !== null, `${label} did not render a Mermaid node.`);
+  return settled;
+}
+
+async function waitForFlowchartFixtureRender(page: Page): Promise<void> {
+  await page.locator('.mermaid-flow-node').filter({ hasText: 'Database' }).first()
+    .waitFor({ state: 'visible', timeout: 15_000 });
 }
 
 async function waitForFocusedTestId(page: Page, testId: string, label: string): Promise<void> {
@@ -427,7 +463,9 @@ async function expectTabKeyboardAndRename(page: Page, created: string): Promise<
 
 async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
+  await waitForFlowchartFixtureRender(page);
   await saveScreenshot(page, 'issue-14-source');
   await closeFlyout(page, 'source');
   await saveScreenshot(page, 'issue-14-light-canvas');
@@ -460,20 +498,28 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await saveScreenshot(page, 'issue-14-flowchart-selected');
 
   await replaceSource(page, SOURCE_OWNED_COLOR_FIXTURE);
+  await waitForSource(page, SOURCE_OWNED_COLOR_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   const coloredNode = page.locator('.mermaid-flow-node').filter({ hasText: 'Browser' }).first();
-  const sourceOwnedColors = await coloredNode.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { background: style.backgroundColor, border: style.borderTopColor, text: style.color };
-  });
+  const expectedSourceOwnedColors = {
+    background: 'rgb(255, 236, 153)',
+    border: 'rgb(217, 72, 15)',
+    text: 'rgb(74, 44, 0)',
+  };
+  const sourceOwnedColors = await waitForNodeColors(
+    coloredNode,
+    expectedSourceOwnedColors,
+    'Light source-owned Mermaid classDef',
+  );
   assertExactColor(sourceOwnedColors.background, 'rgb(255, 236, 153)', 'Mermaid classDef #ffec99 fill');
   assertExactColor(sourceOwnedColors.border, 'rgb(217, 72, 15)', 'Mermaid classDef #d9480f stroke');
   assertExactColor(sourceOwnedColors.text, 'rgb(74, 44, 0)', 'Mermaid classDef #4a2c00 text');
   await selectThemePreference(page, 'dark');
-  const afterThemeColors = await coloredNode.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { background: style.backgroundColor, border: style.borderTopColor, text: style.color };
-  });
+  const afterThemeColors = await waitForNodeColors(
+    coloredNode,
+    expectedSourceOwnedColors,
+    'Dark source-owned Mermaid classDef',
+  );
   assertExactColor(afterThemeColors.background, 'rgb(255, 236, 153)', 'Dark Mermaid classDef #ffec99 fill');
   assertExactColor(afterThemeColors.border, 'rgb(217, 72, 15)', 'Dark Mermaid classDef #d9480f stroke');
   assertExactColor(afterThemeColors.text, 'rgb(74, 44, 0)', 'Dark Mermaid classDef #4a2c00 text');
@@ -482,12 +528,14 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await selectThemePreference(page, 'light');
 
   await replaceSource(page, TRANSPARENT_MERMAID_FIXTURE);
+  await waitForSource(page, TRANSPARENT_MERMAID_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   const transparentNode = page.locator('.mermaid-flow-node').filter({ hasText: 'Ghost' }).first();
-  const transparentColors = await transparentNode.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { background: style.backgroundColor, border: style.borderTopColor, text: style.color };
-  });
+  const transparentColors = await waitForNodeColors(transparentNode, {
+    background: 'rgba(0, 0, 0, 0)',
+    border: 'rgba(0, 0, 0, 0)',
+    text: 'rgba(0, 0, 0, 0)',
+  }, 'Transparent source-owned Mermaid classDef');
   assertExactColor(transparentColors.background, 'rgba(0, 0, 0, 0)', 'Mermaid fill:none background');
   assertExactColor(transparentColors.border, 'rgba(0, 0, 0, 0)', 'Mermaid transparent stroke');
   assertExactColor(transparentColors.text, 'rgba(0, 0, 0, 0)', 'Mermaid transparent text');
@@ -540,7 +588,9 @@ async function expectRemoteUpdateWithoutAnchorJump(page: Page, mcp: ModernMcpCli
   await ensureSourceFlyoutOpen(page);
   await waitForSyncedSource(page);
   await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
+  await waitForFlowchartFixtureRender(page);
   const session = await mcp.getSession(sessionId);
   const diagram = session.diagrams.find((candidate) => candidate.name === diagramName);
   assert(diagram, `MCP did not expose diagram ${diagramName}.`);
@@ -805,7 +855,9 @@ async function assertNoProductShadows(page: Page, selectors: Record<string, stri
 async function expectFlatChrome(page: Page): Promise<void> {
   await ensureFlyout(page, 'source');
   await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
+  await waitForFlowchartFixtureRender(page);
   const outerNode = page.locator('.diagram-reactflow-layer .react-flow__node').first();
   const visibleNode = outerNode.locator('.mermaid-flow-node');
   const selectedEdge = page.locator('.diagram-reactflow-layer .react-flow__edge').first();
@@ -915,8 +967,9 @@ async function expectFlatChrome(page: Page): Promise<void> {
 
 async function expectUnstyledNodesUseNeutralThemeColors(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
-  await page.locator('.mermaid-flow-node').first().waitFor({ state: 'visible', timeout: 15_000 });
+  await waitForFlowchartFixtureRender(page);
   await page.locator('.react-flow__edge-path').first().waitFor({ state: 'attached', timeout: 15_000 });
   await assertNoProductShadows(page, {
     edge: '.react-flow__edge-path',
@@ -997,7 +1050,9 @@ async function expectContrastRoles(page: Page): Promise<void> {
 
 async function expectActivityFlyoutFitSafety(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
+  await waitForFlowchartFixtureRender(page);
   await closeFlyout(page, 'source');
   const firstNode = page.locator('.mermaid-flow-node').first();
   await verifiedClick(page, firstNode, 'selected node before activity Fit');

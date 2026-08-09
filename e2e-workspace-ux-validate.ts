@@ -1189,6 +1189,19 @@ async function assertVisiblePhoneActionTargets(page: Page, label: string, state:
     const centerResult = await target.evaluate((element, point) => {
       const hit = document.elementFromPoint(point.x, point.y);
       const targetHit = !!hit && (element === hit || element.contains(hit));
+      let ancestor = element.parentElement;
+      let clippedByScrollContainer = false;
+      while (ancestor && !clippedByScrollContainer) {
+        const style = window.getComputedStyle(ancestor);
+        const clipsX = style.overflowX === 'auto' || style.overflowX === 'scroll';
+        const clipsY = style.overflowY === 'auto' || style.overflowY === 'scroll';
+        if (clipsX || clipsY) {
+          const rect = ancestor.getBoundingClientRect();
+          clippedByScrollContainer = (clipsX && (point.x < rect.left || point.x > rect.right))
+            || (clipsY && (point.y < rect.top || point.y > rect.bottom));
+        }
+        ancestor = ancestor.parentElement;
+      }
       const activeSurfaceSelectors = [
         '[data-testid="source-flyout"]',
         '[data-testid="activity-flyout"]',
@@ -1199,10 +1212,18 @@ async function assertVisiblePhoneActionTargets(page: Page, label: string, state:
         const surface = document.querySelector(selector);
         return surface !== null && surface.contains(hit) && !surface.contains(element);
       });
-      return { occludedByActiveSurface, targetHit };
+      return {
+        clippedByScrollContainer,
+        hitDescription: hit instanceof Element
+          ? `${hit.tagName.toLowerCase()}[data-testid=${hit.getAttribute('data-testid') ?? ''}][class=${hit.getAttribute('class') ?? ''}]`
+          : 'none',
+        occludedByActiveSurface,
+        targetHit,
+      };
     }, { x: box.x + (box.width / 2), y: box.y + (box.height / 2) });
+    if (centerResult.clippedByScrollContainer) continue;
     if (centerResult.occludedByActiveSurface) continue;
-    assert(centerResult.targetHit, `${label} ${state} ${name} is visible and centered in the viewport, but its center is obscured or not clickable.`);
+    assert(centerResult.targetHit, `${label} ${state} ${name} is visible and centered in the viewport, but its center is hit by ${centerResult.hitDescription}.`);
     await assertTouchTarget(page, target, `${label} ${state} ${name}`);
     checked += 1;
   }

@@ -35,7 +35,7 @@ import type { DiagramEdgeIdentity, DiagramLink, DiagramLinkType, DiagramNode, Di
 import { getDiagramEdgeIdentity, resolveDiagramEdgeIndex } from '../lib/diagram-mutations';
 import { measureUnobscuredCanvasViewport, type ViewportRect } from '../lib/canvas-viewport';
 import { shouldCanvasHandleEscape } from '../lib/canvas-keyboard-ownership';
-import { getCanvasToolbarStackGeometry } from '../lib/canvas-toolbar-stack';
+import { getCanvasToolbarStackGeometry, getCanvasToolbarVisibility } from '../lib/canvas-toolbar-stack';
 import { applyCanvasTouchGesture, CanvasTouchGestureController, type CanvasTouchGesture } from '../lib/canvas-touch-gesture';
 import { getConnectNodeActivation } from '../lib/diagram-connect-state';
 import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
@@ -260,6 +260,7 @@ export function DiagramCanvas({
 }: DiagramCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgContainerRef = useRef<HTMLDivElement | null>(null);
+  const addNodeToolbarRef = useRef<HTMLFormElement | null>(null);
   const controlsToolbarRef = useRef<HTMLDivElement | null>(null);
   const touchGestureRef = useRef(new CanvasTouchGestureController());
   const nodeButtonRefs = useRef(new Map<string, HTMLElement | null>());
@@ -267,6 +268,7 @@ export function DiagramCanvas({
   const [mermaidPresentation, setMermaidPresentation] = useState<MermaidPresentation>({ edges: [], nodes: new Map() });
   const [canvasViewport, setCanvasViewport] = useState<ViewportRect>({ height: 0, width: 0, x: 0, y: 0 });
   const [canvasSize, setCanvasSize] = useState({ height: 0, width: 0 });
+  const [addNodeToolbarHeight, setAddNodeToolbarHeight] = useState(0);
   const [controlsToolbarHeight, setControlsToolbarHeight] = useState(0);
   const [uncontrolledNodePositions, setUncontrolledNodePositions] = useState<DiagramNodePositions>({});
   const [liveNodePositions, setLiveNodePositions] = useState<DiagramNodePositions>({});
@@ -592,6 +594,13 @@ export function DiagramCanvas({
 
   const displayedToolbarRect = screenSelectionBounds ?? { height: 0, width: 0, x: 16, y: 16 };
   const canvasToolbarStack = useMemo(() => getCanvasToolbarStackGeometry(canvasSize, canvasViewport, BOTTOM_TOOLBAR_INSET), [canvasSize, canvasViewport]);
+  const canvasToolbarVisibility = getCanvasToolbarVisibility(
+    canvasViewport.height,
+    controlsToolbarHeight,
+    addNodeToolbarHeight,
+    BOTTOM_TOOLBAR_INSET,
+    BOTTOM_TOOLBAR_GAP,
+  );
   const selectedToolbarPosition = getSafeToolbarPosition({
     anchor: {
       x: displayedToolbarRect.x + (displayedToolbarRect.width / 2),
@@ -822,6 +831,25 @@ export function DiagramCanvas({
     observer.observe(toolbar);
     return () => { observer.disconnect(); };
   }, [hasPersistedLayout, isFlowchart, readOnly]);
+
+  useLayoutEffect(() => {
+    const toolbar = addNodeToolbarRef.current;
+    if (!toolbar) {
+      setAddNodeToolbarHeight(0);
+      return;
+    }
+
+    const updateHeight = () => {
+      setAddNodeToolbarHeight((current) => {
+        const next = toolbar.getBoundingClientRect().height;
+        return current === next ? current : next;
+      });
+    };
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(toolbar);
+    return () => { observer.disconnect(); };
+  }, [isFlowchart, readOnly]);
 
   useEffect(() => {
     if (!graph || !isFlowchart) {
@@ -1697,6 +1725,7 @@ export function DiagramCanvas({
           <form
             aria-label="Add Mermaid node"
             data-testid="canvas-add-node-toolbar"
+            ref={addNodeToolbarRef}
             onSubmit={(event) => {
               event.preventDefault();
               addNodeFromToolbar();
@@ -1716,6 +1745,7 @@ export function DiagramCanvas({
               pointerEvents: 'auto',
               position: 'absolute',
               bottom: canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP,
+              visibility: canvasToolbarVisibility.addNode ? 'visible' : 'hidden',
               zIndex: 20,
             }}
           >
@@ -1772,6 +1802,7 @@ export function DiagramCanvas({
             }}
           >
             <button
+              className="canvas-empty-add-button"
               onClick={addDefaultNode}
               style={{
                 background: 'var(--control-surface)',
@@ -1931,6 +1962,7 @@ export function DiagramCanvas({
               pointerEvents: 'auto',
               position: 'absolute',
               right: canvasToolbarStack.right,
+              visibility: canvasToolbarVisibility.controls ? 'visible' : 'hidden',
             }}
           >
             {isFlowchart && hasPersistedLayout ? (

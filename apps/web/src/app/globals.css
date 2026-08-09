@@ -2019,6 +2019,7 @@ code {
 
   .workspace-diagram-tab-action,
   .workspace-diagram-tab-delete {
+    flex: 0 0 44px;
     width: 44px;
     height: 44px;
   }
@@ -2110,6 +2111,10 @@ code {
   .canvas-toolbar-button {
     width: 44px !important;
     height: 44px !important;
+  }
+
+  .canvas-empty-add-button {
+    min-height: 44px;
   }
 
   [data-testid='canvas-controls-toolbar'] {

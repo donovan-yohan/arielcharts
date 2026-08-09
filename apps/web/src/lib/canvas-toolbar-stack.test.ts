@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getCanvasToolbarStackGeometry } from './canvas-toolbar-stack';
+import { getCanvasToolbarStackGeometry, getCanvasToolbarVisibility } from './canvas-toolbar-stack';
 
 describe('getCanvasToolbarStackGeometry', () => {
   it('keeps the stack inside the measured viewport beside a flyout', () => {
@@ -14,5 +14,10 @@ describe('getCanvasToolbarStackGeometry', () => {
       { height: 600, width: 320 },
       { height: 420, width: 320, x: 0, y: 0 },
     )).toEqual({ bottom: 192, left: 12, right: 12 });
+  });
+
+  it('hides controls rather than pushing them outside a fully occluded canvas', () => {
+    expect(getCanvasToolbarVisibility(1, 54, 52)).toEqual({ addNode: false, controls: false });
+    expect(getCanvasToolbarVisibility(154, 54, 52)).toEqual({ addNode: true, controls: true });
   });
 });

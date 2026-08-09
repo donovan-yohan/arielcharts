@@ -6,6 +6,26 @@ export interface CanvasToolbarStackGeometry {
   right: number;
 }
 
+export interface CanvasToolbarVisibility {
+  addNode: boolean;
+  controls: boolean;
+}
+
+/** Hides bottom controls instead of letting a short unobscured viewport push them outside the canvas. */
+export function getCanvasToolbarVisibility(
+  viewportHeight: number,
+  controlsHeight: number,
+  addNodeHeight: number,
+  inset = 12,
+  gap = 12,
+): CanvasToolbarVisibility {
+  const controls = viewportHeight >= controlsHeight + (inset * 2);
+  return {
+    addNode: controls && viewportHeight >= controlsHeight + gap + addNodeHeight + (inset * 2),
+    controls,
+  };
+}
+
 /** Positions a dynamic bottom-control stack inside the currently unobscured canvas viewport. */
 export function getCanvasToolbarStackGeometry(
   canvas: { height: number; width: number },

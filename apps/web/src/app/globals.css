@@ -2242,7 +2242,6 @@ code {
     border-bottom: 0;
     border-radius: 16px 16px 0 0;
     overscroll-behavior: contain;
-    padding-bottom: env(safe-area-inset-bottom);
   }
 
   .workspace-flyout-header {

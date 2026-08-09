@@ -1185,12 +1185,12 @@ async function assertVisiblePhoneActionTargets(page: Page, label: string, state:
       && box.y + (box.height / 2) >= 0
       && box.y + (box.height / 2) <= viewport.height;
     if (!centerVisible) continue;
+    const name = (await target.getAttribute('aria-label')) ?? (await target.textContent())?.trim() ?? `action ${index + 1}`;
     const centerHit = await target.evaluate((element, point) => {
       const hit = document.elementFromPoint(point.x, point.y);
       return !!hit && (element === hit || element.contains(hit));
     }, { x: box.x + (box.width / 2), y: box.y + (box.height / 2) });
-    if (!centerHit) continue;
-    const name = (await target.getAttribute('aria-label')) ?? (await target.textContent())?.trim() ?? `action ${index + 1}`;
+    assert(centerHit, `${label} ${state} ${name} is visible and centered in the viewport, but its center is obscured or not clickable.`);
     await assertTouchTarget(page, target, `${label} ${state} ${name}`);
     checked += 1;
   }

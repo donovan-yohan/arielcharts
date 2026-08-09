@@ -1884,7 +1884,7 @@ code {
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 480px) and (pointer: coarse) {
   html,
   body {
     width: 100%;

@@ -1186,11 +1186,23 @@ async function assertVisiblePhoneActionTargets(page: Page, label: string, state:
       && box.y + (box.height / 2) <= viewport.height;
     if (!centerVisible) continue;
     const name = (await target.getAttribute('aria-label')) ?? (await target.textContent())?.trim() ?? `action ${index + 1}`;
-    const centerHit = await target.evaluate((element, point) => {
+    const centerResult = await target.evaluate((element, point) => {
       const hit = document.elementFromPoint(point.x, point.y);
-      return !!hit && (element === hit || element.contains(hit));
+      const targetHit = !!hit && (element === hit || element.contains(hit));
+      const activeSurfaceSelectors = [
+        '[data-testid="source-flyout"]',
+        '[data-testid="activity-flyout"]',
+        '[data-testid="workspace-settings-dialog"]',
+        '[role="menu"][aria-label="Starter templates"]',
+      ];
+      const occludedByActiveSurface = !targetHit && !!hit && activeSurfaceSelectors.some((selector) => {
+        const surface = document.querySelector(selector);
+        return surface !== null && surface.contains(hit) && !surface.contains(element);
+      });
+      return { occludedByActiveSurface, targetHit };
     }, { x: box.x + (box.width / 2), y: box.y + (box.height / 2) });
-    assert(centerHit, `${label} ${state} ${name} is visible and centered in the viewport, but its center is obscured or not clickable.`);
+    if (centerResult.occludedByActiveSurface) continue;
+    assert(centerResult.targetHit, `${label} ${state} ${name} is visible and centered in the viewport, but its center is obscured or not clickable.`);
     await assertTouchTarget(page, target, `${label} ${state} ${name}`);
     checked += 1;
   }

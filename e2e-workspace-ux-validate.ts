@@ -1524,8 +1524,10 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
     await expect(page.getByRole('tab', { name: 'Phone scratchpad', exact: true })).toHaveCount(0);
     await expectTouchLabelStatus(page, 'Delete', `${label} delete tab`);
   } else {
-    await templateMenu.press('Escape');
+    await waitForFocusedLocator(page, blankTemplate, `${label} opening starter templates`);
+    await blankTemplate.press('Escape');
     await templateMenu.waitFor({ state: 'detached', timeout: 15_000 });
+    await waitForFocusedTestId(page, 'create-diagram-tab', `${label} closing starter templates with Escape`);
   }
 
   await selectTabByName(page, diagramName);

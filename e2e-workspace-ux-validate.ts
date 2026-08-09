@@ -1614,19 +1614,23 @@ async function prepareHistoryActionForClick(
     const centerX = actionBounds.left + (actionBounds.width / 2);
     const centerY = actionBounds.top + (actionBounds.height / 2);
     const hit = document.elementFromPoint(centerX, centerY);
-    const withinList = (bounds: DOMRect) => bounds.top >= listBounds.top - 0.5
-      && bounds.bottom <= listBounds.bottom + 0.5
-      && bounds.left >= listBounds.left - 0.5
-      && bounds.right <= listBounds.right + 0.5;
+    const actionContained = actionBounds.top >= listBounds.top - 0.5
+      && actionBounds.bottom <= listBounds.bottom + 0.5
+      && actionBounds.left >= listBounds.left - 0.5
+      && actionBounds.right <= listBounds.right + 0.5;
+    const itemContained = itemBounds.top >= listBounds.top - 0.5
+      && itemBounds.bottom <= listBounds.bottom + 0.5
+      && itemBounds.left >= listBounds.left - 0.5
+      && itemBounds.right <= listBounds.right + 0.5;
     return {
       action: { bottom: actionBounds.bottom, left: actionBounds.left, right: actionBounds.right, top: actionBounds.top },
-      actionContained: withinList(actionBounds),
+      actionContained,
       centerHit: hit instanceof Node && element.contains(hit),
       hit: hit instanceof Element
         ? `${hit.tagName.toLowerCase()}[data-testid=${hit.getAttribute('data-testid') ?? ''}][class=${hit.getAttribute('class') ?? ''}]`
         : 'none',
       item: { bottom: itemBounds.bottom, left: itemBounds.left, right: itemBounds.right, top: itemBounds.top },
-      itemContained: withinList(itemBounds),
+      itemContained,
       list: { bottom: listBounds.bottom, left: listBounds.left, right: listBounds.right, top: listBounds.top },
     };
   }), {

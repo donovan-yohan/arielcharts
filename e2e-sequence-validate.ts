@@ -10,7 +10,7 @@ import {
   waitForReactFlowNodePositions,
 } from './e2e/support/react-flow';
 import { createRoom, roomShareUrl } from './e2e/support/room-access';
-import { createBlankDiagram } from './e2e/support/workspace';
+import { canonicalSource, createBlankDiagram, waitForInvalidPreview } from './e2e/support/workspace';
 
 const FLOWCHART_FIXTURE = `flowchart LR
   A[Main] --> B[Done]`;
@@ -340,13 +340,21 @@ async function validateSequenceCanvas() {
 
     await tabs.nth(1).click();
     await waitForCanvas(page, 'generic');
-    await replaceSource(page, 'not valid Mermaid');
-    await page.getByTestId('parse-error-banner').waitFor({ state: 'visible', timeout: 15000 });
-    const invalidPreviewRetained = await page.locator('.diagram-canvas-svg svg').count() > 0;
+    const invalidSource = 'not valid Mermaid';
+    const lastValidSvg = await page.locator('.diagram-canvas-svg svg').innerHTML();
+    await replaceSource(page, invalidSource);
+    await waitForInvalidPreview(page);
+    const invalidPreviewRetained = await page.locator('.diagram-canvas-svg svg').innerHTML() === lastValidSvg;
+    const invalidSourceRetained = await canonicalSource(page) === invalidSource;
+    await closeSourceFlyout(page);
+    await waitForInvalidPreview(page);
 
     await tabs.nth(0).click();
     await waitForCanvas(page, 'flowchart');
-    const invalidDoesNotLeak = await page.getByTestId('parse-error-banner').count() === 0;
+    await page.getByTestId('parse-error-banner').waitFor({ state: 'detached', timeout: 15000 });
+    await page.getByTestId('source-parse-status').waitFor({ state: 'detached', timeout: 15000 });
+    const invalidDoesNotLeak = await page.getByTestId('parse-error-banner').count() === 0
+      && await page.getByTestId('source-parse-status').count() === 0;
 
     await page.screenshot({ path: '/tmp/arielcharts-sequence-isolation.png' });
     assertNoPageErrors(diagnostics.pageErrors, 'during the sequence canvas gate');
@@ -364,6 +372,7 @@ async function validateSequenceCanvas() {
       && sameTabTransition.passed
       && flowchartRestored
       && invalidPreviewRetained
+      && invalidSourceRetained
       && invalidDoesNotLeak;
     console.log(`generic zoom transform changed=${zoomChangedTransform}`);
     console.log(`generic Fit transform changed=${fitChangedTransform} restored=${fitRestoredTransform}`);
@@ -372,7 +381,7 @@ async function validateSequenceCanvas() {
     console.log(`multi-selected nodes drag together and persist to fresh peer=${multiSelectedDrag}`);
     console.log(`same-tab flowchart/sequence transition=${sameTabTransition.passed} generic withholds structure=${sameTabTransition.genericWithholdsStructure} flowchart restores structure=${sameTabTransition.flowchartRestoresStructure} generic clears persisted layout=${sameTabTransition.genericClearsPersistedLayout}`);
     console.log(`flowchart controls restore=${flowchartRestored}`);
-    console.log(`invalid generic preview retained=${invalidPreviewRetained}`);
+    console.log(`invalid generic last-valid preview retained=${invalidPreviewRetained} source retained=${invalidSourceRetained}`);
     console.log(`invalid state isolated=${invalidDoesNotLeak}`);
     console.log(passed ? 'SEQUENCE E2E PASSED' : 'SEQUENCE E2E FAILED');
     if (!passed) process.exitCode = 1;

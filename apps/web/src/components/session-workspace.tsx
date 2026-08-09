@@ -465,7 +465,6 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const activeDiagramIdRef = useRef<string | null>(null);
   const activeTouchLabelRef = useRef<HTMLElement | null>(null);
   const touchLabelTimeoutRef = useRef<number | null>(null);
-  const touchLabelSequenceRef = useRef(0);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
@@ -501,7 +500,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const [restoreCandidate, setRestoreCandidate] = useState<DiagramRevisionSummary | null>(null);
   const [restorePending, setRestorePending] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
-  const [touchLabelStatus, setTouchLabelStatus] = useState<{ id: number; label: string } | null>(null);
+  const [touchLabelStatus, setTouchLabelStatus] = useState<{ label: string } | null>(null);
 
   const activeDiagram = useMemo(
     () => getActiveDiagramState(collaboration, activeDiagramId),
@@ -1569,8 +1568,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
     activeTouchLabelRef.current = labelTarget;
     labelTarget.setAttribute('data-touch-label-visible', 'true');
-    touchLabelSequenceRef.current += 1;
-    setTouchLabelStatus({ id: touchLabelSequenceRef.current, label });
+    setTouchLabelStatus({ label });
     touchLabelTimeoutRef.current = window.setTimeout(() => {
       labelTarget.removeAttribute('data-touch-label-visible');
       if (activeTouchLabelRef.current === labelTarget) {
@@ -1816,7 +1814,6 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         aria-live="polite"
         className={`workspace-touch-label-status${touchLabelStatus ? ' is-visible' : ''}`}
         data-testid="workspace-touch-label-status"
-        key={touchLabelStatus?.id ?? 'empty-touch-label'}
         role="status"
       >{touchLabelStatus?.label ?? ''}</div>
 

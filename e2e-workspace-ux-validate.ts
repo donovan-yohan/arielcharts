@@ -1444,7 +1444,16 @@ async function tapTarget(page: Page, target: Locator, label: string): Promise<vo
   await assertTouchTarget(page, target, label);
   const box = await target.boundingBox();
   assert(box, `${label} has no tappable bounds.`);
+  const touchLabelStatus = page.getByTestId('workspace-touch-label-status');
+  await touchLabelStatus.evaluate((element) => {
+    element.setAttribute('data-e2e-live-region-identity', 'stable');
+  });
   await page.touchscreen.tap(box.x + (box.width / 2), box.y + (box.height / 2));
+  await expect(touchLabelStatus, `${label} remounted the persistent touch-label live region.`)
+    .toHaveAttribute('data-e2e-live-region-identity', 'stable');
+  await touchLabelStatus.evaluate((element) => {
+    element.removeAttribute('data-e2e-live-region-identity');
+  });
 }
 
 async function expectTouchLabelStatus(page: Page, expected: string, label: string): Promise<void> {
@@ -1452,6 +1461,12 @@ async function expectTouchLabelStatus(page: Page, expected: string, label: strin
   await expect(status, `${label} did not preserve its touch label outside the action subtree.`).toHaveText(expected);
   await expect(status, `${label} touch label was not visibly presented.`).toHaveClass(/\bis-visible\b/u);
   await assertContainedInViewport(page, status, `${label} touch label`);
+  const overflowStyle = await status.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { overflow: style.overflow, textOverflow: style.textOverflow, whiteSpace: style.whiteSpace };
+  });
+  assert(overflowStyle.overflow === 'hidden' && overflowStyle.textOverflow === 'ellipsis' && overflowStyle.whiteSpace === 'nowrap',
+    `${label} touch label cannot safely truncate a long status: ${JSON.stringify(overflowStyle)}.`);
   await expect(page.locator('.workspace-touch-label[data-touch-label-visible="true"]'),
     `${label} retained a duplicate anchored touch label after pointer release.`).toHaveCount(0);
 }
@@ -1462,6 +1477,44 @@ async function waitForTouchLabelPresentationToClear(page: Page, label: string): 
   await expect(status, `${label} persistent touch label remained visible.`).not.toHaveClass(/\bis-visible\b/u);
   await expect(page.locator('.workspace-touch-label[data-touch-label-visible="true"]'),
     `${label} retained an anchored touch label.`).toHaveCount(0);
+}
+
+async function assertMobileErrorBannerScrollability(page: Page, label: string): Promise<void> {
+  const banner = page.getByTestId('parse-error-banner');
+  await banner.waitFor({ state: 'visible', timeout: 15_000 });
+  const behavior = await banner.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      maxHeight: style.maxHeight,
+      overflowY: style.overflowY,
+      pointerEvents: style.pointerEvents,
+      touchAction: style.touchAction,
+    };
+  });
+  assert(behavior.maxHeight !== 'none' && (behavior.overflowY === 'auto' || behavior.overflowY === 'scroll')
+    && behavior.pointerEvents === 'auto' && behavior.touchAction === 'pan-y',
+  `${label} global Mermaid error is not capped and touch-scrollable: ${JSON.stringify(behavior)}.`);
+  const canvasReceivesTouchesOutsideBanner = await page.evaluate(() => {
+    const bannerElement = document.querySelector<HTMLElement>('[data-testid="parse-error-banner"]');
+    const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+    if (!bannerElement || !canvas) return false;
+    const bannerBounds = bannerElement.getBoundingClientRect();
+    const canvasBounds = canvas.getBoundingClientRect();
+    const ratios = [0.1, 0.5, 0.9];
+    for (const yRatio of ratios) {
+      for (const xRatio of ratios) {
+        const x = canvasBounds.left + (canvasBounds.width * xRatio);
+        const y = canvasBounds.top + (canvasBounds.height * yRatio);
+        const insideBanner = x >= bannerBounds.left && x <= bannerBounds.right
+          && y >= bannerBounds.top && y <= bannerBounds.bottom;
+        const hit = document.elementFromPoint(x, y);
+        if (!insideBanner && hit instanceof Node && canvas.contains(hit)) return true;
+      }
+    }
+    return false;
+  });
+  assert(canvasReceivesTouchesOutsideBanner,
+    `${label} global Mermaid error prevented the canvas receiving pointer hits outside the banner bounds.`);
 }
 
 async function waitForCameraChange(page: Page, previous: string, label: string): Promise<string> {
@@ -1536,14 +1589,29 @@ async function assertPinchZoomIncrease(page: Page, label: string, renderer: 'flo
   const before = parseCameraTransform(beforeTransform, `${label} ${renderer} pinch baseline`);
   const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
   const expansion = 1.35;
+  const canvasBounds = await page.getByTestId('diagram-canvas').boundingBox();
+  assert(canvasBounds, `${label} ${renderer} pinch has no canvas bounds.`);
+  const inset = Math.min(8, canvasBounds.width / 4, canvasBounds.height / 4);
+  const minX = canvasBounds.x + inset;
+  const maxX = canvasBounds.x + canvasBounds.width - inset;
+  const minY = canvasBounds.y + inset;
+  const maxY = canvasBounds.y + canvasBounds.height - inset;
   const movedFirst = {
-    x: center.x + ((first.x - center.x) * expansion),
-    y: center.y + ((first.y - center.y) * expansion),
+    x: Math.max(minX, Math.min(maxX, center.x + ((first.x - center.x) * expansion))),
+    y: Math.max(minY, Math.min(maxY, center.y + ((first.y - center.y) * expansion))),
   };
   const movedSecond = {
-    x: center.x + ((second.x - center.x) * expansion),
-    y: center.y + ((second.y - center.y) * expansion),
+    x: Math.max(minX, Math.min(maxX, center.x + ((second.x - center.x) * expansion))),
+    y: Math.max(minY, Math.min(maxY, center.y + ((second.y - center.y) * expansion))),
   };
+  const initialSeparation = Math.hypot(first.x - second.x, first.y - second.y);
+  const movedSeparation = Math.hypot(movedFirst.x - movedSecond.x, movedFirst.y - movedSecond.y);
+  for (const [pointLabel, gesturePoint] of [['first', movedFirst], ['second', movedSecond]] as const) {
+    assert(gesturePoint.x >= minX && gesturePoint.x <= maxX && gesturePoint.y >= minY && gesturePoint.y <= maxY,
+      `${label} ${renderer} clamped ${pointLabel} pinch point escaped the inset canvas bounds: ${JSON.stringify({ canvasBounds, gesturePoint, inset })}.`);
+  }
+  assert(movedSeparation > initialSeparation,
+    `${label} ${renderer} clamped pinch did not expand touch separation: ${initialSeparation} -> ${movedSeparation}.`);
   const session = await page.context().newCDPSession(page);
   const point = (id: number, x: number, y: number) => ({ force: 1, id, radiusX: 1, radiusY: 1, x, y });
   try {
@@ -1706,6 +1774,10 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   await assertContainedInViewport(page, sourceFlyout, `${label} invalid Mermaid source flyout`);
   await assertContainedInViewport(page, sourceParseStatus, `${label} contextual source parse error`);
   await assertPhoneSurface(page, label, 'source-parse-error');
+
+  await closeFlyout(page, 'source');
+  await waitForInvalidPreview(page);
+  await assertMobileErrorBannerScrollability(page, `${label} global Mermaid error`);
 
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForSource(page, FLOWCHART_FIXTURE);

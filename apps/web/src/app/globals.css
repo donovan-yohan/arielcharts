@@ -1861,6 +1861,7 @@ code {
   bottom: calc(68px + env(safe-area-inset-bottom));
   z-index: 90;
   max-width: calc(100vw - 24px);
+  overflow: hidden;
   padding: 6px 9px;
   border: 1px solid var(--control-border);
   border-radius: 5px;
@@ -1871,6 +1872,7 @@ code {
   pointer-events: none;
   transform: translate(-50%, 4px);
   transition: opacity 120ms ease, transform 120ms ease;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1964,6 +1966,7 @@ code {
     --workspace-mobile-topbar-height: calc(56px + env(safe-area-inset-top));
     --workspace-mobile-tabbar-height: 52px;
     --workspace-mobile-footer-height: calc(56px + env(safe-area-inset-bottom));
+
     min-height: 100dvh;
     height: 100dvh;
     max-height: 100dvh;
@@ -2239,6 +2242,7 @@ code {
     border-bottom: 0;
     border-radius: 16px 16px 0 0;
     overscroll-behavior: contain;
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   .workspace-flyout-header {
@@ -2281,7 +2285,9 @@ code {
     max-height: min(40%, 180px);
     overflow: auto;
     overflow-wrap: anywhere;
-    pointer-events: none;
+    overscroll-behavior: contain;
+    pointer-events: auto;
+    touch-action: pan-y;
   }
 }
 

@@ -76,6 +76,25 @@ async function waitForCanvas(page: Page, mode: 'flowchart' | 'generic'): Promise
   }, mode, { timeout: 15000 });
 }
 
+async function waitForStableSvgInnerHtml(page: Page, label: string): Promise<string> {
+  const svg = page.locator('.diagram-canvas-svg svg');
+  const settleIntervalMs = 300;
+  const deadline = Date.now() + 15_000;
+  let stableSince = Date.now();
+  let value = await svg.innerHTML();
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(50);
+    const nextValue = await svg.innerHTML();
+    if (nextValue !== value) {
+      value = nextValue;
+      stableSince = Date.now();
+      continue;
+    }
+    if (Date.now() - stableSince >= settleIntervalMs) return value;
+  }
+  throw new Error(`${label} did not keep the same SVG markup for ${settleIntervalMs}ms.`);
+}
+
 async function waitForTransformChange(page: Page, layer: Locator, previous: string | null): Promise<string | null> {
   await page.waitForFunction((lastTransform) => {
     const layerElement = document.querySelector('.diagram-canvas-svg')?.parentElement;
@@ -341,7 +360,7 @@ async function validateSequenceCanvas() {
     await tabs.nth(1).click();
     await waitForCanvas(page, 'generic');
     const invalidSource = 'not valid Mermaid';
-    const lastValidSvg = await page.locator('.diagram-canvas-svg svg').innerHTML();
+    const lastValidSvg = await waitForStableSvgInnerHtml(page, 'Generic last-valid preview');
     await replaceSource(page, invalidSource);
     await waitForInvalidPreview(page);
     const invalidPreviewRetained = await page.locator('.diagram-canvas-svg svg').innerHTML() === lastValidSvg;

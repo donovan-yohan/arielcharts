@@ -110,6 +110,7 @@ export function WorkspaceTabStrip({
         <button
           aria-controls="source-flyout"
           aria-expanded={sourceOpen}
+          aria-label={sourceOpen ? 'Hide source' : 'Show source'}
           className={`workspace-source-toggle workspace-touch-label${sourceOpen ? ' is-active' : ''}`}
           data-touch-label={sourceOpen ? 'Hide source' : 'Show source'}
           data-testid="source-flyout-toggle"

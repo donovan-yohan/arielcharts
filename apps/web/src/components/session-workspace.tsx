@@ -510,7 +510,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
   useEffect(() => {
     activeDiagramIdRef.current = activeDiagramId;
-  }, [activeDiagramId]);
+  }, [activeDiagramId, diagrams]);
 
   useEffect(() => () => {
     if (touchLabelTimeoutRef.current !== null) {
@@ -1440,7 +1440,24 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       return;
     }
     const frame = window.requestAnimationFrame(() => {
-      diagramTabRefs.current.get(activeDiagramId)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const tab = diagramTabRefs.current.get(activeDiagramId);
+      const tabContainer = tab?.closest<HTMLElement>('.workspace-diagram-tab');
+      const scroller = tabContainer?.closest<HTMLElement>('.workspace-diagram-tab-scroller');
+      if (!tabContainer || !scroller) {
+        tab?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return;
+      }
+      const tabRect = tabContainer.getBoundingClientRect();
+      const scrollerRect = scroller.getBoundingClientRect();
+      const tabLeft = scroller.scrollLeft + tabRect.left - scrollerRect.left;
+      const tabRight = scroller.scrollLeft + tabRect.right - scrollerRect.left;
+      const visibleLeft = scroller.scrollLeft;
+      const visibleRight = visibleLeft + scroller.clientWidth;
+      if (tabRight > visibleRight) {
+        scroller.scrollLeft = tabRight - scroller.clientWidth;
+      } else if (tabLeft < visibleLeft) {
+        scroller.scrollLeft = tabLeft;
+      }
     });
     return () => { window.cancelAnimationFrame(frame); };
   }, [activeDiagramId]);

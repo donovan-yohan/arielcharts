@@ -167,7 +167,15 @@ export async function waitForCanvas(page: Page, mode: 'flowchart' | 'generic'): 
 }
 
 export async function waitForInvalidPreview(page: Page): Promise<void> {
-  await page.getByTestId('parse-error-banner').waitFor({ state: 'visible', timeout: 15_000 });
+  const globalStatus = page.getByTestId('parse-error-banner');
+  const sourceStatus = page.getByTestId('source-parse-status');
+  const sourceOpen = await page.getByTestId('source-flyout').isVisible();
+  const expectedStatus = sourceOpen ? sourceStatus : globalStatus;
+  const unexpectedStatus = sourceOpen ? globalStatus : sourceStatus;
+
+  await expectedStatus.waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(expectedStatus).toContainText(/preview kept on last valid diagram/iu);
+  await expect(unexpectedStatus).toHaveCount(0);
   assert(await page.locator('.diagram-canvas-svg svg').count() > 0, 'Invalid Mermaid removed the last valid visual preview.');
 }
 

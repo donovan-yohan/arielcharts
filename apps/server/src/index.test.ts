@@ -7,6 +7,7 @@ import { WebSocket } from 'ws';
 import { createApp } from './index.js';
 import { createActivityEvent } from './lib/activity.js';
 import type { ServerEnv } from './lib/types.js';
+import { SessionWebSocketServer } from './lib/websocket.js';
 
 const MCP_PROTOCOL_VERSION = '2026-07-28';
 
@@ -131,6 +132,83 @@ describe('server integration', () => {
       socket.once('close', () => resolve());
     });
     expect(await app.manager.readSession(missingId)).toBeNull();
+  });
+
+  it('revalidates browser room access immediately before a WebSocket upgrade', async () => {
+    const authenticate = vi.spyOn(app.roomAccess, 'authenticateBrowserCookie')
+      .mockResolvedValueOnce({ sessionId: 'abc123de', accessVersion: 1 })
+      .mockRejectedValueOnce(new Error('Room key rotated.'));
+    const upgrade = vi.spyOn(SessionWebSocketServer.prototype, 'upgrade');
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws/abc123de`, {
+      headers: { origin: 'http://allowed.test', cookie: roomCookie },
+    });
+
+    try {
+      await new Promise<void>((resolve) => {
+        socket.once('error', resolve);
+        socket.once('close', resolve);
+      });
+      expect(authenticate).toHaveBeenCalledTimes(2);
+      expect(upgrade).not.toHaveBeenCalled();
+    } finally {
+      authenticate.mockRestore();
+      upgrade.mockRestore();
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CLOSING) {
+        socket.terminate();
+      }
+    }
+  });
+
+  it('rejects a stale final WebSocket authorization after room-key rotation completes', async () => {
+    const originalAuthenticate = app.roomAccess.authenticateBrowserCookie.bind(app.roomAccess);
+    const staleAuthorization = { sessionId: 'abc123de', accessVersion: 1 };
+    let releaseFinalAuthorization!: () => void;
+    let markFinalAuthorizationPending!: () => void;
+    const finalAuthorization = new Promise<typeof staleAuthorization>((resolve) => {
+      releaseFinalAuthorization = () => resolve(staleAuthorization);
+    });
+    const finalAuthorizationPending = new Promise<void>((resolve) => {
+      markFinalAuthorizationPending = resolve;
+    });
+    let authenticationCount = 0;
+    const authenticate = vi.spyOn(app.roomAccess, 'authenticateBrowserCookie').mockImplementation((sessionId, request) => {
+      authenticationCount += 1;
+      if (authenticationCount === 2) {
+        markFinalAuthorizationPending();
+        return finalAuthorization;
+      }
+      return originalAuthenticate(sessionId, request);
+    });
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws/abc123de`, {
+      headers: { origin: 'http://allowed.test', cookie: roomCookie },
+    });
+
+    try {
+      await finalAuthorizationPending;
+      const rotated = await fetch(`http://127.0.0.1:${port}/api/rooms/abc123de/rotate`, {
+        method: 'POST',
+        headers: { origin: 'http://allowed.test', cookie: roomCookie },
+      });
+      expect(rotated.status).toBe(200);
+
+      const rejected = new Promise<void>((resolve, reject) => {
+        socket.once('open', () => reject(new Error('Expected stale authorization to reject the WebSocket upgrade.')));
+        socket.once('error', () => resolve());
+        socket.once('close', () => resolve());
+      });
+      releaseFinalAuthorization();
+      await rejected;
+
+      const session = await app.manager.requireSession('abc123de');
+      expect(authenticationCount).toBe(3);
+      expect(session.sockets.size).toBe(0);
+    } finally {
+      releaseFinalAuthorization();
+      authenticate.mockRestore();
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CLOSING) {
+        socket.terminate();
+      }
+    }
   });
 
   it('exchanges a raw key once, rotates capability access, and revokes existing WebSocket, cookie, and MCP authorization', async () => {

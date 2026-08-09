@@ -265,7 +265,7 @@ export function createApp(env = loadServerEnv()) {
       try {
         const authorized = await roomAccess.authenticateBrowserCookie(rotateSessionId, request);
         const grant = await roomAccess.rotate(rotateSessionId, authorized.accessVersion);
-        await websocketServer.closeRoom(rotateSessionId);
+        await websocketServer.closeRoom(rotateSessionId, grant.record.accessVersion);
         sendJson(response, 200, { room_key: grant.roomKey }, {
           ...corsHeaders,
           ...roomAccess.browserCookieHeaders(rotateSessionId, grant.record.accessVersion),
@@ -439,8 +439,12 @@ export function createApp(env = loadServerEnv()) {
     void roomAccess.authenticateBrowserCookie(sessionId, request)
       .then(() => {
         if (socket.destroyed) return;
+        return roomAccess.authenticateBrowserCookie(sessionId, request);
+      })
+      .then((authorized) => {
+        if (socket.destroyed || !authorized) return;
         clearRawSocketGuard();
-        websocketServer.upgrade({ request, socket, head, sessionId });
+        websocketServer.upgrade({ request, socket, head, sessionId, accessVersion: authorized.accessVersion });
       })
       .catch(() => socket.destroy());
   });

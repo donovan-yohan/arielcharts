@@ -72,17 +72,27 @@ function encodeAwarenessEntries(entries: AwarenessEntry[]): Uint8Array {
 export class SessionWebSocketServer {
   private readonly wss = new WebSocketServer({ noServer: true });
   private readonly observedDocs = new WeakSet<object>();
+  private readonly minimumAccessVersions = new Map<string, number>();
+  /**
+   * An upgraded connection does not join SessionState.sockets until its
+   * asynchronous session lookup completes. Track that interval so key
+   * rotation can revoke it as well.
+   */
+  private readonly pendingSockets = new Map<string, Set<WebSocket>>();
 
   constructor(private readonly manager: SessionManager) {
     this.wss.on('connection', (socket: WebSocket, _request: IncomingMessage, sessionId: string) => {
+      this.trackPendingSocket(sessionId, socket);
       void this.handleConnection(socket, sessionId).catch((error) => {
         console.error('WebSocket connection handling failed:', error);
+        this.untrackPendingSocket(sessionId, socket);
         socket.close();
       });
       socket.on('error', () => {
         socket.close();
       });
       socket.on('close', () => {
+        this.untrackPendingSocket(sessionId, socket);
         void this.handleClose(socket, sessionId).catch((error) => {
           console.error('WebSocket close handling failed:', error);
         });
@@ -100,11 +110,15 @@ export class SessionWebSocketServer {
     return pathname.startsWith('/ws/');
   }
 
-  async upgrade({ request, socket, head, sessionId }: UpgradeContext): Promise<void> {
+  async upgrade({ request, socket, head, sessionId, accessVersion }: UpgradeContext): Promise<void> {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
     const pathSessionId = pathname.replace(/^\/ws\//u, '');
 
     if (!isValidSessionId(sessionId) || sessionId !== pathSessionId) {
+      socket.destroy();
+      return;
+    }
+    if (accessVersion < (this.minimumAccessVersions.get(sessionId) ?? 0)) {
       socket.destroy();
       return;
     }
@@ -115,6 +129,13 @@ export class SessionWebSocketServer {
   }
 
   async close(): Promise<void> {
+    for (const sockets of this.pendingSockets.values()) {
+      for (const socket of sockets) {
+        socket.terminate();
+      }
+    }
+    this.pendingSockets.clear();
+
     for (const client of this.wss.clients) {
       client.terminate();
     }
@@ -132,7 +153,15 @@ export class SessionWebSocketServer {
   }
 
   /** Rotation revokes already-upgraded peers; cookie checks alone only protect reconnects. */
-  async closeRoom(sessionId: string): Promise<void> {
+  async closeRoom(sessionId: string, accessVersion: number): Promise<void> {
+    this.minimumAccessVersions.set(sessionId, Math.max(
+      this.minimumAccessVersions.get(sessionId) ?? 0,
+      accessVersion,
+    ));
+    for (const socket of [...(this.pendingSockets.get(sessionId) ?? [])]) {
+      socket.terminate();
+    }
+
     let session: SessionState;
     try {
       session = await this.manager.requireSession(sessionId);
@@ -147,9 +176,11 @@ export class SessionWebSocketServer {
   private async handleConnection(socket: WebSocket, sessionId: string): Promise<void> {
     const session = await this.manager.requireSession(sessionId);
     if (socket.readyState !== WebSocket.OPEN) {
+      this.untrackPendingSocket(sessionId, socket);
       return;
     }
     this.ensureSocketRegistered(session, socket);
+    this.untrackPendingSocket(sessionId, socket);
     socket.send(Buffer.from(encodeMessage(MESSAGE_TYPE_SYNC, (encoderInstance) => {
       syncProtocol.writeSyncStep1(encoderInstance, session.doc);
     })));
@@ -182,6 +213,9 @@ export class SessionWebSocketServer {
     }
 
     const session = await this.manager.requireSession(sessionId);
+    if (sender.readyState !== WebSocket.OPEN) {
+      return;
+    }
     this.ensureSocketRegistered(session, sender);
     const decoderInstance = decoding.createDecoder(buffer);
     const messageType = decoding.readVarUint(decoderInstance);
@@ -232,6 +266,27 @@ export class SessionWebSocketServer {
     session.sockets.add(socket);
     if (!session.socketClientIds.has(socket)) {
       session.socketClientIds.set(socket, new Set());
+    }
+  }
+
+  private trackPendingSocket(sessionId: string, socket: WebSocket): void {
+    let sockets = this.pendingSockets.get(sessionId);
+    if (!sockets) {
+      sockets = new Set();
+      this.pendingSockets.set(sessionId, sockets);
+    }
+    sockets.add(socket);
+  }
+
+  private untrackPendingSocket(sessionId: string, socket: WebSocket): void {
+    const sockets = this.pendingSockets.get(sessionId);
+    if (!sockets) {
+      return;
+    }
+
+    sockets.delete(socket);
+    if (sockets.size === 0) {
+      this.pendingSockets.delete(sessionId);
     }
   }
 

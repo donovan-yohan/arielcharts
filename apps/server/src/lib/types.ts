@@ -94,4 +94,5 @@ export interface UpgradeContext {
   socket: Duplex;
   head: Buffer;
   sessionId: string;
+  accessVersion: number;
 }

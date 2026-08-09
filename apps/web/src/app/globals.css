@@ -1468,6 +1468,24 @@ code {
   min-height: 0;
 }
 
+.workspace-source-status {
+  display: grid;
+  gap: 3px;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--status-danger-border);
+  background: var(--status-danger-surface);
+  color: var(--status-danger-text);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.workspace-source-status strong {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .workspace-flyout-switch {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1837,6 +1855,32 @@ code {
   overflow: auto;
 }
 
+.workspace-touch-label-status {
+  position: fixed;
+  left: 50%;
+  bottom: calc(68px + env(safe-area-inset-bottom));
+  z-index: 90;
+  max-width: calc(100vw - 24px);
+  overflow: hidden;
+  padding: 6px 9px;
+  border: 1px solid var(--control-border);
+  border-radius: 5px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: 600 12px/1.2 var(--font-sans);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-touch-label-status.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 @media (max-width: 960px) {
   .workspace-topbar {
     height: auto;
@@ -1866,10 +1910,14 @@ code {
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 480px) and (pointer: coarse) {
   html,
   body {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     overflow: auto;
+    overflow-x: hidden;
   }
 
   .session-shell {
@@ -1915,21 +1963,90 @@ code {
   }
 
   .workspace-shell {
-    min-height: 100vh;
-    height: 100vh;
+    --workspace-mobile-topbar-height: calc(56px + env(safe-area-inset-top));
+    --workspace-mobile-tabbar-height: 52px;
+    --workspace-mobile-footer-height: calc(56px + env(safe-area-inset-bottom));
+
+    min-height: 100dvh;
+    height: 100dvh;
+    max-height: 100dvh;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .workspace-topbar {
+    height: var(--workspace-mobile-topbar-height);
+    min-height: var(--workspace-mobile-topbar-height);
+    flex-direction: row;
+    align-items: center;
+    padding: max(6px, env(safe-area-inset-top)) 10px 6px;
+  }
+
+  .workspace-topbar-left,
+  .workspace-topbar-right {
+    width: auto;
+    min-width: 0;
+  }
+
+  .workspace-topbar-right {
+    flex: 0 1 auto;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .workspace-logo {
+    font-size: 16px;
+  }
+
+  .workspace-main,
+  .workspace-pane,
+  .workspace-diagram-tabs {
+    min-width: 0;
   }
 
   .workspace-diagram-tabs {
-    padding-inline: 8px;
+    height: var(--workspace-mobile-tabbar-height);
+    min-height: var(--workspace-mobile-tabbar-height);
+    gap: 0;
+    padding-inline: 4px;
+  }
+
+  .workspace-diagram-tab-scroller {
+    overscroll-behavior-x: contain;
+  }
+
+  .workspace-diagram-tab {
+    max-width: min(52vw, 220px);
+  }
+
+  .workspace-diagram-tab-action,
+  .workspace-diagram-tab-delete {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .workspace-diagram-tab-input {
+    min-height: 44px;
+    margin-block: 4px;
   }
 
   .workspace-template-menu {
     position: fixed;
+    z-index: 50;
     top: auto;
-    left: 8px;
     right: 8px;
-    bottom: max(48px, calc(40px + env(safe-area-inset-bottom)));
+    bottom: calc(var(--workspace-mobile-footer-height) + 8px);
+    left: 8px;
     width: auto;
+    max-height: min(420px, calc(100dvh - var(--workspace-mobile-topbar-height) - var(--workspace-mobile-tabbar-height) - var(--workspace-mobile-footer-height) - 24px));
+    border-radius: 16px;
+    padding: 8px;
+  }
+
+  .workspace-template-menu-item {
+    min-height: 52px;
   }
 
   .workspace-settings-trigger {
@@ -1952,12 +2069,22 @@ code {
 
   .workspace-settings-dialog {
     position: fixed;
-    top: max(8px, env(safe-area-inset-top));
+    top: calc(env(safe-area-inset-top) + 8px);
     right: 8px;
+    bottom: calc(env(safe-area-inset-bottom) + 8px);
     left: 8px;
     width: auto;
-    max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: none;
+    overflow-y: auto;
     overscroll-behavior: contain;
+  }
+
+  .workspace-settings-heading {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    background: var(--surface-raised);
+    box-shadow: none;
   }
 
   .workspace-share-button {
@@ -1992,6 +2119,72 @@ code {
     justify-content: center;
   }
 
+  .canvas-toolbar-button {
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  .canvas-empty-add-button {
+    min-height: 44px;
+  }
+
+  [data-testid='canvas-controls-toolbar'] {
+    flex-wrap: wrap;
+    gap: 4px !important;
+    justify-content: flex-end;
+    padding: 4px !important;
+  }
+
+  .workspace-touch-label {
+    position: relative;
+  }
+
+  .workspace-touch-label::after {
+    position: absolute;
+    z-index: 70;
+    right: 0;
+    bottom: calc(100% + 6px);
+    max-width: min(180px, calc(100vw - 16px));
+    padding: 5px 7px;
+    border: 1px solid var(--control-border);
+    border-radius: 4px;
+    background: var(--surface-raised);
+    color: var(--ink);
+    content: attr(data-touch-label);
+    font: 600 11px/1.2 var(--font-sans);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(3px);
+    transition: opacity 120ms ease, transform 120ms ease;
+    white-space: nowrap;
+  }
+
+  .workspace-touch-label:focus-visible::after,
+  .workspace-touch-label:active::after,
+  .workspace-touch-label[data-touch-label-visible='true']::after {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .workspace-topbar .workspace-touch-label::after {
+    top: calc(100% + 6px);
+    bottom: auto;
+    transform: translateY(-3px);
+  }
+
+  .workspace-topbar .workspace-touch-label:focus-visible::after,
+  .workspace-topbar .workspace-touch-label:active::after,
+  .workspace-topbar .workspace-touch-label[data-touch-label-visible='true']::after {
+    transform: translateY(0);
+  }
+
+  @media (hover: hover) {
+    .workspace-touch-label:hover::after {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
   .workspace-footer-toggle {
     min-height: 44px;
     min-width: 44px;
@@ -2002,7 +2195,8 @@ code {
   }
 
   .workspace-footer {
-    padding-inline: 10px;
+    min-height: var(--workspace-mobile-footer-height);
+    padding: 7px 10px max(7px, env(safe-area-inset-bottom));
   }
 
   .workspace-footer-left {
@@ -2036,8 +2230,30 @@ code {
   }
 
   .workspace-flyout {
-    width: 100%;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
     max-width: none;
+    height: min(76dvh, 100%);
+    max-height: 100%;
+    border: 1px solid var(--control-border);
+    border-bottom: 0;
+    border-radius: 16px 16px 0 0;
+    overscroll-behavior: contain;
+  }
+
+  .workspace-flyout-header {
+    min-height: 56px;
+  }
+
+  .workspace-flyout-meta {
+    min-height: 44px;
+  }
+
+  .workspace-flyout-switch {
+    min-height: 48px;
   }
 
   .workspace-flyout .workspace-icon-button {
@@ -2055,6 +2271,22 @@ code {
   .history-preview-notice {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .history-list,
+  .activity-list {
+    overscroll-behavior: contain;
+  }
+
+  .error-banner {
+    z-index: 42;
+    width: min(560px, calc(100% - 24px));
+    max-height: min(40%, 180px);
+    overflow: auto;
+    overflow-wrap: anywhere;
+    overscroll-behavior: contain;
+    pointer-events: auto;
+    touch-action: pan-y;
   }
 }
 

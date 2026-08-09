@@ -4,11 +4,13 @@ import { WebSocket } from 'ws';
 import * as Y from 'yjs';
 import {
   DESKTOP_VIEWPORT,
+  MOBILE_LANDSCAPE_VIEWPORT,
   MOBILE_VIEWPORT,
   NARROW_MOBILE_VIEWPORT,
   TABLET_VIEWPORT,
   launchBrowserHarness,
   saveScreenshot,
+  saveViewportScreenshot,
   type BrowserHarness,
 } from './e2e/support/browser.ts';
 import { assert, describeError } from './e2e/support/assert.ts';
@@ -16,10 +18,12 @@ import {
   assertAnchorsStable,
   assertContainedInViewport,
   assertContrastAtLeast,
+  assertDocumentMatchesViewport,
   assertDocumentHasNoHorizontalOverflow,
   assertExactColor,
   assertHitTarget,
   assertNeutralColor,
+  assertTouchTarget,
   snapshotAnchors,
   verifiedClick,
 } from './e2e/support/interactions.ts';
@@ -94,9 +98,45 @@ const SAFE_FLYOUT_MARGIN = 16;
 
 type AgentPresence = { destroy: () => void };
 
+type ComputedNodeColors = {
+  background: string;
+  border: string;
+  text: string;
+};
+
 function record(results: string[], name: string): void {
   results.push(name);
   console.log(`PASS ${name}`);
+}
+
+async function readNodeColors(node: Locator): Promise<ComputedNodeColors> {
+  return node.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, border: style.borderTopColor, text: style.color };
+  });
+}
+
+async function waitForNodeColors(
+  node: Locator,
+  expected: ComputedNodeColors,
+  label: string,
+): Promise<ComputedNodeColors> {
+  let settled: ComputedNodeColors | null = null;
+  await expect.poll(async () => {
+    if (await node.count() === 0) return null;
+    settled = await readNodeColors(node);
+    return settled;
+  }, {
+    message: `${label} did not settle to the source-owned Mermaid colors.`,
+    timeout: 15_000,
+  }).toEqual(expected);
+  assert(settled !== null, `${label} did not render a Mermaid node.`);
+  return settled;
+}
+
+async function waitForFlowchartFixtureRender(page: Page): Promise<void> {
+  await page.locator('.mermaid-flow-node').filter({ hasText: 'Database' }).first()
+    .waitFor({ state: 'visible', timeout: 15_000 });
 }
 
 async function waitForFocusedTestId(page: Page, testId: string, label: string): Promise<void> {
@@ -423,7 +463,9 @@ async function expectTabKeyboardAndRename(page: Page, created: string): Promise<
 
 async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
+  await waitForFlowchartFixtureRender(page);
   await saveScreenshot(page, 'issue-14-source');
   await closeFlyout(page, 'source');
   await saveScreenshot(page, 'issue-14-light-canvas');
@@ -456,20 +498,28 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await saveScreenshot(page, 'issue-14-flowchart-selected');
 
   await replaceSource(page, SOURCE_OWNED_COLOR_FIXTURE);
+  await waitForSource(page, SOURCE_OWNED_COLOR_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   const coloredNode = page.locator('.mermaid-flow-node').filter({ hasText: 'Browser' }).first();
-  const sourceOwnedColors = await coloredNode.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { background: style.backgroundColor, border: style.borderTopColor, text: style.color };
-  });
+  const expectedSourceOwnedColors = {
+    background: 'rgb(255, 236, 153)',
+    border: 'rgb(217, 72, 15)',
+    text: 'rgb(74, 44, 0)',
+  };
+  const sourceOwnedColors = await waitForNodeColors(
+    coloredNode,
+    expectedSourceOwnedColors,
+    'Light source-owned Mermaid classDef',
+  );
   assertExactColor(sourceOwnedColors.background, 'rgb(255, 236, 153)', 'Mermaid classDef #ffec99 fill');
   assertExactColor(sourceOwnedColors.border, 'rgb(217, 72, 15)', 'Mermaid classDef #d9480f stroke');
   assertExactColor(sourceOwnedColors.text, 'rgb(74, 44, 0)', 'Mermaid classDef #4a2c00 text');
   await selectThemePreference(page, 'dark');
-  const afterThemeColors = await coloredNode.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { background: style.backgroundColor, border: style.borderTopColor, text: style.color };
-  });
+  const afterThemeColors = await waitForNodeColors(
+    coloredNode,
+    expectedSourceOwnedColors,
+    'Dark source-owned Mermaid classDef',
+  );
   assertExactColor(afterThemeColors.background, 'rgb(255, 236, 153)', 'Dark Mermaid classDef #ffec99 fill');
   assertExactColor(afterThemeColors.border, 'rgb(217, 72, 15)', 'Dark Mermaid classDef #d9480f stroke');
   assertExactColor(afterThemeColors.text, 'rgb(74, 44, 0)', 'Dark Mermaid classDef #4a2c00 text');
@@ -478,12 +528,14 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await selectThemePreference(page, 'light');
 
   await replaceSource(page, TRANSPARENT_MERMAID_FIXTURE);
+  await waitForSource(page, TRANSPARENT_MERMAID_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   const transparentNode = page.locator('.mermaid-flow-node').filter({ hasText: 'Ghost' }).first();
-  const transparentColors = await transparentNode.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { background: style.backgroundColor, border: style.borderTopColor, text: style.color };
-  });
+  const transparentColors = await waitForNodeColors(transparentNode, {
+    background: 'rgba(0, 0, 0, 0)',
+    border: 'rgba(0, 0, 0, 0)',
+    text: 'rgba(0, 0, 0, 0)',
+  }, 'Transparent source-owned Mermaid classDef');
   assertExactColor(transparentColors.background, 'rgba(0, 0, 0, 0)', 'Mermaid fill:none background');
   assertExactColor(transparentColors.border, 'rgba(0, 0, 0, 0)', 'Mermaid transparent stroke');
   assertExactColor(transparentColors.text, 'rgba(0, 0, 0, 0)', 'Mermaid transparent text');
@@ -536,7 +588,9 @@ async function expectRemoteUpdateWithoutAnchorJump(page: Page, mcp: ModernMcpCli
   await ensureSourceFlyoutOpen(page);
   await waitForSyncedSource(page);
   await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
+  await waitForFlowchartFixtureRender(page);
   const session = await mcp.getSession(sessionId);
   const diagram = session.diagrams.find((candidate) => candidate.name === diagramName);
   assert(diagram, `MCP did not expose diagram ${diagramName}.`);
@@ -801,7 +855,9 @@ async function assertNoProductShadows(page: Page, selectors: Record<string, stri
 async function expectFlatChrome(page: Page): Promise<void> {
   await ensureFlyout(page, 'source');
   await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
+  await waitForFlowchartFixtureRender(page);
   const outerNode = page.locator('.diagram-reactflow-layer .react-flow__node').first();
   const visibleNode = outerNode.locator('.mermaid-flow-node');
   const selectedEdge = page.locator('.diagram-reactflow-layer .react-flow__edge').first();
@@ -911,8 +967,9 @@ async function expectFlatChrome(page: Page): Promise<void> {
 
 async function expectUnstyledNodesUseNeutralThemeColors(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
-  await page.locator('.mermaid-flow-node').first().waitFor({ state: 'visible', timeout: 15_000 });
+  await waitForFlowchartFixtureRender(page);
   await page.locator('.react-flow__edge-path').first().waitFor({ state: 'attached', timeout: 15_000 });
   await assertNoProductShadows(page, {
     edge: '.react-flow__edge-path',
@@ -993,7 +1050,9 @@ async function expectContrastRoles(page: Page): Promise<void> {
 
 async function expectActivityFlyoutFitSafety(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
+  await waitForFlowchartFixtureRender(page);
   await closeFlyout(page, 'source');
   const firstNode = page.locator('.mermaid-flow-node').first();
   await verifiedClick(page, firstNode, 'selected node before activity Fit');
@@ -1030,6 +1089,120 @@ async function expectActivityFlyoutFitSafety(page: Page): Promise<void> {
 async function expectNoDevelopmentIndicator(page: Page): Promise<void> {
   const hasIndicator = await page.evaluate(() => !!document.querySelector('nextjs-portal, [data-nextjs-dev-tools], [data-nextjs-toast]'));
   assert(!hasIndicator, 'Browser evidence is running with a Next.js development indicator; use the production owned-services mode for screenshots.');
+}
+
+async function prepareSettingsTargetForTouch(
+  page: Page,
+  target: Locator,
+  label: string,
+): Promise<void> {
+  await target.waitFor({ state: 'visible', timeout: 15_000 });
+  await target.scrollIntoViewIfNeeded();
+  await target.evaluate((element) => {
+    const dialog = element.closest('[data-testid="workspace-settings-dialog"]');
+    if (!(dialog instanceof HTMLElement)) return;
+    const dialogBounds = dialog.getBoundingClientRect();
+    const targetBounds = element.getBoundingClientRect();
+    dialog.scrollTop += targetBounds.top - dialogBounds.top
+      - ((dialog.clientHeight - targetBounds.height) / 2);
+  });
+  await expect.poll(async () => target.evaluate((element) => {
+    const dialog = element.closest('[data-testid="workspace-settings-dialog"]');
+    if (!(dialog instanceof HTMLElement)) {
+      return { centerHit: false, contained: false, hit: 'missing settings dialog' };
+    }
+    const dialogBounds = dialog.getBoundingClientRect();
+    const targetBounds = element.getBoundingClientRect();
+    const centerX = targetBounds.left + (targetBounds.width / 2);
+    const centerY = targetBounds.top + (targetBounds.height / 2);
+    const hit = document.elementFromPoint(centerX, centerY);
+    const contained = targetBounds.top >= dialogBounds.top - 0.5
+      && targetBounds.bottom <= dialogBounds.bottom + 0.5
+      && targetBounds.left >= dialogBounds.left - 0.5
+      && targetBounds.right <= dialogBounds.right + 0.5;
+    return {
+      centerHit: hit instanceof Node && element.contains(hit),
+      contained,
+      dialog: { bottom: dialogBounds.bottom, left: dialogBounds.left, right: dialogBounds.right, top: dialogBounds.top },
+      hit: hit instanceof Element
+        ? `${hit.tagName.toLowerCase()}[data-testid=${hit.getAttribute('data-testid') ?? ''}][class=${hit.getAttribute('class') ?? ''}]`
+        : 'none',
+      target: { bottom: targetBounds.bottom, left: targetBounds.left, right: targetBounds.right, top: targetBounds.top },
+    };
+  }), {
+    message: `${label} did not settle fully inside the scrollable settings dialog with an unobscured center hit.`,
+    timeout: 5_000,
+  }).toMatchObject({ centerHit: true, contained: true });
+  await assertContainedInViewport(page, target, label);
+  await assertHitTarget(page, target, label);
+}
+
+async function assertStickySettingsHeading(
+  page: Page,
+  settings: Locator,
+  close: Locator,
+  label: string,
+): Promise<void> {
+  const heading = settings.locator('.workspace-settings-heading');
+  await expect.poll(async () => heading.evaluate((element) => {
+    const dialog = element.closest('[data-testid="workspace-settings-dialog"]');
+    const closeButton = element.querySelector('.workspace-settings-close');
+    if (!(dialog instanceof HTMLElement) || !(closeButton instanceof HTMLElement)) {
+      return {
+        closeCenterHit: false,
+        closeContained: false,
+        headingCenterHit: false,
+        headingContained: false,
+        hit: 'missing settings heading ancestors',
+      };
+    }
+    const dialogBounds = dialog.getBoundingClientRect();
+    const headingBounds = element.getBoundingClientRect();
+    const closeBounds = closeButton.getBoundingClientRect();
+    const headingHit = document.elementFromPoint(
+      headingBounds.left + (headingBounds.width / 2),
+      headingBounds.top + (headingBounds.height / 2),
+    );
+    const closeHit = document.elementFromPoint(
+      closeBounds.left + (closeBounds.width / 2),
+      closeBounds.top + (closeBounds.height / 2),
+    );
+    const headingContained = headingBounds.top >= dialogBounds.top - 0.5
+      && headingBounds.bottom <= dialogBounds.bottom + 0.5
+      && headingBounds.left >= dialogBounds.left - 0.5
+      && headingBounds.right <= dialogBounds.right + 0.5;
+    const closeContained = closeBounds.top >= dialogBounds.top - 0.5
+      && closeBounds.bottom <= dialogBounds.bottom + 0.5
+      && closeBounds.left >= dialogBounds.left - 0.5
+      && closeBounds.right <= dialogBounds.right + 0.5;
+    return {
+      close: { bottom: closeBounds.bottom, left: closeBounds.left, right: closeBounds.right, top: closeBounds.top },
+      closeCenterHit: closeHit instanceof Node && closeButton.contains(closeHit),
+      closeContained,
+      closeHit: closeHit instanceof Element
+        ? `${closeHit.tagName.toLowerCase()}[class=${closeHit.getAttribute('class') ?? ''}]`
+        : 'none',
+      dialog: { bottom: dialogBounds.bottom, left: dialogBounds.left, right: dialogBounds.right, top: dialogBounds.top },
+      heading: { bottom: headingBounds.bottom, left: headingBounds.left, right: headingBounds.right, top: headingBounds.top },
+      headingCenterHit: headingHit instanceof Node && element.contains(headingHit),
+      headingContained,
+      headingHit: headingHit instanceof Element
+        ? `${headingHit.tagName.toLowerCase()}[class=${headingHit.getAttribute('class') ?? ''}]`
+        : 'none',
+    };
+  }), {
+    message: `${label} did not keep the Settings heading and Close action sticky and unobscured.`,
+    timeout: 5_000,
+  }).toMatchObject({
+    closeCenterHit: true,
+    closeContained: true,
+    headingCenterHit: true,
+    headingContained: true,
+  });
+  await assertContainedInViewport(page, heading, `${label} heading`);
+  await assertHitTarget(page, heading, `${label} heading`);
+  await assertContainedInViewport(page, close, `${label} Close`);
+  await assertHitTarget(page, close, `${label} Close`);
 }
 
 async function expectResponsiveControls(page: Page, label: string, diagramName: string): Promise<void> {
@@ -1077,8 +1250,12 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   const settings = await openWorkspaceSettings(page);
   await assertContainedInViewport(page, settings, `${label} workspace settings dialog`);
   if (label.startsWith('mobile')) {
+    const closeSettings = settings.getByRole('button', { name: 'Close', exact: true });
+    await assertStickySettingsHeading(page, settings, closeSettings, `${label} settings initial state`);
+    const closeBounds = await closeSettings.boundingBox();
+    assert(closeBounds !== null && closeBounds.height >= 44,
+      `${label} close settings must provide a 44px touch target: ${JSON.stringify(closeBounds)}.`);
     for (const [target, targetLabel] of [
-      [settings.getByRole('button', { name: 'Close', exact: true }), 'close settings'],
       [settings.getByRole('button', { name: 'Cancel', exact: true }), 'cancel display-name edit'],
       [settings.getByRole('button', { name: 'Save name', exact: true }), 'save display name'],
       [settings.getByRole('button', { name: /^(Connect my agent|Connection details)$/u }), 'agent connection'],
@@ -1087,7 +1264,8 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
       [settings.locator('.workspace-settings-theme-option').nth(1), 'Light theme option'],
       [settings.locator('.workspace-settings-theme-option').nth(2), 'Dark theme option'],
     ] as const) {
-      await assertHitTarget(page, target, `${label} ${targetLabel}`);
+      await prepareSettingsTargetForTouch(page, target, `${label} ${targetLabel}`);
+      await assertStickySettingsHeading(page, settings, closeSettings, `${label} after scrolling to ${targetLabel}`);
       const bounds = await target.boundingBox();
       assert(bounds !== null && bounds.height >= 44,
         `${label} ${targetLabel} must provide a 44px touch target: ${JSON.stringify(bounds)}.`);
@@ -1138,8 +1316,531 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   }
 }
 
+const PHONE_CONTEXT_OPTIONS = { deviceScaleFactor: 1, hasTouch: true, isMobile: true } as const;
+
+async function waitForPhoneLayout(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
+  });
+}
+
+async function assertPhoneViewportEvidence(page: Page, label: string, state: string): Promise<void> {
+  await waitForPhoneLayout(page);
+  await assertDocumentMatchesViewport(page, `${label} ${state}`);
+  const configuredViewport = page.viewportSize();
+  assert(configuredViewport, `${label} ${state} has no configured browser viewport.`);
+  const layout = await page.evaluate(() => ({
+    devicePixelRatio: window.devicePixelRatio,
+    innerHeight: window.innerHeight,
+    innerWidth: window.innerWidth,
+  }));
+  assert(layout.devicePixelRatio === 1,
+    `${label} ${state} must capture at deviceScaleFactor 1, received ${layout.devicePixelRatio}.`);
+  assert(layout.innerWidth === configuredViewport.width && layout.innerHeight === configuredViewport.height,
+    `${label} ${state} CSS viewport ${layout.innerWidth}x${layout.innerHeight} did not match configured ${configuredViewport.width}x${configuredViewport.height}.`);
+  const screenshot = await saveViewportScreenshot(page, `issue-18-${label}-${state}`);
+  assert(screenshot.width === configuredViewport.width && screenshot.height === configuredViewport.height,
+    `${label} ${state} screenshot was ${screenshot.width}x${screenshot.height}, expected ${configuredViewport.width}x${configuredViewport.height} at deviceScaleFactor 1.`);
+}
+
+async function assertVisiblePhoneActionTargets(page: Page, label: string, state: string): Promise<void> {
+  const targets = page.locator('button, [role="tab"]');
+  const viewport = page.viewportSize();
+  assert(viewport, `${label} ${state} has no configured browser viewport.`);
+  const count = await targets.count();
+  let checked = 0;
+  for (let index = 0; index < count; index += 1) {
+    const target = targets.nth(index);
+    if (!await target.isVisible()) continue;
+    const box = await target.boundingBox();
+    if (!box) continue;
+    const centerVisible = box.x + (box.width / 2) >= 0
+      && box.x + (box.width / 2) <= viewport.width
+      && box.y + (box.height / 2) >= 0
+      && box.y + (box.height / 2) <= viewport.height;
+    if (!centerVisible) continue;
+    const name = (await target.getAttribute('aria-label')) ?? (await target.textContent())?.trim() ?? `action ${index + 1}`;
+    const centerResult = await target.evaluate((element, point) => {
+      const hit = document.elementFromPoint(point.x, point.y);
+      const targetHit = !!hit && (element === hit || element.contains(hit));
+      let ancestor = element.parentElement;
+      let clippedByScrollContainer = false;
+      while (ancestor && !clippedByScrollContainer) {
+        const style = window.getComputedStyle(ancestor);
+        const clipsX = style.overflowX === 'auto' || style.overflowX === 'scroll';
+        const clipsY = style.overflowY === 'auto' || style.overflowY === 'scroll';
+        if (clipsX || clipsY) {
+          const rect = ancestor.getBoundingClientRect();
+          clippedByScrollContainer = (clipsX && (point.x < rect.left || point.x > rect.right))
+            || (clipsY && (point.y < rect.top || point.y > rect.bottom));
+        }
+        ancestor = ancestor.parentElement;
+      }
+      const activeSurfaceSelectors = [
+        '[data-testid="source-flyout"]',
+        '[data-testid="activity-flyout"]',
+        '[data-testid="workspace-settings-dialog"]',
+        '[role="menu"][aria-label="Starter templates"]',
+      ];
+      const occludedByActiveSurface = !targetHit && !!hit && activeSurfaceSelectors.some((selector) => {
+        const surface = document.querySelector(selector);
+        return surface !== null && surface.contains(hit) && !surface.contains(element);
+      });
+      return {
+        clippedByScrollContainer,
+        hitDescription: hit instanceof Element
+          ? `${hit.tagName.toLowerCase()}[data-testid=${hit.getAttribute('data-testid') ?? ''}][class=${hit.getAttribute('class') ?? ''}]`
+          : 'none',
+        occludedByActiveSurface,
+        targetHit,
+      };
+    }, { x: box.x + (box.width / 2), y: box.y + (box.height / 2) });
+    if (centerResult.clippedByScrollContainer) continue;
+    if (centerResult.occludedByActiveSurface) continue;
+    assert(centerResult.targetHit, `${label} ${state} ${name} is visible and centered in the viewport, but its center is hit by ${centerResult.hitDescription}.`);
+    await assertTouchTarget(page, target, `${label} ${state} ${name}`);
+    checked += 1;
+  }
+  assert(checked > 0, `${label} ${state} did not expose any visible action chrome.`);
+}
+
+async function assertPhoneSurface(page: Page, label: string, state: string): Promise<void> {
+  await assertVisiblePhoneActionTargets(page, label, state);
+  await assertPhoneViewportEvidence(page, label, state);
+}
+
+async function assertActiveTabVisible(page: Page, label: string): Promise<void> {
+  const activeTab = page.locator('[role="tab"][aria-selected="true"]');
+  await activeTab.waitFor({ state: 'visible', timeout: 15_000 });
+  let geometry: { scrollerLeft: number; scrollerRight: number; tabLeft: number; tabRight: number } | null = null;
+  try {
+    await expect.poll(async () => {
+      geometry = await activeTab.evaluate((tab) => {
+        const scroller = tab.closest('[data-testid="diagram-tab-bar"]')?.querySelector('.workspace-diagram-tab-scroller');
+        if (!(scroller instanceof HTMLElement)) {
+          throw new Error('The active diagram tab has no scroll container.');
+        }
+        const tabContainer = tab.closest('.workspace-diagram-tab');
+        if (!(tabContainer instanceof HTMLElement)) {
+          throw new Error('The active diagram tab has no action container.');
+        }
+        const tabRect = tabContainer.getBoundingClientRect();
+        const scrollerRect = scroller.getBoundingClientRect();
+        return {
+          scrollerLeft: scrollerRect.left,
+          scrollerRight: scrollerRect.right,
+          tabLeft: tabRect.left,
+          tabRight: tabRect.right,
+        };
+      });
+      return geometry.tabLeft >= geometry.scrollerLeft - 1 && geometry.tabRight <= geometry.scrollerRight + 1;
+    }, { timeout: 5_000 }).toBe(true);
+  } catch (error) {
+    throw new Error(`${label} active tab or its actions remained clipped in the overflow scroller: ${JSON.stringify(geometry)}.`, { cause: error });
+  }
+}
+
+async function tapTarget(page: Page, target: Locator, label: string): Promise<void> {
+  await assertTouchTarget(page, target, label);
+  const box = await target.boundingBox();
+  assert(box, `${label} has no tappable bounds.`);
+  const touchLabelStatus = page.getByTestId('workspace-touch-label-status');
+  await touchLabelStatus.evaluate((element) => {
+    element.setAttribute('data-e2e-live-region-identity', 'stable');
+  });
+  await page.touchscreen.tap(box.x + (box.width / 2), box.y + (box.height / 2));
+  await expect(touchLabelStatus, `${label} remounted the persistent touch-label live region.`)
+    .toHaveAttribute('data-e2e-live-region-identity', 'stable');
+  await touchLabelStatus.evaluate((element) => {
+    element.removeAttribute('data-e2e-live-region-identity');
+  });
+}
+
+async function expectTouchLabelStatus(page: Page, expected: string, label: string): Promise<void> {
+  const status = page.getByTestId('workspace-touch-label-status');
+  await expect(status, `${label} did not preserve its touch label outside the action subtree.`).toHaveText(expected);
+  await expect(status, `${label} touch label was not visibly presented.`).toHaveClass(/\bis-visible\b/u);
+  await assertContainedInViewport(page, status, `${label} touch label`);
+  const overflowStyle = await status.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { overflow: style.overflow, textOverflow: style.textOverflow, whiteSpace: style.whiteSpace };
+  });
+  assert(overflowStyle.overflow === 'hidden' && overflowStyle.textOverflow === 'ellipsis' && overflowStyle.whiteSpace === 'nowrap',
+    `${label} touch label cannot safely truncate a long status: ${JSON.stringify(overflowStyle)}.`);
+  await expect(page.locator('.workspace-touch-label[data-touch-label-visible="true"]'),
+    `${label} retained a duplicate anchored touch label after pointer release.`).toHaveCount(0);
+}
+
+async function waitForTouchLabelPresentationToClear(page: Page, label: string): Promise<void> {
+  const status = page.getByTestId('workspace-touch-label-status');
+  await expect(status, `${label} persistent touch label did not clear.`).toHaveText('', { timeout: 3_000 });
+  await expect(status, `${label} persistent touch label remained visible.`).not.toHaveClass(/\bis-visible\b/u);
+  await expect(page.locator('.workspace-touch-label[data-touch-label-visible="true"]'),
+    `${label} retained an anchored touch label.`).toHaveCount(0);
+}
+
+async function assertMobileErrorBannerScrollability(page: Page, label: string): Promise<void> {
+  const banner = page.getByTestId('parse-error-banner');
+  await banner.waitFor({ state: 'visible', timeout: 15_000 });
+  const behavior = await banner.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      maxHeight: style.maxHeight,
+      overflowY: style.overflowY,
+      pointerEvents: style.pointerEvents,
+      touchAction: style.touchAction,
+    };
+  });
+  assert(behavior.maxHeight !== 'none' && (behavior.overflowY === 'auto' || behavior.overflowY === 'scroll')
+    && behavior.pointerEvents === 'auto' && behavior.touchAction === 'pan-y',
+  `${label} global Mermaid error is not capped and touch-scrollable: ${JSON.stringify(behavior)}.`);
+  const canvasReceivesTouchesOutsideBanner = await page.evaluate(() => {
+    const bannerElement = document.querySelector<HTMLElement>('[data-testid="parse-error-banner"]');
+    const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+    if (!bannerElement || !canvas) return false;
+    const bannerBounds = bannerElement.getBoundingClientRect();
+    const canvasBounds = canvas.getBoundingClientRect();
+    const ratios = [0.1, 0.5, 0.9];
+    for (const yRatio of ratios) {
+      for (const xRatio of ratios) {
+        const x = canvasBounds.left + (canvasBounds.width * xRatio);
+        const y = canvasBounds.top + (canvasBounds.height * yRatio);
+        const insideBanner = x >= bannerBounds.left && x <= bannerBounds.right
+          && y >= bannerBounds.top && y <= bannerBounds.bottom;
+        const hit = document.elementFromPoint(x, y);
+        if (!insideBanner && hit instanceof Node && canvas.contains(hit)) return true;
+      }
+    }
+    return false;
+  });
+  assert(canvasReceivesTouchesOutsideBanner,
+    `${label} global Mermaid error prevented the canvas receiving pointer hits outside the banner bounds.`);
+}
+
+async function waitForCameraChange(page: Page, previous: string, label: string): Promise<string> {
+  await page.waitForFunction((before) => {
+    const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
+    return layer instanceof HTMLElement && layer.style.transform !== before;
+  }, previous, { timeout: 5_000 });
+  return renderedCanvasCameraTransform(page, label);
+}
+
+type CanvasGesturePoint = { x: number; y: number };
+
+async function allowedCanvasGesturePoints(
+  page: Page,
+  label: string,
+  count: number,
+  minimumSeparationPx: number,
+): Promise<CanvasGesturePoint[]> {
+  const points = await page.getByTestId('diagram-canvas').evaluate((canvas, options) => {
+    const root = canvas as HTMLElement;
+    const rect = root.getBoundingClientRect();
+    const forbiddenSelector = 'button, input, select, textarea, [contenteditable="true"], [role="button"], .react-flow__node, .react-flow__edge, .react-flow__handle';
+    const ratios = [0.12, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.88];
+    const candidates: CanvasGesturePoint[] = [];
+
+    for (const yRatio of ratios) {
+      for (const xRatio of ratios) {
+        const point = { x: rect.left + (rect.width * xRatio), y: rect.top + (rect.height * yRatio) };
+        const target = document.elementFromPoint(point.x, point.y);
+        if (!(target instanceof Element) || !root.contains(target) || target.closest(forbiddenSelector)) continue;
+        if (candidates.every((candidate) => Math.hypot(candidate.x - point.x, candidate.y - point.y) >= options.minimumSeparationPx)) {
+          candidates.push(point);
+        }
+        if (candidates.length === options.count) return candidates;
+      }
+    }
+    return candidates;
+  }, { count, minimumSeparationPx });
+  assert(points.length === count,
+    `${label} found ${points.length} of ${count} required blank canvas touch points at least ${minimumSeparationPx}px apart.`);
+  return points;
+}
+
+async function dispatchTouchDrag(page: Page, label: string): Promise<void> {
+  const [from, to] = await allowedCanvasGesturePoints(page, `${label} pan`, 2, 48);
+  assert(from && to, `${label} pan did not resolve two blank canvas points.`);
+  const session = await page.context().newCDPSession(page);
+  const point = (x: number, y: number) => ({ force: 1, id: 1, radiusX: 1, radiusY: 1, x, y });
+  try {
+    await session.send('Input.dispatchTouchEvent', { touchPoints: [point(from.x, from.y)], type: 'touchStart' });
+    await session.send('Input.dispatchTouchEvent', { touchPoints: [point((from.x + to.x) / 2, (from.y + to.y) / 2)], type: 'touchMove' });
+    await session.send('Input.dispatchTouchEvent', { touchPoints: [point(to.x, to.y)], type: 'touchMove' });
+    await session.send('Input.dispatchTouchEvent', { touchPoints: [], type: 'touchEnd' });
+  } finally {
+    await session.detach();
+  }
+}
+
+function parseCameraTransform(transform: string, label: string): { panX: number; panY: number; zoom: number } {
+  const match = transform.match(/^translate\(([-+]?(?:\d+(?:\.\d*)?|\.\d+))px,\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))px\)\s*scale\(([-+]?(?:\d+(?:\.\d*)?|\.\d+))\)$/u);
+  assert(match, `${label} has an unexpected canvas transform: ${transform}.`);
+  const camera = { panX: Number(match[1]), panY: Number(match[2]), zoom: Number(match[3]) };
+  assert(Object.values(camera).every(Number.isFinite), `${label} has non-finite camera values: ${transform}.`);
+  return camera;
+}
+
+async function assertPinchZoomIncrease(page: Page, label: string, renderer: 'flowchart' | 'generic', residuals: string[]): Promise<void> {
+  const initial = await allowedCanvasGesturePoints(page, `${label} ${renderer} pinch`, 2, 72);
+  const [first, second] = initial;
+  assert(first && second, `${label} ${renderer} pinch did not resolve two blank canvas points.`);
+  const beforeTransform = await renderedCanvasCameraTransform(page, `${label} ${renderer} pinch baseline`);
+  const before = parseCameraTransform(beforeTransform, `${label} ${renderer} pinch baseline`);
+  const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+  const expansion = 1.35;
+  const canvasBounds = await page.getByTestId('diagram-canvas').boundingBox();
+  assert(canvasBounds, `${label} ${renderer} pinch has no canvas bounds.`);
+  const inset = Math.min(8, canvasBounds.width / 4, canvasBounds.height / 4);
+  const minX = canvasBounds.x + inset;
+  const maxX = canvasBounds.x + canvasBounds.width - inset;
+  const minY = canvasBounds.y + inset;
+  const maxY = canvasBounds.y + canvasBounds.height - inset;
+  const movedFirst = {
+    x: Math.max(minX, Math.min(maxX, center.x + ((first.x - center.x) * expansion))),
+    y: Math.max(minY, Math.min(maxY, center.y + ((first.y - center.y) * expansion))),
+  };
+  const movedSecond = {
+    x: Math.max(minX, Math.min(maxX, center.x + ((second.x - center.x) * expansion))),
+    y: Math.max(minY, Math.min(maxY, center.y + ((second.y - center.y) * expansion))),
+  };
+  const initialSeparation = Math.hypot(first.x - second.x, first.y - second.y);
+  const movedSeparation = Math.hypot(movedFirst.x - movedSecond.x, movedFirst.y - movedSecond.y);
+  for (const [pointLabel, gesturePoint] of [['first', movedFirst], ['second', movedSecond]] as const) {
+    assert(gesturePoint.x >= minX && gesturePoint.x <= maxX && gesturePoint.y >= minY && gesturePoint.y <= maxY,
+      `${label} ${renderer} clamped ${pointLabel} pinch point escaped the inset canvas bounds: ${JSON.stringify({ canvasBounds, gesturePoint, inset })}.`);
+  }
+  assert(movedSeparation > initialSeparation,
+    `${label} ${renderer} clamped pinch did not expand touch separation: ${initialSeparation} -> ${movedSeparation}.`);
+  const session = await page.context().newCDPSession(page);
+  const point = (id: number, x: number, y: number) => ({ force: 1, id, radiusX: 1, radiusY: 1, x, y });
+  try {
+    await session.send('Input.dispatchTouchEvent', {
+      touchPoints: [point(1, first.x, first.y), point(2, second.x, second.y)],
+      type: 'touchStart',
+    });
+    await session.send('Input.dispatchTouchEvent', {
+      touchPoints: [point(1, movedFirst.x, movedFirst.y), point(2, movedSecond.x, movedSecond.y)],
+      type: 'touchMove',
+    });
+    await session.send('Input.dispatchTouchEvent', { touchPoints: [], type: 'touchEnd' });
+  } catch (error) {
+    throw new Error(`${label} ${renderer} CDP pinch could not be dispatched.`, { cause: error });
+  } finally {
+    await session.detach();
+  }
+  let afterZoom = before.zoom;
+  await expect.poll(async () => {
+    const transform = await renderedCanvasCameraTransform(page, `${label} ${renderer} pinch result`);
+    afterZoom = parseCameraTransform(transform, `${label} ${renderer} pinch result`).zoom;
+    return afterZoom;
+  }, {
+    message: `${label} ${renderer} pinch did not increase zoom above ${before.zoom}.`,
+    timeout: 5_000,
+  }).toBeGreaterThan(before.zoom + 0.001);
+  residuals.push(`${label} ${renderer}: simulated pinch increased zoom from ${before.zoom} to ${afterZoom}; physical iOS/Android pinch remains a manual residual.`);
+}
+
+async function expectTouchCanvasControls(
+  page: Page,
+  label: string,
+  renderer: 'flowchart' | 'generic',
+  residuals: string[],
+): Promise<void> {
+  const controls = page.getByTestId('canvas-controls-toolbar');
+  await controls.waitFor({ state: 'visible', timeout: 15_000 });
+  for (const name of ['Zoom out', 'Zoom in', 'Fit diagram'] as const) {
+    await assertTouchTarget(page, page.getByRole('button', { name, exact: true }), `${label} ${renderer} ${name}`);
+  }
+  if (renderer === 'flowchart') {
+    const addNode = page.getByRole('button', { name: 'Add node to Mermaid text', exact: true });
+    await assertTouchTarget(page, addNode, `${label} flowchart add-node control`);
+    await addNode.click({ trial: true, timeout: 15_000 });
+  }
+
+  const beforeZoom = await renderedCanvasCameraTransform(page, `${label} ${renderer} touch zoom baseline`);
+  await tapTarget(page, page.getByRole('button', { name: 'Zoom in', exact: true }), `${label} ${renderer} touch Zoom in`);
+  const afterZoom = await waitForCameraChange(page, beforeZoom, `${label} ${renderer} touch zoom`);
+  await tapTarget(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), `${label} ${renderer} touch Fit diagram`);
+  const afterFit = await waitForCameraChange(page, afterZoom, `${label} ${renderer} touch fit`);
+  await dispatchTouchDrag(page, `${label} ${renderer}`);
+  await waitForCameraChange(page, afterFit, `${label} ${renderer} touch pan`);
+  await assertPinchZoomIncrease(page, label, renderer, residuals);
+}
+
+async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagramName: string, residuals: string[]): Promise<void> {
+  await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+  await selectTabByName(page, diagramName);
+  await waitForCanvas(page, 'flowchart');
+  await assertActiveTabVisible(page, `${label} initial tabs`);
+  await assertPhoneSurface(page, label, 'canvas');
+
+  await expect.poll(async () => (await presenceSignature(page)).length, {
+    message: `${label} did not show collaboration presence after peer pages joined.`,
+    timeout: 15_000,
+  }).toBeGreaterThanOrEqual(2);
+  await assertPhoneSurface(page, label, 'presence-and-footer');
+
+  const sourceCamera = await renderedCanvasCameraTransform(page, `${label} source baseline`);
+  const sourceToggle = page.getByTestId('source-flyout-toggle');
+  await tapTarget(page, sourceToggle, `${label} source toggle`);
+  await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(page.getByTestId('source-flyout')).toHaveCount(1);
+  await expectTouchLabelStatus(page, 'Show source', `${label} source toggle`);
+  assert(await renderedCanvasCameraTransform(page, `${label} source open`) === sourceCamera,
+    `${label} opening source changed the local canvas camera.`);
+  await assertPhoneSurface(page, label, 'source');
+  const sourceClose = page.getByRole('button', { name: 'Close source panel', exact: true });
+  await tapTarget(page, sourceClose, `${label} source close`);
+  await page.getByTestId('source-flyout').waitFor({ state: 'detached', timeout: 15_000 });
+  await expectTouchLabelStatus(page, 'Close', `${label} source close`);
+  assert(await renderedCanvasCameraTransform(page, `${label} source close`) === sourceCamera,
+    `${label} closing source changed the local canvas camera.`);
+
+  const templateCamera = await renderedCanvasCameraTransform(page, `${label} template baseline`);
+  const templateMenu = await openTemplateMenu(page);
+  assert(await renderedCanvasCameraTransform(page, `${label} template open`) === templateCamera,
+    `${label} opening templates changed the local canvas camera.`);
+  await assertContainedInViewport(page, templateMenu, `${label} starter template menu`);
+  const blankTemplate = templateMenuItem(page, 'Blank sheet');
+  await assertTouchTarget(page, blankTemplate, `${label} Blank sheet template`);
+  await blankTemplate.click({ trial: true, timeout: 15_000 });
+  await assertPhoneSurface(page, label, 'templates');
+  if (label === 'mobile-390') {
+    const beforeTabCount = await page.getByRole('tab').count();
+    await blankTemplate.click();
+    await page.waitForFunction((count) => document.querySelectorAll('[role="tab"]').length === count + 1, beforeTabCount, { timeout: 15_000 });
+    await assertActiveTabVisible(page, `${label} blank-sheet tab`);
+    await assertPhoneSurface(page, label, 'tab-overflow');
+    await renameActiveDiagram(page, 'Phone scratchpad');
+    await assertActiveTabVisible(page, `${label} renamed tab`);
+    const tabCountBeforeDelete = await page.getByRole('tab').count();
+    const deleteTab = page.getByRole('button', { name: 'Delete Phone scratchpad', exact: true });
+    await tapTarget(page, deleteTab, `${label} delete tab`);
+    await page.waitForFunction((count) => document.querySelectorAll('[role="tab"]').length === count - 1, tabCountBeforeDelete, { timeout: 15_000 });
+    await expect(page.getByRole('tab', { name: 'Phone scratchpad', exact: true })).toHaveCount(0);
+    await expectTouchLabelStatus(page, 'Delete', `${label} delete tab`);
+  } else {
+    await waitForFocusedLocator(page, blankTemplate, `${label} opening starter templates`);
+    await blankTemplate.press('Escape');
+    await templateMenu.waitFor({ state: 'detached', timeout: 15_000 });
+    await waitForFocusedTestId(page, 'create-diagram-tab', `${label} closing starter templates with Escape`);
+  }
+
+  await selectTabByName(page, diagramName);
+  await waitForCanvas(page, 'flowchart');
+  const settingsCamera = await renderedCanvasCameraTransform(page, `${label} settings baseline`);
+  const settingsTrigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
+  await tapTarget(page, settingsTrigger, `${label} settings`);
+  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(page.getByTestId(SETTINGS_DIALOG_TEST_ID)).toHaveCount(1);
+  await expectTouchLabelStatus(page, 'Settings', `${label} settings`);
+  assert(await renderedCanvasCameraTransform(page, `${label} settings open`) === settingsCamera,
+    `${label} opening settings changed the local canvas camera.`);
+  await waitForTouchLabelPresentationToClear(page, `${label} settings screenshot`);
+  await assertPhoneSurface(page, label, 'settings');
+  await closeWorkspaceSettings(page);
+  assert(await renderedCanvasCameraTransform(page, `${label} settings close`) === settingsCamera,
+    `${label} closing settings changed the local canvas camera.`);
+
+  const historyCamera = await renderedCanvasCameraTransform(page, `${label} history baseline`);
+  await ensureFlyout(page, 'activity');
+  assert(await renderedCanvasCameraTransform(page, `${label} history open`) === historyCamera,
+    `${label} opening history changed the local canvas camera.`);
+  await page.getByTestId('diagram-history-list').waitFor({ state: 'visible', timeout: 15_000 });
+  await assertPhoneSurface(page, label, 'history');
+  await closeFlyout(page, 'activity');
+  assert(await renderedCanvasCameraTransform(page, `${label} history close`) === historyCamera,
+    `${label} closing history changed the local canvas camera.`);
+
+  await expectTouchCanvasControls(page, label, 'flowchart', residuals);
+  await assertPhoneSurface(page, label, 'flowchart-touch-controls');
+
+  await replaceSource(page, API_SEQUENCE_FIXTURE);
+  await waitForSource(page, API_SEQUENCE_FIXTURE);
+  await closeFlyout(page, 'source');
+  await waitForCanvas(page, 'generic');
+  await expectTouchCanvasControls(page, label, 'generic', residuals);
+  await assertPhoneSurface(page, label, 'generic-touch-controls');
+
+  await replaceSource(page, INVALID_MERMAID_FIXTURE);
+  await waitForInvalidPreview(page);
+  const sourceFlyout = page.getByTestId('source-flyout');
+  const sourceParseStatus = page.getByTestId('source-parse-status');
+  await sourceParseStatus.waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(sourceParseStatus).toContainText('Preview kept on last valid diagram');
+  await expect(sourceParseStatus.locator('span')).not.toHaveText('');
+  await expect(page.getByTestId('parse-error-banner')).toHaveCount(0);
+  await assertContainedInViewport(page, sourceFlyout, `${label} invalid Mermaid source flyout`);
+  await assertContainedInViewport(page, sourceParseStatus, `${label} contextual source parse error`);
+  await assertPhoneSurface(page, label, 'source-parse-error');
+
+  await closeFlyout(page, 'source');
+  await waitForInvalidPreview(page);
+  await assertMobileErrorBannerScrollability(page, `${label} global Mermaid error`);
+
+  await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
+  await sourceParseStatus.waitFor({ state: 'detached', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+  await waitForCanvas(page, 'flowchart');
+  await assertPhoneSurface(page, label, 'flowchart-restored');
+}
+
 function historyItem(page: Page, revisionId: string): Locator {
   return page.getByTestId(`history-revision-${revisionId}`);
+}
+
+async function prepareHistoryActionForClick(
+  page: Page,
+  item: Locator,
+  action: Locator,
+  label: string,
+): Promise<void> {
+  const list = page.getByTestId('diagram-history-list');
+  await list.waitFor({ state: 'visible', timeout: 15_000 });
+  await item.waitFor({ state: 'visible', timeout: 15_000 });
+  await item.evaluate((element) => {
+    element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
+  });
+  await action.scrollIntoViewIfNeeded();
+  await expect.poll(async () => action.evaluate((element) => {
+    const itemElement = element.closest('.history-item');
+    const listElement = element.closest('.history-list');
+    if (!(itemElement instanceof HTMLElement) || !(listElement instanceof HTMLElement)) {
+      return { actionContained: false, centerHit: false, hit: 'missing history ancestors', itemContained: false };
+    }
+    const actionBounds = element.getBoundingClientRect();
+    const itemBounds = itemElement.getBoundingClientRect();
+    const listBounds = listElement.getBoundingClientRect();
+    const centerX = actionBounds.left + (actionBounds.width / 2);
+    const centerY = actionBounds.top + (actionBounds.height / 2);
+    const hit = document.elementFromPoint(centerX, centerY);
+    const actionContained = actionBounds.top >= listBounds.top - 0.5
+      && actionBounds.bottom <= listBounds.bottom + 0.5
+      && actionBounds.left >= listBounds.left - 0.5
+      && actionBounds.right <= listBounds.right + 0.5;
+    const itemContained = itemBounds.top >= listBounds.top - 0.5
+      && itemBounds.bottom <= listBounds.bottom + 0.5
+      && itemBounds.left >= listBounds.left - 0.5
+      && itemBounds.right <= listBounds.right + 0.5;
+    return {
+      action: { bottom: actionBounds.bottom, left: actionBounds.left, right: actionBounds.right, top: actionBounds.top },
+      actionContained,
+      centerHit: hit instanceof Node && element.contains(hit),
+      hit: hit instanceof Element
+        ? `${hit.tagName.toLowerCase()}[data-testid=${hit.getAttribute('data-testid') ?? ''}][class=${hit.getAttribute('class') ?? ''}]`
+        : 'none',
+      item: { bottom: itemBounds.bottom, left: itemBounds.left, right: itemBounds.right, top: itemBounds.top },
+      itemContained,
+      list: { bottom: listBounds.bottom, left: listBounds.left, right: listBounds.right, top: listBounds.top },
+    };
+  }), {
+    message: `${label} did not settle fully inside the history list with an unobscured center hit.`,
+    timeout: 5_000,
+  }).toMatchObject({ actionContained: true, centerHit: true, itemContained: true });
+  await assertContainedInViewport(page, action, label);
+  await assertHitTarget(page, action, label);
 }
 
 function snapshotsMatch(left: YjsSessionSnapshot, right: YjsSessionSnapshot): boolean {
@@ -1527,7 +2228,9 @@ async function expectRevisionHistoryCollaboration(
     await ensureFlyout(page, 'activity');
     const staleItem = historyItem(page, historical.revision.id);
     await staleItem.waitFor({ state: 'visible', timeout: 15_000 });
-    await verifiedClick(page, staleItem.getByRole('button', { name: 'Restore', exact: true }), 'stale layout-only restore candidate');
+    const staleRestore = staleItem.getByRole('button', { name: 'Restore', exact: true });
+    await prepareHistoryActionForClick(page, staleItem, staleRestore, 'stale layout-only restore candidate');
+    await verifiedClick(page, staleRestore, 'stale layout-only restore candidate');
     const staleConfirmation = page.getByTestId('history-restore-confirmation');
     await staleConfirmation.waitFor({ state: 'visible', timeout: 15_000 });
     const staleRestoreRequests: Array<{ method: string; path: string }> = [];
@@ -1671,6 +2374,7 @@ async function expectRevisionHistoryCollaboration(
 
 async function validateWorkspaceUx(): Promise<void> {
   const results: string[] = [];
+  const mobilePinchResiduals: string[] = [];
   const slice = process.env.ARIELCHARTS_E2E_SLICE;
   if (slice !== undefined && slice !== 'history') {
     throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history" or no slice.`);
@@ -1753,11 +2457,19 @@ async function validateWorkspaceUx(): Promise<void> {
         ['tablet', TABLET_VIEWPORT],
         ['mobile-390', MOBILE_VIEWPORT],
         ['mobile-320', NARROW_MOBILE_VIEWPORT],
+        ['mobile-landscape', MOBILE_LANDSCAPE_VIEWPORT],
       ] as const) {
-        const { page: responsivePage } = await browser.newPage(viewport);
+        const { page: responsivePage } = await browser.newPage(
+          viewport,
+          label.startsWith('mobile') ? PHONE_CONTEXT_OPTIONS : undefined,
+        );
         await visitWorkspace(responsivePage, baseUrl, sessionId, room.roomKey);
         await expectStableFlyoutAnchors(responsivePage, label);
         await expectResponsiveControls(responsivePage, label, diagramName);
+        if (label.startsWith('mobile')) {
+          await expectPhoneLiveCodingWorkspace(responsivePage, label, diagramName, mobilePinchResiduals);
+          record(results, `${label} touch viewport, tabs, flyouts, camera, final-state overflow, screenshots, and canvas controls`);
+        }
         await expectNoDevelopmentIndicator(responsivePage);
         await saveScreenshot(responsivePage, `workspace-ux-${label}`);
         record(results, `${label} anchors and source controls`);
@@ -1766,6 +2478,9 @@ async function validateWorkspaceUx(): Promise<void> {
       await browser.close();
     }
   });
+  for (const residual of mobilePinchResiduals) {
+    console.warn(`MOBILE PINCH RESIDUAL ${residual}`);
+  }
   console.log(`WORKSPACE UX E2E PASSED (${results.length} passed, 0 skips)`);
 }
 

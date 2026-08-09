@@ -4,7 +4,7 @@ import type { ActivityEvent, AwarenessState, DiagramRevision, DiagramRevisionSum
 import { APP_NAME, STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
@@ -463,6 +463,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const restoreOriginRef = useRef<HTMLButtonElement | null>(null);
   const restoreConfirmRef = useRef<HTMLButtonElement | null>(null);
   const activeDiagramIdRef = useRef<string | null>(null);
+  const activeTouchLabelRef = useRef<HTMLElement | null>(null);
+  const touchLabelTimeoutRef = useRef<number | null>(null);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
@@ -498,6 +500,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const [restoreCandidate, setRestoreCandidate] = useState<DiagramRevisionSummary | null>(null);
   const [restorePending, setRestorePending] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [touchLabelStatus, setTouchLabelStatus] = useState<{ label: string } | null>(null);
 
   const activeDiagram = useMemo(
     () => getActiveDiagramState(collaboration, activeDiagramId),
@@ -507,6 +510,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   useEffect(() => {
     activeDiagramIdRef.current = activeDiagramId;
   }, [activeDiagramId]);
+
+  useEffect(() => () => {
+    if (touchLabelTimeoutRef.current !== null) {
+      window.clearTimeout(touchLabelTimeoutRef.current);
+    }
+  }, []);
 
   const renderedMermaidText = historyPreview?.mermaid_text ?? mermaidText;
   const renderedPreview = historyPreview
@@ -1425,6 +1434,48 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     );
   }, [activeDiagram, collaboration]);
 
+  useEffect(() => {
+    if (!activeDiagramId) {
+      return;
+    }
+    let frame = 0;
+    const revealActiveTab = () => {
+      const tab = diagramTabRefs.current.get(activeDiagramId);
+      const tabContainer = tab?.closest<HTMLElement>('.workspace-diagram-tab');
+      const scroller = tabContainer?.closest<HTMLElement>('.workspace-diagram-tab-scroller');
+      if (!tabContainer || !scroller) {
+        tab?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return;
+      }
+      const tabRect = tabContainer.getBoundingClientRect();
+      const scrollerRect = scroller.getBoundingClientRect();
+      const tabLeft = scroller.scrollLeft + tabRect.left - scrollerRect.left;
+      const tabRight = scroller.scrollLeft + tabRect.right - scrollerRect.left;
+      const visibleLeft = scroller.scrollLeft;
+      const visibleRight = visibleLeft + scroller.clientWidth;
+      if (tabRight > visibleRight) {
+        scroller.scrollLeft = tabRight - scroller.clientWidth;
+      } else if (tabLeft < visibleLeft) {
+        scroller.scrollLeft = tabLeft;
+      }
+    };
+    const scheduleReveal = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(revealActiveTab);
+    };
+    const tab = diagramTabRefs.current.get(activeDiagramId);
+    const tabContainer = tab?.closest<HTMLElement>('.workspace-diagram-tab');
+    const scroller = tabContainer?.closest<HTMLElement>('.workspace-diagram-tab-scroller');
+    const resizeObserver = new ResizeObserver(scheduleReveal);
+    if (tabContainer) resizeObserver.observe(tabContainer);
+    if (scroller) resizeObserver.observe(scroller);
+    scheduleReveal();
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+    };
+  }, [activeDiagramId, diagrams]);
+
   const focusDiagramTab = useCallback((diagramId: string) => {
     setActiveDiagramId(diagramId);
     window.requestAnimationFrame(() => { diagramTabRefs.current.get(diagramId)?.focus(); });
@@ -1495,8 +1546,57 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     if (deleted) addActivityRef.current?.('deleted', `Deleted ${deleted.name}`, diagramId);
   }, [activeDiagramId, collaboration, diagrams]);
 
+  const handleTouchLabelPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (event.pointerType !== 'touch' || !(event.target instanceof Element)) {
+      return;
+    }
+
+    const labelTarget = event.target.closest<HTMLElement>('.workspace-touch-label');
+    if (!labelTarget) {
+      return;
+    }
+
+    const label = labelTarget.dataset.touchLabel ?? labelTarget.getAttribute('aria-label');
+    if (!label) {
+      return;
+    }
+
+    activeTouchLabelRef.current?.removeAttribute('data-touch-label-visible');
+    if (touchLabelTimeoutRef.current !== null) {
+      window.clearTimeout(touchLabelTimeoutRef.current);
+    }
+
+    activeTouchLabelRef.current = labelTarget;
+    labelTarget.setAttribute('data-touch-label-visible', 'true');
+    setTouchLabelStatus({ label });
+    touchLabelTimeoutRef.current = window.setTimeout(() => {
+      labelTarget.removeAttribute('data-touch-label-visible');
+      if (activeTouchLabelRef.current === labelTarget) {
+        activeTouchLabelRef.current = null;
+      }
+      touchLabelTimeoutRef.current = null;
+      setTouchLabelStatus(null);
+    }, 1_200);
+  }, []);
+
+  const handleTouchLabelPointerRelease = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (event.pointerType !== 'touch') {
+      return;
+    }
+    const labelTarget = activeTouchLabelRef.current;
+    labelTarget?.removeAttribute('data-touch-label-visible');
+    if (activeTouchLabelRef.current === labelTarget) {
+      activeTouchLabelRef.current = null;
+    }
+  }, []);
+
   return (
-    <main className="workspace-shell">
+    <main
+      className="workspace-shell"
+      onPointerCancelCapture={handleTouchLabelPointerRelease}
+      onPointerDownCapture={handleTouchLabelPointerDown}
+      onPointerUpCapture={handleTouchLabelPointerRelease}
+    >
       <header className="workspace-topbar">
         <div className="workspace-topbar-left">
           <span className="workspace-logo">{APP_NAME}</span>
@@ -1535,7 +1635,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
           </div>
           <button
             aria-label={roomKey ? 'Copy private room link' : 'Room key unavailable. Reset it in Settings to share'}
-            className="workspace-share-button"
+            className="workspace-share-button workspace-touch-label"
+            data-touch-label={roomKey ? 'Copy link' : 'Room key unavailable'}
             data-testid="share-session-button"
             disabled={!roomKey}
             title={roomKey ? 'Copy private room link' : 'Reset the room key in Settings before sharing'}
@@ -1583,7 +1684,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
       <section aria-labelledby={activeDiagramId ? `diagram-tab-${activeDiagramId}` : undefined} className="workspace-main" data-testid="canvas-first-workspace" id="diagram-workspace" role="tabpanel">
         <article data-testid="preview-root" className="workspace-pane workspace-diagram-pane">
-          {renderError || historyPreviewError ? (
+          {(renderError || historyPreviewError) && openFlyout !== 'source' ? (
             <div data-testid="parse-error-banner" className="error-banner" role="status">
               <strong>preview kept on last valid diagram</strong>
               <span>{historyPreviewError ?? renderError}</span>
@@ -1692,6 +1793,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
           restoreError={restoreError}
           restorePending={restorePending}
           restoreConfirmRef={restoreConfirmRef}
+          sourceError={historyPreviewError ?? renderError}
         />
       </section>
 
@@ -1706,6 +1808,14 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         participants={participants}
         saveStatusLabel={saveStatusLabel}
       />
+
+      <div
+        aria-atomic="true"
+        aria-live="polite"
+        className={`workspace-touch-label-status${touchLabelStatus ? ' is-visible' : ''}`}
+        data-testid="workspace-touch-label-status"
+        role="status"
+      >{touchLabelStatus?.label ?? ''}</div>
 
       <p aria-live="polite" className="visually-hidden">{roomKeyAnnouncement}</p>
 

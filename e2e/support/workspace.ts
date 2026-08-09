@@ -62,14 +62,24 @@ export async function replaceSource(page: Page, source: string): Promise<void> {
   const editor = await ensureSourceFlyoutOpen(page);
   await editor.click();
   await page.keyboard.press('ControlOrMeta+A');
-  await page.keyboard.insertText(source);
+  const pasteHandled = await editor.evaluate((element, text) => {
+    const clipboard = new DataTransfer();
+    clipboard.setData('text/plain', text);
+    const event = new ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: clipboard,
+    });
+    return !element.dispatchEvent(event);
+  }, source);
+  assert(pasteHandled, 'CodeMirror did not handle the source replacement paste event.');
 }
 
 export async function canonicalSource(page: Page): Promise<string> {
   return page.locator('.cm-line').evaluateAll((lines) => lines.map((line) => {
     const copy = line.cloneNode(true) as HTMLElement;
-    copy.querySelectorAll('.cm-ySelectionCaret, .cm-widgetBuffer').forEach((node) => node.remove());
-    return copy.textContent ?? '';
+    copy.querySelectorAll('[contenteditable="false"], .cm-widgetBuffer').forEach((node) => node.remove());
+    return (copy.textContent ?? '').replaceAll('\u2060', '');
   }).join('\n'));
 }
 
@@ -167,7 +177,15 @@ export async function waitForCanvas(page: Page, mode: 'flowchart' | 'generic'): 
 }
 
 export async function waitForInvalidPreview(page: Page): Promise<void> {
-  await page.getByTestId('parse-error-banner').waitFor({ state: 'visible', timeout: 15_000 });
+  const globalStatus = page.getByTestId('parse-error-banner');
+  const sourceStatus = page.getByTestId('source-parse-status');
+  const sourceOpen = await page.getByTestId('source-flyout').isVisible();
+  const expectedStatus = sourceOpen ? sourceStatus : globalStatus;
+  const unexpectedStatus = sourceOpen ? globalStatus : sourceStatus;
+
+  await expectedStatus.waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(expectedStatus).toContainText(/preview kept on last valid diagram/iu);
+  await expect(unexpectedStatus).toHaveCount(0);
   assert(await page.locator('.diagram-canvas-svg svg').count() > 0, 'Invalid Mermaid removed the last valid visual preview.');
 }
 

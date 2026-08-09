@@ -39,6 +39,19 @@ export async function assertHitTarget(page: Page, target: Locator, label: string
   assert(hit, `${label} is obscured at its center point.`);
 }
 
+/**
+ * Phone targets need both a clear hit point and enough physical space for a
+ * fingertip. Keep this separate from assertHitTarget because desktop controls
+ * are allowed to be visually compact.
+ */
+export async function assertTouchTarget(page: Page, target: Locator, label: string, minimumPx = 44): Promise<void> {
+  await assertHitTarget(page, target, label);
+  const box = await target.boundingBox();
+  assert(box, `${label} has no clickable bounds.`);
+  assert(box.width >= minimumPx && box.height >= minimumPx,
+    `${label} is ${box.width.toFixed(1)}x${box.height.toFixed(1)}px; phone action targets must be at least ${minimumPx}px.`);
+}
+
 export async function verifiedClick(page: Page, target: Locator, label: string): Promise<void> {
   await assertHitTarget(page, target, label);
   await target.click({ trial: true, timeout: 15_000 });
@@ -60,6 +73,21 @@ export async function assertContainedInViewport(page: Page, target: Locator, lab
 export async function assertDocumentHasNoHorizontalOverflow(page: Page, tolerancePx = 1): Promise<void> {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert(overflow <= tolerancePx, `Document has ${overflow}px horizontal overflow.`);
+}
+
+/**
+ * Use after a UI has settled. A tolerance-free assertion intentionally catches
+ * the one-pixel/late overflow regressions that viewport-only layout checks miss.
+ */
+export async function assertDocumentMatchesViewport(page: Page, label: string): Promise<void> {
+  const metrics = await page.evaluate(() => ({
+    bodyScrollWidth: document.body.scrollWidth,
+    innerHeight: window.innerHeight,
+    innerWidth: window.innerWidth,
+    rootScrollWidth: document.documentElement.scrollWidth,
+  }));
+  assert(metrics.rootScrollWidth === metrics.innerWidth,
+    `${label} document width is ${metrics.rootScrollWidth}px, expected viewport ${metrics.innerWidth}px (body ${metrics.bodyScrollWidth}px).`);
 }
 
 type Rgb = { b: number; g: number; r: number };

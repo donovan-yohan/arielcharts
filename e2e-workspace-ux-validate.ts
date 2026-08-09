@@ -38,6 +38,7 @@ import {
 } from './e2e/support/yjs-session.ts';
 import { STARTER_TEMPLATES } from './packages/shared/src/starter-templates.js';
 import { getWebsocketServerUrl } from './apps/web/src/lib/session.ts';
+import { getCanvasDotGridGeometry } from './apps/web/src/lib/canvas-dot-grid.ts';
 import {
   API_SEQUENCE_FIXTURE,
   FLOWCHART_FIXTURE,
@@ -194,6 +195,83 @@ async function renderedCanvasCameraTransform(page: Page, label: string): Promise
   const transform = await layer.evaluate((element) => (element as HTMLElement).style.transform);
   assert(transform.length > 0, `${label} requires a rendered canvas transform.`);
   return transform;
+}
+
+async function canvasDotGridStyle(page: Page, label: string): Promise<{
+  backgroundPosition: string;
+  backgroundSize: string;
+  dotRadius: string;
+  transitionDuration: string;
+  transitionProperty: string;
+  transitionTimingFunction: string;
+}> {
+  const grid = page.getByTestId('canvas-dot-grid');
+  await grid.waitFor({ state: 'visible', timeout: 5_000 });
+  const style = await grid.evaluate((element) => {
+    const gridStyle = (element as HTMLElement).style;
+    return {
+      backgroundPosition: gridStyle.backgroundPosition,
+      backgroundSize: gridStyle.backgroundSize,
+      dotRadius: gridStyle.getPropertyValue('--canvas-grid-dot-radius'),
+      transitionDuration: gridStyle.transitionDuration,
+      transitionProperty: gridStyle.transitionProperty,
+      transitionTimingFunction: gridStyle.transitionTimingFunction,
+    };
+  });
+  assert(style.backgroundPosition && style.backgroundSize && style.dotRadius,
+    `${label} dot grid did not expose its camera-derived visual style.`);
+  return style;
+}
+
+async function assertDotGridTracksCamera(page: Page, label: string): Promise<{
+  backgroundPosition: string;
+  backgroundSize: string;
+  dotRadius: string;
+  transitionDuration: string;
+  transitionProperty: string;
+  transitionTimingFunction: string;
+}> {
+  const camera = parseCameraTransform(await renderedCanvasCameraTransform(page, `${label} camera`), `${label} camera`);
+  const actual = await canvasDotGridStyle(page, label);
+  const expected = getCanvasDotGridGeometry(camera);
+  assert(Math.abs(Number.parseFloat(actual.dotRadius) - Number.parseFloat(expected.dotRadius)) < 0.01,
+    `${label} dot grid radius diverged from the shared camera zoom: ${JSON.stringify({ actual, camera, expected })}.`);
+  for (const property of ['backgroundPosition', 'backgroundSize'] as const) {
+    const actualValues = actual[property].split(' ').map((value) => Number.parseFloat(value));
+    const expectedValues = expected[property].split(' ').map((value) => Number.parseFloat(value));
+    assert(
+      actualValues.length === 2
+        && expectedValues.length === 2
+        && actualValues.every((value, index) => Math.abs(value - expectedValues[index]!) < 0.01),
+      `${label} dot grid ${property} diverged from the shared camera: ${JSON.stringify({ actual, camera, expected })}.`,
+    );
+  }
+  return actual;
+}
+
+async function assertDotGridTransition(page: Page, expected: boolean, label: string): Promise<void> {
+  const grid = page.getByTestId('canvas-dot-grid');
+  await expect.poll(async () => grid.evaluate((element) => {
+    const style = (element as HTMLElement).style;
+    return {
+      duration: style.transitionDuration,
+      property: style.transitionProperty,
+      timingFunction: style.transitionTimingFunction,
+    };
+  }), {
+    message: `${label} did not settle the expected dot-grid transition contract.`,
+    timeout: 5_000,
+  }).toEqual(expected
+    ? {
+      duration: '180ms, 180ms, 180ms',
+      property: 'background-position, background-size, --canvas-grid-dot-radius',
+      timingFunction: 'ease, ease, ease',
+    }
+    : { duration: '', property: '', timingFunction: '' });
+}
+
+async function triggerCanvasFit(page: Page, label: string): Promise<void> {
+  await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), label);
 }
 
 async function waitForStableCanvasTransform(page: Page, label: string): Promise<string> {
@@ -555,7 +633,10 @@ async function expectRendererTransitionPreservesCamera(page: Page): Promise<void
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   await closeFlyout(page, 'source');
+  await triggerCanvasFit(page, 'flowchart fit diagram');
+  await assertDotGridTransition(page, false, 'React Flow fit');
   const beforeZoom = await waitForStableCanvasTransform(page, 'Flowchart zoom verification');
+  const beforeFlowchartGrid = await assertDotGridTracksCamera(page, 'Flowchart grid baseline');
   await verifiedClick(page, page.getByRole('button', { name: 'Zoom in', exact: true }), 'zoom in');
   await page.waitForFunction((previous) => {
     const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
@@ -563,24 +644,51 @@ async function expectRendererTransitionPreservesCamera(page: Page): Promise<void
   }, beforeZoom, { timeout: 5_000 });
   const zoomed = await waitForStableCanvasTransform(page, 'Flowchart zoom result');
   assert(zoomed !== beforeZoom, `Zoom in did not change the flowchart camera: ${beforeZoom}`);
+  const zoomedFlowchartGrid = await assertDotGridTracksCamera(page, 'Flowchart grid after zoom');
+  assert(JSON.stringify(zoomedFlowchartGrid) !== JSON.stringify(beforeFlowchartGrid),
+    'Flowchart zoom did not change the dot-grid visual state.');
+  await dispatchTouchDrag(page, 'Flowchart grid pan');
+  const pannedFlowchartTransform = await waitForCameraChange(page, zoomed, 'Flowchart grid pan');
+  const pannedFlowchartGrid = await assertDotGridTracksCamera(page, 'Flowchart grid after pan');
+  assert(JSON.stringify(pannedFlowchartGrid) !== JSON.stringify(zoomedFlowchartGrid),
+    'Flowchart pan did not change the dot-grid visual state.');
   await replaceSource(page, API_SEQUENCE_FIXTURE);
   await waitForCanvas(page, 'generic');
   await closeFlyout(page, 'source');
   const staticTransform = await waitForStableCanvasTransform(page, 'Static renderer transition');
-  assert(staticTransform === zoomed, `Editable-to-static renderer transition changed the camera: ${zoomed} -> ${staticTransform}`);
-  await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), 'static renderer fit diagram');
+  assert(staticTransform === pannedFlowchartTransform, `Editable-to-static renderer transition changed the camera: ${pannedFlowchartTransform} -> ${staticTransform}`);
+  const staticGrid = await assertDotGridTracksCamera(page, 'Generic renderer grid after transition');
+  assert(JSON.stringify(staticGrid) === JSON.stringify(pannedFlowchartGrid),
+    'Renderer transition changed the dot grid despite preserving the shared camera.');
+  await triggerCanvasFit(page, 'static renderer fit diagram');
+  await assertDotGridTransition(
+    page,
+    true,
+    'Generic Mermaid fit',
+  );
   await page.waitForFunction((previous) => {
     const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
     return layer instanceof HTMLElement && layer.style.transform !== previous;
   }, staticTransform, { timeout: 5_000 });
   const fittedTransform = await waitForStableCanvasTransform(page, 'Static renderer explicit Fit result');
   assert(fittedTransform !== staticTransform, `Explicit Fit did not change the static renderer camera: ${staticTransform}`);
+  const fittedGenericGrid = await assertDotGridTracksCamera(page, 'Generic renderer grid after fit');
+  assert(JSON.stringify(fittedGenericGrid) !== JSON.stringify(staticGrid),
+    'Generic renderer Fit did not change the dot-grid visual state.');
+  await dispatchTouchDrag(page, 'Generic grid pan');
+  const pannedGenericTransform = await waitForCameraChange(page, fittedTransform, 'Generic grid pan');
+  const pannedGenericGrid = await assertDotGridTracksCamera(page, 'Generic renderer grid after pan');
+  assert(JSON.stringify(pannedGenericGrid) !== JSON.stringify(fittedGenericGrid),
+    'Generic renderer pan did not change the dot-grid visual state.');
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   await closeFlyout(page, 'source');
   const restoredFlowchartTransform = await waitForStableCanvasTransform(page, 'Flowchart renderer restoration');
-  assert(restoredFlowchartTransform === fittedTransform,
-    `Static-to-editable renderer transition changed the camera: ${fittedTransform} -> ${restoredFlowchartTransform}`);
+  assert(restoredFlowchartTransform === pannedGenericTransform,
+    `Static-to-editable renderer transition changed the camera: ${pannedGenericTransform} -> ${restoredFlowchartTransform}`);
+  const restoredFlowchartGrid = await assertDotGridTracksCamera(page, 'Flowchart grid after restoration');
+  assert(JSON.stringify(restoredFlowchartGrid) === JSON.stringify(pannedGenericGrid),
+    'Static-to-editable renderer transition changed the dot grid despite preserving the shared camera.');
 }
 
 async function expectRemoteUpdateWithoutAnchorJump(page: Page, mcp: ModernMcpClient, sessionId: string, diagramName: string): Promise<void> {

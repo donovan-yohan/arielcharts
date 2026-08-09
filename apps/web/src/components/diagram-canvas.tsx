@@ -38,6 +38,7 @@ import { shouldCanvasHandleEscape } from '../lib/canvas-keyboard-ownership';
 import { getCanvasToolbarStackGeometry, getCanvasToolbarVisibility } from '../lib/canvas-toolbar-stack';
 import { applyCanvasTouchGesture, CanvasTouchGestureController, type CanvasTouchGesture } from '../lib/canvas-touch-gesture';
 import { getConnectNodeActivation } from '../lib/diagram-connect-state';
+import { getCanvasDotGridGeometry } from '../lib/canvas-dot-grid';
 import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
 import {
@@ -1464,6 +1465,20 @@ export function DiagramCanvas({
     transformOrigin: '0 0',
     transition: animateTransform ? 'transform 180ms ease' : undefined,
   };
+  const dotGridGeometry = useMemo(() => getCanvasDotGridGeometry(viewport), [viewport]);
+  const dotGridLayerStyle = useMemo<CSSProperties & Record<'--canvas-grid-dot-radius', string>>(() => ({
+    '--canvas-grid-dot-radius': dotGridGeometry.dotRadius,
+    backgroundPosition: dotGridGeometry.backgroundPosition,
+    backgroundSize: dotGridGeometry.backgroundSize,
+    inset: 0,
+    pointerEvents: 'none',
+    position: 'absolute',
+    transitionDuration: animateTransform && !useReactFlowRenderer ? '180ms, 180ms, 180ms' : undefined,
+    transitionProperty: animateTransform && !useReactFlowRenderer
+      ? 'background-position, background-size, --canvas-grid-dot-radius'
+      : undefined,
+    transitionTimingFunction: animateTransform && !useReactFlowRenderer ? 'ease, ease, ease' : undefined,
+  }), [animateTransform, dotGridGeometry, useReactFlowRenderer]);
 
   const canvasCursor = readOnly ? 'default' : isPanning ? 'grabbing' : mode === 'connect' ? 'crosshair' : spacePressed ? 'grab' : 'default';
   const hasGraphNodes = (graph?.nodes.length ?? 0) > 0;
@@ -1510,6 +1525,12 @@ export function DiagramCanvas({
       }}
       tabIndex={0}
     >
+      <div
+        aria-hidden="true"
+        className="canvas-dot-grid"
+        data-testid="canvas-dot-grid"
+        style={dotGridLayerStyle}
+      />
       <div style={transformStyle}>
         {svg ? (
           <div

@@ -1164,8 +1164,16 @@ code {
   overflow: hidden;
   position: relative;
   background-color: var(--surface-canvas) !important;
-  background-image: radial-gradient(circle, var(--canvas-grid-dot) 1px, transparent 1.2px) !important;
-  background-size: 20px 20px !important;
+}
+
+@property --canvas-grid-dot-radius {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 1px;
+}
+
+.canvas-dot-grid {
+  background-image: radial-gradient(circle, var(--canvas-grid-dot) 0 var(--canvas-grid-dot-radius), transparent var(--canvas-grid-dot-radius));
 }
 
 .diagram-canvas:focus-visible {

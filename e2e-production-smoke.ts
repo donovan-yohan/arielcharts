@@ -3,7 +3,7 @@ import { WebSocket as NodeWebSocket } from 'ws';
 import { assert } from './e2e/support/assert.ts';
 import { ModernMcpClient, postModernMcp } from './e2e/support/mcp.ts';
 import { createRoom, rotateRoomAccess, type RoomAccess } from './e2e/support/room-access.ts';
-import { visitWorkspace } from './e2e/support/workspace.ts';
+import { ensureSourceFlyoutOpen, visitWorkspace } from './e2e/support/workspace.ts';
 
 const PRODUCTION_BASE_URL = 'https://arielcharts.donovanyohan.com';
 const PRODUCTION_MCP_URL = 'https://api.arielcharts.donovanyohan.com/mcp';
@@ -179,6 +179,7 @@ async function run(): Promise<void> {
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+    await ensureSourceFlyoutOpen(page);
     await page.getByTestId('connection-status-badge').filter({ hasText: /^synced$/iu }).waitFor({ state: 'visible', timeout: 15_000 });
 
     initialSocket = await openAuthorizedWebSocket(endpoints.serverUrl, origin, credentials.sessionId, nodeAccess.cookie);

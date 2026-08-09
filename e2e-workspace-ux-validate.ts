@@ -270,10 +270,8 @@ async function assertDotGridTransition(page: Page, expected: boolean, label: str
     : { duration: '', property: '', timingFunction: '' });
 }
 
-async function triggerCanvasFit(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Fit diagram', exact: true }).evaluate((button) => {
-    (button as HTMLButtonElement).click();
-  });
+async function triggerCanvasFit(page: Page, label: string): Promise<void> {
+  await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), label);
 }
 
 async function waitForStableCanvasTransform(page: Page, label: string): Promise<string> {
@@ -635,7 +633,7 @@ async function expectRendererTransitionPreservesCamera(page: Page): Promise<void
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   await closeFlyout(page, 'source');
-  await triggerCanvasFit(page);
+  await triggerCanvasFit(page, 'flowchart fit diagram');
   await assertDotGridTransition(page, false, 'React Flow fit');
   const beforeZoom = await waitForStableCanvasTransform(page, 'Flowchart zoom verification');
   const beforeFlowchartGrid = await assertDotGridTracksCamera(page, 'Flowchart grid baseline');
@@ -662,7 +660,7 @@ async function expectRendererTransitionPreservesCamera(page: Page): Promise<void
   const staticGrid = await assertDotGridTracksCamera(page, 'Generic renderer grid after transition');
   assert(JSON.stringify(staticGrid) === JSON.stringify(pannedFlowchartGrid),
     'Renderer transition changed the dot grid despite preserving the shared camera.');
-  await triggerCanvasFit(page);
+  await triggerCanvasFit(page, 'static renderer fit diagram');
   await assertDotGridTransition(
     page,
     true,

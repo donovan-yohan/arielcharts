@@ -32,6 +32,13 @@ export function canUseErControls(source: string, preview: DiagramPreview | null)
     && getDiagramSourceModelAdapter(preview.capability).getRepresentability(source).representable;
 }
 
+/** Semantic families share only their current-preview gate; each owns its grammar. */
+export function canUseSemanticFamilyControls(source: string, preview: DiagramPreview | null, adapter: 'class' | 'state' | 'requirement'): boolean {
+  return preview?.source === source
+    && preview.capability.adapter === adapter
+    && getDiagramSourceModelAdapter(preview.capability).getRepresentability(source).representable;
+}
+
 /** Last-known-good previews are intentionally local and isolated by stable tab id. */
 export class DiagramPreviewRegistry {
   private readonly previews = new Map<string, DiagramPreview>();

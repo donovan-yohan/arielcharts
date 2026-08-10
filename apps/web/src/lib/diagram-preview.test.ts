@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canUseErControls, canUseFlowchartControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from './diagram-preview';
+import { canUseErControls, canUseFlowchartControls, canUseSemanticFamilyControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from './diagram-preview';
 
 const flowchartPreview: DiagramPreview = {
   capability: { diagramType: 'flowchart-v2', kind: 'flowchart' },
@@ -48,6 +48,17 @@ describe('DiagramPreviewRegistry', () => {
     expect(canUseErControls(erPreview.source, erPreview)).toBe(true);
     expect(canUseErControls('erDiagram\n  CUSTOMER ||--o{ ORDER : places', { ...erPreview, source: 'erDiagram\n  CUSTOMER ||--o{ ORDER : places' })).toBe(false);
     expect(canUseErControls(erPreview.source, { ...erPreview, source: 'erDiagram\n  direction LR' })).toBe(false);
+  });
+
+  it('gates each new semantic family by both current parser result and its own strict adapter', () => {
+    const classPreview: DiagramPreview = { capability: { adapter: 'class', diagramType: 'class', kind: 'generic' }, diagramId: 'class', flowchartSnapshot: null, source: 'classDiagram\n  class Account', svg: '<svg />' };
+    const statePreview: DiagramPreview = { capability: { adapter: 'state', diagramType: 'state', kind: 'generic' }, diagramId: 'state', flowchartSnapshot: null, source: 'stateDiagram-v2\n  [*] --> Ready', svg: '<svg />' };
+    const requirementPreview: DiagramPreview = { capability: { adapter: 'requirement', diagramType: 'requirement', kind: 'generic' }, diagramId: 'requirement', flowchartSnapshot: null, source: 'requirementDiagram\n  requirement req {\n    id: 1\n    text: Example\n    risk: low\n    verifyMethod: test\n  }', svg: '<svg />' };
+    expect(canUseSemanticFamilyControls(classPreview.source, classPreview, 'class')).toBe(true);
+    expect(canUseSemanticFamilyControls(statePreview.source, statePreview, 'state')).toBe(true);
+    expect(canUseSemanticFamilyControls(requirementPreview.source, requirementPreview, 'requirement')).toBe(true);
+    expect(canUseSemanticFamilyControls('stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }', { ...statePreview, source: 'stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }' }, 'state')).toBe(false);
+    expect(canUseSemanticFamilyControls(classPreview.source, classPreview, 'state')).toBe(false);
   });
 
   it('isolates last-known-good previews by stable diagram id', () => {

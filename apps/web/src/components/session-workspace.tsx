@@ -41,7 +41,7 @@ import {
   type NodePositionsSyncMode,
 } from '../lib/diagram-layout';
 import { classifyDiagramCapability, getDiagramCapabilityLabel } from '../lib/diagram-capabilities';
-import { canUseErControls, canUseFlowchartControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
+import { canUseErControls, canUseFlowchartControls, canUseSemanticFamilyControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
 import {
   addSequenceMessage,
   addSequenceActivation,
@@ -83,6 +83,17 @@ import {
   moveErEntity,
   renameErEntity,
 } from '../lib/er-mutations';
+import {
+  addClass, addClassAnnotation, addClassMember, addClassRelationship, deleteClass, deleteClassAnnotation, deleteClassMember,
+  deleteClassRelationship, editClass, editClassMember, editClassRelationship, getClassDiagramSnapshot,
+} from '../lib/class-mutations';
+import {
+  addState, addStateTransition, deleteState, deleteStateTransition, editState, editStateTransition, getStateDiagramSnapshot,
+} from '../lib/state-mutations';
+import {
+  addRequirement, addRequirementRelationship, deleteRequirement, deleteRequirementRelationship, editRequirement,
+  editRequirementRelationship, getRequirementDiagramSnapshot,
+} from '../lib/requirement-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -1692,6 +1703,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isFlowchart = canUseFlowchartControls(renderedMermaidText, renderedPreview);
   const isSequence = canUseSequenceControls(renderedMermaidText, renderedPreview);
   const isEr = canUseErControls(renderedMermaidText, renderedPreview);
+  const isClass = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'class');
+  const isState = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'state');
+  const isRequirement = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'requirement');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1711,6 +1725,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     ...sequenceDiagram.fragments.map((fragment) => ({ id: fragment.id, text: fragment.label, type: 'fragment' as const })),
   ] : [], [renderedMermaidText, sequenceDiagram]);
   const erDiagram = useMemo(() => isEr ? getErDiagramSnapshot(renderedMermaidText) : null, [isEr, renderedMermaidText]);
+  const classDiagram = useMemo(() => isClass ? getClassDiagramSnapshot(renderedMermaidText) : null, [isClass, renderedMermaidText]);
+  const stateDiagram = useMemo(() => isState ? getStateDiagramSnapshot(renderedMermaidText) : null, [isState, renderedMermaidText]);
+  const requirementDiagram = useMemo(() => isRequirement ? getRequirementDiagramSnapshot(renderedMermaidText) : null, [isRequirement, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2156,6 +2173,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             mermaidSource={renderedMermaidText}
             isSequence={isSequence}
             isEr={isEr}
+            isClass={isClass}
+            isState={isState}
+            isRequirement={isRequirement}
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
@@ -2270,6 +2290,29 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onDeleteErRelationship={(identity) => {
               mutateCanvasSource((source) => deleteErRelationship(source, identity), 'Deleted an ER relationship');
             }}
+            onAddClass={(name) => { mutateCanvasSource((source) => addClass(source, name), 'Added a class'); }}
+            onEditClass={(name, patch) => { mutateCanvasSource((source) => editClass(source, name, patch), 'Edited a class'); }}
+            onDeleteClass={(name) => { mutateCanvasSource((source) => deleteClass(source, name), 'Deleted a class and dependent relationships'); }}
+            onAddClassMember={(name, member) => { mutateCanvasSource((source) => addClassMember(source, name, member), 'Added a class member'); }}
+            onEditClassMember={(name, identity, member) => { mutateCanvasSource((source) => editClassMember(source, name, identity, member), 'Edited a class member'); }}
+            onDeleteClassMember={(name, identity) => { mutateCanvasSource((source) => deleteClassMember(source, name, identity), 'Deleted a class member'); }}
+            onAddClassAnnotation={(name, annotation) => { mutateCanvasSource((source) => addClassAnnotation(source, name, annotation), 'Added a class annotation'); }}
+            onDeleteClassAnnotation={(name, annotation) => { mutateCanvasSource((source) => deleteClassAnnotation(source, name, annotation), 'Deleted a class annotation'); }}
+            onAddClassRelationship={(relationship) => { mutateCanvasSource((source) => addClassRelationship(source, relationship), 'Added a class relationship'); }}
+            onEditClassRelationship={(identity, relationship) => { mutateCanvasSource((source) => editClassRelationship(source, identity, relationship), 'Edited a class relationship'); }}
+            onDeleteClassRelationship={(identity) => { mutateCanvasSource((source) => deleteClassRelationship(source, identity), 'Deleted a class relationship'); }}
+            onAddState={(name) => { mutateCanvasSource((source) => addState(source, name), 'Added a state'); }}
+            onEditState={(id, patch) => { mutateCanvasSource((source) => editState(source, id, patch), 'Edited a state'); }}
+            onDeleteState={(id) => { mutateCanvasSource((source) => deleteState(source, id), 'Deleted a state and dependent transitions'); }}
+            onAddStateTransition={(transition) => { mutateCanvasSource((source) => addStateTransition(source, transition), 'Added a state transition'); }}
+            onEditStateTransition={(identity, transition) => { mutateCanvasSource((source) => editStateTransition(source, identity, transition), 'Edited a state transition'); }}
+            onDeleteStateTransition={(identity) => { mutateCanvasSource((source) => deleteStateTransition(source, identity), 'Deleted a state transition'); }}
+            onAddRequirement={(requirement) => { mutateCanvasSource((source) => addRequirement(source, requirement), 'Added a requirement'); }}
+            onEditRequirement={(name, requirement) => { mutateCanvasSource((source) => editRequirement(source, name, requirement), 'Edited a requirement'); }}
+            onDeleteRequirement={(name) => { mutateCanvasSource((source) => deleteRequirement(source, name), 'Deleted a requirement and dependent relationships'); }}
+            onAddRequirementRelationship={(relationship) => { mutateCanvasSource((source) => addRequirementRelationship(source, relationship), 'Added a requirement relationship'); }}
+            onEditRequirementRelationship={(identity, relationship) => { mutateCanvasSource((source) => editRequirementRelationship(source, identity, relationship), 'Edited a requirement relationship'); }}
+            onDeleteRequirementRelationship={(identity) => { mutateCanvasSource((source) => deleteRequirementRelationship(source, identity), 'Deleted a requirement relationship'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onChangeNodeShape={(nodeId, shape) => {
@@ -2334,6 +2377,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             sequenceDiagram={sequenceDiagram}
             sequenceTextItems={sequenceTextItems}
             erDiagram={erDiagram}
+            classDiagram={classDiagram}
+            stateDiagram={stateDiagram}
+            requirementDiagram={requirementDiagram}
             svg={renderedPreview?.svg ?? ''}
             theme={resolvedTheme}
             onUndo={handleCanvasUndo}

@@ -50,6 +50,33 @@ describe('ER editor safe area', () => {
   });
 });
 
+describe('relationship and architecture semantic editors', () => {
+  it('shares only the measured panel shell while keeping family-specific form controls separate', () => {
+    expect(canvasSource).toMatch(/data-testid="class-editor-controls"/u);
+    expect(canvasSource).toMatch(/data-testid="state-editor-controls"/u);
+    expect(canvasSource).toMatch(/data-testid="requirement-editor-controls"/u);
+    expect(canvasSource).toMatch(/ClassRelationshipForm[^]*?Class relationship type/u);
+    expect(canvasSource).toMatch(/Class relationship type[^]*?CLASS_RELATION_OPTIONS\.map/u);
+    expect(canvasSource).toMatch(/Class \$\{entity\.name\} id/u);
+    expect(canvasSource).toMatch(/StateTransitionForm[^]*?State transition source[^]*?State transition target/u);
+    expect(canvasSource).toMatch(/State \$\{state\.id\} id/u);
+    expect(canvasSource).toMatch(/const endpoints = \[\.\.\.new Set\(states\.map\(\(state\) => state\.id\)\)\]/u);
+    expect(canvasSource).toMatch(/RequirementRelationshipForm[^]*?Requirement relationship type/u);
+    expect(canvasSource).toMatch(/getClassRelationshipIdentity\(item, index, diagram\.relationships\)/u);
+    expect(canvasSource).toMatch(/getStateTransitionIdentity\(item, index, diagram\.transitions\)/u);
+    expect(canvasSource).toMatch(/getRequirementRelationshipIdentity\(item, index, diagram\.relationships\)/u);
+    expect(canvasSource).toMatch(/const nextRequirementId = Math\.max\(0, \.\.\.diagram\.entities\.map/u);
+    expect(canvasSource).toMatch(/id: String\(nextRequirementId\)/u);
+    expect(canvasSource).toMatch(/const \[name, setName\] = useState\('req'\)/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'class'\)/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'state'\)/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'requirement'\)/u);
+    expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addClass/u);
+    expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addState/u);
+    expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addRequirement/u);
+  });
+});
+
 describe('sequence semantic editor', () => {
   it('keeps every representable statement family behind explicit semantic controls', () => {
     expect(canvasSource).toMatch(/New sequence participant kind/u);

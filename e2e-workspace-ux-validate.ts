@@ -107,6 +107,26 @@ const HISTORY_GENERIC_SEQUENCE = `sequenceDiagram
 const HISTORY_INVALID_FLOWCHART = 'this is a temporary invalid Mermaid revision';
 const HISTORY_NEGATIVE_OBSERVATION_MS = 250;
 
+const CLASS_DIAGRAM_FIXTURE = `classDiagram
+  class Account
+  class Order
+  Account --> Order : places`;
+const STATE_DIAGRAM_FIXTURE = `stateDiagram-v2
+  [*] --> Draft
+  Draft --> Published : publish
+  Published --> [*]`;
+const REQUIREMENT_DIAGRAM_FIXTURE = `requirementDiagram
+  requirement order {
+    id: 1
+    text: "order is accepted"
+    risk: low
+    verifyMethod: test
+  }
+  element checkout {
+    type: service
+  }
+  order - satisfies -> checkout`;
+
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
 
@@ -930,6 +950,69 @@ async function expectErSemanticEditor(page: Page): Promise<void> {
   await waitForInvalidPreview(page);
   assert(await page.locator('.diagram-canvas-svg svg').innerHTML() === lastValidSvg,
     'Invalid ER source replaced the last valid SVG preview.');
+}
+
+async function expectRelationshipArchitectureEditors(page: Page): Promise<void> {
+  const before = await snapshotAnchors(page, ANCHORS);
+  const beforeTransform = await canvasTransform(page);
+
+  await replaceSource(page, CLASS_DIAGRAM_FIXTURE);
+  await waitForSource(page, CLASS_DIAGRAM_FIXTURE);
+  await page.locator('.diagram-canvas-svg svg').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.waitForTimeout(300);
+  await expect(page.getByTestId('diagram-mode')).toContainText('Class · editable · form');
+  await page.getByTestId('class-editor-controls').waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+  const classEditor = page.getByTestId('class-editor-controls');
+  const addClass = classEditor.getByRole('button', { name: 'Add class', exact: true });
+  await scrollErControlIntoView(addClass);
+  await assertHitTarget(page, addClass, 'class add control');
+  await verifiedClick(page, addClass, 'class add control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('class Class');
+  await closeFlyout(page, 'source');
+  await expect(page.getByTestId('diagram-mode')).toContainText('Class · editable · form');
+
+  await replaceSource(page, STATE_DIAGRAM_FIXTURE);
+  await waitForSource(page, STATE_DIAGRAM_FIXTURE);
+  await page.locator('.diagram-canvas-svg svg').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.waitForTimeout(300);
+  await expect(page.getByTestId('diagram-mode')).toContainText('State · editable · form');
+  await page.getByTestId('state-editor-controls').waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+  const stateEditor = page.getByTestId('state-editor-controls');
+  const addState = stateEditor.getByRole('button', { name: 'Add state', exact: true });
+  await scrollErControlIntoView(addState);
+  await assertHitTarget(page, addState, 'state add control');
+  await verifiedClick(page, addState, 'state add control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('state State');
+  await closeFlyout(page, 'source');
+  await expect(page.getByTestId('diagram-mode')).toContainText('State · editable · form');
+  const nestedState = 'stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }';
+  await replaceSource(page, nestedState);
+  await waitForSource(page, nestedState);
+  await expect(page.getByTestId('diagram-mode')).toContainText('State · source only');
+  await expect(page.getByTestId('state-editor-controls')).toHaveCount(0);
+
+  await replaceSource(page, REQUIREMENT_DIAGRAM_FIXTURE);
+  await waitForSource(page, REQUIREMENT_DIAGRAM_FIXTURE);
+  await page.locator('.diagram-canvas-svg svg').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.waitForTimeout(300);
+  await expect(page.getByTestId('diagram-mode')).toContainText('Requirement · editable · form');
+  await page.getByTestId('requirement-editor-controls').waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+  const requirementEditor = page.getByTestId('requirement-editor-controls');
+  const addRequirement = requirementEditor.getByRole('button', { name: 'Add requirement', exact: true });
+  await scrollErControlIntoView(addRequirement);
+  await assertHitTarget(page, addRequirement, 'requirement add control');
+  await verifiedClick(page, addRequirement, 'requirement add control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('requirement req {');
+  await closeFlyout(page, 'source');
+  await expect(page.getByTestId('diagram-mode')).toContainText('Requirement · editable · form');
+  assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
+  assert(await canvasTransform(page) === beforeTransform, 'Relationship/architecture semantic forms changed the generic Mermaid camera transform.');
 }
 
 async function expectStableFlyoutAnchors(page: Page, label: string): Promise<void> {
@@ -3293,6 +3376,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'flowchart and API sequence templates render, rename, edit, and remain ordinary diagrams');
       await expectErSemanticEditor(page);
       record(results, 'ER semantic form has hit-tested entity controls, source-safe writes, stable anchors, and no generic graph editor');
+      await expectRelationshipArchitectureEditors(page);
+      record(results, 'Class, State, and Requirement semantic forms expose hit-tested source-safe controls, preserve anchors/camera, and fail closed for nested state');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');

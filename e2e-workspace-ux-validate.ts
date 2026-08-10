@@ -416,6 +416,156 @@ async function waitForStableCanvasTransform(page: Page, label: string): Promise<
   throw new Error(`${label} did not settle a rendered canvas camera transform: ${JSON.stringify(samples)}.`);
 }
 
+type CanvasCameraSnapshot = {
+  panX: number;
+  panY: number;
+  zoom: number;
+};
+
+async function readCanvasCameraSnapshot(page: Page, label: string): Promise<CanvasCameraSnapshot> {
+  return page.evaluate((currentLabel) => {
+    const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
+    if (!(layer instanceof HTMLElement)) {
+      throw new Error(`${currentLabel} could not find the rendered canvas camera layer.`);
+    }
+    const match = /^translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)$/u.exec(layer.style.transform);
+    if (!match) {
+      throw new Error(`${currentLabel} found an unexpected canvas transform: ${JSON.stringify(layer.style.transform)}.`);
+    }
+    return { panX: Number(match[1]), panY: Number(match[2]), zoom: Number(match[3]) };
+  }, label);
+}
+
+async function dispatchTrustedCanvasWheel(
+  page: Page,
+  label: string,
+  renderer: 'flowchart' | 'generic',
+  options: { ctrlKey: boolean; deltaX: number; deltaY: number },
+): Promise<{
+  browserScale: number;
+  defaultPrevented: boolean;
+  devicePixelRatio: number;
+  isTrusted: boolean;
+  point: CanvasGesturePoint;
+}> {
+  const [point] = await allowedCanvasGesturePoints(page, `${label} trusted wheel`, 1, 0);
+  assert(point, `${label} did not find a blank canvas point for trusted wheel input.`);
+  const pointOwnership = await page.evaluate((clientPoint) => {
+    const target = document.elementFromPoint(clientPoint.x, clientPoint.y);
+    return {
+      inReactFlowPane: target instanceof Element && target.closest('.react-flow__pane') !== null,
+      target: target instanceof Element ? target.className : null,
+    };
+  }, point);
+  assert(
+    renderer === 'flowchart' ? pointOwnership.inReactFlowPane : !pointOwnership.inReactFlowPane,
+    `${label} trusted wheel missed the expected ${renderer} blank canvas surface: ${JSON.stringify(pointOwnership)}.`,
+  );
+  await page.evaluate(() => {
+    document.addEventListener('wheel', (event) => {
+      document.body.dataset.canvasWheelResult = JSON.stringify({
+        defaultPrevented: event.defaultPrevented,
+        isTrusted: event.isTrusted,
+      });
+    }, { once: true });
+  });
+  await page.mouse.move(point.x, point.y);
+  if (options.ctrlKey) await page.keyboard.down('Control');
+  try {
+    await page.mouse.wheel(options.deltaX, options.deltaY);
+  } finally {
+    if (options.ctrlKey) await page.keyboard.up('Control');
+  }
+  await page.waitForFunction(() => document.body.dataset.canvasWheelResult !== undefined, undefined, { timeout: 5_000 });
+  return page.evaluate((clientPoint) => {
+    const result = JSON.parse(document.body.dataset.canvasWheelResult ?? '{}') as {
+      defaultPrevented?: boolean;
+      isTrusted?: boolean;
+    };
+    delete document.body.dataset.canvasWheelResult;
+    return {
+      browserScale: window.visualViewport?.scale ?? 1,
+      defaultPrevented: result.defaultPrevented === true,
+      devicePixelRatio: window.devicePixelRatio,
+      isTrusted: result.isTrusted === true,
+      point: clientPoint,
+    };
+  }, point);
+}
+
+async function expectWheelGestureCameraControls(page: Page, label: string, renderer: 'flowchart' | 'generic'): Promise<void> {
+  const canvas = page.getByTestId('diagram-canvas');
+  await canvas.waitFor({ state: 'visible', timeout: 15_000 });
+  await verifiedClick(page, page.getByRole('button', { name: 'Zoom out', exact: true }), `${label} wheel headroom`);
+  await waitForStableCanvasTransform(page, `${label} wheel headroom`);
+  const beforePan = await readCanvasCameraSnapshot(page, `${label} wheel-pan baseline`);
+  const normalWheel = await dispatchTrustedCanvasWheel(page, label, renderer, { ctrlKey: false, deltaX: 18, deltaY: 32 });
+  const afterPan = await readCanvasCameraSnapshot(page, `${label} wheel-pan result`);
+  assert(normalWheel.isTrusted && normalWheel.defaultPrevented, `${label} normal trusted wheel was not owned by the canvas.`);
+  assert(afterPan.zoom === beforePan.zoom && (afterPan.panX !== beforePan.panX || afterPan.panY !== beforePan.panY),
+    `${label} ordinary two-finger scroll did not pan without zooming: ${JSON.stringify({ beforePan, afterPan })}.`);
+
+  const beforeZoom = afterPan;
+  const browserBeforeZoom = await page.evaluate(() => ({
+    browserScale: window.visualViewport?.scale ?? 1,
+    devicePixelRatio: window.devicePixelRatio,
+  }));
+  const pinch = await dispatchTrustedCanvasWheel(page, label, renderer, { ctrlKey: true, deltaX: 0, deltaY: -20 });
+  await expect.poll(async () => (await readCanvasCameraSnapshot(page, `${label} ctrl-wheel settle`)).zoom, {
+    message: `${label} ctrl-wheel zoom did not settle after trusted input.`,
+    timeout: 5_000,
+  }).not.toBe(beforeZoom.zoom);
+  const afterZoom = await readCanvasCameraSnapshot(page, `${label} ctrl-wheel result`);
+  const canvasBounds = await canvas.boundingBox();
+  assert(canvasBounds, `${label} lost its canvas bounds during ctrl-wheel zoom.`);
+  const anchoredCanvasPoint = {
+    x: (pinch.point.x - canvasBounds.x - beforeZoom.panX) / beforeZoom.zoom,
+    y: (pinch.point.y - canvasBounds.y - beforeZoom.panY) / beforeZoom.zoom,
+  };
+  const anchoredScreenPoint = {
+    x: afterZoom.panX + (anchoredCanvasPoint.x * afterZoom.zoom),
+    y: afterZoom.panY + (anchoredCanvasPoint.y * afterZoom.zoom),
+  };
+  assert(pinch.isTrusted && pinch.defaultPrevented, `${label} trusted ctrl-wheel pinch was not cancelled before browser zoom.`);
+  assert(afterZoom.zoom > beforeZoom.zoom && afterZoom.zoom < beforeZoom.zoom * 1.1,
+    `${label} ctrl-wheel zoom was missing or too sensitive: ${JSON.stringify({ beforeZoom, afterZoom })}.`);
+  assert(pinch.browserScale === 1 && browserBeforeZoom.browserScale === 1
+    && pinch.devicePixelRatio === browserBeforeZoom.devicePixelRatio,
+  `${label} ctrl-wheel changed the browser viewport scale: ${JSON.stringify({ browserBeforeZoom, pinch })}.`);
+  assert(Math.abs(anchoredScreenPoint.x - (pinch.point.x - canvasBounds.x)) < 0.1
+    && Math.abs(anchoredScreenPoint.y - (pinch.point.y - canvasBounds.y)) < 0.1,
+  `${label} ctrl-wheel zoom did not keep its blank-pane cursor point anchored: ${JSON.stringify({ afterZoom, anchoredScreenPoint, pinch })}.`);
+}
+
+async function expectBlankCanvasClickClearsSelection(page: Page): Promise<void> {
+  await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForCanvas(page, 'flowchart');
+  const node = page.locator('.mermaid-flow-node').first();
+  await verifiedClick(page, node, 'select flowchart node before blank canvas click');
+  await expect.poll(() => canonicalSelectedNodeIds(page), { timeout: 5_000 }).not.toEqual([]);
+  const [flowchartBlankPoint] = await allowedCanvasGesturePoints(page, 'flowchart blank selection clear', 1, 0);
+  assert(flowchartBlankPoint, 'Flowchart selection clear did not find a blank canvas point.');
+  await page.mouse.click(flowchartBlankPoint.x, flowchartBlankPoint.y);
+  await expect.poll(() => canonicalSelectedNodeIds(page), { timeout: 5_000 }).toEqual([]);
+  assert((await renderedSelectedNodeIds(page)).length === 0, 'Blank flowchart canvas click left a React Flow node selected.');
+  const flowchartVisualState = await node.evaluate((element) => {
+    const surface = element.querySelector<HTMLElement>('.mermaid-flow-node-surface');
+    return {
+      focusVisible: element.matches(':focus-visible'),
+      outline: surface ? getComputedStyle(surface).outlineStyle : null,
+    };
+  });
+  assert(!flowchartVisualState.focusVisible && flowchartVisualState.outline === 'none',
+    `Blank flowchart click left a focus-ring-like node treatment: ${JSON.stringify(flowchartVisualState)}.`);
+
+  await replaceSource(page, API_SEQUENCE_FIXTURE);
+  await waitForCanvas(page, 'sequence');
+  const [genericBlankPoint] = await allowedCanvasGesturePoints(page, 'generic Mermaid blank-canvas smoke', 1, 0);
+  assert(genericBlankPoint, 'Generic Mermaid blank-canvas smoke did not find a blank canvas point.');
+  await page.mouse.click(genericBlankPoint.x, genericBlankPoint.y);
+  assert(await page.getByTestId('diagram-canvas').isVisible(), 'Generic Mermaid blank-canvas click did not retain its canvas surface.');
+}
+
 async function closeWorkspaceSettings(page: Page): Promise<void> {
   const dialog = page.getByTestId(SETTINGS_DIALOG_TEST_ID);
   const closeButton = dialog.getByRole('button', { name: 'Close', exact: true });
@@ -3057,6 +3207,17 @@ async function validateWorkspaceUx(): Promise<void> {
       await selectThemePreference(page, 'light');
       await expectRendererTransitionPreservesCamera(page);
       record(results, 'editable/static renderer transition preserves camera and explicit Fit changes it');
+      await expectWheelGestureCameraControls(page, 'flowchart renderer', 'flowchart');
+      await replaceSource(page, API_SEQUENCE_FIXTURE);
+      await waitForCanvas(page, 'sequence');
+      await expectWheelGestureCameraControls(page, 'generic Mermaid renderer', 'generic');
+      await replaceSource(page, FLOWCHART_FIXTURE);
+      await waitForCanvas(page, 'flowchart');
+      record(results, 'ordinary wheel pans and ctrl-pinch gently zooms without browser scale changes across renderers');
+      await expectBlankCanvasClickClearsSelection(page);
+      await replaceSource(page, FLOWCHART_FIXTURE);
+      await waitForCanvas(page, 'flowchart');
+      record(results, 'blank flowchart click clears selected nodes while generic Mermaid blank-canvas click remains a smoke check');
       await expectRemoteUpdateWithoutAnchorJump(page, mcp, sessionId, diagramName);
       record(results, 'remote update leaves desktop anchors stable');
       await saveScreenshot(page, 'workspace-ux-desktop');

@@ -47,6 +47,35 @@ describe('ER editor safe area', () => {
   });
 });
 
+describe('canvas blank-click selection ownership', () => {
+  it('clears app-owned selection from both the generic canvas click and the React Flow pane while keeping focus roving-only', () => {
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+    expect(canvasSource).toMatch(/const handleCanvasClick = useCallback\(\(\) => \{[^]*?setSelection\(\[\]\);/u);
+    expect(canvasSource).toMatch(/const handleFlowPaneClick = useCallback\(\(event: ReactMouseEvent\) => \{\s*event\.stopPropagation\(\);\s*handleCanvasClick\(\);/u);
+    expect(canvasSource).toMatch(/onPaneClick=\{handleFlowPaneClick\}/u);
+    expect(canvasSource).toMatch(/event\.currentTarget\.matches\(':focus-visible'\)/u);
+    expect(canvasSource).not.toMatch(/is-focused/u);
+    expect(css).toMatch(/\.diagram-node-target:focus-visible\s*\{[^}]*outline:/u);
+    expect(css).toMatch(/\.mermaid-flow-node:focus-visible \.mermaid-flow-node-surface/u);
+  });
+});
+
+describe('canvas wheel ownership', () => {
+  it('uses a non-passive native listener so canvas pan and pinch can suppress browser zoom', () => {
+    expect(canvasSource).toMatch(/container\.addEventListener\('wheel', handleCanvasWheel, \{ passive: false \}\);/u);
+    expect(canvasSource).toMatch(/container\.addEventListener\('gesturechange', handleSafariGestureChange, \{ passive: false \}\);/u);
+    expect(canvasSource).toMatch(/event\.preventDefault\(\);[^]*?getCanvasWheelGesture\(event/u);
+    expect(canvasSource).not.toMatch(/onWheel=\{handleWheel\}/u);
+  });
+
+  it('keeps the focus ring available for keyboard navigation but hides it while a Space drag pans', () => {
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+    expect(canvasSource).toMatch(/data-panning=\{spacePressed \|\| isPanning \|\| undefined\}/u);
+    expect(css).toMatch(/\.diagram-canvas:focus-visible\s*\{[^}]*outline:/u);
+    expect(css).toMatch(/\.diagram-canvas\[data-panning='true'\]:focus-visible\s*\{\s*outline:\s*none;/u);
+  });
+});
+
 describe('getRendererInteractionMode', () => {
   it('leaves camera ownership separate while static previews clear connect mode', () => {
     expect(getRendererInteractionMode('connect', false)).toBe('select');

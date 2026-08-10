@@ -1,7 +1,7 @@
 'use client';
 
 import type { CanvasPresenceEntry, CanvasWorldPoint } from '@arielcharts/shared';
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   ConnectionLineType,
   Handle,
@@ -41,6 +41,7 @@ import { measureUnobscuredCanvasViewport, type ViewportRect } from '../lib/canva
 import { shouldCanvasHandleEscape } from '../lib/canvas-keyboard-ownership';
 import { getCanvasToolbarStackGeometry, getCanvasToolbarVisibility } from '../lib/canvas-toolbar-stack';
 import { applyCanvasTouchGesture, CanvasTouchGestureController, type CanvasTouchGesture } from '../lib/canvas-touch-gesture';
+import { applyCanvasWheelGesture, getCanvasWheelGesture } from '../lib/canvas-wheel-gesture';
 import { getConnectNodeActivation } from '../lib/diagram-connect-state';
 import { getCanvasDotGridGeometry } from '../lib/canvas-dot-grid';
 import { beginCanvasMousePan, CanvasMousePanController } from '../lib/canvas-mouse-pan';
@@ -150,6 +151,12 @@ interface PendingEdge {
   midpoint: SvgPoint;
   source: string;
   target: string;
+}
+
+interface SafariGestureEvent extends Event {
+  clientX: number;
+  clientY: number;
+  scale: number;
 }
 
 interface SubgraphDragState {
@@ -381,6 +388,14 @@ function canStartMouseCanvasPan(target: EventTarget | null, root: HTMLDivElement
   return !target.closest(CANVAS_PAN_EXCLUSION_SELECTOR);
 }
 
+function canHandleCanvasWheel(target: EventTarget | null, root: HTMLDivElement): boolean {
+  if (!(target instanceof Element) || !root.contains(target)) {
+    return false;
+  }
+
+  return !target.closest('input, select, textarea, [contenteditable="true"]');
+}
+
 export function DiagramCanvas({
   className,
   emptyMessage = 'start typing mermaid syntax',
@@ -445,6 +460,7 @@ export function DiagramCanvas({
   const controlsToolbarRef = useRef<HTMLDivElement | null>(null);
   const onRenderSettledRef = useRef(onRenderSettled);
   const touchGestureRef = useRef(new CanvasTouchGestureController());
+  const safariPinchScaleRef = useRef<number | null>(null);
   const nodeButtonRefs = useRef(new Map<string, HTMLElement | null>());
   const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
   const [mermaidPresentation, setMermaidPresentation] = useState<MermaidPresentation>({ edges: [], nodes: new Map() });
@@ -1567,27 +1583,76 @@ export function DiagramCanvas({
     setShapePickerOpen(false);
   }, [viewport.zoom]);
 
-  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    if (!containerRef.current) {
+  const handleCanvasWheel = useCallback((event: WheelEvent) => {
+    const container = containerRef.current;
+    if (!container || !canHandleCanvasWheel(event.target, container)) {
       return;
     }
 
     event.preventDefault();
-    const rect = containerRef.current.getBoundingClientRect();
-    const clientX = event.clientX - rect.left;
-    const clientY = event.clientY - rect.top;
-    const canvasX = (clientX - viewport.panX) / viewport.zoom;
-    const canvasY = (clientY - viewport.panY) / viewport.zoom;
-    const scaleFactor = event.deltaY > 0 ? 0.9 : 1.1;
-    const zoom = clamp(viewport.zoom * scaleFactor, MIN_ZOOM, MAX_ZOOM);
+    const rect = container.getBoundingClientRect();
+    const gesture = getCanvasWheelGesture(event, { x: event.clientX, y: event.clientY });
 
     setAnimateTransform(false);
-    setViewport({
-      panX: clientX - (canvasX * zoom),
-      panY: clientY - (canvasY * zoom),
-      zoom,
-    });
-  }, [viewport.panX, viewport.panY, viewport.zoom]);
+    setViewport((current) => applyCanvasWheelGesture(current, gesture, rect, MIN_ZOOM, MAX_ZOOM));
+  }, []);
+
+  const handleSafariGestureStart = useCallback((event: Event) => {
+    const container = containerRef.current;
+    const gesture = event as SafariGestureEvent;
+    if (!container || !canHandleCanvasWheel(event.target, container) || !Number.isFinite(gesture.scale)) {
+      return;
+    }
+
+    event.preventDefault();
+    safariPinchScaleRef.current = gesture.scale;
+  }, []);
+
+  const handleSafariGestureChange = useCallback((event: Event) => {
+    const container = containerRef.current;
+    const gesture = event as SafariGestureEvent;
+    const previousScale = safariPinchScaleRef.current;
+    if (!container || previousScale === null || !canHandleCanvasWheel(event.target, container) || !Number.isFinite(gesture.scale)) {
+      return;
+    }
+
+    event.preventDefault();
+    safariPinchScaleRef.current = gesture.scale;
+    const rect = container.getBoundingClientRect();
+    const client = {
+      x: Number.isFinite(gesture.clientX) ? gesture.clientX : rect.left + (rect.width / 2),
+      y: Number.isFinite(gesture.clientY) ? gesture.clientY : rect.top + (rect.height / 2),
+    };
+
+    setAnimateTransform(false);
+    setViewport((current) => applyCanvasWheelGesture(current, {
+      client,
+      kind: 'zoom',
+      scale: Math.pow(gesture.scale / previousScale, 0.4),
+    }, rect, MIN_ZOOM, MAX_ZOOM));
+  }, []);
+
+  const resetSafariGesture = useCallback(() => {
+    safariPinchScaleRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    container.addEventListener('wheel', handleCanvasWheel, { passive: false });
+    container.addEventListener('gesturestart', handleSafariGestureStart, { passive: false });
+    container.addEventListener('gesturechange', handleSafariGestureChange, { passive: false });
+    container.addEventListener('gestureend', resetSafariGesture);
+    return () => {
+      container.removeEventListener('wheel', handleCanvasWheel);
+      container.removeEventListener('gesturestart', handleSafariGestureStart);
+      container.removeEventListener('gesturechange', handleSafariGestureChange);
+      container.removeEventListener('gestureend', resetSafariGesture);
+    };
+  }, [handleCanvasWheel, handleSafariGestureChange, handleSafariGestureStart, resetSafariGesture]);
 
   const applyTouchGesture = useCallback((gesture: CanvasTouchGesture) => {
     const container = containerRef.current;
@@ -1793,6 +1858,11 @@ export function DiagramCanvas({
     setSelectedSubgraphId(null);
     setEditingSubgraphId(null);
   }, [isPanning, setSelection]);
+
+  const handleFlowPaneClick = useCallback((event: ReactMouseEvent) => {
+    event.stopPropagation();
+    handleCanvasClick();
+  }, [handleCanvasClick]);
 
   const handleNodeActivation = useCallback((nodeId: string) => {
     if (!isFlowchart) {
@@ -2204,6 +2274,7 @@ export function DiagramCanvas({
     <div
       aria-label="Interactive diagram canvas"
       className={className}
+      data-panning={spacePressed || isPanning || undefined}
       data-selected-node-ids={getCanonicalSelectionAttribute(selection)}
       data-testid="diagram-canvas"
       onClick={(event) => {
@@ -2226,9 +2297,8 @@ export function DiagramCanvas({
       onPointerCancel={handlePointerUp}
       onLostPointerCapture={handleLostPointerCapture}
       onPointerUp={handlePointerUp}
-      onWheel={handleWheel}
       onFocus={(event) => {
-        if (event.target === event.currentTarget && orderedNodeIds[0]) {
+        if (event.target === event.currentTarget && event.currentTarget.matches(':focus-visible') && orderedNodeIds[0]) {
           focusNode(orderedNodeIds[0]);
         }
       }}
@@ -2293,14 +2363,14 @@ export function DiagramCanvas({
                   ref={(element) => { registerNodeElement(nodeId, element); }}
                   role="button"
                   style={{
-                    background: selected ? 'color-mix(in srgb, var(--selection) 10%, transparent)' : focused ? 'color-mix(in srgb, var(--ink-muted) 8%, transparent)' : 'transparent',
+                    background: selected ? 'color-mix(in srgb, var(--selection) 10%, transparent)' : 'transparent',
                     border: '1px solid transparent',
                     borderRadius: 12,
                     cursor: readOnly ? 'default' : 'pointer',
                     height: bounds.height,
                     left: bounds.x,
                     opacity: 1,
-                    outline: selected || focused ? '2px solid var(--selection)' : 'none',
+                    outline: selected ? '2px solid var(--selection)' : undefined,
                     outlineOffset: 3,
                     padding: 0,
                     position: 'absolute',
@@ -2411,7 +2481,7 @@ export function DiagramCanvas({
                 setAnimateTransform(false);
                 setViewport((current) => reconcileReactFlowViewport(current, nextViewport));
               }}
-              onPaneClick={handleCanvasClick}
+              onPaneClick={handleFlowPaneClick}
               panOnDrag={false}
               preventScrolling={false}
               proOptions={FLOW_PRO_OPTIONS}
@@ -3251,7 +3321,7 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
   const interaction = useContext(FlowNodeInteractionContext);
   const focused = interaction?.focusedNodeId === id;
   const label = data.ariaLabel;
-  const handleColor = getCanvasHandlePaint(Boolean(selected || focused || interaction?.connectMode));
+  const handleColor = getCanvasHandlePaint(Boolean(selected || interaction?.connectMode));
   const remoteSelection = data.remoteSelections[0];
   const remoteEditor = data.remoteEditors[0];
   const remotePresence = remoteEditor ?? remoteSelection;
@@ -3268,7 +3338,7 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
       aria-label={label}
       aria-description={remoteEditor && remoteEditingLabel ? `${remoteEditingLabel} is editing this node` : undefined}
       aria-pressed={selected}
-      className={`mermaid-flow-node${selected ? ' is-selected' : ''}${focused ? ' is-focused' : ''}`}
+      className={`mermaid-flow-node${selected ? ' is-selected' : ''}`}
       onFocus={() => { interaction?.onFocus(id); }}
       onKeyDown={(event) => { interaction?.onKeyDown(id, event); }}
       ref={(element) => { interaction?.registerNodeElement(id, element); }}

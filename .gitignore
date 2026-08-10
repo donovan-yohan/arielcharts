@@ -143,9 +143,10 @@ apps/server/.data/
 .vercel
 .env*.local
 
-# Belayer runtime state (config + policies are tracked; runs/artifacts are local)
-.belayer/runs/
-.belayer/artifacts/
+# Local isolated Git worktrees
+.worktrees/
+
+# Local Hermes runtime state
 .hermes/
 
 # macOS

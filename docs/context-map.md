@@ -142,19 +142,24 @@ pnpm test
 pnpm build
 ```
 
-For browser interaction work, start the server and web app, then run
-`npx tsx e2e-validate.ts`; nested section editing has the focused
-`pnpm test:e2e-subgraphs` gate. For Mermaid type/canvas coverage also run
-`pnpm test:e2e-sequence`. Inspect `/tmp/arielcharts-sequence.png` and
-`/tmp/arielcharts-sequence-isolation.png`.
-`pnpm test:e2e-workspace-ux` is the exact production browser gate for theme,
-flyout focus/exclusivity, responsive layout, visible toolbars, Fit, and stable
-outer anchors/camera; CI runs it.
-For human/MCP concurrency, local UI ownership, active-drag stability, and
-eventual layout convergence, run `pnpm test:e2e-collaboration`; nested update,
-awareness, reconnect, and persisted reload coverage lives in
+Browser gates have two execution models. The owned-service gates build the
+workspace, start an isolated production-like web/server pair, and clean up the
+temporary data directory themselves: `pnpm test:e2e-workspace-ux`,
+`pnpm test:e2e-subgraphs`, and `pnpm test:e2e-collaboration`. CI runs all three.
+`pnpm test:e2e-workspace-ux` covers theme, flyout focus/exclusivity,
+responsive layout, visible toolbars, Fit, and stable outer anchors/camera.
+`pnpm test:e2e-collaboration` covers human/MCP concurrency, local UI ownership,
+active-drag stability, and eventual layout convergence; nested update,
+awareness, reconnect, and persisted reload coverage also lives in
 `apps/server/src/lib/websocket.test.ts`.
-This command additionally proves RoomGate fragment clearing, cookie-gated
+
+The focused/manual gates use the supplied local services (or
+`E2E_BASE_URL`/`E2E_MCP_URL`): start the server and web app before
+`npx tsx e2e-validate.ts` or `pnpm test:e2e-sequence`. The latter covers
+Mermaid type/canvas behavior; inspect `/tmp/arielcharts-sequence.png` and
+`/tmp/arielcharts-sequence-isolation.png`. These two focused gates are not CI
+jobs today.
+The collaboration gate additionally proves RoomGate fragment clearing, cookie-gated
 browser access, room-scoped MCP bearer rejection, and rotation revocation. The
 production deployment check exercises the canonical DNS/cookie topology and
 refuses non-canonical targets:

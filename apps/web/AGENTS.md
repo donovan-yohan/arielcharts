@@ -5,7 +5,8 @@ active tab, CodeMirror, Mermaid preview, and workspace UI. `diagram-canvas.tsx`
 renders generic SVG navigation and flowchart-only structural controls.
 `src/lib/diagram-mutations.ts` is the sole visual flowchart-to-source mutation
 path; `diagram-layout.ts` owns per-diagram node-position encoding.
-`theme-provider.tsx` is the sole browser theme controller.
+`theme-provider.tsx` owns runtime browser theme state. `public/theme-init.js`
+only mirrors its resolved value before hydration to prevent a first-paint flash.
 
 ## Current boundaries
 
@@ -63,14 +64,16 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
   `src/lib/drag-layout.test.ts`, `src/lib/reactflow-controlled-node-adapter.test.ts`,
   `test:e2e-sequence`, and `test:e2e-collaboration` green.
 
-Run `pnpm --filter @arielcharts/web test` for focused changes. Run
-`npx tsx e2e-validate.ts` for legacy canvas coverage and
-`pnpm test:e2e-sequence` for generic Mermaid coverage. For collaboration
-changes also run `pnpm test:e2e-collaboration`. Inspect
+Run `pnpm --filter @arielcharts/web test` for focused changes.
+`pnpm test:e2e-workspace-ux` is the production-mode browser gate for theme,
+flyout, focus, responsive, toolbar, Fit, and layout stability. Run
+`pnpm test:e2e-sequence` for Mermaid kind/canvas changes,
+`pnpm test:e2e-subgraphs` for nested-flowchart work, and
+`pnpm test:e2e-collaboration` for protected-room or shared-state changes.
+`npx tsx e2e-validate.ts` is legacy manual coverage and requires separately
+running services. Inspect
 `/tmp/arielcharts-sequence.png` and `/tmp/arielcharts-sequence-isolation.png`
 for Mermaid changes, and `/tmp/arielcharts-collaboration.png` plus
 `/tmp/arielcharts-collaboration-local-state.png` for collaboration changes.
-`pnpm test:e2e-workspace-ux` is the exact production-mode browser gate for
-theme, flyout, focus, responsive, toolbar, Fit, and layout stability; CI runs it.
 
 No deeper nested `AGENTS.md` is justified for these cross-cutting web invariants.

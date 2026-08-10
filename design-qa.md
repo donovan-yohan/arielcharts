@@ -1,5 +1,12 @@
 # ArielCharts canvas-first design QA
 
+> **Historical design-QA artifact — superseded on 2026-08-10.** This is a
+> point-in-time visual comparison for the canvas-first slice, not a current
+> product acceptance report. Its cited issue state, screenshots, browser
+> observations, and "final result" must not be used as present-tense evidence.
+> Use [ARCHITECTURE.md](ARCHITECTURE.md), [docs/context-map.md](docs/context-map.md),
+> current tests, and fresh browser evidence for current behavior.
+
 - Source visual truth: `reports/design-reference/canvas-first-history-flyout.png`
 - Browser implementation: `reports/design-qa/activity-flyout.png`
 - Additional states: `reports/design-qa/canvas.png`, `reports/design-qa/source-flyout.png`

@@ -12,7 +12,7 @@ the internal tool boundary; `mcp-server.ts` exposes the modern MCP contract;
   (`Y.Map`). Preserve this shape or migrate it deliberately with persistence
   coverage.
 - Catalog repair validates diagram structure, canonicalizes order and names,
-  and reseeds `main`/`Main` only when no valid diagram remains. It runs after
+  and seeds `main`/`Main` only when the diagrams map is empty after repair. It runs after
   raw Yjs updates and persisted loads with a server-private origin; preserve
   valid concurrent entries and cover changes in `src/lib/session-manager.test.ts`.
 - Server-owned document mutations are transactions. Persist only a coherent
@@ -30,11 +30,13 @@ the internal tool boundary; `mcp-server.ts` exposes the modern MCP contract;
 ## Collaboration and protocol boundaries
 
 - `room-access.ts` owns room capabilities: its verifier/access-version record is server-private LevelDB state, never Yjs, activity, history, logs, or a URL query. Authenticate HTTP, WebSocket, and MCP ingress before `SessionManager`; only explicit protected creation may create a session. Rotation increments the access version and must close live room sockets. Client-IP limits default to the socket address; only `CLIENT_ADDRESS_PROFILE=fly` may use a single validated `Fly-Client-IP`, never `X-Forwarded-For`.
-- Awareness is live, per-connection presence. Do not put browser-local UI
-  state in awareness or durable document state. Each live socket owns its
-  claimed client ids; stale/idempotent foreign echoes are filtered, while
-  novel or advancing foreign entries are rejected. Preserve reconnect-safe
-  ownership cleanup and `src/lib/websocket.test.ts` coverage.
+- Awareness is live, per-connection presence. It may carry an ephemeral editor
+  cursor, active-diagram canvas cursor/selection, and one advisory active node
+  editor id. It is never draft transport, a lock, durable state, authorization,
+  or general browser UI storage. Each live socket owns its claimed client ids;
+  stale/idempotent foreign echoes are filtered, while novel or advancing foreign
+  entries are rejected. Preserve reconnect-safe ownership cleanup and
+  `src/lib/websocket.test.ts` coverage.
 - Keep activity as a bounded collaboration feed. It is not a version-history
   store; MCP mutations identify the diagram and record applicable base/result
   revisions. Snapshots/restore need their own revision model.

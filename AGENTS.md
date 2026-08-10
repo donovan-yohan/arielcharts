@@ -8,12 +8,16 @@ browser client, a Node/Yjs/MCP server, and shared TypeScript contracts.
 - `docs/context-map.md` — state ownership, request/data flows, scaling seams,
   and the evidence map. Update it when a durable schema, public contract, or
   cross-package ownership boundary changes.
+- `ARCHITECTURE.md` — implemented stack and system flows; use the context map
+  for the finer-grained ownership and evidence detail.
 - `apps/web/AGENTS.md` — browser rendering, editor, canvas, and local-state
   boundaries.
 - `apps/server/AGENTS.md` — durable Yjs, MCP, persistence, and concurrency
   boundaries.
 - `packages/shared/src/types.ts` — public shared shapes; keep it free of
   server or browser behavior.
+- `packages/shared/AGENTS.md` — shared contracts, source/layout policy, and
+  starter-template boundaries.
 
 ## Cross-package rules
 
@@ -43,11 +47,23 @@ pnpm test
 pnpm build
 ```
 
-For browser/canvas, layout, or mobile changes, also run both services and
-`npx tsx e2e-validate.ts`. For Mermaid type/canvas changes, run
-`pnpm test:e2e-sequence`; inspect `/tmp/arielcharts-sequence.png` and
-`/tmp/arielcharts-sequence-isolation.png`. CI runs the same shared build, lint,
-typecheck, test, and build sequence in `.github/workflows/ci.yml`.
+Choose the focused browser gate for the changed behavior:
+
+- `pnpm test:e2e-workspace-ux` — production-mode browser gate for responsive
+  layout, theme, flyouts, visible controls, Fit, and stable anchors/camera.
+- `pnpm test:e2e-subgraphs` — nested-flowchart section editing.
+- `pnpm test:e2e-sequence` — Mermaid kind/canvas behavior; inspect
+  `/tmp/arielcharts-sequence.png` and
+  `/tmp/arielcharts-sequence-isolation.png`.
+- `pnpm test:e2e-collaboration` — protected-room access, browser/MCP
+  concurrency, awareness, and persistence.
+
+`npx tsx e2e-validate.ts` is a legacy manual harness: it requires separately
+running services and is not the CI browser gate. CI has three verification jobs
+in `.github/workflows/ci.yml`: `verify` (shared build, lint, typecheck, test,
+and build), `workspace-ux` (workspace UX and subgraphs), and
+`protected-collaboration`. The separate `deploy-server` job runs only for
+pushes to `main` after all three verification jobs pass.
 
 Before a behavior, protocol, persistence, or collaboration PR is merged:
 

@@ -1,5 +1,12 @@
 # Phase 4 verification plan
 
+> **Historical planning artifact — superseded on 2026-08-10.** This report
+> records a pre-hardening Phase 4 plan and its observations at that time. Its
+> unchecked checklists and statements about missing E2E, CI, or deployment
+> configuration are not current status. Use [ARCHITECTURE.md](../ARCHITECTURE.md),
+> [README.md](../README.md), [docs/context-map.md](../docs/context-map.md), and
+> `.github/workflows/ci.yml` for current repository behavior and gates.
+
 Repo: ArielCharts
 Prepared during Phase 3 kickoff, then refreshed after the Phase 2 + 3 implementation landed and Phase 4 hardening began.
 

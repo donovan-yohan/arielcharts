@@ -106,6 +106,7 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(architecture).getOperationResult('architecture-beta\n  service api(server)[API]', 'add-service')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(c4).getOperationResult('C4Context\n  Person(user, "User")', 'add-element')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(block).getOperationResult('block-beta\n  api', 'add-node')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(block).getOperationResult('block-beta\n  api', 'set-columns')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(swimlane).getOperationResult('swimlane-beta\n  subgraph api [API]\n  end', 'add-lane')).toEqual({ supported: true });
     const noteOnlySequence = 'sequenceDiagram\n  Note over A: details';
     await expect(mermaid.parse(noteOnlySequence)).resolves.toMatchObject({ diagramType: 'sequence' });

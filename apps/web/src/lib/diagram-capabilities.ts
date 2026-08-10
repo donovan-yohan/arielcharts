@@ -192,7 +192,7 @@ const ARCHITECTURE_ADAPTER: DiagramSourceModelAdapter = {
     ? { representable: true }
     : { representable: false, reason: 'unsupported-syntax' },
 };
-const BLOCK_OPERATIONS = new Set(['add-node', 'edit-node', 'delete-node', 'move-node', 'add-link', 'edit-link', 'delete-link', 'add-composite', 'edit-composite', 'delete-composite', 'move-composite']);
+const BLOCK_OPERATIONS = new Set(['add-node', 'edit-node', 'delete-node', 'move-node', 'add-link', 'edit-link', 'delete-link', 'add-composite', 'edit-composite', 'delete-composite', 'move-composite', 'set-columns']);
 const C4_OPERATIONS = new Set(['add-element', 'edit-element', 'delete-element', 'move-element', 'add-boundary', 'edit-boundary', 'delete-boundary', 'move-boundary', 'add-relationship', 'edit-relationship', 'delete-relationship']);
 const SWIMLANE_OPERATIONS = new Set(['add-lane', 'edit-lane', 'delete-lane', 'add-node', 'edit-node', 'delete-node', 'add-handoff', 'edit-handoff', 'delete-handoff']);
 

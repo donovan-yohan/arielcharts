@@ -58,6 +58,13 @@ describe('swimlane source mutations', () => {
     });
   });
 
+  it('accepts a BOM-prefixed header and rejects pipes that the subset cannot round-trip', () => {
+    expect(isSwimlaneSourceRepresentable('\uFEFFswimlane-beta\n  subgraph sales [Sales]\n    lead[Lead]\n  end')).toBe(true);
+    expect(isSwimlaneSourceRepresentable('swimlane-beta\n  subgraph sales [Sales|North]\n    lead[Lead]\n  end')).toBe(false);
+    expect(isSwimlaneSourceRepresentable('swimlane-beta\n  subgraph sales [Sales]\n    lead[Lead|North]\n  end')).toBe(false);
+    expect(() => addSwimlane(SOURCE, { id: 'sales', label: 'Sales|North' })).toThrow('one-line Mermaid labels');
+  });
+
   it('uses source ranges to edit nodes and re-resolves a unique handoff after remote insertion', () => {
     const withEngineering = addSwimlane(SOURCE, { id: 'engineering', label: 'Engineering' });
     const withNode = addSwimlaneNode(withEngineering, { id: 'fix', label: 'Prepare fix', laneId: 'engineering' });

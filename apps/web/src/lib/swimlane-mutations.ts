@@ -14,9 +14,9 @@ interface Parsed { direction: SwimlaneDirection; handoffs: HandoffRecord[]; lane
 const HEADER = /^\s*swimlane-beta(?:\s+(TB|TD|BT|LR|RL))?\s*$/i;
 const ID = '[A-Za-z_][A-Za-z0-9_-]*';
 const idPattern = new RegExp(`^${ID}$`);
-const LANE_WITH_LABEL = new RegExp(`^\\s*subgraph\\s+(${ID})\\s*\\[([^\\]\\r\\n]+)\\]\\s*$`, 'i');
+const LANE_WITH_LABEL = new RegExp(`^\\s*subgraph\\s+(${ID})\\s*\\[([^|\\]\\r\\n]+)\\]\\s*$`, 'i');
 const LANE = new RegExp(`^\\s*subgraph\\s+(${ID})\\s*$`, 'i');
-const NODE = new RegExp(`^\\s*(${ID})\\s*\\[([^\\]\\r\\n]+)\\]\\s*$`);
+const NODE = new RegExp(`^\\s*(${ID})\\s*\\[([^|\\]\\r\\n]+)\\]\\s*$`);
 const HANDOFF = new RegExp(`^\\s*(${ID})\\s*-->(?:\\|([^|\\r\\n]+)\\|)?\\s*(${ID})\\s*$`);
 
 export function isSwimlaneDiagramSource(source: string): boolean { return parseSwimlane(source) !== null; }
@@ -38,7 +38,7 @@ export function editSwimlaneHandoff(source: string, identity: SwimlaneHandoffIde
 export function deleteSwimlaneHandoff(source: string, identity: SwimlaneHandoffIdentity): string { const parsed = requireSwimlane(source); const current = parsed.handoffs[resolveSwimlaneHandoffIndex(parsed.handoffs, identity)]; if (!current) throw stale(); return deleteLines(source, [current.line]); }
 
 function parseSwimlane(source: string): Parsed | null {
-  const lines = splitLines(source); const headerIndex = statementIndex(lines); const header = lines[headerIndex]?.text.match(HEADER); if (!header) return null; const direction = (header[1]?.toUpperCase() as SwimlaneDirection | undefined) ?? 'TB';
+  const lines = splitLines(source); const headerIndex = statementIndex(lines); const header = lines[headerIndex]?.text.replace(/^\uFEFF/, '').match(HEADER); if (!header) return null; const direction = (header[1]?.toUpperCase() as SwimlaneDirection | undefined) ?? 'TB';
   const lanes: LaneRecord[] = []; const nodes: NodeRecord[] = []; const handoffs: HandoffRecord[] = []; let active: { id: string; label: string; line: Line } | null = null;
   for (let index = headerIndex + 1; index < lines.length; index += 1) { const line = lines[index]!; if (!line.text.trim() || ignorable(line.text)) continue;
     if (/^\s*end\s*$/i.test(line.text)) { if (!active) return null; lanes.push({ ...active, close: line }); active = null; continue; }
@@ -61,7 +61,7 @@ function formatHandoff(value: SwimlaneHandoff): string { return `${value.from} -
 function sameHandoff(left: SwimlaneHandoff, right: SwimlaneHandoff): boolean { return left.from === right.from && left.to === right.to && left.label === right.label; }
 function stale(): Error { return new Error('Swimlane handoff changed remotely and can no longer be resolved safely.'); }
 function normalizeId(value: string, noun: string): string { const id = value.trim(); if (!idPattern.test(id)) throw new Error(`${noun} identifiers must be Mermaid-safe identifiers.`); return id; }
-function normalizeText(value: string, noun: string): string { const text = value.trim(); if (!text || /[\[\]\r\n]/.test(text)) throw new Error(`${noun} must be one-line Mermaid labels.`); return text; }
+function normalizeText(value: string, noun: string): string { const text = value.trim(); if (!text || /[|\[\]\r\n]/.test(text)) throw new Error(`${noun} must be one-line Mermaid labels.`); return text; }
 function uniqueId(base: string, existing: readonly string[]): string { const ids = new Set(existing); let id = base; let suffix = 2; while (ids.has(id)) { id = `${base}${suffix}`; suffix += 1; } return id; }
 function splitLines(source: string): Line[] { const lines: Line[] = []; const matcher = /.*?(?:\r\n|\n|\r|$)/g; let match: RegExpExecArray | null; while ((match = matcher.exec(source)) && match[0]) { const raw = match[0]; lines.push({ start: match.index, end: match.index + raw.length, raw, text: raw.replace(/\r\n|\n|\r$/, '') }); } return lines; }
 function statementIndex(lines: readonly Line[]): number { let start = 0; if (lines[0]?.text.replace(/^\uFEFF/, '').trim() === '---') { const close = lines.findIndex((line, index) => index > 0 && line.text.trim() === '---'); start = close < 0 ? lines.length : close + 1; } for (let index = start; index < lines.length; index += 1) if (lines[index]!.text.trim() && !ignorable(lines[index]!.text)) return index; return lines.length; }

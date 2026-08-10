@@ -148,6 +148,9 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(flowchart, 'flowchart TD\nA-->')).toBe('Flowchart · source only');
     expect(getDiagramCapabilityLabel(er, 'erDiagram\nA ||--o{ B')).toBe('Entity relationship · source only');
     expect(getDiagramCapabilityLabel(state, 'stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }')).toBe('State · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('c4'), 'C4Dynamic\n  Person(user, "User")')).toBe('C4 · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('block'), 'block-beta\n  space:2')).toBe('Block · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('swimlane'), 'swimlane-beta\n  subgraph Sales\n    a(A)\n  end')).toBe('Swimlane · source only');
     expect(getDiagramCapabilityLabel(null, 'sequenceDiagram\nA->>B: request')).toBe('Mermaid · source only');
   });
 });

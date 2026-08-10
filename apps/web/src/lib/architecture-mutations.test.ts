@@ -101,6 +101,19 @@ describe('architecture source mutations', () => {
     expect(() => deleteArchitectureGroup(SOURCE, 'platform')).toThrow('contents and references');
   });
 
+  it('rejects indirect group containment cycles both in source and while editing', () => {
+    const nested = `architecture-beta
+  group outer[Outer]
+  group middle[Middle] in outer
+  group inner[Inner] in middle`;
+    expect(isArchitectureSourceRepresentable(`${nested}\n  group loop[Loop] in loop`)).toBe(false);
+    expect(isArchitectureSourceRepresentable(`architecture-beta
+  group outer[Outer] in inner
+  group middle[Middle] in outer
+  group inner[Inner] in middle`)).toBe(false);
+    expect(() => editArchitectureGroup(nested, 'outer', { parentId: 'inner' })).toThrow('cannot form a cycle');
+  });
+
   it('re-resolves edge and alignment identities after unrelated remote insertions and rejects ambiguity', () => {
     const initial = getArchitectureDiagramSnapshot(SOURCE);
     const edge = getArchitectureEdgeIdentity(initial.edges[1]!, initial.edges);

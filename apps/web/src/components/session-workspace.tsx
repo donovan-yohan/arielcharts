@@ -2364,9 +2364,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onAddC4Relationship={(value) => { mutateCanvasSource((source) => addC4Relationship(source, value), 'Added a C4 relationship'); }}
             onEditC4Relationship={(identity, value) => { mutateCanvasSource((source) => editC4Relationship(source, identity, value), 'Edited a C4 relationship'); }}
             onDeleteC4Relationship={(identity) => { mutateCanvasSource((source) => deleteC4Relationship(source, identity), 'Deleted a C4 relationship'); }}
-            onAddBlockNode={(value) => { mutateCanvasSource((source) => addBlockNode(source, value), 'Added a block'); }}
-            onEditBlockNode={(id, value) => { mutateCanvasSource((source) => editBlockNode(source, id, value), 'Edited a block'); }}
-            onDeleteBlockNode={(id) => { mutateCanvasSource((source) => deleteBlockNode(source, id), 'Deleted a block'); }}
+            onAddBlockNode={(value) => { mutateCanvasSource((source) => addBlockNode(source, value), 'Added a block node'); }}
+            onEditBlockNode={(id, value) => { mutateCanvasSource((source) => editBlockNode(source, id, value), 'Edited a block node'); }}
+            onDeleteBlockNode={(id) => { mutateCanvasSource((source) => deleteBlockNode(source, id), 'Deleted a block node'); }}
             onMoveBlockNode={(id, parentId) => { mutateCanvasSource((source) => moveBlockNode(source, id, parentId), 'Moved a block'); }}
             onMoveBlockComposite={(id, parentId) => { mutateCanvasSource((source) => moveBlockComposite(source, id, parentId), 'Moved a block composite'); }}
             onAddBlockComposite={(value) => { mutateCanvasSource((source) => addBlockComposite(source, value), 'Added a block composite'); }}
@@ -2376,9 +2376,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onAddBlockLink={(value) => { mutateCanvasSource((source) => addBlockLink(source, value), 'Added a block link'); }}
             onEditBlockLink={(identity, value) => { mutateCanvasSource((source) => editBlockLink(source, identity, value), 'Edited a block link'); }}
             onDeleteBlockLink={(identity) => { mutateCanvasSource((source) => deleteBlockLink(source, identity), 'Deleted a block link'); }}
-            onAddSwimlane={(value) => { mutateCanvasSource((source) => addSwimlane(source, value), 'Added a swimlane'); }}
-            onEditSwimlane={(id, value) => { mutateCanvasSource((source) => editSwimlane(source, id, value), 'Edited a swimlane'); }}
-            onDeleteSwimlane={(id) => { mutateCanvasSource((source) => deleteSwimlane(source, id), 'Deleted a swimlane'); }}
+            onAddSwimlane={(value) => { mutateCanvasSource((source) => addSwimlane(source, value), 'Added a swimlane lane'); }}
+            onEditSwimlane={(id, value) => { mutateCanvasSource((source) => editSwimlane(source, id, value), 'Edited a swimlane lane'); }}
+            onDeleteSwimlane={(id) => { mutateCanvasSource((source) => deleteSwimlane(source, id), 'Deleted a swimlane lane'); }}
             onAddSwimlaneNode={(value) => { mutateCanvasSource((source) => addSwimlaneNode(source, value), 'Added a swimlane node'); }}
             onEditSwimlaneNode={(id, value) => { mutateCanvasSource((source) => editSwimlaneNode(source, id, value), 'Edited a swimlane node'); }}
             onMoveSwimlaneNode={(id, laneId) => { mutateCanvasSource((source) => moveSwimlaneNode(source, id, laneId), 'Moved a swimlane node'); }}

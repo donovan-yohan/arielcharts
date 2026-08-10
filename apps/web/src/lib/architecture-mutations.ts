@@ -263,6 +263,7 @@ function validateParsedArchitecture(parsed: ParsedArchitecture): void {
     assertText(group.title, 'Group titles'); assertIcon(group.icon);
     if (group.parentId && (!groupIds.has(group.parentId) || group.parentId === group.id)) throw new Error('Groups must belong to another group.');
   }
+  assertAcyclicGroupContainment(parsed.groups);
   for (const service of parsed.services) {
     assertText(service.title, 'Service titles'); assertIcon(service.icon);
     if (service.iconText) throw new Error('Quoted service icon text is not supported by Mermaid rendering.');
@@ -285,8 +286,29 @@ function normalizeGroup(group: ArchitectureGroup, parsed: ParsedArchitecture | n
   if (parsed) {
     assertUniqueId(parsed, normalized.id, currentId);
     if (normalized.parentId && (normalized.parentId === normalized.id || !parsed.groups.some((candidate) => candidate.id === normalized.parentId))) throw new Error('Groups can only belong to another existing group.');
+    const groups = currentId
+      ? parsed.groups.map((candidate) => candidate.id === currentId
+        ? normalized
+        : candidate.parentId === currentId && normalized.id !== currentId
+          ? { ...candidate, parentId: normalized.id }
+          : candidate)
+      : [...parsed.groups, normalized];
+    assertAcyclicGroupContainment(groups);
   } else if (normalized.parentId) throw new Error('Create the parent group before adding a nested group.');
   return normalized;
+}
+
+function assertAcyclicGroupContainment(groups: readonly Pick<ArchitectureGroup, 'id' | 'parentId'>[]): void {
+  const byId = new Map(groups.map((group) => [group.id, group]));
+  for (const group of groups) {
+    const visited = new Set<string>();
+    let current: Pick<ArchitectureGroup, 'id' | 'parentId'> | undefined = group;
+    while (current?.parentId) {
+      if (visited.has(current.id)) throw new Error('Architecture group containment cannot form a cycle.');
+      visited.add(current.id);
+      current = byId.get(current.parentId);
+    }
+  }
 }
 
 function normalizeService(service: ArchitectureService, parsed: ParsedArchitecture, currentId?: string): ArchitectureService {

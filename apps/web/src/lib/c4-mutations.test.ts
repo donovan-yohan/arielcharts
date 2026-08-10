@@ -80,6 +80,20 @@ describe('C4 source mutations', () => {
     expect(deleteC4Boundary(renamed, 'checkout')).not.toContain('checkout');
   });
 
+  it('keeps the source line ending when adding root and nested boundaries', () => {
+    const root = 'C4Context\r\n  Person(user, "User")\r\n';
+    expect(addC4Boundary(root, { id: 'zone', kind: 'Boundary', label: 'Zone' })).toBe('C4Context\r\n  Person(user, "User")\r\n  Boundary(zone, "Zone") {\r\n    }');
+    const nested = 'C4Context\r  Boundary(zone, "Zone") {\r  }\r';
+    expect(addC4Boundary(nested, { id: 'team', kind: 'Boundary', label: 'Team', parentId: 'zone' })).toBe('C4Context\r  Boundary(zone, "Zone") {\r    Boundary(team, "Team") {\r      }\r  }\r');
+  });
+
+  it('keeps an empty technology argument when a container description is the only optional field', () => {
+    const source = addC4Element('C4Container', { id: 'web', kind: 'Container', label: 'Web', description: 'Serves requests' });
+    expect(source).toContain('Container(web, "Web", "", "Serves requests")');
+    expect(getC4DiagramSnapshot(source).elements).toEqual([{ id: 'web', kind: 'Container', label: 'Web', description: 'Serves requests' }]);
+    expect(editC4Element(source, 'web', { description: 'Serves updates' })).toContain('Container(web, "Web", "", "Serves updates")');
+  });
+
   it('models and writes explicit boundary containment without rewriting surrounding source', () => {
     const nested = `C4Context
   Boundary(zone, "Zone") {

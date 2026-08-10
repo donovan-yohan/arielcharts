@@ -68,7 +68,16 @@ export function moveC4Boundary(source: string, id: string, parentId: string | nu
   const separator = endsWithLineEnding(fragment) ? '' : lineEnding(without);
   return `${without.slice(0, parent.close.start)}${reindent(fragment, indent(boundary.line), targetIndent)}${separator}${without.slice(parent.close.start)}`;
 }
-export function addC4Boundary(source: string, boundary: C4Boundary): string { const parsed = requireC4(source); const next = normalizeBoundary(boundary); const id = uniqueId(next.id, parsed.elements.map((entry) => entry.id).concat(parsed.boundaries.map((entry) => entry.id))); const statement = `${next.kind}(${id}, ${quote(next.label)}) {\n  }`; if (!boundary.parentId) return append(source, `  ${statement}`); const parent = findBoundary(parsed, boundary.parentId); return `${source.slice(0, parent.close.start)}${indent(parent.line)}  ${statement.replace(/\n/g, `\n${indent(parent.line)}  `)}${lineEnding(source)}${source.slice(parent.close.start)}`; }
+export function addC4Boundary(source: string, boundary: C4Boundary): string {
+  const parsed = requireC4(source);
+  const next = normalizeBoundary(boundary);
+  const id = uniqueId(next.id, parsed.elements.map((entry) => entry.id).concat(parsed.boundaries.map((entry) => entry.id)));
+  const ending = lineEnding(source);
+  if (!boundary.parentId) return append(source, formatBoundary({ ...next, id }, '  ', ending));
+  const parent = findBoundary(parsed, boundary.parentId);
+  const childIndent = `${indent(parent.line)}  `;
+  return `${source.slice(0, parent.close.start)}${formatBoundary({ ...next, id }, childIndent, ending)}${ending}${source.slice(parent.close.start)}`;
+}
 export function editC4Boundary(source: string, id: string, patch: Partial<C4Boundary>): string { const parsed = requireC4(source); const current = findBoundary(parsed, id); const next = normalizeBoundary({ ...current, ...patch }); if (next.id !== id && hasId(parsed, next.id)) throw new Error(`A C4 item named ${next.id} already exists.`); return replace(source, current.line, `${indent(current.line)}${next.kind}(${next.id}, ${quote(next.label)}) {`); }
 export function deleteC4Boundary(source: string, id: string): string { const parsed = requireC4(source); const boundary = findBoundary(parsed, id); const containedIds = new Set(parsed.elements.filter((element) => element.line.start > boundary.line.start && element.line.end < boundary.close.end).map((element) => element.id)); return deleteLines(source, [{ start: boundary.line.start, end: boundary.close.end, raw: '', text: '' }, ...parsed.relationships.filter((relationship) => containedIds.has(relationship.from) || containedIds.has(relationship.to)).map((relationship) => relationship.line)]); }
 export function addC4Relationship(source: string, relationship: C4Relationship): string {
@@ -124,7 +133,13 @@ function normalizeElement(value: C4Element): C4Element { const kind = canonical(
 function normalizeBoundary(value: C4Boundary): C4Boundary { const kind = canonical(BOUNDARY_KINDS, value.kind); if (!kind) throw new Error('Unsupported C4 boundary kind.'); return { id: normalizeId(value.id), kind, label: normalizeText(value.label, 'C4 boundary labels') }; }
 function normalizeRelationship(value: C4Relationship): C4Relationship { return { from: normalizeId(value.from), to: normalizeId(value.to), label: normalizeText(value.label, 'C4 relationship labels'), ...(value.technology ? { technology: normalizeText(value.technology, 'C4 relationship technology') } : {}) }; }
 function assertRelationship(parsed: ParsedC4, relationship: C4Relationship): void { if (!parsed.elements.some((entry) => entry.id === relationship.from) || !parsed.elements.some((entry) => entry.id === relationship.to)) throw new Error('C4 relationships require existing elements.'); }
-function formatElement(value: C4Element): string { const args = elementHasTechnology(value.kind) ? [value.id, quote(value.label), ...(value.technology ? [quote(value.technology)] : []), ...(value.description ? [quote(value.description)] : [])] : [value.id, quote(value.label), ...(value.description ? [quote(value.description)] : [])]; return `${value.kind}(${args.join(', ')})`; }
+function formatElement(value: C4Element): string {
+  const args = elementHasTechnology(value.kind)
+    ? [value.id, quote(value.label), ...(value.technology ? [quote(value.technology)] : value.description ? ['""'] : []), ...(value.description ? [quote(value.description)] : [])]
+    : [value.id, quote(value.label), ...(value.description ? [quote(value.description)] : [])];
+  return `${value.kind}(${args.join(', ')})`;
+}
+function formatBoundary(value: C4Boundary, indentation: string, ending: string): string { return `${indentation}${value.kind}(${value.id}, ${quote(value.label)}) {${ending}${indentation}  }`; }
 function elementHasTechnology(kind: C4ElementKind): boolean { return kind.startsWith('Container') || kind.startsWith('Component'); }
 function formatRelationship(value: C4Relationship): string { return `Rel(${value.from}, ${value.to}, ${quote(value.label)}${value.technology ? `, ${quote(value.technology)}` : ''})`; }
 function quote(value: string): string { return `"${value}"`; }

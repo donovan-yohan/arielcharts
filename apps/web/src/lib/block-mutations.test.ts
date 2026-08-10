@@ -82,6 +82,13 @@ describe('block source mutations', () => {
     expect(deleteBlockComposite(renamed, 'archive')).not.toContain('archive');
   });
 
+  it('keeps the source line ending when adding root and nested composites', () => {
+    const root = 'block-beta\r\n  api["API"]\r\n';
+    expect(addBlockComposite(root, { id: 'storage', columns: 2 })).toBe('block-beta\r\n  api["API"]\r\n  block:storage\r\n    columns 2\r\n  end');
+    const nested = 'block-beta\r  block:outer\r  end\r';
+    expect(addBlockComposite(nested, { id: 'inner', parentId: 'outer' })).toBe('block-beta\r  block:outer\r    block:inner\r    end\r  end\r');
+  });
+
   it('inserts root columns after the header without separating it from the first authored statement', () => {
     expect(setBlockColumns('block-beta\n  api["API"]', 2)).toBe('block-beta\n  columns 2\n  api["API"]');
   });

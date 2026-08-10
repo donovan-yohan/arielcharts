@@ -74,7 +74,7 @@ function parseRequirement(source: string): ParsedRequirement | null {
     if (declaration) {
       const name = declaration[3]!;
       const kind = KINDS.find((candidate) => candidate.toLowerCase() === declaration[2]!.toLowerCase());
-      if (!kind || entities.some((entry) => entry.name === name)) return null;
+      if (!kind || isReservedRequirementName(name) || entities.some((entry) => entry.name === name)) return null;
       open = { kind, name, fields: {}, lines: [], open: line }; continue;
     }
     const relation = text.match(RELATION);
@@ -116,7 +116,8 @@ function normalizeRequirementText(value: string): string {
   return text;
 }
 function assertRelationship(parsed: ParsedRequirement, relationship: RequirementRelationship): void { if (!RELATIONS.includes(relationship.kind)) throw new Error('Unsupported requirement relationship.'); if (!parsed.entities.some((entry) => entry.name === relationship.from) || !parsed.entities.some((entry) => entry.name === relationship.to)) throw new Error('Requirement relationships require existing entities.'); }
-function normalizeName(value: string): string { const name = value.trim().replace(/[^A-Za-z0-9_.-]/g, '_').replace(/^[^A-Za-z_]+/, ''); if (!namePattern.test(name)) throw new Error('Requirement names must be Mermaid-safe identifiers.'); return name; }
+function normalizeName(value: string): string { const name = value.trim().replace(/[^A-Za-z0-9_.-]/g, '_').replace(/^[^A-Za-z_]+/, ''); if (!namePattern.test(name)) throw new Error('Requirement names must be Mermaid-safe identifiers.'); if (isReservedRequirementName(name)) throw new Error('Requirement names cannot be Mermaid requirement type keywords.'); return name; }
+function isReservedRequirementName(name: string): boolean { return KINDS.some((kind) => kind.toLowerCase() === name.toLowerCase()); }
 function normalizeFieldKey(value: string): string { const key = value.trim(); if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(key)) throw new Error('Requirement field names must be identifiers.'); return key; }
 function normalizeFieldValue(value: string): string { const normalized = value.trim().replace(/[\r\n{}]/g, ''); if (!normalized) throw new Error('Requirement field values are required.'); return normalized; }
 function formatEntity(entity: RequirementEntity, indentation: string, ending: string): string { const body = Object.entries(entity.fields).map(([key, value]) => `${indentation}  ${key}: ${key === 'text' ? `"${value}"` : value}`).join(ending); return `${indentation}${entity.kind} ${entity.name} {${ending}${body}${ending}${indentation}}`; }

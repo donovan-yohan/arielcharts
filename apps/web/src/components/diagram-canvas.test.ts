@@ -67,6 +67,7 @@ describe('relationship and architecture semantic editors', () => {
     expect(canvasSource).toMatch(/getRequirementRelationshipIdentity\(item, index, diagram\.relationships\)/u);
     expect(canvasSource).toMatch(/const nextRequirementId = Math\.max\(0, \.\.\.diagram\.entities\.map/u);
     expect(canvasSource).toMatch(/id: String\(nextRequirementId\)/u);
+    expect(canvasSource).toMatch(/const \[name, setName\] = useState\('req'\)/u);
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'class'\)/u);
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'state'\)/u);
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'requirement'\)/u);

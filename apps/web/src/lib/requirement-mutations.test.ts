@@ -67,6 +67,8 @@ describe('requirement source mutations', () => {
     expect(isRequirementSourceRepresentable('requirementDiagram\n  requirement req {\n    id: REQ-1\n    text: "one"\n    risk: low\n    verifyMethod: test\n  }')).toBe(false);
     expect(isRequirementSourceRepresentable('requirementDiagram\n  requirement req {\n    id: 1\n    text: "one"\n    risk: urgent\n    verifyMethod: test\n  }')).toBe(false);
     expect(isRequirementSourceRepresentable('requirementDiagram\n  requirement req {\n    id: 1\n    text: "one"\n    risk: low\n    verifyMethod: deploy\n  }')).toBe(false);
+    expect(isRequirementSourceRepresentable('requirementDiagram\n  requirement requirement {\n    id: 1\n    text: "one"\n    risk: low\n    verifyMethod: test\n  }')).toBe(false);
+    expect(() => addRequirement(SOURCE, { name: 'requirement', kind: 'requirement', fields: { id: '2', text: 'two', risk: 'low', verifyMethod: 'test' } })).toThrow('type keywords');
     expect(isRequirementSourceRepresentable('requirementDiagram\n  requirement req {\n    id: 1\n    text: one\n    risk: low\n    verifyMethod: test\n  }\n  req <- satisfies - other')).toBe(false);
   });
 
@@ -74,6 +76,7 @@ describe('requirement source mutations', () => {
     mermaid.initialize({ startOnLoad: false });
     const upper = SOURCE.replace('  requirement order {', '  REQUIREMENT order {').replace('  element checkout {', '  ELEMENT checkout {').replace('  order - satisfies -> checkout', '  order - SATISFIES -> checkout');
     await expect(mermaid.parse(upper)).resolves.toMatchObject({ diagramType: 'requirement' });
+    await expect(mermaid.parse(addRequirement(SOURCE, { name: 'req', kind: 'requirement', fields: { id: '2', text: 'two', risk: 'low', verifyMethod: 'test' } }))).resolves.toMatchObject({ diagramType: 'requirement' });
     expect(getRequirementDiagramSnapshot(upper).entities.map((entity) => entity.kind)).toEqual(['requirement', 'element']);
     const relationships = getRequirementDiagramSnapshot(SOURCE).relationships;
     const identity = getRequirementRelationshipIdentity(relationships[0]!, 0, relationships);

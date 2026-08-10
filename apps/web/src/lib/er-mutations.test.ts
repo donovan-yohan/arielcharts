@@ -1,12 +1,18 @@
+// @vitest-environment happy-dom
+
+import mermaid from 'mermaid';
 import { describe, expect, it } from 'vitest';
 import {
   addErAttribute,
   addErEntity,
   addErRelationship,
+  deleteErAttribute,
   deleteErEntity,
+  deleteErRelationship,
   editErAttribute,
   editErRelationship,
   getErDiagramSnapshot,
+  getErRelationshipIdentity,
   isErSourceRepresentable,
   moveErAttribute,
   moveErEntity,
@@ -31,51 +37,92 @@ erDiagram
 %% preserve this unrelated comment
 `;
 
+async function expectValidMutation(source: string): Promise<void> {
+  expect(isErSourceRepresentable(source)).toBe(true);
+  await expect(mermaid.parse(source)).resolves.toMatchObject({ diagramType: 'er' });
+}
+
 describe('ER source mutations', () => {
-  it('parses a strict editable ER subset with attributes, markers, comments, and both relationship endpoints', () => {
+  it('parses a strict editable ER subset with semantic endpoint cardinalities', () => {
     expect(getErDiagramSnapshot(SOURCE)).toEqual({
       entities: [
         { name: 'CUSTOMER', attributes: [{ type: 'int', name: 'id', keys: ['PK'], comment: 'stable key' }, { type: 'string', name: 'email', keys: ['UK'] }] },
         { name: 'ORDER', attributes: [{ type: 'int', name: 'id', keys: ['PK'] }, { type: 'int', name: 'customer_id', keys: ['FK'] }] },
       ],
-      relationships: [{ left: 'CUSTOMER', leftCardinality: '||', identifying: true, rightCardinality: 'o{', right: 'ORDER', label: 'places' }],
+      relationships: [{ left: 'CUSTOMER', leftCardinality: 'exactly-one', identifying: true, rightCardinality: 'zero-or-more', right: 'ORDER', label: 'places' }],
     });
   });
 
-  it('uses minimal source-local transforms while preserving frontmatter, directives, comments, and endings', () => {
-    const renamed = renameErEntity(SOURCE, 'CUSTOMER', 'ACCOUNT');
-    expect(renamed).toContain('  ACCOUNT {');
-    expect(renamed).toContain('  ACCOUNT ||--o{ ORDER : places');
-    expect(renamed).toContain('%% preserve this unrelated comment');
-
-    const attributeEdited = editErAttribute(renamed, 'ACCOUNT', 'email', { type: 'varchar', name: 'primary_email', keys: ['PK', 'UK'], comment: 'canonical' });
-    expect(attributeEdited).toContain('    varchar primary_email PK, UK "canonical"');
-    expect(attributeEdited).toContain('    int id PK "stable key"');
-
-    const relationshipEdited = editErRelationship(attributeEdited, 0, {
-      left: 'ACCOUNT', leftCardinality: '|o', identifying: false, rightCardinality: '|{', right: 'ORDER', label: 'may place',
+  it('keeps inline comments, backslashes, directives, CRLF, and trailing whitespace outside semantic replacements', () => {
+    const source = [
+      "%%{init: {'theme':'neutral'}}%%",
+      'erDiagram',
+      '  CUSTOMER {',
+      '    string path UK "C:\\\\temp"   %% attribute note  ',
+      '  }',
+      '  ORDER {',
+      '    int id PK',
+      '  }',
+      '  CUSTOMER ||--o{ ORDER : places   %% relationship note  ',
+      '',
+    ].join('\r\n');
+    const attributeEdited = editErAttribute(source, 'CUSTOMER', 'path', { type: 'string', name: 'location', keys: ['UK'], comment: 'D:\\archive' });
+    expect(attributeEdited).toContain('    string location UK "D:\\\\archive"   %% attribute note  \r\n');
+    const identity = getErRelationshipIdentity(getErDiagramSnapshot(attributeEdited).relationships[0]!, 0);
+    const relationshipEdited = editErRelationship(attributeEdited, identity, {
+      left: 'CUSTOMER', leftCardinality: 'zero-or-one', identifying: false, rightCardinality: 'one-or-more', right: 'ORDER', label: 'may place',
     });
-    expect(relationshipEdited).toContain('  ACCOUNT |o..|{ ORDER : may place');
+    expect(relationshipEdited).toContain('  CUSTOMER |o..|{ ORDER : may place   %% relationship note  \r\n');
+    expect(relationshipEdited).toContain("%%{init: {'theme':'neutral'}}%%\r\n");
   });
 
-  it('creates, reorders, and removes declarations while updating dependent relationships', () => {
+  it('generates only Mermaid-valid and representable source for every mutation', async () => {
+    mermaid.initialize({ startOnLoad: false });
     const withEntity = addErEntity(SOURCE, 'INVOICE');
+    await expectValidMutation(withEntity);
     const withAttribute = addErAttribute(withEntity, 'INVOICE', { type: 'uuid', name: 'id', keys: ['PK'] });
-    const withRelationship = addErRelationship(withAttribute, {
-      left: 'ORDER', leftCardinality: '||', identifying: false, rightCardinality: 'o{', right: 'INVOICE', label: 'creates',
+    await expectValidMutation(withAttribute);
+    const withUniqueAttribute = addErAttribute(withAttribute, 'INVOICE', { type: 'uuid', name: 'id', keys: ['PK'] });
+    expect(withUniqueAttribute).toContain('uuid id_2 PK');
+    await expectValidMutation(withUniqueAttribute);
+    const withRelationship = addErRelationship(withUniqueAttribute, {
+      left: 'ORDER', leftCardinality: 'exactly-one', identifying: false, rightCardinality: 'zero-or-more', right: 'INVOICE', label: 'creates',
     });
-    expect(moveErEntity(withRelationship, 'INVOICE', 'up')).toContain('  INVOICE {');
-    expect(moveErAttribute(withRelationship, 'ORDER', 'customer_id', 'up')).toContain('    int customer_id FK\n    int id PK');
-    const deleted = deleteErEntity(withRelationship, 'ORDER');
-    expect(deleted).not.toContain('ORDER {');
-    expect(deleted).not.toContain(': places');
-    expect(deleted).not.toContain(': creates');
+    await expectValidMutation(withRelationship);
+    const editedAttribute = editErAttribute(withRelationship, 'INVOICE', 'id', { type: 'uuid', name: 'invoice_id', keys: ['PK'], comment: 'stable' });
+    await expectValidMutation(editedAttribute);
+    const identity = getErRelationshipIdentity(getErDiagramSnapshot(editedAttribute).relationships[1]!, 1);
+    const editedRelationship = editErRelationship(editedAttribute, identity, {
+      left: 'ORDER', leftCardinality: 'zero-or-one', identifying: false, rightCardinality: 'one-or-more', right: 'INVOICE', label: 'may create',
+    });
+    await expectValidMutation(editedRelationship);
+    await expectValidMutation(moveErEntity(editedRelationship, 'INVOICE', 'up'));
+    await expectValidMutation(moveErAttribute(editedRelationship, 'ORDER', 'customer_id', 'up'));
+    await expectValidMutation(renameErEntity(editedRelationship, 'INVOICE', 'BILL'));
+    await expectValidMutation(deleteErAttribute(editedRelationship, 'INVOICE', 'id_2'));
+    await expectValidMutation(deleteErRelationship(editedRelationship, getErRelationshipIdentity(getErDiagramSnapshot(editedRelationship).relationships[1]!, 1)));
+    await expectValidMutation(deleteErEntity(editedRelationship, 'ORDER'));
   });
 
-  it('fails closed for valid Mermaid ER syntax the source model cannot faithfully mutate', () => {
-    expect(isErSourceRepresentable('erDiagram\n  CUSTOMER ||--o{ ORDER : places')).toBe(true);
-    expect(isErSourceRepresentable('erDiagram\n  CUSTOMER ||--o{ ORDER')).toBe(false);
-    expect(isErSourceRepresentable('erDiagram\n  CUSTOMER {\n    string name "comment with unsupported \\" quote"\n  }')).toBe(false);
+  it('re-resolves a relationship after remote insertion or deletion and rejects ambiguous identity', () => {
+    const inserted = SOURCE.replace('  CUSTOMER ||--o{ ORDER : places', '  ORDER ||--o{ CUSTOMER : returns\n  CUSTOMER ||--o{ ORDER : places');
+    const target = getErRelationshipIdentity(getErDiagramSnapshot(inserted).relationships[1]!, 1);
+    const edited = editErRelationship(inserted, target, {
+      left: 'CUSTOMER', leftCardinality: 'exactly-one', identifying: false, rightCardinality: 'zero-or-more', right: 'ORDER', label: 'may place',
+    });
+    expect(edited).toContain('CUSTOMER ||..o{ ORDER : may place');
+    const afterRemoteDeletion = edited.replace('  ORDER ||--o{ CUSTOMER : returns\n', '');
+    const movedIdentity = getErRelationshipIdentity(getErDiagramSnapshot(edited).relationships[1]!, 1);
+    expect(deleteErRelationship(afterRemoteDeletion, movedIdentity)).not.toContain('may place');
+
+    const duplicate = `${SOURCE}  CUSTOMER ||--o{ ORDER : places\n`;
+    expect(() => editErRelationship(duplicate, { ...target, index: 4 }, { ...target, label: 'changed' })).toThrow('can no longer be resolved safely');
+  });
+
+  it('fails closed for unmodeled endpoint declarations and unsupported valid syntax', () => {
+    expect(isErSourceRepresentable('erDiagram\n  CUSTOMER ||--o{ ORDER : places')).toBe(false);
+    expect(isErSourceRepresentable('erDiagram\n  CUSTOMER {\n    string[] tags\n  }')).toBe(false);
     expect(isErSourceRepresentable('erDiagram\n  CUSTOMER {\n    string name\n  }\n  direction LR')).toBe(false);
+    expect(() => addErRelationship(SOURCE, { left: 'CUSTOMER', leftCardinality: 'exactly-one', identifying: true, rightCardinality: 'zero-or-more', right: 'ORDER', label: 'bad: label' })).toThrow('Mermaid-safe');
   });
 });

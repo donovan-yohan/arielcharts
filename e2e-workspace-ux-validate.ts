@@ -669,15 +669,61 @@ async function expectErSemanticEditor(page: Page): Promise<void> {
   await closeFlyout(page, 'source');
   const controls = page.getByTestId('er-editor-controls');
   const before = await snapshotAnchors(page, ANCHORS);
+  const beforeTransform = await canvasTransform(page);
+
+  const customerName = controls.getByLabel('ER entity CUSTOMER');
+  await customerName.fill('ACCOUNT');
+  const rename = customerName.locator('xpath=..').getByRole('button', { name: 'Rename', exact: true });
+  await assertHitTarget(page, rename, 'ER entity rename control');
+  await verifiedClick(page, rename, 'ER entity rename control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('ACCOUNT ||--o{ ORDER : places');
+  await closeFlyout(page, 'source');
+
+  const attributeName = controls.getByLabel('New attribute for ACCOUNT');
+  await attributeName.fill('created_at');
+  const addAttribute = attributeName.locator('xpath=..').getByRole('button', { name: 'Add attribute', exact: true });
+  await assertHitTarget(page, addAttribute, 'ER add-attribute control');
+  await verifiedClick(page, addAttribute, 'ER add-attribute control');
+  const attributeForm = controls.getByRole('form', { name: 'Attribute created_at on ACCOUNT', exact: true });
+  await attributeForm.getByLabel('Type for created_at').fill('timestamp');
+  await attributeForm.getByLabel('Comment for created_at').fill('created');
+  await verifiedClick(page, attributeForm.getByRole('button', { name: 'Save', exact: true }), 'ER edit-attribute control');
+
+  const existingRelationship = controls.getByRole('form', { name: 'Relationship ACCOUNT ORDER', exact: true }).first();
+  await existingRelationship.getByLabel('Relationship left entity').selectOption('ORDER');
+  await existingRelationship.getByLabel('Relationship right entity').selectOption('ACCOUNT');
+  await existingRelationship.getByLabel('Relationship label').fill('may place');
+  await existingRelationship.getByLabel('Relationship left cardinality').selectOption('zero-or-one');
+  await existingRelationship.getByLabel('Relationship right cardinality').selectOption('one-or-more');
+  await verifiedClick(page, existingRelationship.getByRole('button', { name: 'Save', exact: true }), 'ER edit-relationship control');
+  await verifiedClick(page, controls.getByRole('button', { name: 'Delete relationship may place', exact: true }), 'ER delete-relationship control');
+  const newRelationship = controls.getByRole('form', { name: 'Relationship ACCOUNT ORDER', exact: true }).last();
+  await newRelationship.getByLabel('Relationship label').fill('places again');
+  await verifiedClick(page, newRelationship.getByRole('button', { name: 'Add relationship', exact: true }), 'ER add-relationship control');
+
   const addEntity = controls.getByRole('button', { name: 'Add ER entity', exact: true });
   await assertHitTarget(page, addEntity, 'ER add-entity control');
   await verifiedClick(page, addEntity, 'ER add-entity control');
+  await verifiedClick(page, controls.getByRole('button', { name: 'Delete ORDER and dependent relationships', exact: true }), 'ER delete-entity control');
   await ensureSourceFlyoutOpen(page);
   await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('ENTITY {');
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).not.toContain('ORDER {');
   await closeFlyout(page, 'source');
   assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
+  assert(await canvasTransform(page) === beforeTransform, 'ER form operations changed the generic Mermaid camera transform.');
   assert(await page.locator('.react-flow__node').count() === 0,
     'ER semantic form incorrectly exposed the generic React Flow editor.');
+
+  const unsupported = 'erDiagram\n  ACCOUNT ||--o{ ORDER : places';
+  await replaceSource(page, unsupported);
+  await waitForSource(page, unsupported);
+  await waitForCanvas(page, 'generic');
+  const lastValidSvg = await page.locator('.diagram-canvas-svg svg').innerHTML();
+  await replaceSource(page, 'erDiagram\n  ACCOUNT ||--o{');
+  await waitForInvalidPreview(page);
+  assert(await page.locator('.diagram-canvas-svg svg').innerHTML() === lastValidSvg,
+    'Invalid ER source replaced the last valid SVG preview.');
 }
 
 async function expectStableFlyoutAnchors(page: Page, label: string): Promise<void> {

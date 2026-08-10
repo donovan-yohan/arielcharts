@@ -46,7 +46,7 @@ describe('DiagramPreviewRegistry', () => {
       source: 'erDiagram\n  CUSTOMER {\n    int id PK\n  }', svg: '<svg />',
     };
     expect(canUseErControls(erPreview.source, erPreview)).toBe(true);
-    expect(canUseErControls('erDiagram\n  CUSTOMER ||--o{ ORDER', erPreview)).toBe(false);
+    expect(canUseErControls('erDiagram\n  CUSTOMER ||--o{ ORDER : places', { ...erPreview, source: 'erDiagram\n  CUSTOMER ||--o{ ORDER : places' })).toBe(false);
     expect(canUseErControls(erPreview.source, { ...erPreview, source: 'erDiagram\n  direction LR' })).toBe(false);
   });
 

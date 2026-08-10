@@ -75,7 +75,7 @@ import {
 } from '../lib/svg-hit-map';
 import { getSafeToolbarPosition } from '../lib/toolbar-safe-area';
 import type { SequenceParticipant } from '../lib/sequence-mutations';
-import type { ErAttribute, ErDiagramSnapshot, ErRelationship } from '../lib/er-mutations';
+import { getErRelationshipIdentity, type ErAttribute, type ErDiagramSnapshot, type ErRelationship, type ErRelationshipIdentity } from '../lib/er-mutations';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
@@ -110,8 +110,8 @@ export interface DiagramCanvasProps {
   onDeleteErAttribute?: (entityName: string, attributeName: string) => void;
   onMoveErAttribute?: (entityName: string, attributeName: string, direction: 'up' | 'down') => void;
   onAddErRelationship?: (relationship: ErRelationship) => void;
-  onEditErRelationship?: (index: number, relationship: ErRelationship) => void;
-  onDeleteErRelationship?: (index: number) => void;
+  onEditErRelationship?: (identity: ErRelationshipIdentity, relationship: ErRelationship) => void;
+  onDeleteErRelationship?: (identity: ErRelationshipIdentity) => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
@@ -3404,14 +3404,10 @@ function SequenceEditorControls({
 }
 
 const ER_CARDINALITY_OPTIONS: Array<{ label: string; value: ErRelationship['leftCardinality'] }> = [
-  { label: 'exactly one', value: '||' },
-  { label: 'zero or one', value: '|o' },
-  { label: 'one or more', value: '}|' },
-  { label: 'zero or more', value: '}o' },
-  { label: 'one or more (right)', value: '|{' },
-  { label: 'zero or more (right)', value: 'o{' },
-  { label: 'exactly one (right)', value: 'o|' },
-  { label: 'one or more (inverse)', value: '}{' },
+  { label: 'exactly one', value: 'exactly-one' },
+  { label: 'zero or one', value: 'zero-or-one' },
+  { label: 'one or more', value: 'one-or-more' },
+  { label: 'zero or more', value: 'zero-or-more' },
 ];
 
 function ErEditorControls({
@@ -3434,9 +3430,9 @@ function ErEditorControls({
   onAddRelationship?: (relationship: ErRelationship) => void;
   onDeleteAttribute?: (entityName: string, attributeName: string) => void;
   onDeleteEntity?: (name: string) => void;
-  onDeleteRelationship?: (index: number) => void;
+  onDeleteRelationship?: (identity: ErRelationshipIdentity) => void;
   onEditAttribute?: (entityName: string, attributeName: string, attribute: ErAttribute) => void;
-  onEditRelationship?: (index: number, relationship: ErRelationship) => void;
+  onEditRelationship?: (identity: ErRelationshipIdentity, relationship: ErRelationship) => void;
   onMoveAttribute?: (entityName: string, attributeName: string, direction: 'up' | 'down') => void;
   onMoveEntity?: (name: string, direction: 'up' | 'down') => void;
   onRenameEntity?: (currentName: string, nextName: string) => void;
@@ -3446,9 +3442,9 @@ function ErEditorControls({
     identifying: true,
     label: 'relates to',
     left: diagram.entities[0]?.name ?? '',
-    leftCardinality: '||',
+    leftCardinality: 'exactly-one',
     right: diagram.entities[1]?.name ?? diagram.entities[0]?.name ?? '',
-    rightCardinality: 'o{',
+    rightCardinality: 'zero-or-more',
   }), [diagram.entities]);
 
   return (
@@ -3480,8 +3476,8 @@ function ErEditorControls({
           <ErRelationshipForm
             entities={diagram.entities.map((entity) => entity.name)}
             key={`${index}:${relationship.left}:${relationship.right}:${relationship.label}`}
-            onDelete={() => { onDeleteRelationship?.(index); }}
-            onSave={(next) => { onEditRelationship?.(index, next); }}
+            onDelete={() => { onDeleteRelationship?.(getErRelationshipIdentity(relationship, index)); }}
+            onSave={(next) => { onEditRelationship?.(getErRelationshipIdentity(relationship, index), next); }}
             relationship={relationship}
           />
         ))}

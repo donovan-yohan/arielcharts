@@ -1,5 +1,6 @@
 export type ErKeyMarker = 'PK' | 'FK' | 'UK';
-export type ErCardinality = '||' | '|o' | '}|' | '}o' | 'o|' | 'o{' | '|{' | '}{';
+/** Endpoint meaning is independent of Mermaid's direction-sensitive wire token. */
+export type ErCardinality = 'exactly-one' | 'zero-or-one' | 'one-or-more' | 'zero-or-more';
 
 export interface ErAttribute {
   comment?: string;
@@ -22,28 +23,47 @@ export interface ErRelationship {
   rightCardinality: ErCardinality;
 }
 
+/** A relationship stays addressable if a collaborator inserts lines before it. */
+export interface ErRelationshipIdentity extends ErRelationship {
+  index: number;
+}
+
 export interface ErDiagramSnapshot {
   entities: ErEntity[];
   relationships: ErRelationship[];
 }
 
 interface SourceRange { end: number; start: number; }
-interface ErAttributeRecord extends ErAttribute { line: SourceRange; }
+interface ErAttributeRecord extends ErAttribute { semantic: SourceRange; line: SourceRange; }
 interface ErEntityRecord extends ErEntity { attributes: ErAttributeRecord[]; block: SourceRange; declaration: SourceRange; }
-interface ErRelationshipRecord extends ErRelationship { leftRange: SourceRange; line: SourceRange; rightRange: SourceRange; }
+interface ErRelationshipRecord extends ErRelationship { leftRange: SourceRange; line: SourceRange; rightRange: SourceRange; semantic: SourceRange; }
 interface ParsedErDiagram { entities: ErEntityRecord[]; relationships: ErRelationshipRecord[]; }
 
 const FRONTMATTER_PATTERN = /^\uFEFF?---[ \t]*(?:\r\n|\n|\r)[\s\S]*?(?:\r\n|\n|\r)---[ \t]*(?:(?:\r\n|\n|\r)|$)/;
 const HEADER_PATTERN = /^\s*erDiagram\b[ \t]*(?:%%[^\r\n]*)?$/i;
 const ENTITY_NAME_PATTERN = '[A-Za-z_][A-Za-z0-9_-]*';
 const ENTITY_START_PATTERN = new RegExp(`^(\\s*)(${ENTITY_NAME_PATTERN})\\s*\\{\\s*(?:%%[^\\r\\n]*)?$`);
-const ATTRIBUTE_PATTERN = new RegExp(`^\\s*(\\S+)\\s+(${ENTITY_NAME_PATTERN})(.*)$`);
-const RELATIONSHIP_PATTERN = new RegExp(`^\\s*(${ENTITY_NAME_PATTERN})\\s+([|o}]{2})\\s*(--|\\.\\.)\\s*([|o}{]{2})\\s+(${ENTITY_NAME_PATTERN})\\s*:\\s*(\\S(?:.*\\S)?)\\s*(?:%%.*)?$`);
+const ATTRIBUTE_TYPE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const RELATIONSHIP_LABEL_BODY = '[A-Za-z0-9][A-Za-z0-9 _-]*';
+const RELATIONSHIP_LABEL_PATTERN = new RegExp(`^${RELATIONSHIP_LABEL_BODY}$`);
+const ATTRIBUTE_PATTERN = new RegExp(`^\\s*(${ENTITY_NAME_PATTERN})\\s+(${ENTITY_NAME_PATTERN})(.*)$`);
+const RELATIONSHIP_PATTERN = new RegExp(`^\\s*(${ENTITY_NAME_PATTERN})\\s+(\\|\\||\\|o|}\\||}o)\\s*(--|\\.\\.)\\s*(\\|\\||o\\||\\|\\{|o\\{)\\s+(${ENTITY_NAME_PATTERN})\\s*:\\s*(${RELATIONSHIP_LABEL_BODY})$`);
 const COMMENT_OR_DIRECTIVE_PATTERN = /^\s*%%/;
 const CLOSE_PATTERN = /^\s*}\s*(?:%%[^\r\n]*)?$/;
 const LINE_ENDING_PATTERN = /\r\n|\n|\r/;
-const VALID_CARDINALITIES = new Set<ErCardinality>(['||', '|o', '}|', '}o', 'o|', 'o{', '|{', '}{']);
 const VALID_KEYS = new Set<ErKeyMarker>(['PK', 'FK', 'UK']);
+const LEFT_CARDINALITY_BY_TOKEN: Readonly<Record<string, ErCardinality>> = {
+  '||': 'exactly-one', '|o': 'zero-or-one', '}|': 'one-or-more', '}o': 'zero-or-more',
+};
+const RIGHT_CARDINALITY_BY_TOKEN: Readonly<Record<string, ErCardinality>> = {
+  '||': 'exactly-one', 'o|': 'zero-or-one', '|{': 'one-or-more', 'o{': 'zero-or-more',
+};
+const LEFT_TOKEN_BY_CARDINALITY: Readonly<Record<ErCardinality, string>> = {
+  'exactly-one': '||', 'zero-or-one': '|o', 'one-or-more': '}|', 'zero-or-more': '}o',
+};
+const RIGHT_TOKEN_BY_CARDINALITY: Readonly<Record<ErCardinality, string>> = {
+  'exactly-one': '||', 'zero-or-one': 'o|', 'one-or-more': '|{', 'zero-or-more': 'o{',
+};
 
 export function isErDiagramSource(source: string): boolean {
   return parseErDiagram(source) !== null;
@@ -68,6 +88,34 @@ export function getErDiagramSnapshot(source: string): ErDiagramSnapshot {
       identifying, label, left, leftCardinality, right, rightCardinality,
     })),
   };
+}
+
+export function getErRelationshipIdentity(relationship: ErRelationship, index: number): ErRelationshipIdentity {
+  return { ...relationship, index };
+}
+
+export function resolveErRelationshipIndex(
+  relationships: readonly ErRelationship[],
+  identity: ErRelationshipIdentity,
+): number {
+  const atIndex = relationships[identity.index];
+  if (atIndex && isSameErRelationship(atIndex, identity)) return identity.index;
+  const matches = relationships
+    .map((relationship, index) => ({ index, relationship }))
+    .filter(({ relationship }) => isSameErRelationship(relationship, identity));
+  if (matches.length !== 1 || matches[0] === undefined) {
+    throw new Error('Relationship changed remotely and can no longer be resolved safely.');
+  }
+  return matches[0].index;
+}
+
+function isSameErRelationship(left: ErRelationship, right: ErRelationship): boolean {
+  return left.left === right.left
+    && left.leftCardinality === right.leftCardinality
+    && left.identifying === right.identifying
+    && left.rightCardinality === right.rightCardinality
+    && left.right === right.right
+    && left.label === right.label;
 }
 
 export function addErEntity(source: string, name = 'ENTITY'): string {
@@ -122,7 +170,8 @@ export function moveErEntity(source: string, name: string, direction: 'up' | 'do
 export function addErAttribute(source: string, entityName: string, attribute: Partial<ErAttribute> = {}): string {
   const parsed = requireErDiagram(source);
   const entity = findEntity(parsed, entityName);
-  const next = normalizeAttribute(attribute);
+  const normalized = normalizeAttribute(attribute);
+  const next = { ...normalized, name: uniqueAttributeName(normalized.name, entity.attributes.map((candidate) => candidate.name)) };
   const lines = splitLines(source);
   const closingLine = lines[lineIndexAt(lines, entity.block.end - 1)];
   if (!closingLine) throw new Error(`Entity ${entityName} has no closing declaration.`);
@@ -136,7 +185,7 @@ export function editErAttribute(source: string, entityName: string, attributeNam
   if (next.name !== attributeName && entity.attributes.some((candidate) => candidate.name === next.name)) {
     throw new Error(`Entity ${entityName} already has an attribute named ${next.name}.`);
   }
-  return replaceRanges(source, [{ range: attribute.line, value: `${leadingWhitespace(source.slice(attribute.line.start, attribute.line.end))}${formatAttribute(next)}` }]);
+  return replaceRanges(source, [{ range: attribute.semantic, value: `${leadingWhitespace(source.slice(attribute.line.start, attribute.semantic.start))}${formatAttribute(next)}` }]);
 }
 
 export function deleteErAttribute(source: string, entityName: string, attributeName: string): string {
@@ -166,16 +215,18 @@ export function addErRelationship(source: string, relationship: ErRelationship):
   return appendErStatement(source, `  ${formatRelationship(normalizeRelationship(relationship))}`);
 }
 
-export function editErRelationship(source: string, index: number, relationship: ErRelationship): string {
+export function editErRelationship(source: string, identity: ErRelationshipIdentity, relationship: ErRelationship): string {
   const parsed = requireErDiagram(source);
+  const index = resolveErRelationshipIndex(parsed.relationships, identity);
   const current = parsed.relationships[index];
   if (!current) throw new Error('Relationship no longer exists.');
   assertRelationshipEndpoints(parsed, relationship);
-  return replaceRanges(source, [{ range: current.line, value: `${leadingWhitespace(source.slice(current.line.start, current.line.end))}${formatRelationship(normalizeRelationship(relationship))}` }]);
+  return replaceRanges(source, [{ range: current.semantic, value: `${leadingWhitespace(source.slice(current.line.start, current.semantic.start))}${formatRelationship(normalizeRelationship(relationship))}` }]);
 }
 
-export function deleteErRelationship(source: string, index: number): string {
+export function deleteErRelationship(source: string, identity: ErRelationshipIdentity): string {
   const parsed = requireErDiagram(source);
+  const index = resolveErRelationshipIndex(parsed.relationships, identity);
   const relationship = parsed.relationships[index];
   if (!relationship) throw new Error('Relationship no longer exists.');
   const lines = splitLines(source);
@@ -227,15 +278,21 @@ function parseErDiagram(source: string): ParsedErDiagram | null {
     relationships.push(relationship);
     lineIndex += 1;
   }
+  const entityNames = new Set(entities.map((entity) => entity.name));
+  if (relationships.some((relationship) => !entityNames.has(relationship.left) || !entityNames.has(relationship.right))) {
+    return null;
+  }
   return { entities, relationships };
 }
 
 function parseAttribute(line: SourceLine): ErAttributeRecord | null {
-  const match = line.text.match(ATTRIBUTE_PATTERN);
+  const semantic = getLineSemanticRange(line);
+  const match = semantic.text.match(ATTRIBUTE_PATTERN);
   if (!match?.[1] || !match[2]) return null;
   const type = match[1];
   const name = match[2];
-  let rest = match[3].replace(/\s*%%.*$/, '').trim();
+  if (!ATTRIBUTE_TYPE_PATTERN.test(type)) return null;
+  let rest = match[3].trim();
   let comment: string | undefined;
   const commentMatch = rest.match(/\s+"((?:[^"\\]|\\.)*)"\s*$/);
   if (commentMatch) {
@@ -244,20 +301,31 @@ function parseAttribute(line: SourceLine): ErAttributeRecord | null {
   }
   const keys = rest ? rest.split(/\s*,\s*|\s+/).filter(Boolean) : [];
   if (!keys.every((key): key is ErKeyMarker => VALID_KEYS.has(key as ErKeyMarker))) return null;
-  return { ...(comment ? { comment } : {}), keys, line: { start: line.start, end: line.endWithoutEnding }, name, type };
+  return { ...(comment ? { comment } : {}), keys, line: { start: line.start, end: line.endWithoutEnding }, name, semantic: semantic.range, type };
 }
 
 function parseRelationship(line: SourceLine): ErRelationshipRecord | null {
-  const match = line.text.match(RELATIONSHIP_PATTERN);
+  const semantic = getLineSemanticRange(line);
+  const match = semantic.text.match(RELATIONSHIP_PATTERN);
   if (!match?.[1] || !match[2] || !match[3] || !match[4] || !match[5] || !match[6]) return null;
-  if (!VALID_CARDINALITIES.has(match[2] as ErCardinality) || !VALID_CARDINALITIES.has(match[4] as ErCardinality)) return null;
-  const leftStart = line.start + line.text.indexOf(match[1]);
-  const rightStart = line.start + line.text.indexOf(match[5], leftStart - line.start + match[1].length);
+  const leftCardinality = LEFT_CARDINALITY_BY_TOKEN[match[2]];
+  const rightCardinality = RIGHT_CARDINALITY_BY_TOKEN[match[4]];
+  if (!leftCardinality || !rightCardinality) return null;
+  const leftStart = semantic.range.start + semantic.text.indexOf(match[1]);
+  const rightStart = semantic.range.start + semantic.text.indexOf(match[5], leftStart - semantic.range.start + match[1].length);
   return {
-    identifying: match[3] === '--', label: match[6], left: match[1], leftCardinality: match[2] as ErCardinality,
-    leftRange: { start: leftStart, end: leftStart + match[1].length }, line: { start: line.start, end: line.endWithoutEnding },
-    right: match[5], rightCardinality: match[4] as ErCardinality, rightRange: { start: rightStart, end: rightStart + match[5].length },
+    identifying: match[3] === '--', label: match[6], left: match[1], leftCardinality,
+    leftRange: { start: leftStart, end: leftStart + match[1].length }, line: { start: line.start, end: line.endWithoutEnding }, semantic: semantic.range,
+    right: match[5], rightCardinality, rightRange: { start: rightStart, end: rightStart + match[5].length },
   };
+}
+
+function getLineSemanticRange(line: SourceLine): { range: SourceRange; text: string } {
+  const commentIndex = line.text.indexOf('%%');
+  const withoutInlineComment = commentIndex < 0 ? line.text : line.text.slice(0, commentIndex);
+  const end = line.start + withoutInlineComment.trimEnd().length;
+  const start = line.start + (withoutInlineComment.match(/^\s*/)?.[0].length ?? 0);
+  return { range: { start, end }, text: line.text.slice(start - line.start, end - line.start) };
 }
 
 interface SourceLine { end: number; endWithoutEnding: number; raw: string; start: number; text: string; }
@@ -312,14 +380,22 @@ function uniqueEntityName(base: string, existing: Iterable<string>): string {
   return candidate;
 }
 
+function uniqueAttributeName(base: string, existing: Iterable<string>): string {
+  const occupied = new Set(existing);
+  let candidate = base;
+  let suffix = 2;
+  while (occupied.has(candidate)) { candidate = `${base}_${suffix}`; suffix += 1; }
+  return candidate;
+}
+
 function normalizeAttribute(attribute: Partial<ErAttribute>): ErAttribute {
   const type = (attribute.type ?? 'string').trim();
   const name = normalizeEntityName(attribute.name ?? 'attribute');
-  if (!type || /\s|["{}]/.test(type)) throw new Error('Attribute types must be one Mermaid ER type token.');
+  if (!ATTRIBUTE_TYPE_PATTERN.test(type)) throw new Error('Attribute types must be a Mermaid ER identifier.');
   const keys = [...new Set(attribute.keys ?? [])];
   if (!keys.every((key): key is ErKeyMarker => VALID_KEYS.has(key))) throw new Error('Attribute keys must be PK, FK, or UK.');
   const comment = attribute.comment?.replace(/[\r\n]/g, ' ').trim();
-  if (comment?.includes('"')) throw new Error('Attribute comments cannot contain quotes.');
+  if (comment?.includes('"') || comment?.includes('%%')) throw new Error('Attribute comments cannot contain quotes or Mermaid comments.');
   return { ...(comment ? { comment } : {}), keys, name, type };
 }
 
@@ -329,8 +405,8 @@ function normalizeRelationship(relationship: ErRelationship): ErRelationship {
     label: relationship.label.replace(/[\r\n]/g, ' ').trim(),
     left: normalizeEntityName(relationship.left), right: normalizeEntityName(relationship.right),
   };
-  if (!normalized.label || normalized.label.includes('%%')) throw new Error('Relationship labels must be non-empty plain Mermaid text.');
-  if (!VALID_CARDINALITIES.has(normalized.leftCardinality) || !VALID_CARDINALITIES.has(normalized.rightCardinality)) throw new Error('Choose valid Mermaid ER endpoint cardinalities.');
+  if (!RELATIONSHIP_LABEL_PATTERN.test(normalized.label)) throw new Error('Relationship labels must use Mermaid-safe letters, numbers, spaces, underscores, or hyphens.');
+  if (!(normalized.leftCardinality in LEFT_TOKEN_BY_CARDINALITY) || !(normalized.rightCardinality in RIGHT_TOKEN_BY_CARDINALITY)) throw new Error('Choose a supported relationship cardinality.');
   return normalized;
 }
 
@@ -347,7 +423,7 @@ function formatAttribute(attribute: ErAttribute): string {
 }
 
 function formatRelationship(relationship: ErRelationship): string {
-  return `${relationship.left} ${relationship.leftCardinality}${relationship.identifying ? '--' : '..'}${relationship.rightCardinality} ${relationship.right} : ${relationship.label}`;
+  return `${relationship.left} ${LEFT_TOKEN_BY_CARDINALITY[relationship.leftCardinality]}${relationship.identifying ? '--' : '..'}${RIGHT_TOKEN_BY_CARDINALITY[relationship.rightCardinality]} ${relationship.right} : ${relationship.label}`;
 }
 
 function appendErStatement(source: string, statement: string): string {

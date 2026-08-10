@@ -2161,11 +2161,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onAddErRelationship={(relationship) => {
               mutateCanvasSource((source) => addErRelationship(source, relationship), 'Added an ER relationship');
             }}
-            onEditErRelationship={(index, relationship) => {
-              mutateCanvasSource((source) => editErRelationship(source, index, relationship), 'Edited an ER relationship');
+            onEditErRelationship={(identity, relationship) => {
+              mutateCanvasSource((source) => editErRelationship(source, identity, relationship), 'Edited an ER relationship');
             }}
-            onDeleteErRelationship={(index) => {
-              mutateCanvasSource((source) => deleteErRelationship(source, index), 'Deleted an ER relationship');
+            onDeleteErRelationship={(identity) => {
+              mutateCanvasSource((source) => deleteErRelationship(source, identity), 'Deleted an ER relationship');
             }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}

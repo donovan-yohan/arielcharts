@@ -43,13 +43,49 @@ export interface MutationResult {
   snapshot: FlowchartSnapshot;
 }
 
+export interface DiagramClipboardPoint {
+  x: number;
+  y: number;
+}
+
+export interface DiagramClipboardPayload {
+  nodes: Array<{
+    classes: string[];
+    id: string;
+    label: string;
+    position: DiagramClipboardPoint;
+    shape: DiagramNodeShape;
+  }>;
+  origin: DiagramClipboardPoint;
+  version: 1;
+  links: Array<{
+    label?: string;
+    length: number;
+    source: string;
+    stroke: FlowchartLink['stroke'];
+    target: string;
+    type: DiagramLinkType;
+  }>;
+}
+
+export interface PasteClipboardResult extends MutationResult {
+  idMap: Record<string, string>;
+  pastedNodeIds: string[];
+}
+
+export interface PasteClipboardOptions {
+  onApplied?: (result: PasteClipboardResult) => void;
+}
+
 interface QueuedMutation {
+  afterApply?: (result: MutationResult) => void;
   mutate: (currentText: string) => MutationResult;
   reject: (reason?: unknown) => void;
   resolve: (value: MutationResult) => void;
 }
 
 export interface MutationQueueOptions {
+  onAfterApplyError?: (error: unknown) => void;
   transactionOrigin?: unknown;
 }
 
@@ -85,7 +121,7 @@ export function getFlowchartSnapshot(chart: Flowchart): FlowchartSnapshot {
     direction: chart.direction,
     links: chart.links,
     nodeIds: chart.nodeIds,
-    nodes: chart.nodes,
+    nodes: chart.nodes.map((node) => ({ ...node, classes: chart.getClasses(node.id) })),
     subgraphs: chart.subgraphs,
   };
 }
@@ -191,9 +227,17 @@ export class MutationQueue {
     });
   }
 
-  enqueueResult(mutate: (currentText: string) => MutationResult): Promise<MutationResult> {
-    return new Promise<MutationResult>((resolve, reject) => {
-      this.queue.push({ mutate, reject, resolve });
+  enqueueResult<TResult extends MutationResult>(
+    mutate: (currentText: string) => TResult,
+    afterApply?: (result: TResult) => void,
+  ): Promise<TResult> {
+    return new Promise<TResult>((resolve, reject) => {
+      this.queue.push({
+        afterApply: afterApply ? (result) => { afterApply(result as TResult); } : undefined,
+        mutate,
+        reject,
+        resolve: (result) => { resolve(result as TResult); },
+      });
       void this.flush();
     });
   }
@@ -239,6 +283,50 @@ export class MutationQueue {
         snapshot: getFlowchartSnapshot(chart),
       };
     });
+  }
+
+  async pasteClipboard(
+    payload: DiagramClipboardPayload,
+    options: PasteClipboardOptions = {},
+  ): Promise<PasteClipboardResult> {
+    assertValidClipboardPayload(payload);
+
+    return this.enqueueResult((currentText) => {
+      const chart = getMutableFlowchart(currentText, { createIfEmpty: true });
+      const idMap: Record<string, string> = {};
+      const reservedIds = [...chart.nodeIds];
+
+      for (const node of payload.nodes) {
+        const pastedId = ensureUniqueId(reservedIds, `${node.id}_copy`);
+        reservedIds.push(pastedId);
+        idMap[node.id] = pastedId;
+        chart.addNode(pastedId, node.label, { classes: node.classes, shape: node.shape });
+      }
+
+      for (const link of payload.links) {
+        const source = idMap[link.source];
+        const target = idMap[link.target];
+        if (!source || !target) {
+          throw new Error('Cannot paste an invalid or stale canvas selection.');
+        }
+        chart.addLink(source, target, {
+          length: link.length,
+          stroke: link.stroke,
+          text: link.label,
+          type: link.type,
+        });
+      }
+
+      const result: PasteClipboardResult = {
+        idMap,
+        nextText: chart.render(),
+        pastedNodeIds: payload.nodes.map((node) => idMap[node.id]!).filter((nodeId): nodeId is string => Boolean(nodeId)),
+        previousText: currentText,
+        snapshot: getFlowchartSnapshot(chart),
+      };
+
+      return result;
+    }, options.onApplied);
   }
 
   async removeNode(nodeId: string): Promise<MutationResult> {
@@ -319,14 +407,27 @@ export class MutationQueue {
           const previousText = this.yText.toString();
           const result = next.mutate(previousText);
 
-          if (result.nextText !== previousText) {
+          const applyResult = () => {
+            if (result.nextText !== previousText) {
+              applyDiff(this.yText, result.nextText, previousText);
+            }
+            try {
+              next.afterApply?.({ ...result, previousText });
+            } catch (error) {
+              if (this.options.onAfterApplyError) {
+                this.options.onAfterApplyError(error);
+              } else {
+                throw error;
+              }
+            }
+          };
+
+          if (result.nextText !== previousText || next.afterApply) {
             const doc = this.yText.doc;
             if (doc) {
-              doc.transact(() => {
-                applyDiff(this.yText, result.nextText, previousText);
-              }, this.options.transactionOrigin);
+              doc.transact(applyResult, this.options.transactionOrigin);
             } else {
-              applyDiff(this.yText, result.nextText, previousText);
+              applyResult();
             }
           }
 
@@ -358,6 +459,97 @@ export class MutationQueue {
         snapshot: getFlowchartSnapshot(chart),
       };
     });
+  }
+}
+
+export function createDiagramClipboardPayload(
+  snapshot: FlowchartSnapshot,
+  selectedNodeIds: readonly string[],
+  positions: Readonly<Record<string, DiagramClipboardPoint | undefined>>,
+): DiagramClipboardPayload | null {
+  const selectedIds = new Set(selectedNodeIds);
+  const nodes = snapshot.nodes
+    .filter((node) => selectedIds.has(node.id))
+    .map((node) => ({
+      id: node.id,
+      classes: [...(node.classes ?? [])],
+      label: typeof node.text === 'string' ? node.text : node.text?.text ?? node.id,
+      position: positions[node.id] ?? { x: 0, y: 0 },
+      shape: node.shape,
+    }));
+
+  if (nodes.length === 0) {
+    return null;
+  }
+
+  const origin = {
+    x: Math.min(...nodes.map((node) => node.position.x)),
+    y: Math.min(...nodes.map((node) => node.position.y)),
+  };
+
+  return {
+    links: snapshot.links
+      .filter((link) => selectedIds.has(link.source) && selectedIds.has(link.target))
+      .map((link) => ({
+        label: typeof link.text === 'string' ? link.text : link.text?.text,
+        length: link.length,
+        source: link.source,
+        stroke: link.stroke,
+        target: link.target,
+        type: link.type,
+      })),
+    nodes: nodes.map((node) => ({
+      ...node,
+      position: { x: node.position.x - origin.x, y: node.position.y - origin.y },
+    })),
+    origin,
+    version: 1,
+  };
+}
+
+export function getPastedClipboardPositions(
+  payload: DiagramClipboardPayload,
+  idMap: Readonly<Record<string, string>>,
+  offset: DiagramClipboardPoint,
+): Record<string, DiagramClipboardPoint> {
+  assertValidClipboardPayload(payload);
+
+  return Object.fromEntries(payload.nodes.map((node) => {
+    const pastedId = idMap[node.id];
+    if (!pastedId) {
+      throw new Error('Cannot paste an invalid or stale canvas selection.');
+    }
+    return [pastedId, {
+      x: payload.origin.x + node.position.x + offset.x,
+      y: payload.origin.y + node.position.y + offset.y,
+    }];
+  }));
+}
+
+export function assertValidClipboardPayload(payload: DiagramClipboardPayload): void {
+  const nodeIds = new Set<string>();
+  const isFinitePoint = (point: DiagramClipboardPoint | undefined) => Boolean(point && Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (payload.version !== 1 || !isFinitePoint(payload.origin) || payload.nodes.length === 0) {
+    throw new Error('Cannot paste an invalid or stale canvas selection.');
+  }
+
+  for (const node of payload.nodes) {
+    if (!node.id
+      || !node.label
+      || nodeIds.has(node.id)
+      || !Array.isArray(node.classes)
+      || node.classes.some((className) => typeof className !== 'string' || !className.trim())
+      || new Set(node.classes).size !== node.classes.length
+      || !isFinitePoint(node.position)) {
+      throw new Error('Cannot paste an invalid or stale canvas selection.');
+    }
+    nodeIds.add(node.id);
+  }
+
+  for (const link of payload.links) {
+    if (!nodeIds.has(link.source) || !nodeIds.has(link.target) || !Number.isInteger(link.length) || link.length < 1) {
+      throw new Error('Cannot paste an invalid or stale canvas selection.');
+    }
   }
 }
 

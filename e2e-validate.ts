@@ -122,11 +122,82 @@ async function validate() {
   await ensureSourceFlyoutOpen(page);
   await editor.click();
   await page.keyboard.press('Control+A');
-  await page.keyboard.type(`flowchart TD
-    A[Start] --> B{Bug?}
-    B -->|Yes| C[Fix]
-    B -->|No| D[Ship]`, { delay: 10 });
+  await page.keyboard.type(`flowchart LR
+    classDef hot fill:#ffec99,stroke:#d9480f,color:#4a2c00;
+    A[Alpha]:::hot --> B{Beta}
+    B --> C[Gamma]`, { delay: 10 });
   await page.waitForTimeout(3000);
+
+  // --- Test: marquee selection and application-local clipboard ---
+  console.log('\n2c. Testing marquee selection and canvas clipboard...');
+  const marqueeNodes = page.locator('.react-flow__node');
+  const marqueeNodeA = page.locator('.react-flow__node[data-id="A"]');
+  const marqueeNodeB = page.locator('.react-flow__node[data-id="B"]');
+  const marqueeNodeC = page.locator('.react-flow__node[data-id="C"]');
+  const marqueeBoxes = await Promise.all([marqueeNodeA.boundingBox(), marqueeNodeB.boundingBox(), marqueeNodeC.boundingBox()]);
+  const marqueeSelectionBoxes = marqueeBoxes.slice(0, 2);
+  const marqueeBounds = marqueeSelectionBoxes.every((box) => box !== null)
+    ? {
+      bottom: Math.max(...marqueeSelectionBoxes.map((box) => box!.y + box!.height)) + 8,
+      left: Math.min(...marqueeSelectionBoxes.map((box) => box!.x)) - 8,
+      right: Math.max(...marqueeSelectionBoxes.map((box) => box!.x + box!.width)) + 8,
+      top: Math.min(...marqueeSelectionBoxes.map((box) => box!.y)) - 8,
+    }
+    : null;
+  if (marqueeBounds) {
+    await page.mouse.move(marqueeBounds.left, marqueeBounds.top);
+    await page.mouse.down();
+    await page.mouse.move(marqueeBounds.right, marqueeBounds.bottom, { steps: 8 });
+    await page.mouse.up();
+  }
+  const expectedMarqueeSelection = JSON.stringify(['A', 'B']);
+  const marqueeSelectionPass = marqueeBounds !== null
+    && marqueeBoxes[2] !== null
+    && await page.getByTestId('diagram-canvas').getAttribute('data-selected-node-ids') === expectedMarqueeSelection;
+  results.push({ test: 'React Flow full-containment marquee selection', pass: marqueeSelectionPass });
+  console.log(`   Marquee selected ${expectedMarqueeSelection}: ${marqueeSelectionPass ? 'PASS' : 'FAIL'}`);
+
+  const canvas = page.getByTestId('diagram-canvas');
+  const nodesBeforePaste = await marqueeNodes.count();
+  const edgesBeforePaste = await page.locator('.react-flow__edge').count();
+  await canvas.focus();
+  await page.keyboard.press('Control+C');
+  await page.keyboard.press('Control+V');
+  await page.waitForFunction((expected) => document.querySelectorAll('.react-flow__node').length === expected, nodesBeforePaste + 2, { timeout: 15_000 });
+  await page.keyboard.press('Control+V');
+  await page.waitForFunction((expected) => document.querySelectorAll('.react-flow__node').length === expected, nodesBeforePaste + 4, { timeout: 15_000 });
+  await durableObserver.waitFor(
+    (observer) => observer.hasNodePosition('main', 'A_copy') && observer.hasNodePosition('main', 'A_copy_2'),
+    'durable layout positions for repeated canvas pastes',
+    15_000,
+  );
+  const pastedLayout = durableObserver.snapshot('main').nodePositions;
+  const firstPastePosition = pastedLayout.A_copy;
+  const secondPastePosition = pastedLayout.A_copy_2;
+  const pastedSource = await editor.textContent();
+  const pastePass = await page.locator('.react-flow__edge').count() === edgesBeforePaste + 2
+    && firstPastePosition !== undefined
+    && secondPastePosition !== undefined
+    && Math.abs(secondPastePosition.x - firstPastePosition.x - 32) < 1
+    && Math.abs(secondPastePosition.y - firstPastePosition.y - 32) < 1
+    && (pastedSource?.includes('A_copy') ?? false)
+    && !(pastedSource?.includes('B_copy --> C') ?? false);
+  results.push({ test: 'canvas Ctrl+C/Ctrl+V copies internal edges with collision-safe layout', pass: pastePass });
+  console.log(`   Repeated paste nodes/edges/layout: ${pastePass ? 'PASS' : 'FAIL'}`);
+
+  const sourceNativeClipboard = `flowchart LR
+    Source[Source shortcut] --> Target[Native paste]`;
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseUrl });
+  await page.evaluate((text) => navigator.clipboard.writeText(text), sourceNativeClipboard);
+  await editor.click();
+  await page.keyboard.press('Control+A');
+  await page.keyboard.press('Control+V');
+  await page.waitForFunction((expected) => [...document.querySelectorAll('.cm-line')].map((line) => line.textContent ?? '').join('\n') === expected, sourceNativeClipboard, { timeout: 15_000 });
+  await page.locator('.react-flow__node[data-id="Source"]').waitFor({ state: 'visible', timeout: 15_000 });
+  const sourceShortcutPass = await page.locator('.react-flow__node[data-id="Source"]').count() === 1
+    && await page.locator('.react-flow__node[data-id="Target"]').count() === 1;
+  results.push({ test: 'source editor native Ctrl+V is not intercepted by canvas', pass: sourceShortcutPass });
+  console.log(`   Source editor native clipboard path: ${sourceShortcutPass ? 'PASS' : 'FAIL'}`);
 
   // --- Test: overlay alignment ---
   console.log('\n3. Checking overlay alignment...');

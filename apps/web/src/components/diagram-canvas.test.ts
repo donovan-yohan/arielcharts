@@ -35,6 +35,8 @@ describe('canvas pan exclusions', () => {
     expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('[data-canvas-pan-exclusion="true"]');
     expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('[data-subgraph-drag-target="true"]');
     expect(canvasSource).toMatch(/return !target\.closest\(CANVAS_PAN_EXCLUSION_SELECTOR\);/u);
+    expect(canvasSource).toMatch(/className="diagram-canvas-shell"[^]*?<div[^]*?data-testid="diagram-canvas"[^]*?touchAction: 'none'/u);
+    expect(canvasSource).toMatch(/<form className="canvas-sequence-participant-form" data-canvas-pan-exclusion="true"/u);
   });
 });
 
@@ -44,6 +46,21 @@ describe('ER editor safe area', () => {
     expect(canvasSource).toMatch(/<ErEditorControls\s+bottom=\{erEditorBottom\}/u);
     expect(canvasSource).toMatch(/function ErEditorControls\(\{\s+bottom,/u);
     expect(canvasSource).toMatch(/canvas-er-editor[^]*?bottom,/u);
+  });
+});
+
+describe('sequence semantic editor', () => {
+  it('keeps every representable statement family behind explicit semantic controls', () => {
+    expect(canvasSource).toMatch(/New sequence participant kind/u);
+    expect(canvasSource).toMatch(/Sequence message sender[^]*?Sequence message recipient[^]*?Sequence message arrow[^]*?Sequence message text/u);
+    expect(canvasSource).toMatch(/Sequence note placement[^]*?Sequence note targets[^]*?Sequence note text/u);
+    expect(canvasSource).toMatch(/Sequence activation action[^]*?Sequence activation participant/u);
+    expect(canvasSource).toMatch(/Sequence fragment label/u);
+    expect(canvasSource).toMatch(/onDeleteActivation[^]*?onMoveActivation[^]*?onEditActivation/u);
+    expect(workspaceSource).toMatch(/onEditSequenceMessage[^]*?editSequenceMessage/u);
+    expect(workspaceSource).toMatch(/onEditSequenceNote[^]*?editSequenceNote/u);
+    expect(workspaceSource).toMatch(/onEditSequenceActivation[^]*?editSequenceActivation/u);
+    expect(workspaceSource).toMatch(/onEditSequenceFragment[^]*?editSequenceFragment/u);
   });
 });
 
@@ -66,6 +83,7 @@ describe('canvas wheel ownership', () => {
     expect(canvasSource).toMatch(/container\.addEventListener\('gesturechange', handleSafariGestureChange, \{ passive: false \}\);/u);
     expect(canvasSource).toMatch(/event\.preventDefault\(\);[^]*?getCanvasWheelGesture\(event/u);
     expect(canvasSource).not.toMatch(/onWheel=\{handleWheel\}/u);
+    expect(canvasSource).toMatch(/function canHandleCanvasWheel[^]*?return !target\.closest\(CANVAS_PAN_EXCLUSION_SELECTOR\);/u);
   });
 
   it('keeps the focus ring available for keyboard navigation but hides it while a Space drag pans', () => {

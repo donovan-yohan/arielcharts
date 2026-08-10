@@ -80,7 +80,8 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('zenuml'))).toBe('ZenUML · plugin unavailable');
   });
 
-  it('fails closed when a family source cannot safely represent a semantic operation', () => {
+  it('fails closed when a family source cannot safely represent a semantic operation', async () => {
+    mermaid.initialize({ startOnLoad: false });
     const flowchart = classifyDiagramCapability('flowchart-v2');
     const sequence = classifyDiagramCapability('sequence');
     const er = classifyDiagramCapability('er');
@@ -91,7 +92,9 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult('sequenceDiagram\n  A->>B: request', 'add-message')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(er).getOperationResult('erDiagram\n  A {\n    int id PK\n  }', 'add-attribute')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(er).getOperationResult('erDiagram\n  A ||--o{ B', 'add-relationship')).toEqual({ supported: false, reason: 'unrepresentable' });
-    expect(getDiagramSourceModelAdapter(sequence).getOperationResult('sequenceDiagram\n  Note over A: details', 'add-message')).toEqual({ supported: false, reason: 'unrepresentable' });
+    const noteOnlySequence = 'sequenceDiagram\n  Note over A: details';
+    await expect(mermaid.parse(noteOnlySequence)).resolves.toMatchObject({ diagramType: 'sequence' });
+    expect(getDiagramSourceModelAdapter(sequence).getOperationResult(noteOnlySequence, 'add-message')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(sourceOnly).getOperationResult('timeline\n  2026 : Started', 'add-event')).toEqual({ supported: false, reason: 'source-only' });
   });
 

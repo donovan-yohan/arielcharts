@@ -42,7 +42,33 @@ import {
 } from '../lib/diagram-layout';
 import { classifyDiagramCapability, getDiagramCapabilityLabel } from '../lib/diagram-capabilities';
 import { canUseErControls, canUseFlowchartControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
-import { addSequenceMessage, addSequenceParticipant, getSequenceParticipants } from '../lib/sequence-mutations';
+import {
+  addSequenceMessage,
+  addSequenceActivation,
+  addSequenceFragment,
+  addSequenceNote,
+  addSequenceParticipant,
+  deleteSequenceMessage,
+  deleteSequenceActivation,
+  deleteSequenceFragment,
+  deleteSequenceNote,
+  deleteSequenceParticipant,
+  editSequenceActivation,
+  editSequenceFragment,
+  editSequenceMessage,
+  editSequenceNote,
+  editSequenceInlineText,
+  getSequenceDiagramSnapshot,
+  getSequenceParticipants,
+  moveSequenceMessage,
+  moveSequenceActivation,
+  moveSequenceFragment,
+  moveSequenceNote,
+  moveSequenceParticipant,
+  renameSequenceParticipant,
+  renameSequenceParticipantId,
+  setSequenceAutonumber,
+} from '../lib/sequence-mutations';
 import {
   addErAttribute,
   addErEntity,
@@ -1670,6 +1696,20 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
   );
+  const sequenceDiagram = useMemo(() => {
+    if (!isSequence) return null;
+    try {
+      return getSequenceDiagramSnapshot(renderedMermaidText);
+    } catch {
+      return null;
+    }
+  }, [isSequence, renderedMermaidText]);
+  const sequenceTextItems = useMemo(() => sequenceDiagram ? [
+    ...sequenceDiagram.participants.flatMap((participant) => participant.declarationId ? [{ id: participant.declarationId, text: participant.label, type: 'participant' as const }] : []),
+    ...sequenceDiagram.messages.map((message) => ({ id: message.id, text: message.text, type: 'message' as const })),
+    ...sequenceDiagram.notes.map((note) => ({ id: note.id, text: note.text, type: 'note' as const })),
+    ...sequenceDiagram.fragments.map((fragment) => ({ id: fragment.id, text: fragment.label, type: 'fragment' as const })),
+  ] : [], [renderedMermaidText, sequenceDiagram]);
   const erDiagram = useMemo(() => isEr ? getErDiagramSnapshot(renderedMermaidText) : null, [isEr, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
@@ -2128,11 +2168,74 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.addNode(label, { shape }));
             }}
-            onAddSequenceMessage={(from, to, message) => {
-              mutateCanvasSource((source) => addSequenceMessage(source, from, to, message), 'Added a sequence message');
+            onAddSequenceMessage={(from, to, message, arrow) => {
+              mutateCanvasSource((source) => addSequenceMessage(source, from, to, message, arrow), 'Added a sequence message');
             }}
-            onAddSequenceParticipant={(label) => {
-              mutateCanvasSource((source) => addSequenceParticipant(source, label), 'Added a sequence participant');
+            onAddSequenceParticipant={(label, kind) => {
+              mutateCanvasSource((source) => addSequenceParticipant(source, label, kind), 'Added a sequence participant');
+            }}
+            onAddSequenceNote={(placement, participantIds, text) => {
+              mutateCanvasSource((source) => addSequenceNote(source, placement, participantIds, text), 'Added a sequence note');
+            }}
+            onAddSequenceActivation={(action, participant) => {
+              mutateCanvasSource((source) => addSequenceActivation(source, action, participant), 'Added a sequence activation');
+            }}
+            onAddSequenceFragment={(kind, label) => {
+              mutateCanvasSource((source) => addSequenceFragment(source, kind, label), 'Added a sequence fragment');
+            }}
+            onDeleteSequenceParticipant={(id) => {
+              mutateCanvasSource((source) => deleteSequenceParticipant(source, id), 'Deleted a sequence participant');
+            }}
+            onDeleteSequenceMessage={(id) => {
+              mutateCanvasSource((source) => deleteSequenceMessage(source, id), 'Deleted a sequence message');
+            }}
+            onDeleteSequenceNote={(id) => {
+              mutateCanvasSource((source) => deleteSequenceNote(source, id), 'Deleted a sequence note');
+            }}
+            onDeleteSequenceActivation={(id) => {
+              mutateCanvasSource((source) => deleteSequenceActivation(source, id), 'Deleted a sequence activation');
+            }}
+            onDeleteSequenceFragment={(id) => {
+              mutateCanvasSource((source) => deleteSequenceFragment(source, id), 'Deleted a sequence fragment');
+            }}
+            onEditSequenceParticipant={(id, label) => {
+              mutateCanvasSource((source) => renameSequenceParticipant(source, id, label), 'Renamed a sequence participant');
+            }}
+            onRenameSequenceParticipantId={(id, nextId) => {
+              mutateCanvasSource((source) => renameSequenceParticipantId(source, id, nextId), 'Renamed a sequence participant identifier');
+            }}
+            onEditSequenceMessage={(id, patch) => {
+              mutateCanvasSource((source) => editSequenceMessage(source, id, patch), 'Edited a sequence message');
+            }}
+            onEditSequenceNote={(id, patch) => {
+              mutateCanvasSource((source) => editSequenceNote(source, id, patch), 'Edited a sequence note');
+            }}
+            onEditSequenceActivation={(id, action, participant) => {
+              mutateCanvasSource((source) => editSequenceActivation(source, id, { action, participant }), 'Edited a sequence activation');
+            }}
+            onEditSequenceFragment={(id, label) => {
+              mutateCanvasSource((source) => editSequenceFragment(source, id, label), 'Edited a sequence fragment');
+            }}
+            onMoveSequenceParticipant={(id, direction) => {
+              mutateCanvasSource((source) => moveSequenceParticipant(source, id, direction), 'Reordered sequence participants');
+            }}
+            onMoveSequenceMessage={(id, direction) => {
+              mutateCanvasSource((source) => moveSequenceMessage(source, id, direction), 'Reordered sequence messages');
+            }}
+            onMoveSequenceNote={(id, direction) => {
+              mutateCanvasSource((source) => moveSequenceNote(source, id, direction), 'Reordered sequence notes');
+            }}
+            onMoveSequenceActivation={(id, direction) => {
+              mutateCanvasSource((source) => moveSequenceActivation(source, id, direction), 'Reordered sequence activations');
+            }}
+            onMoveSequenceFragment={(id, direction) => {
+              mutateCanvasSource((source) => moveSequenceFragment(source, id, direction), 'Reordered sequence fragments');
+            }}
+            onSetSequenceAutonumber={(value) => {
+              mutateCanvasSource((source) => setSequenceAutonumber(source, value), 'Updated sequence autonumbering');
+            }}
+            onEditSequenceStatement={(id, text) => {
+              mutateCanvasSource((source) => editSequenceInlineText(source, id, text), 'Edited a sequence statement');
             }}
             onAddErEntity={(name) => {
               mutateCanvasSource((source) => addErEntity(source, name), 'Added an ER entity');
@@ -2228,6 +2331,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             }}
             selectedNodeIds={selectedNodeIds}
             sequenceParticipants={sequenceParticipants}
+            sequenceDiagram={sequenceDiagram}
+            sequenceTextItems={sequenceTextItems}
             erDiagram={erDiagram}
             svg={renderedPreview?.svg ?? ''}
             theme={resolvedTheme}

@@ -798,17 +798,44 @@ async function expectTemplateDiagramCreation(page: Page): Promise<void> {
     'API sequence template retained flowchart structural controls.');
   assert(await page.locator('form.canvas-sequence-participant-form').count() === 1,
     'API sequence template did not expose participant controls.');
-  assert(await page.locator('form.canvas-sequence-message-form').count() === 1,
+  assert(await page.locator('form.canvas-sequence-message-form:has([aria-label="Sequence message"])').count() === 1,
     'API sequence template did not expose message controls.');
   await renameActiveDiagram(page, 'API request timing');
   await ensureSourceFlyoutOpen(page);
   const sequenceSource = await canonicalSource(page);
   await replaceSource(page, `${sequenceSource}\n  Note over Client,API: traced in live coding`);
   await waitForSource(page, `${sequenceSource}\n  Note over Client,API: traced in live coding`);
-  await waitForCanvas(page, 'generic');
+  await waitForCanvas(page, 'sequence');
   await closeFlyout(page, 'source');
   await saveScreenshot(page, 'issue-15-api-sequence');
   await assertTemplateIdentityAbsent(page);
+  const headerOnlySequenceSource = 'sequenceDiagram';
+  await ensureSourceFlyoutOpen(page);
+  await replaceSource(page, headerOnlySequenceSource);
+  await waitForSource(page, headerOnlySequenceSource);
+  await waitForCanvas(page, 'sequence');
+  await closeFlyout(page, 'source');
+  const centeredSequenceEditor = page.getByTestId('sequence-editor-controls');
+  await centeredSequenceEditor.waitFor({ state: 'visible', timeout: 15_000 });
+  const centeredSequenceLayout = await centeredSequenceEditor.evaluate((editor) => {
+    const canvas = editor.closest('[data-testid="diagram-canvas"]');
+    if (!(canvas instanceof HTMLElement)) return null;
+    const editorBounds = editor.getBoundingClientRect();
+    const canvasBounds = canvas.getBoundingClientRect();
+    return {
+      bottom: editorBounds.bottom,
+      left: editorBounds.left,
+      right: editorBounds.right,
+      top: editorBounds.top,
+      withinCanvas: editorBounds.top >= canvasBounds.top - 0.5
+        && editorBounds.bottom <= canvasBounds.bottom + 0.5
+        && editorBounds.left >= canvasBounds.left - 0.5
+        && editorBounds.right <= canvasBounds.right + 0.5,
+    };
+  });
+  assert(centeredSequenceLayout?.withinCanvas,
+    `Centered header-only sequence controls did not overlay the canvas: ${JSON.stringify(centeredSequenceLayout)}.`);
+  await assertHitTarget(page, page.getByRole('button', { name: 'Add sequence participant', exact: true }), 'centered header-only sequence participant control');
   assert(flowchartName !== sequenceName, 'Flowchart and sequence templates reused the same created tab.');
 }
 
@@ -2361,7 +2388,7 @@ async function expectTouchCanvasControls(
   if (renderer === 'sequence') {
     const canvas = page.getByTestId('canvas-first-workspace');
     const participantForm = page.locator('form.canvas-sequence-participant-form');
-    const messageForm = page.locator('form.canvas-sequence-message-form');
+    const messageForm = page.locator('form.canvas-sequence-message-form:has([aria-label="Sequence message"])');
     const participantAdd = page.getByRole('button', { name: 'Add sequence participant', exact: true });
     const messageAdd = page.getByRole('button', { name: 'Add sequence message', exact: true });
     await Promise.all([
@@ -2373,7 +2400,7 @@ async function expectTouchCanvasControls(
     await assertDocumentHasNoHorizontalOverflow(page);
     const layout = await page.evaluate(() => {
       const canvas = document.querySelector<HTMLElement>('[data-testid="canvas-first-workspace"]');
-      const forms = [...document.querySelectorAll<HTMLElement>('form.canvas-sequence-participant-form, form.canvas-sequence-message-form')];
+      const forms = [...document.querySelectorAll<HTMLElement>('form.canvas-sequence-participant-form, form.canvas-sequence-message-form:has([aria-label="Sequence message"])')];
       if (!canvas || forms.length !== 2) return null;
       const canvasBounds = canvas.getBoundingClientRect();
       return forms.map((form) => {
@@ -2392,6 +2419,47 @@ async function expectTouchCanvasControls(
     });
     assert(layout !== null && layout.every((form) => form.withinCanvas),
       `${label} sequence forms overflowed or overlapped workspace chrome: ${JSON.stringify(layout)}.`);
+    if (label === 'mobile-landscape') {
+      const editor = page.getByTestId('sequence-editor-controls');
+      const scrollSurface = page.locator('form.canvas-sequence-message-form:has([aria-label="Sequence message"])');
+      const beforeScroll = await editor.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollTop: element.scrollTop }));
+      assert(beforeScroll.scrollHeight > beforeScroll.clientHeight,
+        `${label} sequence editor did not expose overflow for lower controls: ${JSON.stringify(beforeScroll)}.`);
+      const bounds = await scrollSurface.boundingBox();
+      assert(bounds, `${label} sequence editor has no visible touch-scroll form.`);
+      const session = await page.context().newCDPSession(page);
+      const touch = (y: number) => ({ force: 1, id: 1, radiusX: 1, radiusY: 1, x: bounds.x + (bounds.width / 2), y });
+      try {
+        const start = bounds.y + bounds.height - 24;
+        await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start)], type: 'touchStart' });
+        await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - 48)], type: 'touchMove' });
+        await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - 112)], type: 'touchMove' });
+        await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - 176)], type: 'touchMove' });
+        await session.send('Input.dispatchTouchEvent', { touchPoints: [], type: 'touchEnd' });
+      } finally {
+        await session.detach();
+      }
+      await expect.poll(() => editor.evaluate((element) => element.scrollTop), {
+        message: `${label} sequence editor did not respond to a vertical touch scroll.`,
+        timeout: 5_000,
+      }).toBeGreaterThan(beforeScroll.scrollTop);
+      let previousScrollTop = await editor.evaluate((element) => element.scrollTop);
+      let stableScrollSamples = 0;
+      await expect.poll(async () => {
+        const currentScrollTop = await editor.evaluate((element) => element.scrollTop);
+        stableScrollSamples = Math.abs(currentScrollTop - previousScrollTop) < 0.5 ? stableScrollSamples + 1 : 0;
+        previousScrollTop = currentScrollTop;
+        return stableScrollSamples;
+      }, {
+        message: `${label} sequence editor scroll did not settle before canvas interaction.`,
+        timeout: 5_000,
+        intervals: [50],
+      }).toBeGreaterThanOrEqual(3);
+      const activation = page.getByRole('button', { name: 'Add sequence activation', exact: true });
+      await activation.scrollIntoViewIfNeeded();
+      await tapTarget(page, activation, `${label} sequence lower activation control`);
+      await editor.evaluate((element) => { element.scrollTop = 0; });
+    }
   }
 
   const beforeZoom = await renderedCanvasCameraTransform(page, `${label} ${renderer} touch zoom baseline`);

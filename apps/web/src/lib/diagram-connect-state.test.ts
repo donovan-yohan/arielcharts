@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { getConnectNodeActivation } from './diagram-connect-state';
+import { getConnectModeSourceId, getConnectNodeActivation } from './diagram-connect-state';
+
+describe('getConnectModeSourceId', () => {
+  it('uses exactly one selected node as the initial connect source', () => {
+    expect(getConnectModeSourceId([])).toBeNull();
+    expect(getConnectModeSourceId(['source'])).toBe('source');
+    expect(getConnectModeSourceId(['source', 'target'])).toBeNull();
+  });
+});
 
 describe('getConnectNodeActivation', () => {
   it('runs source and target selections through one activation flow', () => {

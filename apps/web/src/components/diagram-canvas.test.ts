@@ -4,6 +4,7 @@ import type { DiagramLink } from '../lib/diagram-mutations';
 import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
+import { getConnectModeSourceId } from '../lib/diagram-connect-state';
 import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getRendererInteractionMode, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
 
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
@@ -99,6 +100,16 @@ describe('getRendererInteractionMode', () => {
     expect(getRendererInteractionMode('connect', false)).toBe('select');
     expect(getRendererInteractionMode('connect', true)).toBe('connect');
     expect(getRendererInteractionMode('select', false)).toBe('select');
+  });
+});
+
+describe('connect mode entry', () => {
+  it('shares the selected-source contract between the toolbar and keyboard command', () => {
+    expect(getConnectModeSourceId(['source'])).toBe('source');
+    expect(getConnectModeSourceId(['source', 'target'])).toBeNull();
+    expect(canvasSource).toMatch(/const toggleConnectMode = useCallback\(\(\) => \{[^]*?getConnectModeSourceId\(selectionRef\.current\)/u);
+    expect(canvasSource).toMatch(/key === 'c'[^]*?toggleConnectMode\(\);/u);
+    expect(canvasSource).toMatch(/label="Connect nodes"[^]*?toggleConnectMode\(\);/u);
   });
 });
 

@@ -469,7 +469,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     const selectedBeforeRemote = (await nodeById(pageB, selectedNodeId).getAttribute('class'))?.includes('selected') === true;
     assert(selectedBeforeRemote, 'Selecting the local-view node did not produce a React Flow selected node.');
     await pageB.getByRole('button', { name: 'Connect nodes' }).click();
-    await pageB.getByText('click source node [esc cancel]', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+    await pageB.getByText('click target node [esc cancel]', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
     await pageB.getByRole('button', { name: 'Zoom in' }).click();
     const localTabBeforeRemote = await getActiveTabId(pageB);
     const localTransformBeforeRemote = await transformedLayer(pageB).getAttribute('style');
@@ -500,7 +500,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     const activeTabPreserved = await getActiveTabId(pageB) === localTabBeforeRemote;
     const sourceFlyoutsPreserved = await pageA.getByTestId('source-flyout-toggle').getAttribute('aria-expanded') === sourceOpenBeforeRemote
       && await pageB.getByTestId('source-flyout-toggle').getAttribute('aria-expanded') === sourceClosedBeforeRemote;
-    const localConnectModePreserved = await pageB.getByText('click source node [esc cancel]', { exact: true }).count() === 1;
+    const localConnectModePreserved = await pageB.getByText('click target node [esc cancel]', { exact: true }).count() === 1;
     const localSelectionPreserved = (await nodeById(pageB, selectedNodeId).getAttribute('class'))?.includes('selected') === true;
     const localCameraPreserved = await transformedLayer(pageB).getAttribute('style') === localTransformBeforeRemote;
     assert(activeTabPreserved && sourceFlyoutsPreserved && localConnectModePreserved && localSelectionPreserved && localCameraPreserved,

@@ -364,11 +364,21 @@ export class MutationQueue {
   }
 
   async addEdge(source: string, target: string, options: AddEdgeOptions = {}): Promise<MutationResult> {
-    return this.enqueueFlowchartMutation((chart) => {
-      chart.addLink(source, target, {
-        text: options.label,
-        type: options.type ?? DEFAULT_LINK_TYPE,
-      });
+    return this.enqueueResult((currentText) => {
+      const snapshot = parseSourceSafeEdgeSnapshot(currentText);
+      if (!snapshot.nodeIds.includes(source) || !snapshot.nodeIds.includes(target)) {
+        throw new Error('Cannot connect nodes because the selected node changed.');
+      }
+
+      // Mermaid AST currently drops quotes required by existing labels when it
+      // renders a whole chart. Render only the new edge, then append that
+      // declaration so all existing source remains canonical and untouched.
+      const nextText = appendFlowchartEdgeDeclaration(currentText, renderFlowchartEdgeDeclaration(source, target, options));
+      return {
+        nextText,
+        previousText: currentText,
+        snapshot: parseSourceSafeEdgeSnapshot(nextText),
+      };
     });
   }
 
@@ -594,6 +604,52 @@ function getMutableFlowchart(
   }
 
   return Flowchart.parse(currentText);
+}
+
+function renderFlowchartEdgeDeclaration(source: string, target: string, options: AddEdgeOptions): string {
+  const edgeChart = Flowchart.create(DEFAULT_DIRECTION);
+  edgeChart.addLink(source, target, {
+    type: options.type ?? DEFAULT_LINK_TYPE,
+  });
+  const declaration = edgeChart.render().split(/\r\n|\n|\r/u).slice(1).join('\n').trim();
+  if (!declaration || declaration.includes('\n') || declaration.includes('\r')) {
+    throw new Error('Cannot serialize a flowchart edge declaration.');
+  }
+
+  if (options.label === undefined) {
+    return declaration;
+  }
+
+  const prefix = `${source} `;
+  const suffix = ` ${target}`;
+  if (!declaration.startsWith(prefix) || !declaration.endsWith(suffix)) {
+    throw new Error('Cannot serialize a flowchart edge declaration.');
+  }
+  const connector = declaration.slice(prefix.length, -suffix.length);
+  return `${prefix}${connector}|${serializeFlowchartEdgeLabel(options.label)}|${suffix}`;
+}
+
+function serializeFlowchartEdgeLabel(label: string): string {
+  if (/\r|\n/u.test(label)) {
+    throw new Error('Cannot serialize a multiline flowchart edge label.');
+  }
+  return `"${label.replace(/&/gu, '&amp;').replace(/"/gu, '&quot;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;')}"`;
+}
+
+function appendFlowchartEdgeDeclaration(source: string, declaration: string): string {
+  const lineEnding = source.match(/\r\n|\n|\r/u)?.[0] ?? '\n';
+  const endsWithLineBreak = /(?:\r\n|\n|\r)$/u.test(source);
+  return `${source}${endsWithLineBreak ? '' : lineEnding}  ${declaration}${lineEnding}`;
+}
+
+function parseSourceSafeEdgeSnapshot(source: string): FlowchartSnapshot {
+  // AST parsing is only a read for node validation and the resulting canvas
+  // snapshot. Keep all Mermaid comments/directives and original newlines in
+  // Y.Text; they are not safe to round-trip through mermaid-ast.
+  const astSource = source
+    .replace(/^[ \t]*%%.*(?:\r\n|\n|\r|$)/gmu, '')
+    .replace(/\r\n|\r/gu, '\n');
+  return parseFlowchartSnapshot(astSource);
 }
 
 export function createNodeId(label: string): string {

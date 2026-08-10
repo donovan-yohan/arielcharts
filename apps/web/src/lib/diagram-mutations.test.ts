@@ -1,3 +1,6 @@
+// @vitest-environment happy-dom
+
+import mermaid from 'mermaid';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import {
@@ -36,6 +39,59 @@ function setText(yText: Y.Text, text: string) {
 }
 
 describe('collaborative edge mutations', () => {
+  it.each([
+    ['a|b', 'A -->|"a|b"| B'],
+    ['say "hello"', 'A -->|"say &quot;hello&quot;"| B'],
+  ])('writes a Mermaid-valid edge for a delimiter-sensitive label %j', async (label, declaration) => {
+    mermaid.initialize({ startOnLoad: false });
+    const doc = new Y.Doc();
+    const yText = doc.getText('mermaid');
+    const source = 'flowchart TD\n  A[Source]\n  B[Target]\n';
+    setText(yText, source);
+
+    const result = await new MutationQueue(yText).addEdge('A', 'B', { label });
+
+    expect(result.nextText).toBe(`${source}  ${declaration}\n`);
+    await expect(mermaid.parse(result.nextText)).resolves.toMatchObject({ diagramType: 'flowchart-v2' });
+    expect(result.snapshot.links).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'A', target: 'B' }),
+    ]));
+  });
+
+  it('does not mutate source when a label cannot be represented safely', async () => {
+    const doc = new Y.Doc();
+    const yText = doc.getText('mermaid');
+    const source = 'flowchart TD\n  A[Source]\n  B[Target]\n';
+    setText(yText, source);
+
+    await expect(new MutationQueue(yText).addEdge('A', 'B', { label: 'first\nsecond' })).rejects.toThrow('multiline flowchart edge label');
+    expect(yText.toString()).toBe(source);
+  });
+
+  it('appends an edge without rewriting quoted labels, comments, directives, or line endings', async () => {
+    const doc = new Y.Doc();
+    const yText = doc.getText('mermaid');
+    const source = 'flowchart TD\r\n  %% keep this comment\r\n  A["Session A (Worker 1)"]:::worker\r\n  B["Target (Reviewer)"]\r\n  classDef worker fill:#f00,stroke:#900\r\n  class A worker\r\n';
+    setText(yText, source);
+
+    const result = await new MutationQueue(yText).addEdge('A', 'B');
+
+    expect(result.nextText).toBe(`${source}  A --> B\r\n`);
+    expect(yText.toString()).toBe(result.nextText);
+    expect(result.snapshot.links).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'A', target: 'B' }),
+    ]));
+  });
+
+  it('rejects a queued edge when either selected node no longer exists', async () => {
+    const doc = new Y.Doc();
+    const yText = doc.getText('mermaid');
+    setText(yText, 'flowchart LR\n  A[Source]\n');
+
+    await expect(new MutationQueue(yText).addEdge('A', 'B')).rejects.toThrow('selected node changed');
+    expect(yText.toString()).toBe('flowchart LR\n  A[Source]\n');
+  });
+
   it('resolves a selected edge after concurrent inserts before the original index', async () => {
     const doc = new Y.Doc();
     const yText = doc.getText('mermaid');

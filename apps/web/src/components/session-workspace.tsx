@@ -1663,7 +1663,10 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       : isSequence && sequenceParticipants.length === 0 ? 'sequence' as const : null;
   const diagramModeLabel = !renderedMermaidText.trim()
     ? 'Choose diagram type'
-    : getDiagramCapabilityLabel(renderedPreview?.source === renderedMermaidText ? renderedPreview.capability : null);
+    : getDiagramCapabilityLabel(
+      renderedPreview?.source === renderedMermaidText ? renderedPreview.capability : null,
+      renderedMermaidText,
+    );
   const shareButtonLabel = !roomKey
     ? 'reset key to share'
     : shareCopyState === 'copied' ? 'copied' : shareCopyState === 'error' ? 'copy failed' : 'share';

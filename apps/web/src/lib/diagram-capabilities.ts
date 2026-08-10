@@ -192,10 +192,16 @@ export function getDiagramSourceModelAdapter(capability: DiagramCapability | nul
   }
 }
 
-export function getDiagramCapabilityLabel(capability: DiagramCapability | null): string {
+export function getDiagramCapabilityLabel(capability: DiagramCapability | null, source?: string): string {
   if (!capability) return 'Mermaid · source only';
   const label = capability.label ?? (capability.kind === 'flowchart' ? 'Flowchart' : capability.kind === 'sequence' ? 'Sequence' : 'Mermaid');
-  switch (capability.editingMode ?? (capability.kind === 'flowchart' ? 'canvas' : capability.kind === 'sequence' ? 'semantic-form' : 'source-only')) {
+  const editingMode = capability.editingMode ?? (capability.kind === 'flowchart' ? 'canvas' : capability.kind === 'sequence' ? 'semantic-form' : 'source-only');
+  if ((editingMode === 'canvas' || editingMode === 'semantic-form')
+    && source !== undefined
+    && !getDiagramSourceModelAdapter(capability).getRepresentability(source).representable) {
+    return `${label} · source only`;
+  }
+  switch (editingMode) {
     case 'canvas': return `${label} · editable · canvas`;
     case 'semantic-form': return `${label} · editable · form`;
     case 'unavailable-plugin': return `${label} · plugin unavailable`;

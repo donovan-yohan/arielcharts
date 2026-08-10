@@ -31,8 +31,10 @@ export async function assertHitTarget(page: Page, target: Locator, label: string
   assert(await target.isEnabled(), `${label} is disabled.`);
   const box = await target.boundingBox();
   assert(box && box.width > 0 && box.height > 0, `${label} has no clickable bounds.`);
-  const point = { x: box.x + (box.width / 2), y: box.y + (box.height / 2) };
-  const hit = await target.evaluate((targetElement, { x, y }) => {
+  const hit = await target.evaluate((targetElement) => {
+    const rect = targetElement.getBoundingClientRect();
+    const x = rect.x + (rect.width / 2);
+    const y = rect.y + (rect.height / 2);
     const hitElement = document.elementFromPoint(x, y);
     return {
       className: hitElement instanceof HTMLElement || hitElement instanceof SVGElement ? hitElement.getAttribute('class') : null,
@@ -40,7 +42,7 @@ export async function assertHitTarget(page: Page, target: Locator, label: string
       tagName: hitElement?.tagName ?? null,
       testId: hitElement instanceof Element ? hitElement.getAttribute('data-testid') : null,
     };
-  }, point);
+  });
   assert(hit.matches, `${label} is obscured at its center point by ${JSON.stringify(hit)}.`);
 }
 

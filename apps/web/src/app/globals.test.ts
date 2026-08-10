@@ -42,3 +42,9 @@ describe('revision history selection CSS contracts', () => {
     expect(css.slice(currentLastItem, currentLastItem + 140)).toMatch(/border-bottom-color:\s*var\(--selection\);/u);
   });
 });
+
+describe('editable section presentation', () => {
+  it('hides stale Mermaid cluster geometry behind the derived interactive section layer', () => {
+    expect(css).toMatch(/\.diagram-canvas-svg--reactflow svg g\.cluster,[^}]*\{\s*opacity:\s*0;/u);
+  });
+});

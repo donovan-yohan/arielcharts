@@ -46,6 +46,7 @@ import { getCanvasDotGridGeometry } from '../lib/canvas-dot-grid';
 import { beginCanvasMousePan, CanvasMousePanController } from '../lib/canvas-mouse-pan';
 import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
+import { canRenameFlowchartSubgraphDeclaration, getFlowchartCanvasBounds, getInteractiveSubgraphBounds, getNestedSubgraphNodeIds, getSubgraphLabel } from '../lib/diagram-subgraphs';
 import {
   applyControlledNodeChanges,
   createControlledNodeComposer,
@@ -80,6 +81,7 @@ export interface DiagramCanvasProps {
   graph: FlowchartSnapshot | null;
   interactionMode?: 'select' | 'connect';
   isFlowchart?: boolean;
+  mermaidSource?: string;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
@@ -95,6 +97,7 @@ export interface DiagramCanvasProps {
   onDeleteNodes?: (nodeIds: string[]) => void;
   onEditEdgeLabel?: (edge: DiagramEdgeIdentity, label?: string) => void;
   onEditNodeLabel?: (nodeId: string, newLabel: string) => void;
+  onEditSubgraphLabel?: (subgraphId: string, newLabel: string) => void;
   onGroupNodes?: (nodeIds: string[], label: string) => void;
   onInteractionModeChange?: (mode: 'select' | 'connect') => void;
   onNodeDrag?: (positions: DiagramNodePositions) => void;
@@ -123,6 +126,14 @@ interface PendingEdge {
   midpoint: SvgPoint;
   source: string;
   target: string;
+}
+
+interface SubgraphDragState {
+  begun: boolean;
+  initialPositions: DiagramNodePositions;
+  latestPositions: DiagramNodePositions;
+  origin: SvgPoint;
+  pointerId: number;
 }
 
 interface MermaidFlowNodeData extends Record<string, unknown> {
@@ -250,10 +261,22 @@ export function shouldHandleCanvasShortcut(
 }
 
 export function shouldHandleCanvasSingleKeyShortcut(
-  targetIsCanvas: boolean,
-  activeElementIsCanvas: boolean,
+  targetIsInCanvas: boolean,
+  activeElementIsInCanvas: boolean,
+  targetIsExcluded: boolean,
+  activeElementIsExcluded: boolean,
 ): boolean {
-  return targetIsCanvas && activeElementIsCanvas;
+  return targetIsInCanvas
+    && activeElementIsInCanvas
+    && !targetIsExcluded
+    && !activeElementIsExcluded;
+}
+
+export function shouldHandleGlobalCanvasRenameShortcut(
+  defaultPrevented: boolean,
+  targetHasLocalRenameHandler: boolean,
+): boolean {
+  return !defaultPrevented && !targetHasLocalRenameHandler;
 }
 
 export function getCanvasHistoryShortcut(
@@ -312,7 +335,7 @@ function canStartTouchCanvasGesture(target: EventTarget | null, root: HTMLDivEle
     return false;
   }
 
-  if (target.closest('a, button, input, select, textarea, [contenteditable="true"], [role="button"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle')) {
+  if (target.closest('a, button, input, select, textarea, [contenteditable="true"], [role="button"], [data-subgraph-drag-target="true"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle')) {
     return false;
   }
 
@@ -324,6 +347,10 @@ function canStartMouseCanvasPan(target: EventTarget | null, root: HTMLDivElement
     return false;
   }
 
+  if (target.closest('[data-subgraph-drag-target="true"]')) {
+    return true;
+  }
+
   return !target.closest('a, button, input, select, textarea, [contenteditable="true"], [role="button"], [data-testid*="toolbar"]');
 }
 
@@ -333,6 +360,7 @@ export function DiagramCanvas({
   graph,
   interactionMode,
   isFlowchart = true,
+  mermaidSource = '',
   nodePositions,
   preserveCamera = false,
   onAddEdge,
@@ -344,6 +372,7 @@ export function DiagramCanvas({
   onDeleteNodes,
   onEditEdgeLabel,
   onEditNodeLabel,
+  onEditSubgraphLabel,
   onGroupNodes,
   onInteractionModeChange,
   onNodeDrag,
@@ -381,6 +410,8 @@ export function DiagramCanvas({
   const [liveNodePositions, setLiveNodePositions] = useState<DiagramNodePositions>({});
   const [flowNodeRuntime, setFlowNodeRuntime] = useState<ControlledNodeRuntime>({});
   const activeDragNodeIdsRef = useRef(new Set<string>());
+  const subgraphDragRef = useRef<SubgraphDragState | null>(null);
+  const cancelSubgraphEditRef = useRef(false);
   const controlledNodeComposer = useMemo(() => createControlledNodeComposer<MermaidFlowNode>(), []);
   const persistedNodePositions = nodePositions ?? uncontrolledNodePositions;
   const persistedNodePositionsRef = useRef<DiagramNodePositions>(persistedNodePositions);
@@ -411,6 +442,9 @@ export function DiagramCanvas({
   const [selectedEdgeIdentity, setSelectedEdgeIdentity] = useState<DiagramEdgeIdentity | null>(null);
   const [editingEdgeIdentity, setEditingEdgeIdentity] = useState<DiagramEdgeIdentity | null>(null);
   const [editingEdgeLabel, setEditingEdgeLabel] = useState('');
+  const [selectedSubgraphId, setSelectedSubgraphId] = useState<string | null>(null);
+  const [editingSubgraphId, setEditingSubgraphId] = useState<string | null>(null);
+  const [editingSubgraphLabel, setEditingSubgraphLabel] = useState('');
   const [shapePickerOpen, setShapePickerOpen] = useState(false);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
   const [connectionPreviewSourceId, setConnectionPreviewSourceId] = useState<string | null>(null);
@@ -504,6 +538,26 @@ export function DiagramCanvas({
   }, [graph?.links]);
 
   const nodeById = useMemo(() => new Map(graph?.nodes.map((node) => [node.id, node]) ?? []), [graph?.nodes]);
+  const subgraphById = useMemo(() => new Map(graph?.subgraphs.map((subgraph) => [subgraph.id, subgraph]) ?? []), [graph?.subgraphs]);
+  const subgraphMemberNodeIds = useMemo(() => new Map(
+    (graph?.subgraphs ?? []).map((subgraph) => [
+      subgraph.id,
+      getNestedSubgraphNodeIds(subgraph.id, graph?.subgraphs ?? [], graph?.nodeIds ?? []),
+    ]),
+  ), [graph?.nodeIds, graph?.subgraphs]);
+  const interactiveSubgraphBounds = useMemo(() => {
+    const next = new Map<string, SvgBounds>();
+    if (!hitMap || !interactiveNodeBounds) return next;
+    for (const [subgraphId, bounds] of hitMap.subgraphs) {
+      next.set(subgraphId, getInteractiveSubgraphBounds(
+        bounds,
+        hitMap.nodes,
+        interactiveNodeBounds,
+        subgraphMemberNodeIds.get(subgraphId) ?? [],
+      ));
+    }
+    return next;
+  }, [hitMap, interactiveNodeBounds, subgraphMemberNodeIds]);
   const graphMembershipKey = getGraphMembershipKey(
     graph?.nodes.map((node) => node.id) ?? [],
     graph?.subgraphs.map((subgraph) => subgraph.id) ?? [],
@@ -534,6 +588,9 @@ export function DiagramCanvas({
 
     return getBoundsUnion(boundsList);
   }, [hitMap, interactiveNodeBounds, selection]);
+  const useReactFlowRenderer = isFlowchart && Boolean(
+    graph?.nodes.some((node) => interactiveNodeBounds?.has(node.id)),
+  );
 
   const graphBounds = useMemo(() => {
     if (!hitMap) {
@@ -544,13 +601,14 @@ export function DiagramCanvas({
       return hitMap.viewBox;
     }
 
-    const nodeBounds = interactiveNodeBounds ? [...interactiveNodeBounds.values()] : [...hitMap.nodes.values()];
-    const allBounds = nodeBounds.length > 0
-      ? [...nodeBounds, ...hitMap.subgraphs.values()]
-      : [...hitMap.subgraphs.values(), ...[...hitMap.edges.values()].map((edge) => edge.bounds)];
-
-    return getBoundsUnion(allBounds) ?? hitMap.viewBox;
-  }, [hitMap, interactiveNodeBounds, isFlowchart]);
+    return getFlowchartCanvasBounds(
+      interactiveNodeBounds ?? hitMap.nodes,
+      hitMap.subgraphs,
+      interactiveSubgraphBounds,
+      [...hitMap.edges.values()].map((edge) => edge.bounds),
+      useReactFlowRenderer,
+    ) ?? hitMap.viewBox;
+  }, [hitMap, interactiveNodeBounds, interactiveSubgraphBounds, isFlowchart, useReactFlowRenderer]);
 
   const remoteSelectionsByNodeId = useMemo(() => {
     const selections = new Map<string, CanvasPresenceEntry[]>();
@@ -634,7 +692,6 @@ export function DiagramCanvas({
     ...mermaidPresentation.edges.flatMap((presentation) => presentation.stroke ? [presentation.stroke] : []),
   ])], [mermaidPresentation.edges]);
 
-  const useReactFlowRenderer = isFlowchart && flowNodes.length > 0;
   const controlledFlowNodes = useMemo(
     () => controlledNodeComposer.compose(flowNodes, flowNodeRuntime),
     [controlledNodeComposer, flowNodeRuntime, flowNodes],
@@ -652,6 +709,16 @@ export function DiagramCanvas({
 
     return toScreenRect(selectedBounds, viewport);
   }, [selectedBounds, viewport]);
+
+  const selectedSubgraphBounds = selectedSubgraphId
+    ? interactiveSubgraphBounds.get(selectedSubgraphId) ?? null
+    : null;
+  const screenSelectedSubgraphBounds = useMemo(() => (
+    selectedSubgraphBounds ? toScreenRect(selectedSubgraphBounds, viewport) : null
+  ), [selectedSubgraphBounds, viewport]);
+  const selectedSubgraphCanRename = Boolean(
+    selectedSubgraphId && canRenameFlowchartSubgraphDeclaration(mermaidSource, selectedSubgraphId),
+  );
 
   const editingNode = useMemo(() => {
     if (!graph || !editingNodeId) {
@@ -764,6 +831,18 @@ export function DiagramCanvas({
     position: 'absolute',
     top: selectedToolbarPosition.top,
     zIndex: 30,
+  };
+  const selectedSubgraphToolbarPosition = getSafeToolbarPosition({
+    anchor: screenSelectedSubgraphBounds
+      ? { x: screenSelectedSubgraphBounds.x + (screenSelectedSubgraphBounds.width / 2), y: screenSelectedSubgraphBounds.y }
+      : { x: 16, y: 16 },
+    canvas: canvasViewport,
+    toolbar: { height: 34, width: 44 },
+  });
+  const subgraphToolbarStyle: CSSProperties = {
+    ...toolbarStyle,
+    left: selectedSubgraphToolbarPosition.left,
+    top: selectedSubgraphToolbarPosition.top,
   };
 
   const setSelection = useCallback((nodeIds: string[]) => {
@@ -1124,6 +1203,16 @@ export function DiagramCanvas({
   }, [focusedNodeId, selection]);
 
   useEffect(() => {
+    if (selectedSubgraphId && !subgraphById.has(selectedSubgraphId)) {
+      setSelectedSubgraphId(null);
+    }
+    if (editingSubgraphId && !subgraphById.has(editingSubgraphId)) {
+      setEditingSubgraphId(null);
+      setEditingSubgraphLabel('');
+    }
+  }, [editingSubgraphId, selectedSubgraphId, subgraphById]);
+
+  useEffect(() => {
     if (selectedEdgeIdentity && selectedEdgeIndex === null) {
       setSelectedEdgeIdentity(null);
     }
@@ -1185,6 +1274,9 @@ export function DiagramCanvas({
     connectionStartNodeIdRef.current = null;
     setConnectionPreviewSourceId(null);
     setShowGroupPrompt(false);
+    setSelectedSubgraphId(null);
+    setEditingSubgraphId(null);
+    setEditingSubgraphLabel('');
   }, [isFlowchart, mode, setMode]);
 
   useEffect(() => {
@@ -1226,6 +1318,9 @@ export function DiagramCanvas({
         setSelectedEdgeIdentity(null);
         setEditingEdgeIdentity(null);
         setEditingEdgeLabel('');
+        setSelectedSubgraphId(null);
+        setEditingSubgraphId(null);
+        setEditingSubgraphLabel('');
         setMode('select');
         canvas?.focus();
       }
@@ -1236,9 +1331,11 @@ export function DiagramCanvas({
 
       const isModifierShortcut = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
-      const canvasContainerOwnsFocus = shouldHandleCanvasSingleKeyShortcut(
-        event.target === canvas,
-        document.activeElement === canvas,
+      const canvasOwnsSingleKeyFocus = shouldHandleCanvasSingleKeyShortcut(
+        event.target instanceof Node && Boolean(canvas?.contains(event.target)),
+        document.activeElement instanceof Node && Boolean(canvas?.contains(document.activeElement)),
+        isCanvasSingleKeyShortcutExcluded(event.target),
+        isCanvasSingleKeyShortcutExcluded(document.activeElement),
       );
       const historyShortcut = getCanvasHistoryShortcut(event.key, isModifierShortcut, event.shiftKey);
       if (historyShortcut && !readOnly) {
@@ -1284,13 +1381,13 @@ export function DiagramCanvas({
         setShowGroupPrompt(true);
       }
 
-      if (!isModifierShortcut && canvasContainerOwnsFocus && canEditStructure && key === 'n') {
+      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && canEditStructure && key === 'n') {
         event.preventDefault();
         onAddNode?.(DEFAULT_NEW_NODE_LABEL, DEFAULT_NEW_NODE_SHAPE);
         return;
       }
 
-      if (!isModifierShortcut && canvasContainerOwnsFocus && canEditStructure && key === 'c') {
+      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && canEditStructure && key === 'c') {
         event.preventDefault();
         setPendingEdge(null);
         setPendingEdgeLabel('');
@@ -1299,31 +1396,40 @@ export function DiagramCanvas({
         return;
       }
 
-      if (!isModifierShortcut && canvasContainerOwnsFocus && canEditStructure && hasPersistedLayout && key === 's') {
+      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && canEditStructure && hasPersistedLayout && key === 's') {
         event.preventDefault();
         simplifyLayout();
         return;
       }
 
-      if (!isModifierShortcut && canvasContainerOwnsFocus && key === 'f') {
+      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && key === 'f') {
         event.preventDefault();
         fitToDiagram(true);
         return;
       }
 
-      if (!isModifierShortcut && canvasContainerOwnsFocus && (event.key === '+' || event.key === '=')) {
+      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && (event.key === '+' || event.key === '=')) {
         event.preventDefault();
         zoomCanvas(1.1);
         return;
       }
 
-      if (!isModifierShortcut && canvasContainerOwnsFocus && event.key === '-') {
+      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && event.key === '-') {
         event.preventDefault();
         zoomCanvas(0.9);
         return;
       }
 
-      if (!isModifierShortcut && canvasContainerOwnsFocus && event.key === 'F2' && canEditStructure && selection.length === 1) {
+      const targetHasLocalRenameHandler = event.target instanceof Element
+        && event.target.closest('.react-flow__node, [data-subgraph-drag-target="true"]') !== null;
+      if (
+        !isModifierShortcut
+        && canvasOwnsSingleKeyFocus
+        && event.key === 'F2'
+        && canEditStructure
+        && selection.length === 1
+        && shouldHandleGlobalCanvasRenameShortcut(event.defaultPrevented, targetHasLocalRenameHandler)
+      ) {
         const selectedNode = nodeById.get(selection[0] ?? '');
         if (selectedNode) {
           event.preventDefault();
@@ -1603,6 +1709,8 @@ export function DiagramCanvas({
     setToolbarOpen(false);
     setShapePickerOpen(false);
     setEditingNodeId(null);
+    setSelectedSubgraphId(null);
+    setEditingSubgraphId(null);
   }, [isPanning, setSelection]);
 
   const handleNodeActivation = useCallback((nodeId: string) => {
@@ -1614,6 +1722,8 @@ export function DiagramCanvas({
     setEditingEdgeIdentity(null);
     setFocusedNodeId(nodeId);
     setToolbarOpen(true);
+    setSelectedSubgraphId(null);
+    setEditingSubgraphId(null);
 
     if (mode === 'connect') {
       const activation = getConnectNodeActivation(nodeId, connectSourceId, interactiveNodeBounds);
@@ -1646,6 +1756,102 @@ export function DiagramCanvas({
     onEditNodeLabel?.(editingNodeId, editingLabel.trim() || editingNodeId);
     setEditingNodeId(null);
   }, [canEditStructure, editingLabel, editingNodeId, onEditNodeLabel]);
+
+  const selectSubgraph = useCallback((subgraphId: string) => {
+    if (!canEditStructure || !subgraphById.has(subgraphId)) return;
+    setSelection([]);
+    setSelectedEdgeIdentity(null);
+    setEditingEdgeIdentity(null);
+    setEditingNodeId(null);
+    setShapePickerOpen(false);
+    setToolbarOpen(false);
+    setSelectedSubgraphId(subgraphId);
+  }, [canEditStructure, setSelection, subgraphById]);
+
+  const openSubgraphEditor = useCallback((subgraphId: string) => {
+    const subgraph = subgraphById.get(subgraphId);
+    if (!canEditStructure || !subgraph || !canRenameFlowchartSubgraphDeclaration(mermaidSource, subgraphId)) return;
+    cancelSubgraphEditRef.current = false;
+    setSelectedSubgraphId(subgraphId);
+    setEditingSubgraphId(subgraphId);
+    setEditingSubgraphLabel(getSubgraphLabel(subgraph));
+  }, [canEditStructure, mermaidSource, subgraphById]);
+
+  const commitSubgraphEdit = useCallback(() => {
+    if (cancelSubgraphEditRef.current) {
+      cancelSubgraphEditRef.current = false;
+      return;
+    }
+    if (!canEditStructure || !editingSubgraphId) return;
+    const current = subgraphById.get(editingSubgraphId);
+    onEditSubgraphLabel?.(
+      editingSubgraphId,
+      editingSubgraphLabel.trim() || (current ? getSubgraphLabel(current) : editingSubgraphId),
+    );
+    setEditingSubgraphId(null);
+    setEditingSubgraphLabel('');
+  }, [canEditStructure, editingSubgraphId, editingSubgraphLabel, onEditSubgraphLabel, subgraphById]);
+
+  const handleSubgraphPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>, subgraphId: string) => {
+    if (!canEditStructure || spacePressed || event.button !== 0 || !interactiveNodeBounds) return;
+    const initialPositions: DiagramNodePositions = {};
+    for (const nodeId of subgraphMemberNodeIds.get(subgraphId) ?? []) {
+      const bounds = interactiveNodeBounds.get(nodeId);
+      if (bounds) initialPositions[nodeId] = { x: bounds.x, y: bounds.y };
+    }
+    if (Object.keys(initialPositions).length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    selectSubgraph(subgraphId);
+    subgraphDragRef.current = {
+      begun: false,
+      initialPositions,
+      latestPositions: initialPositions,
+      origin: { x: event.clientX, y: event.clientY },
+      pointerId: event.pointerId,
+    };
+  }, [canEditStructure, interactiveNodeBounds, selectSubgraph, spacePressed, subgraphMemberNodeIds]);
+
+  const handleSubgraphPointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const drag = subgraphDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = (event.clientX - drag.origin.x) / viewport.zoom;
+    const dy = (event.clientY - drag.origin.y) / viewport.zoom;
+    if (!drag.begun) {
+      if ((dx * dx) + (dy * dy) < 9) return;
+      if (onNodeDragStart?.(drag.initialPositions) === false) {
+        subgraphDragRef.current = null;
+        return;
+      }
+      drag.begun = true;
+      Object.keys(drag.initialPositions).forEach((nodeId) => activeDragNodeIdsRef.current.add(nodeId));
+    }
+    event.preventDefault();
+    const positions = Object.fromEntries(Object.entries(drag.initialPositions).map(([nodeId, position]) => [
+      nodeId,
+      { x: position.x + dx, y: position.y + dy },
+    ]));
+    drag.latestPositions = positions;
+    setLiveNodePositions((current) => ({ ...current, ...positions }));
+    onNodeDrag?.(positions);
+  }, [onNodeDrag, onNodeDragStart, viewport.zoom]);
+
+  const handleSubgraphPointerEnd = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const drag = subgraphDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    subgraphDragRef.current = null;
+    if (!drag.begun) return;
+    const nodeIds = Object.keys(drag.latestPositions);
+    nodeIds.forEach((nodeId) => activeDragNodeIdsRef.current.delete(nodeId));
+    if (onNodeDragStop) onNodeDragStop(drag.latestPositions);
+    else setNodePositions((current) => ({ ...current, ...drag.latestPositions }), 'merge', drag.latestPositions);
+    setLiveNodePositions((current) => {
+      const next = { ...current };
+      nodeIds.forEach((nodeId) => delete next[nodeId]);
+      return next;
+    });
+  }, [onNodeDragStop, setNodePositions]);
 
   const commitEdgeEdit = useCallback(() => {
     if (!canEditStructure || !editingEdgeIdentity) {
@@ -1698,6 +1904,10 @@ export function DiagramCanvas({
       return;
     }
 
+    if (nextSelection.length > 0) {
+      setSelectedSubgraphId(null);
+      setEditingSubgraphId(null);
+    }
     setSelection(nextSelection);
   }, [canEditStructure, setSelection]);
 
@@ -1863,6 +2073,7 @@ export function DiagramCanvas({
     }
     if (event.key === 'F2') {
       event.preventDefault();
+      event.stopPropagation();
       const node = nodeById.get(nodeId);
       if (node && !readOnly) {
         openNodeEditor(node);
@@ -2085,12 +2296,16 @@ export function DiagramCanvas({
                 setToolbarOpen(false);
                 setShapePickerOpen(false);
                 setEditingNodeId(null);
+                setSelectedSubgraphId(null);
+                setEditingSubgraphId(null);
                 setSelectedEdgeIdentity(edgeIdentity);
               }}
               onEdgeDoubleClick={(event, edge) => {
                 event.stopPropagation();
                 const edgeIdentity = graph ? getDiagramEdgeIdentityForFlowEdge(graph.links, edge.id) : null;
                 if (edgeIdentity) {
+                  setSelectedSubgraphId(null);
+                  setEditingSubgraphId(null);
                   setSelectedEdgeIdentity(edgeIdentity);
                   openEdgeEditor(edgeIdentity);
                 }
@@ -2128,6 +2343,115 @@ export function DiagramCanvas({
               zoomOnScroll={false}
             />
           </FlowNodeInteractionContext.Provider>
+        </div>
+      ) : null}
+
+      {useReactFlowRenderer ? (
+        <div style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 6 }}>
+          {(graph?.subgraphs ?? []).map((subgraph) => {
+            const bounds = interactiveSubgraphBounds.get(subgraph.id);
+            if (!bounds) return null;
+            const screenBounds = toScreenRect(bounds, viewport);
+            const selected = selectedSubgraphId === subgraph.id;
+            const label = getSubgraphLabel(subgraph);
+            const edgeStyle: CSSProperties = {
+              cursor: 'grab',
+              pointerEvents: 'auto',
+              position: 'absolute',
+            };
+            return (
+              <div
+                aria-label={`Section ${label}`}
+                data-selected={selected ? 'true' : 'false'}
+                data-testid={`canvas-subgraph-${subgraph.id}`}
+                key={subgraph.id}
+                style={{
+                  border: selected ? '2px solid var(--selection)' : '1px solid var(--control-border)',
+                  height: screenBounds.height,
+                  left: screenBounds.x,
+                  pointerEvents: 'none',
+                  position: 'absolute',
+                  top: screenBounds.y,
+                  width: screenBounds.width,
+                }}
+              >
+                <button
+                  aria-label={`Select section ${label}`}
+                  data-subgraph-drag-target="true"
+                  data-testid={`canvas-subgraph-header-${subgraph.id}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    selectSubgraph(subgraph.id);
+                  }}
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                    openSubgraphEditor(subgraph.id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'F2') return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openSubgraphEditor(subgraph.id);
+                  }}
+                  onLostPointerCapture={handleSubgraphPointerEnd}
+                  onPointerCancel={handleSubgraphPointerEnd}
+                  onPointerDown={(event) => { handleSubgraphPointerDown(event, subgraph.id); }}
+                  onPointerMove={handleSubgraphPointerMove}
+                  onPointerUp={handleSubgraphPointerEnd}
+                  style={{
+                    background: 'var(--control-surface)',
+                    border: selected ? '1px solid var(--selection)' : '1px solid var(--control-border)',
+                    borderRadius: 5,
+                    color: 'var(--ink)',
+                    cursor: canEditStructure ? 'grab' : 'default',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    left: '50%',
+                    maxWidth: 'calc(100% - 20px)',
+                    overflow: 'hidden',
+                    padding: '2px 6px',
+                    pointerEvents: canEditStructure ? 'auto' : 'none',
+                    position: 'absolute',
+                    textOverflow: 'ellipsis',
+                    top: 0,
+                    transform: 'translate(-50%, -50%)',
+                    whiteSpace: 'nowrap',
+                    zIndex: 2,
+                  }}
+                  tabIndex={canEditStructure ? 0 : -1}
+                  type="button"
+                >
+                  {label}
+                </button>
+                {([
+                  { left: -4, right: -4, top: -4, height: 8 },
+                  { bottom: -4, left: -4, right: -4, height: 8 },
+                  { bottom: 4, left: -4, top: 4, width: 8 },
+                  { bottom: 4, right: -4, top: 4, width: 8 },
+                ] as CSSProperties[]).map((position, index) => (
+                  <span
+                    aria-hidden="true"
+                    data-subgraph-drag-target="true"
+                    data-testid={`canvas-subgraph-boundary-${subgraph.id}-${index}`}
+                    key={index}
+                    onClick={(event) => { event.stopPropagation(); }}
+                    onLostPointerCapture={handleSubgraphPointerEnd}
+                    onPointerCancel={handleSubgraphPointerEnd}
+                    onPointerDown={(event) => { handleSubgraphPointerDown(event, subgraph.id); }}
+                    onPointerMove={handleSubgraphPointerMove}
+                    onPointerUp={handleSubgraphPointerEnd}
+                    style={{
+                      ...edgeStyle,
+                      ...position,
+                      cursor: canEditStructure ? 'grab' : 'default',
+                      pointerEvents: canEditStructure ? 'auto' : 'none',
+                    }}
+                  />
+                ))}
+              </div>
+            );
+          })}
         </div>
       ) : null}
 
@@ -2332,6 +2656,14 @@ export function DiagramCanvas({
           </div>
         ) : null)}
 
+        {isFlowchart && !readOnly && selectedSubgraphId && selectedSubgraphCanRename && screenSelectedSubgraphBounds ? (
+          <div aria-label="Selected section toolbar" data-testid="canvas-subgraph-toolbar" style={subgraphToolbarStyle}>
+            <ToolbarButton label="Edit section label" onClick={() => { openSubgraphEditor(selectedSubgraphId); }}>
+              <Pencil size={16} />
+            </ToolbarButton>
+          </div>
+        ) : null}
+
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
             {selection.length === 1 ? (
@@ -2500,6 +2832,47 @@ export function DiagramCanvas({
             <ToolbarButton label="Fit diagram" onClick={() => { fitToDiagram(true); }} shortcut="F">
               <ScanSearch size={16} />
             </ToolbarButton>
+          </div>
+        ) : null}
+
+        {editingSubgraphId && screenSelectedSubgraphBounds ? (
+          <div
+            style={{
+              left: screenSelectedSubgraphBounds.x + Math.max(8, screenSelectedSubgraphBounds.width / 2) - 90,
+              pointerEvents: 'auto',
+              position: 'absolute',
+              top: Math.max(8, screenSelectedSubgraphBounds.y - 18),
+              width: 180,
+            }}
+          >
+            <input
+              aria-label="Section label"
+              autoFocus
+              onBlur={commitSubgraphEdit}
+              onChange={(event) => { setEditingSubgraphLabel(event.target.value); }}
+              onFocus={(event) => { event.currentTarget.select(); }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitSubgraphEdit();
+                if (event.key === 'Escape') {
+                  cancelSubgraphEditRef.current = true;
+                  setEditingSubgraphId(null);
+                  setEditingSubgraphLabel('');
+                }
+              }}
+              style={{
+                background: 'var(--surface-canvas)',
+                border: '1px solid var(--control-border)',
+                borderBottomColor: 'var(--selection)',
+                borderRadius: 8,
+                color: 'var(--ink)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                outline: 'none',
+                padding: '8px 10px',
+                width: '100%',
+              }}
+              value={editingSubgraphLabel}
+            />
           </div>
         ) : null}
 
@@ -2952,6 +3325,12 @@ function isTypingElement(target: EventTarget | null): boolean {
     || target instanceof HTMLTextAreaElement
     || target instanceof HTMLSelectElement
     || target.isContentEditable;
+}
+
+function isCanvasSingleKeyShortcutExcluded(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest('.react-flow__node, [data-subgraph-drag-target="true"]')) return false;
+  return Boolean(target.closest('a, button, input, select, textarea, [contenteditable="true"], [role="button"], [data-testid*="toolbar"]'));
 }
 
 function ShapePreview({ shape }: { shape: DiagramNodeShape }) {

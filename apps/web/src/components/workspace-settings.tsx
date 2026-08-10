@@ -231,6 +231,8 @@ export function WorkspaceSettings({
         aria-haspopup="dialog"
         aria-label={`Open workspace settings, ${getResolvedAppearanceLabel(resolvedTheme)}`}
         className="workspace-settings-trigger workspace-touch-label"
+        data-resolved-theme={resolvedTheme}
+        data-theme-preference={preference}
         data-touch-label="Settings"
         data-testid="workspace-settings-trigger"
         onClick={() => { setIsOpen((open) => !open); }}

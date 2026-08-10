@@ -4,7 +4,7 @@ import type { DiagramLink } from '../lib/diagram-mutations';
 import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
-import { areMermaidPresentationsEqual, areSvgHitMapsEqual, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getRendererInteractionMode, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
+import { areMermaidPresentationsEqual, areSvgHitMapsEqual, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getRendererInteractionMode, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
 
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
 const workspaceSource = readFileSync(new URL('./session-workspace.tsx', import.meta.url), 'utf8');
@@ -118,10 +118,20 @@ describe('shouldHandleCanvasShortcut', () => {
 });
 
 describe('shouldHandleCanvasSingleKeyShortcut', () => {
-  it('keeps letter and camera shortcuts off toolbar controls and focused nodes', () => {
-    expect(shouldHandleCanvasSingleKeyShortcut(true, true)).toBe(true);
-    expect(shouldHandleCanvasSingleKeyShortcut(false, true)).toBe(false);
-    expect(shouldHandleCanvasSingleKeyShortcut(true, false)).toBe(false);
+  it('accepts canvas descendants while excluding typing and toolbar ownership', () => {
+    expect(shouldHandleCanvasSingleKeyShortcut(true, true, false, false)).toBe(true);
+    expect(shouldHandleCanvasSingleKeyShortcut(false, true, false, false)).toBe(false);
+    expect(shouldHandleCanvasSingleKeyShortcut(true, false, false, false)).toBe(false);
+    expect(shouldHandleCanvasSingleKeyShortcut(true, true, true, false)).toBe(false);
+    expect(shouldHandleCanvasSingleKeyShortcut(true, true, false, true)).toBe(false);
+  });
+});
+
+describe('shouldHandleGlobalCanvasRenameShortcut', () => {
+  it('leaves F2 with a focused node or section instead of renaming a different selected node', () => {
+    expect(shouldHandleGlobalCanvasRenameShortcut(false, true)).toBe(false);
+    expect(shouldHandleGlobalCanvasRenameShortcut(true, false)).toBe(false);
+    expect(shouldHandleGlobalCanvasRenameShortcut(false, false)).toBe(true);
   });
 });
 

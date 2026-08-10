@@ -2028,6 +2028,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             graph={renderedPreview?.flowchartSnapshot ?? null}
             interactionMode={interactionMode}
             isFlowchart={isFlowchart}
+            mermaidSource={renderedMermaidText}
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
@@ -2067,6 +2068,10 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onEditNodeLabel={(nodeId, label) => {
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.editNodeLabel(nodeId, label));
+            }}
+            onEditSubgraphLabel={(subgraphId, label) => {
+              const queue = mutationQueueRef.current;
+              if (queue) runVisualSourceMutation(queue.editSubgraphLabel(subgraphId, label), 'Renamed a diagram section');
             }}
             onGroupNodes={(ids, label) => {
               const queue = mutationQueueRef.current;

@@ -526,6 +526,37 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     const remoteSelectionDoesNotTakeLocalSelection = !((await nodeById(pageB, presenceNodeId).getAttribute('class'))?.includes('selected'));
     assert(remoteSelectionDoesNotTakeLocalSelection, 'Remote canvas selection took over the receiving browser selection state.');
     await pageB.screenshot({ path: '/tmp/arielcharts-canvas-presence.png' });
+
+    await pageA.getByRole('button', { name: 'Edit label', exact: true }).click();
+    const nodeLabelInput = pageA.locator('input[placeholder="node label"]');
+    await nodeLabelInput.waitFor({ state: 'visible', timeout: 15_000 });
+    await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
+    await pageARemoteCursor.locator('span').waitFor({ state: 'detached', timeout: 15_000 });
+    await pageB.screenshot({ path: '/tmp/arielcharts-node-editing-awareness.png' });
+    await nodeLabelInput.fill('Browser draft should not sync');
+    await pageA.evaluate(() => { window.dispatchEvent(new Event('blur')); });
+    await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
+    assert(await nodeLabelInput.inputValue() === 'Browser draft should not sync', 'Inactive presence cleanup discarded the local node-label draft.');
+    await pageA.waitForTimeout(NEGATIVE_OBSERVATION_WINDOW_MS);
+    const draftRead = await mcp.readDiagram(sessionId, main.id);
+    assert(draftRead.mermaidText === mergedSource, 'A node-label draft streamed through shared Mermaid source before commit.');
+    await pageA.evaluate(() => { window.dispatchEvent(new Event('focus')); });
+    await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
+    await pageA.mouse.move(presenceNodeBox.x + (presenceNodeBox.width / 2), presenceNodeBox.y + (presenceNodeBox.height / 2));
+    await pageARemoteCursor.waitFor({ state: 'visible', timeout: 15_000 });
+    await pageA.keyboard.press('Escape');
+    await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
+    await pageARemoteCursor.locator('span').waitFor({ state: 'visible', timeout: 15_000 });
+
+    await presenceNode.click();
+    await pageA.getByRole('button', { name: 'Edit label', exact: true }).click();
+    await nodeLabelInput.fill('Browser edited');
+    await pageA.keyboard.press('Enter');
+    await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
+    await pageB.getByRole('button', { name: 'square: Browser edited', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+    const committedRead = await mcp.readDiagram(sessionId, main.id);
+    assert(committedRead.mermaidText.includes('Browser edited'), 'Committed node-label edit did not converge through Mermaid source.');
+
     await pageA.getByTestId('activity-flyout-toggle').click();
     await pageA.getByTestId('activity-flyout').waitFor({ state: 'visible', timeout: 15_000 });
     await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
@@ -542,11 +573,15 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await pageARemoteCursor.waitFor({ state: 'visible', timeout: 15_000 });
     await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
 
+    await presenceNode.click();
+    await pageA.getByRole('button', { name: 'Edit label', exact: true }).click();
+    await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
     await previewButton.evaluate((button) => { (button as HTMLButtonElement).focus(); });
     await pageA.keyboard.press('Enter');
     await pageA.getByTestId('history-preview-notice').waitFor({ state: 'visible', timeout: 15_000 });
     await pageARemoteCursor.waitFor({ state: 'detached', timeout: 15_000 });
     await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
+    await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
 
     const cancelPreview = pageA.getByRole('button', { name: 'Cancel preview', exact: true });
     await cancelPreview.evaluate((button) => { (button as HTMLButtonElement).focus(); });
@@ -758,6 +793,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     console.log(`modern MCP stale write rejected=${staleRejected}`);
     console.log(`browser/MCP merged source converged=${merged.mermaidText.includes(HUMAN_EDGE.trim()) && merged.mermaidText.includes(AGENT_EDGE.trim())}`);
     console.log(`remote local-state isolation tab=${activeTabPreserved} flyouts=${sourceFlyoutsPreserved} selection=${localSelectionPreserved} mode=${localConnectModePreserved} camera=${localCameraPreserved}`);
+    console.log('remote node editing awareness open/draft/inactive-resume/Escape/commit/history cleanup passed=true');
     console.log(`concurrent drag active overlay stable=${activeDragStable} replicas converged=${replicasConverged}`);
     console.log(`post-release same-node winner moved=${postReleaseWinnerMoved} replicas converged=${postReleaseReplicasConverged}`);
     console.log(`pending removal reconciled before commit=${removalAdvanceMs}ms timer pruned=${pendingPrunedBeforeStop} stop pruned=${pendingPrunedAfterStop}`);

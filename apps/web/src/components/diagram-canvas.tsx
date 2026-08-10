@@ -106,6 +106,7 @@ export interface DiagramCanvasProps {
   onDeleteNodes?: (nodeIds: string[]) => void;
   onEditEdgeLabel?: (edge: DiagramEdgeIdentity, label?: string) => void;
   onEditNodeLabel?: (nodeId: string, newLabel: string) => void;
+  onNodeEditingChange?: (nodeId: string | null) => void;
   onEditSubgraphLabel?: (subgraphId: string, newLabel: string) => void;
   onGroupNodes?: (nodeIds: string[], label: string) => void;
   onInteractionModeChange?: (mode: 'select' | 'connect') => void;
@@ -151,6 +152,7 @@ interface MermaidFlowNodeData extends Record<string, unknown> {
   presentation: MermaidItemPresentation;
   shape: DiagramNodeShape;
   remoteSelections: readonly CanvasPresenceEntry[];
+  remoteEditors: readonly CanvasPresenceEntry[];
 }
 
 type MermaidFlowNode = Node<MermaidFlowNodeData, 'mermaidFlowNode'>;
@@ -388,6 +390,7 @@ export function DiagramCanvas({
   onDeleteNodes,
   onEditEdgeLabel,
   onEditNodeLabel,
+  onNodeEditingChange,
   onEditSubgraphLabel,
   onGroupNodes,
   onInteractionModeChange,
@@ -481,12 +484,26 @@ export function DiagramCanvas({
   const pendingPasteFocusRef = useRef(0);
   const [hasCanvasClipboard, setHasCanvasClipboard] = useState(false);
   const onCanvasCursorChangeRef = useRef(onCanvasCursorChange);
+  const onNodeEditingChangeRef = useRef(onNodeEditingChange);
   onRenderSettledRef.current = onRenderSettled;
   onCanvasCursorChangeRef.current = onCanvasCursorChange;
+  onNodeEditingChangeRef.current = onNodeEditingChange;
 
   useEffect(() => () => {
     onCanvasCursorChangeRef.current?.(null);
+    onNodeEditingChangeRef.current?.(null);
   }, []);
+
+  useEffect(() => {
+    onNodeEditingChange?.(readOnly ? null : editingNodeId);
+  }, [editingNodeId, onNodeEditingChange, readOnly]);
+
+  useEffect(() => {
+    if (readOnly && editingNodeId) {
+      setEditingNodeId(null);
+      setEditingLabel('');
+    }
+  }, [editingNodeId, readOnly]);
 
   const setNodePositions = useCallback((
     update: (current: DiagramNodePositions) => DiagramNodePositions,
@@ -638,6 +655,17 @@ export function DiagramCanvas({
     }
     return selections;
   }, [remoteCanvasPresence]);
+  const remoteEditorsByNodeId = useMemo(() => {
+    const editors = new Map<string, CanvasPresenceEntry[]>();
+    for (const presence of remoteCanvasPresence) {
+      const nodeId = presence.canvas.editing_node_id;
+      if (!nodeId) continue;
+      const current = editors.get(nodeId) ?? [];
+      current.push(presence);
+      editors.set(nodeId, current);
+    }
+    return editors;
+  }, [remoteCanvasPresence]);
 
   const flowNodes = useMemo<MermaidFlowNode[]>(() => {
     if (!graph || !interactiveNodeBounds) {
@@ -659,6 +687,7 @@ export function DiagramCanvas({
           ariaLabel,
           label: nodeLabel,
           presentation: mermaidPresentation.nodes.get(node.id) ?? {},
+          remoteEditors: remoteEditorsByNodeId.get(node.id) ?? [],
           remoteSelections: remoteSelectionsByNodeId.get(node.id) ?? [],
           shape: node.shape,
         },
@@ -677,7 +706,7 @@ export function DiagramCanvas({
     });
 
     return nextNodes;
-  }, [graph, interactiveNodeBounds, isFlowchart, mermaidPresentation.nodes, readOnly, remoteSelectionsByNodeId, selection]);
+  }, [graph, interactiveNodeBounds, isFlowchart, mermaidPresentation.nodes, readOnly, remoteEditorsByNodeId, remoteSelectionsByNodeId, selection]);
   const flowNodeIdsRef = useRef<string[]>([]);
   flowNodeIdsRef.current = flowNodes.map((node) => node.id);
 
@@ -1203,6 +1232,13 @@ export function DiagramCanvas({
       Object.entries(current).filter(([nodeId]) => currentNodeIds.has(nodeId)),
     ));
   }, [graph, isFlowchart]);
+
+  useEffect(() => {
+    if (editingNodeId && !nodeById.has(editingNodeId)) {
+      setEditingNodeId(null);
+      setEditingLabel('');
+    }
+  }, [editingNodeId, nodeById]);
 
   useEffect(() => {
     setFlowNodeRuntime((current) => reconcileControlledNodeRuntime(flowNodes, current));
@@ -2498,23 +2534,25 @@ export function DiagramCanvas({
               <svg height="14" viewBox="0 0 14 18" width="11">
                 <path d="M1 1 12 11 7 12.5 5 17Z" fill="currentColor" stroke="var(--surface-canvas)" strokeWidth="1.4" />
               </svg>
-              <span
-                style={{
-                  background: 'var(--surface-raised)',
-                  border: '1px solid currentColor',
-                  borderRadius: 3,
-                  color: 'var(--ink)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  left: 9,
-                  lineHeight: 1.2,
-                  padding: '2px 4px',
-                  position: 'absolute',
-                  top: 10,
-                  whiteSpace: 'nowrap',
-                }}
-              >{getCanvasPresenceLabel(presence.participant.name)}</span>
+              {!presence.canvas.editing_node_id ? (
+                <span
+                  style={{
+                    background: 'var(--surface-raised)',
+                    border: '1px solid currentColor',
+                    borderRadius: 3,
+                    color: 'var(--ink)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    left: 9,
+                    lineHeight: 1.2,
+                    padding: '2px 4px',
+                    position: 'absolute',
+                    top: 10,
+                    whiteSpace: 'nowrap',
+                  }}
+                >{getCanvasPresenceLabel(presence.participant.name)}</span>
+              ) : null}
             </div>,
           ];
         })}
@@ -3169,13 +3207,20 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
   const label = data.ariaLabel;
   const handleColor = getCanvasHandlePaint(Boolean(selected || focused || interaction?.connectMode));
   const remoteSelection = data.remoteSelections[0];
+  const remoteEditor = data.remoteEditors[0];
+  const remotePresence = remoteEditor ?? remoteSelection;
   const remoteSelectionLabel = remoteSelection
     ? `${getCanvasPresenceLabel(remoteSelection.participant.name)}${data.remoteSelections.length > 1 ? ` +${data.remoteSelections.length - 1}` : ''}`
     : null;
+  const remoteEditingLabel = remoteEditor
+    ? `${getCanvasPresenceLabel(remoteEditor.participant.name)}${data.remoteEditors.length > 1 ? ` +${data.remoteEditors.length - 1}` : ''}`
+    : null;
+  const remoteLabel = remoteEditingLabel ?? remoteSelectionLabel;
 
   return (
     <div
       aria-label={label}
+      aria-description={remoteEditor && remoteEditingLabel ? `${remoteEditingLabel} is editing this node` : undefined}
       aria-pressed={selected}
       className={`mermaid-flow-node${selected ? ' is-selected' : ''}${focused ? ' is-focused' : ''}`}
       onFocus={() => { interaction?.onFocus(id); }}
@@ -3199,20 +3244,23 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
         className={`mermaid-flow-node-surface mermaid-flow-node-surface--${getShapeClassName(data.shape)}`}
         style={getCanvasNodePaint(data.presentation)}
       >
-        {remoteSelection ? (
+        {remotePresence ? (
           <span
             className={`mermaid-flow-node-remote-outline mermaid-flow-node-remote-outline--${getShapeClassName(data.shape)}`}
-            style={{ '--remote-selection-color': remoteSelection.participant.color } as CSSProperties}
+            style={{ '--remote-selection-color': remotePresence.participant.color } as CSSProperties}
           />
         ) : null}
         <span>{data.label}</span>
       </div>
-      {remoteSelection && remoteSelectionLabel ? (
+      {remotePresence && remoteLabel ? (
         <span
-          className="mermaid-flow-node-remote-label"
-          data-testid={`remote-node-selection-${id}`}
-          style={{ backgroundColor: remoteSelection.participant.color }}
-        >{remoteSelectionLabel}</span>
+          className={`mermaid-flow-node-remote-label${remoteEditor ? ' is-editing' : ''}`}
+          data-testid={remoteEditor ? `remote-node-editing-${id}` : `remote-node-selection-${id}`}
+          style={{ backgroundColor: remotePresence.participant.color }}
+        >
+          <span>{remoteLabel}</span>
+          {remoteEditor ? <span aria-hidden="true" className="mermaid-flow-node-remote-editing-dots"><i /><i /><i /></span> : null}
+        </span>
       ) : null}
       {FLOW_HANDLE_POSITIONS.map((position) => (
         <Handle

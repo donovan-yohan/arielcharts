@@ -30,6 +30,8 @@ export interface CanvasAwarenessState {
   diagram_id: string;
   cursor?: CanvasWorldPoint;
   selected_node_ids?: string[];
+  /** A live advisory marker only; never a draft, lock, or durable value. */
+  editing_node_id?: string;
 }
 
 export interface CanvasPresenceEntry {

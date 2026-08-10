@@ -445,6 +445,36 @@ describe('SessionWebSocketServer', () => {
     await client.close();
   });
 
+  it('keeps a bounded owned editing marker live-only and strips malformed canvas entries', async () => {
+    const sessionId = 'abc123de';
+    const client = await openClient(port, sessionId, roomCookie);
+    const participant = { name: 'Editing user', color: '#1188cc', type: 'human' };
+    client.sendAwareness([{
+      clientId: 415,
+      clock: 1,
+      state: { user: participant, canvas: { diagram_id: 'main', editing_node_id: 'node-a' } },
+    }]);
+
+    const session = await app.manager.getOrCreateSession(sessionId);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(415)).toEqual({
+        user: participant,
+        canvas: { diagram_id: 'main', editing_node_id: 'node-a' },
+      });
+    });
+    expect(session.doc.getMap('presence').get(participant.name)).toEqual(participant);
+
+    client.sendAwareness([{
+      clientId: 415,
+      clock: 2,
+      state: { user: participant, canvas: { diagram_id: 'main', editing_node_id: 'x'.repeat(257) } },
+    }]);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(415)).toEqual({ user: participant });
+    });
+    await client.close();
+  });
+
   it('drops over-state-byte-limit awareness before parsing, ownership, or peer fan-out', async () => {
     const sessionId = 'abc123de';
     const sender = await openClient(port, sessionId, roomCookie);

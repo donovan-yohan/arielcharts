@@ -104,6 +104,7 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
   const diagramId = candidate.diagram_id;
   const cursor = candidate.cursor;
   const selectedNodeIds = candidate.selected_node_ids;
+  const editingNodeId = candidate.editing_node_id;
   const hasValidDiagramId = typeof diagramId === 'string'
     && diagramId.length > 0
     && diagramId.length <= MAX_CANVAS_AWARENESS_DIAGRAM_ID_LENGTH;
@@ -119,7 +120,12 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
     && selectedNodeIds.length <= MAX_CANVAS_AWARENESS_NODE_IDS
     && selectedNodeIds.every((nodeId) => typeof nodeId === 'string' && nodeId.length > 0 && nodeId.length <= MAX_CANVAS_AWARENESS_NODE_ID_LENGTH)
   );
-  if (!hasValidDiagramId || !hasValidCursor || !hasValidSelectedNodeIds) {
+  const hasValidEditingNodeId = editingNodeId === undefined || (
+    typeof editingNodeId === 'string'
+    && editingNodeId.length > 0
+    && editingNodeId.length <= MAX_CANVAS_AWARENESS_NODE_ID_LENGTH
+  );
+  if (!hasValidDiagramId || !hasValidCursor || !hasValidSelectedNodeIds || !hasValidEditingNodeId) {
     const { canvas: _canvas, ...state } = entry.state;
     return { ...entry, state, stateJson: JSON.stringify(state) };
   }
@@ -128,6 +134,7 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
     diagram_id: diagramId,
     ...(cursor === undefined ? {} : { cursor }),
     ...(selectedNodeIds === undefined ? {} : { selected_node_ids: selectedNodeIds }),
+    ...(editingNodeId === undefined ? {} : { editing_node_id: editingNodeId }),
   };
   const state = { ...entry.state, canvas: normalizedCanvas };
   return { ...entry, state, stateJson: JSON.stringify(state) };

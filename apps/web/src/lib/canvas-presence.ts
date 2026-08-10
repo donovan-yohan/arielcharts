@@ -30,10 +30,15 @@ function getCanvasAwarenessState(value: unknown): CanvasAwarenessState | null {
     && (!Array.isArray(canvas.selected_node_ids) || canvas.selected_node_ids.some((id) => typeof id !== 'string' || id.length === 0))) {
     return null;
   }
+  if (canvas.editing_node_id !== undefined
+    && (typeof canvas.editing_node_id !== 'string' || canvas.editing_node_id.length === 0)) {
+    return null;
+  }
   return {
     diagram_id: canvas.diagram_id,
     ...(canvas.cursor ? { cursor: canvas.cursor } : {}),
     ...(canvas.selected_node_ids ? { selected_node_ids: [...new Set(canvas.selected_node_ids)] } : {}),
+    ...(canvas.editing_node_id ? { editing_node_id: canvas.editing_node_id } : {}),
   };
 }
 
@@ -75,6 +80,7 @@ export function areCanvasAwarenessStatesEqual(left: CanvasAwarenessState | null,
   if (left.cursor?.x !== right.cursor?.x || left.cursor?.y !== right.cursor?.y) return false;
   const leftSelection = left.selected_node_ids ?? [];
   const rightSelection = right.selected_node_ids ?? [];
-  return leftSelection.length === rightSelection.length
+  return left.editing_node_id === right.editing_node_id
+    && leftSelection.length === rightSelection.length
     && leftSelection.every((nodeId, index) => nodeId === rightSelection[index]);
 }

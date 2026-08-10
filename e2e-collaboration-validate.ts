@@ -542,6 +542,8 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     assert(draftRead.mermaidText === mergedSource, 'A node-label draft streamed through shared Mermaid source before commit.');
     await pageA.evaluate(() => { window.dispatchEvent(new Event('focus')); });
     await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
+    await pageA.mouse.move(presenceNodeBox.x + (presenceNodeBox.width / 2), presenceNodeBox.y + (presenceNodeBox.height / 2));
+    await pageARemoteCursor.waitFor({ state: 'visible', timeout: 15_000 });
     await pageA.keyboard.press('Escape');
     await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
     await pageARemoteCursor.locator('span').waitFor({ state: 'visible', timeout: 15_000 });

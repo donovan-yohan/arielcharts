@@ -798,7 +798,7 @@ async function expectTemplateDiagramCreation(page: Page): Promise<void> {
     'API sequence template retained flowchart structural controls.');
   assert(await page.locator('form.canvas-sequence-participant-form').count() === 1,
     'API sequence template did not expose participant controls.');
-  assert(await page.locator('form.canvas-sequence-message-form').count() === 1,
+  assert(await page.locator('form.canvas-sequence-message-form:has([aria-label="Sequence message"])').count() === 1,
     'API sequence template did not expose message controls.');
   await renameActiveDiagram(page, 'API request timing');
   await ensureSourceFlyoutOpen(page);
@@ -2361,7 +2361,7 @@ async function expectTouchCanvasControls(
   if (renderer === 'sequence') {
     const canvas = page.getByTestId('canvas-first-workspace');
     const participantForm = page.locator('form.canvas-sequence-participant-form');
-    const messageForm = page.locator('form.canvas-sequence-message-form');
+    const messageForm = page.locator('form.canvas-sequence-message-form:has([aria-label="Sequence message"])');
     const participantAdd = page.getByRole('button', { name: 'Add sequence participant', exact: true });
     const messageAdd = page.getByRole('button', { name: 'Add sequence message', exact: true });
     await Promise.all([
@@ -2373,7 +2373,7 @@ async function expectTouchCanvasControls(
     await assertDocumentHasNoHorizontalOverflow(page);
     const layout = await page.evaluate(() => {
       const canvas = document.querySelector<HTMLElement>('[data-testid="canvas-first-workspace"]');
-      const forms = [...document.querySelectorAll<HTMLElement>('form.canvas-sequence-participant-form, form.canvas-sequence-message-form')];
+      const forms = [...document.querySelectorAll<HTMLElement>('form.canvas-sequence-participant-form, form.canvas-sequence-message-form:has([aria-label="Sequence message"])')];
       if (!canvas || forms.length !== 2) return null;
       const canvasBounds = canvas.getBoundingClientRect();
       return forms.map((form) => {

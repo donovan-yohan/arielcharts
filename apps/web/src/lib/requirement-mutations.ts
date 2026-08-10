@@ -16,6 +16,10 @@ const NAME = '[A-Za-z_][A-Za-z0-9_.-]*';
 const namePattern = new RegExp(`^${NAME}$`);
 const KINDS: readonly RequirementKind[] = ['requirement', 'functionalRequirement', 'interfaceRequirement', 'performanceRequirement', 'physicalRequirement', 'designConstraint', 'element'];
 const RELATIONS: readonly RequirementRelation[] = ['contains', 'copies', 'derives', 'refines', 'satisfies', 'traces', 'verifies'];
+const RISK_LEVELS = new Set(['low', 'medium', 'high']);
+const VERIFY_METHODS = new Set(['analysis', 'demonstration', 'inspection', 'test']);
+const REQUIREMENT_FIELD_NAMES = new Set(['id', 'text', 'risk', 'verifyMethod']);
+const ELEMENT_FIELD_NAMES = new Set(['type', 'docRef']);
 const DECLARATION = new RegExp(`^(\\s*)(${KINDS.join('|')})\\s+(${NAME})\\s*\\{\\s*$`, 'i');
 const FIELD = /^\s*([A-Za-z][A-Za-z0-9_-]*)\s*:\s*([^\r\n{}]+?)\s*$/;
 const RELATION = new RegExp(`^\\s*(${NAME})\\s*-\\s*(${RELATIONS.join('|')})\\s*->\\s*(${NAME})\\s*$`, 'i');
@@ -59,7 +63,11 @@ function parseRequirement(source: string): ParsedRequirement | null {
     const line = lines[index]!; const text = line.text;
     if (!text.trim() || ignorable(text)) continue;
     if (open) {
-      if (/^\s*}\s*$/.test(text)) { if (!isValidFields(open.kind, open.fields)) return null; entities.push({ name: open.name, kind: open.kind, fields: open.fields, fieldLines: open.lines, block: { open: open.open, close: line } }); open = null; continue; }
+      if (/^\s*}\s*$/.test(text)) {
+        let fields: Record<string, string>;
+        try { fields = normalizeFields(open.kind, open.fields); } catch { return null; }
+        entities.push({ name: open.name, kind: open.kind, fields, fieldLines: open.lines, block: { open: open.open, close: line } }); open = null; continue;
+      }
       const field = text.match(FIELD); if (!field || Object.hasOwn(open.fields, field[1]!)) return null; open.fields[field[1]!] = field[2]!.trim(); open.lines.push(line); continue;
     }
     const declaration = text.match(DECLARATION);
@@ -82,13 +90,36 @@ function findEntity(parsed: ParsedRequirement, name: string): EntityRecord { con
 function publicEntity(entity: EntityRecord): RequirementEntity { return { name: entity.name, kind: entity.kind, fields: { ...entity.fields } }; }
 function publicRelationship(relationship: RelationshipRecord): RequirementRelationship { return { from: relationship.from, kind: relationship.kind, to: relationship.to }; }
 function isSameRelationship(left: RequirementRelationship, right: RequirementRelationship): boolean { return left.from === right.from && left.kind === right.kind && left.to === right.to; }
-function normalizeEntity(entity: RequirementEntity): RequirementEntity { const kind = entity.kind; if (!KINDS.includes(kind)) throw new Error('Unsupported requirement kind.'); const fields = Object.fromEntries(Object.entries(entity.fields).map(([key, value]) => [normalizeFieldKey(key), normalizeFieldValue(value)])); if (!isValidFields(kind, fields)) throw new Error(kind === 'element' ? 'Elements require a type field.' : 'Requirements need id, text, risk, and verifyMethod fields.'); return { name: normalizeName(entity.name), kind, fields }; }
-function isValidFields(kind: RequirementKind, fields: Record<string, string>): boolean { if (kind === 'element') return typeof fields.type === 'string' && Boolean(fields.type); const required = ['id', 'text', 'risk', 'verifyMethod']; return required.every((key) => typeof fields[key] === 'string' && Boolean(fields[key])); }
+function normalizeEntity(entity: RequirementEntity): RequirementEntity { const kind = entity.kind; if (!KINDS.includes(kind)) throw new Error('Unsupported requirement kind.'); return { name: normalizeName(entity.name), kind, fields: normalizeFields(kind, entity.fields) }; }
+function normalizeFields(kind: RequirementKind, fields: Record<string, string>): Record<string, string> {
+  const normalized = Object.fromEntries(Object.entries(fields).map(([key, value]) => [normalizeFieldKey(key), normalizeFieldValue(value)]));
+  const allowed = kind === 'element' ? ELEMENT_FIELD_NAMES : REQUIREMENT_FIELD_NAMES;
+  if (Object.keys(normalized).some((key) => !allowed.has(key))) throw new Error('Unsupported requirement field.');
+  if (kind === 'element') {
+    if (!normalized.type) throw new Error('Elements require a type field.');
+    return normalized;
+  }
+  if (!/^[0-9]+$/.test(normalized.id ?? '')) throw new Error('Requirement ids must be non-negative integers.');
+  const risk = normalized.risk?.toLowerCase();
+  if (!risk || !RISK_LEVELS.has(risk)) throw new Error('Requirement risk must be low, medium, or high.');
+  const verifyMethod = normalized.verifyMethod?.toLowerCase();
+  if (!verifyMethod || !VERIFY_METHODS.has(verifyMethod)) throw new Error('Requirement verifyMethod must be analysis, demonstration, inspection, or test.');
+  const text = normalizeRequirementText(normalized.text ?? '');
+  if (!text) throw new Error('Requirements need id, text, risk, and verifyMethod fields.');
+  return { id: normalized.id!, text, risk, verifyMethod };
+}
+function normalizeRequirementText(value: string): string {
+  const trimmed = value.trim();
+  const quoted = trimmed.match(/^"([^"\r\n]*)"$/);
+  const text = quoted ? quoted[1]! : trimmed;
+  if (!text || /["\r\n{}]/.test(text)) throw new Error('Requirement text must be a single Mermaid string.');
+  return text;
+}
 function assertRelationship(parsed: ParsedRequirement, relationship: RequirementRelationship): void { if (!RELATIONS.includes(relationship.kind)) throw new Error('Unsupported requirement relationship.'); if (!parsed.entities.some((entry) => entry.name === relationship.from) || !parsed.entities.some((entry) => entry.name === relationship.to)) throw new Error('Requirement relationships require existing entities.'); }
 function normalizeName(value: string): string { const name = value.trim().replace(/[^A-Za-z0-9_.-]/g, '_').replace(/^[^A-Za-z_]+/, ''); if (!namePattern.test(name)) throw new Error('Requirement names must be Mermaid-safe identifiers.'); return name; }
 function normalizeFieldKey(value: string): string { const key = value.trim(); if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(key)) throw new Error('Requirement field names must be identifiers.'); return key; }
 function normalizeFieldValue(value: string): string { const normalized = value.trim().replace(/[\r\n{}]/g, ''); if (!normalized) throw new Error('Requirement field values are required.'); return normalized; }
-function formatEntity(entity: RequirementEntity, indentation: string, ending: string): string { const body = Object.entries(entity.fields).map(([key, value]) => `${indentation}  ${key}: ${value}`).join(ending); return `${indentation}${entity.kind} ${entity.name} {${ending}${body}${ending}${indentation}}`; }
+function formatEntity(entity: RequirementEntity, indentation: string, ending: string): string { const body = Object.entries(entity.fields).map(([key, value]) => `${indentation}  ${key}: ${key === 'text' ? `"${value}"` : value}`).join(ending); return `${indentation}${entity.kind} ${entity.name} {${ending}${body}${ending}${indentation}}`; }
 function formatRelationship(relationship: RequirementRelationship): string { return `${relationship.from} - ${relationship.kind} -> ${relationship.to}`; }
 function uniqueName(base: string, existing: readonly string[]): string { const occupied = new Set(existing); let candidate = base; let suffix = 2; while (occupied.has(candidate)) { candidate = `${base}${suffix}`; suffix += 1; } return candidate; }
 function splitLines(source: string): SourceLine[] { const lines: SourceLine[] = []; const matcher = /.*?(?:\r\n|\n|\r|$)/g; let match: RegExpExecArray | null; while ((match = matcher.exec(source)) && match[0]) { const raw = match[0]; const start = match.index; lines.push({ start, end: start + raw.length, raw, text: raw.replace(/\r\n|\n|\r$/, '') }); } return lines; }

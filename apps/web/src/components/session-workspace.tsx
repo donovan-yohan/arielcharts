@@ -809,7 +809,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     };
     const undoManager = createDiagramUndoManager(activeDiagram.yText, activeDiagram.nodePositionsMap);
     undoManagerRef.current = undoManager;
-    mutationQueueRef.current = new MutationQueue(activeDiagram.yText, { transactionOrigin: collaborationOrigins.visual });
+    mutationQueueRef.current = new MutationQueue(activeDiagram.yText, {
+      onAfterApplyError: (error) => {
+        setMutationError(error instanceof Error ? error.message : 'The diagram update could not be fully applied.');
+      },
+      transactionOrigin: collaborationOrigins.visual,
+    });
     const dragCommitter = new DragLayoutCommitter((positions) => {
       collaboration?.doc.transact(() => {
         writeNodePositions(activeDiagram.nodePositionsMap, positions, 'merge');
@@ -1428,6 +1433,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       return;
     }
 
+    undoManagerRef.current?.stopCapturing();
     const mutation = queue.pasteClipboard(clipboard, {
       onApplied: (result) => {
         commitLayoutActivityCheckpoint(

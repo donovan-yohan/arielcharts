@@ -211,6 +211,22 @@ export function isSameNodeSelection(left: readonly string[], right: readonly str
   return getCanonicalSelectionAttribute(left) === getCanonicalSelectionAttribute(right);
 }
 
+export function getFlowSelectionChange(
+  selectedNodes: readonly { id: string }[],
+  currentNodeIds: readonly string[],
+): string[] | null {
+  if (selectedNodes.length === 0 && currentNodeIds.length === 0) {
+    return null;
+  }
+
+  const currentIds = new Set(currentNodeIds);
+  if (selectedNodes.some((node) => !currentIds.has(node.id))) {
+    return null;
+  }
+
+  return selectedNodes.map((node) => node.id);
+}
+
 export function getRendererInteractionMode(
   current: 'select' | 'connect',
   isFlowchart: boolean,
@@ -224,6 +240,13 @@ export function shouldHandleCanvasShortcut(
   isTyping: boolean,
 ): boolean {
   return !isTyping && (targetIsInCanvas || activeElementIsInCanvas);
+}
+
+export function shouldHandleCanvasSingleKeyShortcut(
+  targetIsCanvas: boolean,
+  activeElementIsCanvas: boolean,
+): boolean {
+  return targetIsCanvas && activeElementIsCanvas;
 }
 
 export function shouldRestoreCanvasFocusAfterPaste(activeElementIsInCanvas: boolean, activeElementIsBody: boolean): boolean {
@@ -528,6 +551,8 @@ export function DiagramCanvas({
 
     return nextNodes;
   }, [graph, interactiveNodeBounds, isFlowchart, mermaidPresentation.nodes, readOnly, selection]);
+  const flowNodeIdsRef = useRef<string[]>([]);
+  flowNodeIdsRef.current = flowNodes.map((node) => node.id);
 
   const hasPersistedLayout = Object.keys(persistedNodePositions).length > 0;
   const canEditStructure = isFlowchart && !readOnly;
@@ -1146,6 +1171,10 @@ export function DiagramCanvas({
 
       const isModifierShortcut = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
+      const canvasContainerOwnsFocus = shouldHandleCanvasSingleKeyShortcut(
+        event.target === canvas,
+        document.activeElement === canvas,
+      );
       if (isModifierShortcut && key === 'c' && canEditStructure) {
         event.preventDefault();
         copySelectedNodes();
@@ -1179,13 +1208,13 @@ export function DiagramCanvas({
         setShowGroupPrompt(true);
       }
 
-      if (!isModifierShortcut && canEditStructure && key === 'n') {
+      if (!isModifierShortcut && canvasContainerOwnsFocus && canEditStructure && key === 'n') {
         event.preventDefault();
         onAddNode?.(DEFAULT_NEW_NODE_LABEL, DEFAULT_NEW_NODE_SHAPE);
         return;
       }
 
-      if (!isModifierShortcut && canEditStructure && key === 'c') {
+      if (!isModifierShortcut && canvasContainerOwnsFocus && canEditStructure && key === 'c') {
         event.preventDefault();
         setPendingEdge(null);
         setPendingEdgeLabel('');
@@ -1194,25 +1223,25 @@ export function DiagramCanvas({
         return;
       }
 
-      if (!isModifierShortcut && key === 'f') {
+      if (!isModifierShortcut && canvasContainerOwnsFocus && key === 'f') {
         event.preventDefault();
         fitToDiagram(true);
         return;
       }
 
-      if (!isModifierShortcut && (event.key === '+' || event.key === '=')) {
+      if (!isModifierShortcut && canvasContainerOwnsFocus && (event.key === '+' || event.key === '=')) {
         event.preventDefault();
         zoomCanvas(1.1);
         return;
       }
 
-      if (!isModifierShortcut && event.key === '-') {
+      if (!isModifierShortcut && canvasContainerOwnsFocus && event.key === '-') {
         event.preventDefault();
         zoomCanvas(0.9);
         return;
       }
 
-      if (!isModifierShortcut && event.key === 'F2' && canEditStructure && selection.length === 1) {
+      if (!isModifierShortcut && canvasContainerOwnsFocus && event.key === 'F2' && canEditStructure && selection.length === 1) {
         const selectedNode = nodeById.get(selection[0] ?? '');
         if (selectedNode) {
           event.preventDefault();
@@ -1492,9 +1521,16 @@ export function DiagramCanvas({
   }, [flowNodes]);
 
   const handleFlowSelectionChange = useCallback(({ nodes }: { nodes: MermaidFlowNode[] }) => {
-    if (canEditStructure) {
-      setSelection(nodes.map((node) => node.id));
+    if (!canEditStructure) {
+      return;
     }
+
+    const nextSelection = getFlowSelectionChange(nodes, flowNodeIdsRef.current);
+    if (nextSelection === null) {
+      return;
+    }
+
+    setSelection(nextSelection);
   }, [canEditStructure, setSelection]);
 
   const handleFlowNodeDragStart = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node, nodes) => {

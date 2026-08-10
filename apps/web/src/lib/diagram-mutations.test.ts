@@ -140,6 +140,49 @@ describe('canvas clipboard mutations', () => {
     });
   });
 
+  it('creates a flowchart from an empty source and calls onApplied in its Yjs transaction', async () => {
+    const clipboard = createClipboard();
+    const doc = new Y.Doc();
+    const yText = doc.getText('mermaid');
+    let inTransaction = false;
+    let callbackResult: { idMap: Record<string, string>; pastedNodeIds: string[]; source: string } | null = null;
+    doc.on('beforeTransaction', () => { inTransaction = true; });
+    doc.on('afterTransaction', () => { inTransaction = false; });
+
+    const result = await new MutationQueue(yText).pasteClipboard(clipboard, {
+      onApplied: (applied) => {
+        callbackResult = {
+          idMap: applied.idMap,
+          pastedNodeIds: applied.pastedNodeIds,
+          source: yText.toString(),
+        };
+        expect(inTransaction).toBe(true);
+      },
+    });
+
+    expect(result.pastedNodeIds).toEqual(['A_copy', 'B_copy']);
+    expect(callbackResult).toEqual({
+      idMap: { A: 'A_copy', B: 'B_copy' },
+      pastedNodeIds: ['A_copy', 'B_copy'],
+      source: expect.stringContaining('A_copy[Alpha]'),
+    });
+  });
+
+  it('reports an onApplied failure without rejecting an already-applied paste', async () => {
+    const clipboard = createClipboard();
+    const doc = new Y.Doc();
+    const yText = doc.getText('mermaid');
+    const errors: unknown[] = [];
+    const queue = new MutationQueue(yText, { onAfterApplyError: (error) => { errors.push(error); } });
+
+    await expect(queue.pasteClipboard(clipboard, {
+      onApplied: () => { throw new Error('layout write failed'); },
+    })).resolves.toMatchObject({ pastedNodeIds: ['A_copy', 'B_copy'] });
+
+    expect(yText.toString()).toContain('A_copy[Alpha]');
+    expect(errors).toEqual([expect.objectContaining({ message: 'layout write failed' })]);
+  });
+
   it('rejects stale or malformed clipboard payloads before touching source', async () => {
     const doc = new Y.Doc();
     const yText = doc.getText('mermaid');

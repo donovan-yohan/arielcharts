@@ -131,15 +131,17 @@ async function validate() {
   // --- Test: marquee selection and application-local clipboard ---
   console.log('\n2c. Testing marquee selection and canvas clipboard...');
   const marqueeNodes = page.locator('.react-flow__node');
-  const marqueeBoxes = await Promise.all([0, 1, 2].map((index) => marqueeNodes.nth(index).boundingBox()));
-  const marqueeIds = await Promise.all([0, 1].map((index) => marqueeNodes.nth(index).getAttribute('data-id')));
-  const firstTwoBoxes = marqueeBoxes.slice(0, 2);
-  const marqueeBounds = firstTwoBoxes.every((box) => box !== null)
+  const marqueeNodeA = page.locator('.react-flow__node[data-id="A"]');
+  const marqueeNodeB = page.locator('.react-flow__node[data-id="B"]');
+  const marqueeNodeC = page.locator('.react-flow__node[data-id="C"]');
+  const marqueeBoxes = await Promise.all([marqueeNodeA.boundingBox(), marqueeNodeB.boundingBox(), marqueeNodeC.boundingBox()]);
+  const marqueeSelectionBoxes = marqueeBoxes.slice(0, 2);
+  const marqueeBounds = marqueeSelectionBoxes.every((box) => box !== null)
     ? {
-      bottom: Math.max(...firstTwoBoxes.map((box) => box!.y + box!.height)) + 8,
-      left: Math.min(...firstTwoBoxes.map((box) => box!.x)) - 8,
-      right: Math.max(...firstTwoBoxes.map((box) => box!.x + box!.width)) + 8,
-      top: Math.min(...firstTwoBoxes.map((box) => box!.y)) - 8,
+      bottom: Math.max(...marqueeSelectionBoxes.map((box) => box!.y + box!.height)) + 8,
+      left: Math.min(...marqueeSelectionBoxes.map((box) => box!.x)) - 8,
+      right: Math.max(...marqueeSelectionBoxes.map((box) => box!.x + box!.width)) + 8,
+      top: Math.min(...marqueeSelectionBoxes.map((box) => box!.y)) - 8,
     }
     : null;
   if (marqueeBounds) {
@@ -148,7 +150,7 @@ async function validate() {
     await page.mouse.move(marqueeBounds.right, marqueeBounds.bottom, { steps: 8 });
     await page.mouse.up();
   }
-  const expectedMarqueeSelection = JSON.stringify([...marqueeIds.filter((id): id is string => Boolean(id))].sort());
+  const expectedMarqueeSelection = JSON.stringify(['A', 'B']);
   const marqueeSelectionPass = marqueeBounds !== null
     && marqueeBoxes[2] !== null
     && await page.getByTestId('diagram-canvas').getAttribute('data-selected-node-ids') === expectedMarqueeSelection;
@@ -192,7 +194,8 @@ async function validate() {
   await page.keyboard.press('Control+V');
   await page.waitForFunction((expected) => [...document.querySelectorAll('.cm-line')].map((line) => line.textContent ?? '').join('\n') === expected, sourceNativeClipboard, { timeout: 15_000 });
   await page.locator('.react-flow__node[data-id="Source"]').waitFor({ state: 'visible', timeout: 15_000 });
-  const sourceShortcutPass = await page.locator('.react-flow__node[data-id="A_copy"]').count() === 0;
+  const sourceShortcutPass = await page.locator('.react-flow__node[data-id="Source"]').count() === 1
+    && await page.locator('.react-flow__node[data-id="Target"]').count() === 1;
   results.push({ test: 'source editor native Ctrl+V is not intercepted by canvas', pass: sourceShortcutPass });
   console.log(`   Source editor native clipboard path: ${sourceShortcutPass ? 'PASS' : 'FAIL'}`);
 

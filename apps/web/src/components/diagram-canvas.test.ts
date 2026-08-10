@@ -3,7 +3,7 @@ import type { DiagramLink } from '../lib/diagram-mutations';
 import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
-import { areMermaidPresentationsEqual, areSvgHitMapsEqual, getCanonicalSelectionAttribute, getFlowEdgePresentation, getGraphMembershipKey, getNodeClickSelection, getRendererInteractionMode, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
+import { areMermaidPresentationsEqual, areSvgHitMapsEqual, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getRendererInteractionMode, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
 
 describe('getRendererInteractionMode', () => {
   it('leaves camera ownership separate while static previews clear connect mode', () => {
@@ -68,6 +68,15 @@ describe('isSameNodeSelection', () => {
   });
 });
 
+describe('getFlowSelectionChange', () => {
+  it('keeps intentional empty selection while ignoring callbacks from an unavailable or stale graph', () => {
+    expect(getFlowSelectionChange([], ['A', 'B'])).toEqual([]);
+    expect(getFlowSelectionChange([], [])).toBeNull();
+    expect(getFlowSelectionChange([{ id: 'stale' }], ['A', 'B'])).toBeNull();
+    expect(getFlowSelectionChange([{ id: 'A' }], ['A', 'B'])).toEqual(['A']);
+  });
+});
+
 describe('getNodeClickSelection', () => {
   it('keeps ordinary and Shift selection in app-owned click handlers', () => {
     expect(getNodeClickSelection(['A'], 'B', false)).toEqual(['B']);
@@ -81,6 +90,14 @@ describe('shouldHandleCanvasShortcut', () => {
     expect(shouldHandleCanvasShortcut(true, true, false)).toBe(true);
     expect(shouldHandleCanvasShortcut(false, false, false)).toBe(false);
     expect(shouldHandleCanvasShortcut(true, true, true)).toBe(false);
+  });
+});
+
+describe('shouldHandleCanvasSingleKeyShortcut', () => {
+  it('keeps letter and camera shortcuts off toolbar controls and focused nodes', () => {
+    expect(shouldHandleCanvasSingleKeyShortcut(true, true)).toBe(true);
+    expect(shouldHandleCanvasSingleKeyShortcut(false, true)).toBe(false);
+    expect(shouldHandleCanvasSingleKeyShortcut(true, false)).toBe(false);
   });
 });
 

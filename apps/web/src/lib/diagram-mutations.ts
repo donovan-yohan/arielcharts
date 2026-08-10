@@ -85,6 +85,7 @@ interface QueuedMutation {
 }
 
 export interface MutationQueueOptions {
+  onAfterApplyError?: (error: unknown) => void;
   transactionOrigin?: unknown;
 }
 
@@ -226,12 +227,17 @@ export class MutationQueue {
     });
   }
 
-  enqueueResult(
-    mutate: (currentText: string) => MutationResult,
-    afterApply?: (result: MutationResult) => void,
-  ): Promise<MutationResult> {
-    return new Promise<MutationResult>((resolve, reject) => {
-      this.queue.push({ afterApply, mutate, reject, resolve });
+  enqueueResult<TResult extends MutationResult>(
+    mutate: (currentText: string) => TResult,
+    afterApply?: (result: TResult) => void,
+  ): Promise<TResult> {
+    return new Promise<TResult>((resolve, reject) => {
+      this.queue.push({
+        afterApply: afterApply ? (result) => { afterApply(result as TResult); } : undefined,
+        mutate,
+        reject,
+        resolve: (result) => { resolve(result as TResult); },
+      });
       void this.flush();
     });
   }
@@ -286,7 +292,7 @@ export class MutationQueue {
     assertValidClipboardPayload(payload);
 
     return this.enqueueResult((currentText) => {
-      const chart = getMutableFlowchart(currentText, {});
+      const chart = getMutableFlowchart(currentText, { createIfEmpty: true });
       const idMap: Record<string, string> = {};
       const reservedIds = [...chart.nodeIds];
 
@@ -320,7 +326,7 @@ export class MutationQueue {
       };
 
       return result;
-    }, options.onApplied as ((result: MutationResult) => void) | undefined) as Promise<PasteClipboardResult>;
+    }, options.onApplied);
   }
 
   async removeNode(nodeId: string): Promise<MutationResult> {
@@ -405,7 +411,15 @@ export class MutationQueue {
             if (result.nextText !== previousText) {
               applyDiff(this.yText, result.nextText, previousText);
             }
-            next.afterApply?.({ ...result, previousText });
+            try {
+              next.afterApply?.({ ...result, previousText });
+            } catch (error) {
+              if (this.options.onAfterApplyError) {
+                this.options.onAfterApplyError(error);
+              } else {
+                throw error;
+              }
+            }
           };
 
           if (result.nextText !== previousText || next.afterApply) {

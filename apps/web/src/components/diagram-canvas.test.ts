@@ -50,6 +50,23 @@ describe('ER editor safe area', () => {
   });
 });
 
+describe('relationship and architecture semantic editors', () => {
+  it('shares only the measured panel shell while keeping family-specific form controls separate', () => {
+    expect(canvasSource).toMatch(/data-testid="class-editor-controls"/u);
+    expect(canvasSource).toMatch(/data-testid="state-editor-controls"/u);
+    expect(canvasSource).toMatch(/data-testid="requirement-editor-controls"/u);
+    expect(canvasSource).toMatch(/ClassRelationshipForm[^]*?Class relationship type/u);
+    expect(canvasSource).toMatch(/StateTransitionForm[^]*?State transition source[^]*?State transition target/u);
+    expect(canvasSource).toMatch(/RequirementRelationshipForm[^]*?Requirement relationship type/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'class')/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'state')/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'requirement')/u);
+    expect(workspaceSource).toMatch(/mutateCanvasSource((source) => addClass/u);
+    expect(workspaceSource).toMatch(/mutateCanvasSource((source) => addState/u);
+    expect(workspaceSource).toMatch(/mutateCanvasSource((source) => addRequirement/u);
+  });
+});
+
 describe('sequence semantic editor', () => {
   it('keeps every representable statement family behind explicit semantic controls', () => {
     expect(canvasSource).toMatch(/New sequence participant kind/u);

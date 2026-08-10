@@ -66,8 +66,8 @@ describe('diagram capability catalog', () => {
   it('collapses renderer variants and Railroad grammars without losing parser aliases', () => {
     expect(classifyDiagramCapability('flowchart-v2')).toMatchObject({ family: 'flowchart', kind: 'flowchart', editingMode: 'canvas' });
     expect(classifyDiagramCapability('flowchart-elk')).toMatchObject({ family: 'flowchart', kind: 'flowchart', editingMode: 'canvas' });
-    expect(classifyDiagramCapability('classDiagram')).toMatchObject({ family: 'class', editingMode: 'source-only' });
-    expect(classifyDiagramCapability('stateDiagram')).toMatchObject({ family: 'state', editingMode: 'source-only' });
+    expect(classifyDiagramCapability('classDiagram')).toMatchObject({ family: 'class', editingMode: 'semantic-form', adapter: 'class' });
+    expect(classifyDiagramCapability('stateDiagram')).toMatchObject({ family: 'state', editingMode: 'semantic-form', adapter: 'state' });
     for (const parserType of ['railroad', 'railroadEbnf', 'railroadAbnf', 'railroadPeg']) {
       expect(classifyDiagramCapability(parserType)).toMatchObject({ family: 'railroad', editingMode: 'source-only' });
     }
@@ -85,6 +85,9 @@ describe('diagram capability catalog', () => {
     const flowchart = classifyDiagramCapability('flowchart-v2');
     const sequence = classifyDiagramCapability('sequence');
     const er = classifyDiagramCapability('er');
+    const classDiagram = classifyDiagramCapability('classDiagram');
+    const state = classifyDiagramCapability('state');
+    const requirement = classifyDiagramCapability('requirement');
     const sourceOnly = classifyDiagramCapability('timeline');
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
@@ -92,6 +95,10 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult('sequenceDiagram\n  A->>B: request', 'add-message')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(er).getOperationResult('erDiagram\n  A {\n    int id PK\n  }', 'add-attribute')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(er).getOperationResult('erDiagram\n  A ||--o{ B', 'add-relationship')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(classDiagram).getOperationResult('classDiagram\n  class A', 'add-class')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(state).getOperationResult('stateDiagram-v2\n  [*] --> Ready', 'add-transition')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(state).getOperationResult('stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }', 'add-state')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(requirement).getOperationResult('requirementDiagram\n  requirement req {\n    id: 1\n    text: Example\n    risk: low\n    verifyMethod: test\n  }', 'add-requirement')).toEqual({ supported: true });
     const noteOnlySequence = 'sequenceDiagram\n  Note over A: details';
     await expect(mermaid.parse(noteOnlySequence)).resolves.toMatchObject({ diagramType: 'sequence' });
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult(noteOnlySequence, 'add-message')).toEqual({ supported: true });
@@ -102,10 +109,16 @@ describe('diagram capability catalog', () => {
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('flowchart-v2'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('sequence'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('er'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('classDiagram'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('state'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('requirement'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('timeline'))).toBe(false);
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('flowchart-v2'))).toBe('Flowchart · editable · canvas');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('sequence'))).toBe('Sequence · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('er'))).toBe('Entity relationship · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('classDiagram'))).toBe('Class · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('state'))).toBe('State · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('requirement'))).toBe('Requirement · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('timeline'))).toBe('Timeline · source only');
   });
 
@@ -113,11 +126,13 @@ describe('diagram capability catalog', () => {
     const sequence = classifyDiagramCapability('sequence');
     const flowchart = classifyDiagramCapability('flowchart-v2');
     const er = classifyDiagramCapability('er');
+    const state = classifyDiagramCapability('state');
 
     expect(getDiagramCapabilityLabel(sequence, 'sequenceDiagram\nparticipant "Web browser" as Browser')).toBe('Sequence · source only');
     expect(getDiagramCapabilityLabel(sequence, 'sequenceDiagram\nA->>B: request')).toBe('Sequence · editable · form');
     expect(getDiagramCapabilityLabel(flowchart, 'flowchart TD\nA-->')).toBe('Flowchart · source only');
     expect(getDiagramCapabilityLabel(er, 'erDiagram\nA ||--o{ B')).toBe('Entity relationship · source only');
+    expect(getDiagramCapabilityLabel(state, 'stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }')).toBe('State · source only');
     expect(getDiagramCapabilityLabel(null, 'sequenceDiagram\nA->>B: request')).toBe('Mermaid · source only');
   });
 });

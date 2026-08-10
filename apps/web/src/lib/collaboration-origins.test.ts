@@ -3,6 +3,9 @@ import * as Y from 'yjs';
 import { applyDiff } from './diagram-mutations';
 import { addSequenceParticipant } from './sequence-mutations';
 import { addErAttribute } from './er-mutations';
+import { addClass } from './class-mutations';
+import { addState } from './state-mutations';
+import { addRequirement } from './requirement-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -102,6 +105,24 @@ describe('collaboration transaction origins', () => {
     expect(undoManager.undoStack).toHaveLength(1);
     undoManager.undo();
     expect(source.toString()).toBe('erDiagram\n  CUSTOMER {\n  }');
+    destroyDiagramUndoManager(undoManager);
+  });
+
+  it.each([
+    ['class', 'classDiagram', (source: string) => addClass(source, 'Account')],
+    ['state', 'stateDiagram-v2\n  [*] --> Ready', (source: string) => addState(source, 'Done')],
+    ['requirement', 'requirementDiagram\n  requirement req {\n    id: 1\n    text: Existing\n    risk: low\n    verifyMethod: test\n  }', (source: string) => addRequirement(source, { kind: 'requirement', name: 'next', fields: { id: '2', text: 'Next', risk: 'low', verifyMethod: 'test' } })],
+  ])('keeps %s semantic form mutations in the local visual undo stack', (_family, initial, mutate) => {
+    const doc = new Y.Doc();
+    const source = doc.getText('semantic-source');
+    const undoManager = createDiagramUndoManager(source, doc.getMap('semantic-layout'));
+    source.insert(0, initial);
+    undoManager.stopCapturing();
+    const next = mutate(source.toString());
+    doc.transact(() => { applyDiff(source, next, source.toString()); }, collaborationOrigins.visual);
+    expect(undoManager.undoStack).toHaveLength(1);
+    undoManager.undo();
+    expect(source.toString()).toBe(initial);
     destroyDiagramUndoManager(undoManager);
   });
 });

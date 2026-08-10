@@ -1,13 +1,16 @@
 import { isHeaderOnlyFlowchartSource, parseFlowchartSnapshot } from './diagram-mutations';
 import { isErSourceRepresentable } from './er-mutations';
+import { isClassSourceRepresentable } from './class-mutations';
+import { isRequirementSourceRepresentable } from './requirement-mutations';
 import { isSequenceSourceRepresentable } from './sequence-mutations';
+import { isStateSourceRepresentable } from './state-mutations';
 
 /** The installed Mermaid detector registry this catalog was audited against. */
 export const MERMAID_CAPABILITY_CATALOG_VERSION = '11.16.1';
 
 export type DiagramKind = 'flowchart' | 'sequence' | 'er' | 'generic';
 export type DiagramEditingMode = 'canvas' | 'semantic-form' | 'source-only' | 'unavailable-plugin';
-export type DiagramAdapterId = 'flowchart' | 'sequence' | 'er' | 'source-only' | 'unavailable-plugin';
+export type DiagramAdapterId = 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'source-only' | 'unavailable-plugin';
 export type MermaidDiagramFamilyId = typeof MERMAID_DIAGRAM_FAMILIES[number]['id'];
 
 export interface MermaidDiagramFamily {
@@ -124,6 +127,52 @@ const ER_ADAPTER: DiagramSourceModelAdapter = {
     : { representable: false, reason: 'unsupported-syntax' },
 };
 
+const CLASS_OPERATIONS = new Set([
+  'add-annotation', 'add-class', 'add-member', 'add-relationship', 'delete-annotation',
+  'delete-class', 'delete-member', 'delete-relationship', 'edit-class', 'edit-member', 'edit-relationship',
+]);
+
+const CLASS_ADAPTER: DiagramSourceModelAdapter = {
+  id: 'class',
+  getOperationResult(source, operation) {
+    if (!this.getRepresentability(source).representable) return { supported: false, reason: 'unrepresentable' };
+    return CLASS_OPERATIONS.has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' };
+  },
+  getRepresentability: (source) => isClassSourceRepresentable(source)
+    ? { representable: true }
+    : { representable: false, reason: 'unsupported-syntax' },
+};
+
+const STATE_OPERATIONS = new Set([
+  'add-state', 'add-transition', 'delete-state', 'delete-transition', 'edit-state', 'edit-transition',
+]);
+
+const STATE_ADAPTER: DiagramSourceModelAdapter = {
+  id: 'state',
+  getOperationResult(source, operation) {
+    if (!this.getRepresentability(source).representable) return { supported: false, reason: 'unrepresentable' };
+    return STATE_OPERATIONS.has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' };
+  },
+  getRepresentability: (source) => isStateSourceRepresentable(source)
+    ? { representable: true }
+    : { representable: false, reason: 'unsupported-syntax' },
+};
+
+const REQUIREMENT_OPERATIONS = new Set([
+  'add-requirement', 'add-relationship', 'delete-requirement', 'delete-relationship', 'edit-requirement', 'edit-relationship',
+]);
+
+const REQUIREMENT_ADAPTER: DiagramSourceModelAdapter = {
+  id: 'requirement',
+  getOperationResult(source, operation) {
+    if (!this.getRepresentability(source).representable) return { supported: false, reason: 'unrepresentable' };
+    return REQUIREMENT_OPERATIONS.has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' };
+  },
+  getRepresentability: (source) => isRequirementSourceRepresentable(source)
+    ? { representable: true }
+    : { representable: false, reason: 'unsupported-syntax' },
+};
+
 /**
  * Every built-in visual Mermaid family in 11.16.1. Aliases, renderer variants,
  * and Railroad's four grammar detector IDs deliberately collapse to one family.
@@ -133,7 +182,7 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'architecture', label: 'Architecture', parserTypes: ['architecture'] },
   { id: 'block', label: 'Block', parserTypes: ['block'] },
   { id: 'c4', label: 'C4', parserTypes: ['c4'] },
-  { id: 'class', label: 'Class', parserTypes: ['class', 'classDiagram'] },
+  { id: 'class', label: 'Class', parserTypes: ['class', 'classDiagram'], editingMode: 'semantic-form', adapter: 'class' },
   { id: 'cynefin', label: 'Cynefin', parserTypes: ['cynefin'] },
   { id: 'entity-relationship', label: 'Entity relationship', parserTypes: ['er'], editingMode: 'semantic-form', adapter: 'er' },
   { id: 'event-modeling', label: 'Event modeling', parserTypes: ['eventmodeling'] },
@@ -149,10 +198,10 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'quadrant', label: 'Quadrant chart', parserTypes: ['quadrantChart'] },
   { id: 'radar', label: 'Radar', parserTypes: ['radar'] },
   { id: 'railroad', label: 'Railroad', parserTypes: ['railroad', 'railroadEbnf', 'railroadAbnf', 'railroadPeg'] },
-  { id: 'requirement', label: 'Requirement', parserTypes: ['requirement'] },
+  { id: 'requirement', label: 'Requirement', parserTypes: ['requirement'], editingMode: 'semantic-form', adapter: 'requirement' },
   { id: 'sankey', label: 'Sankey', parserTypes: ['sankey'] },
   { id: 'sequence', label: 'Sequence', parserTypes: ['sequence'], editingMode: 'semantic-form', adapter: 'sequence' },
-  { id: 'state', label: 'State', parserTypes: ['state', 'stateDiagram'] },
+  { id: 'state', label: 'State', parserTypes: ['state', 'stateDiagram'], editingMode: 'semantic-form', adapter: 'state' },
   { id: 'swimlane', label: 'Swimlane', parserTypes: ['swimlane'] },
   { id: 'timeline', label: 'Timeline', parserTypes: ['timeline'] },
   { id: 'tree-view', label: 'Tree view', parserTypes: ['treeView'] },
@@ -210,6 +259,9 @@ export function getDiagramSourceModelAdapter(capability: DiagramCapability | nul
     case 'flowchart': return FLOWCHART_ADAPTER;
     case 'sequence': return SEQUENCE_ADAPTER;
     case 'er': return ER_ADAPTER;
+    case 'class': return CLASS_ADAPTER;
+    case 'state': return STATE_ADAPTER;
+    case 'requirement': return REQUIREMENT_ADAPTER;
     case 'unavailable-plugin': return UNAVAILABLE_PLUGIN_ADAPTER;
     default: return SOURCE_ONLY_ADAPTER;
   }

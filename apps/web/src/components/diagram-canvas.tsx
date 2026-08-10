@@ -81,6 +81,9 @@ import {
 import { getSafeToolbarPosition } from '../lib/toolbar-safe-area';
 import type { SequenceActivationAction, SequenceArrow, SequenceDiagramSnapshot, SequenceFragmentKind, SequenceMessage, SequenceNote, SequenceParticipant, SequenceParticipantKind } from '../lib/sequence-mutations';
 import { getErRelationshipIdentity, type ErAttribute, type ErDiagramSnapshot, type ErRelationship, type ErRelationshipIdentity } from '../lib/er-mutations';
+import type { ClassDiagramSnapshot, ClassEntity, ClassMember, ClassRelationship } from '../lib/class-mutations';
+import type { StateDiagramSnapshot, StateTransition } from '../lib/state-mutations';
+import type { RequirementDiagramSnapshot, RequirementEntity, RequirementRelationship } from '../lib/requirement-mutations';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
@@ -94,6 +97,9 @@ export interface DiagramCanvasProps {
   mermaidSource?: string;
   isSequence?: boolean;
   isEr?: boolean;
+  isClass?: boolean;
+  isState?: boolean;
+  isRequirement?: boolean;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
@@ -103,6 +109,9 @@ export interface DiagramCanvasProps {
   sequenceDiagram?: SequenceDiagramSnapshot | null;
   sequenceTextItems?: readonly SequenceSvgTextItem[];
   erDiagram?: ErDiagramSnapshot | null;
+  classDiagram?: ClassDiagramSnapshot | null;
+  stateDiagram?: StateDiagramSnapshot | null;
+  requirementDiagram?: RequirementDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
@@ -140,6 +149,29 @@ export interface DiagramCanvasProps {
   onAddErRelationship?: (relationship: ErRelationship) => void;
   onEditErRelationship?: (identity: ErRelationshipIdentity, relationship: ErRelationship) => void;
   onDeleteErRelationship?: (identity: ErRelationshipIdentity) => void;
+  onAddClass?: (name: string) => void;
+  onEditClass?: (name: string, patch: Partial<Pick<ClassEntity, 'name' | 'label'>>) => void;
+  onDeleteClass?: (name: string) => void;
+  onAddClassMember?: (name: string, member: ClassMember) => void;
+  onEditClassMember?: (name: string, index: number, member: ClassMember) => void;
+  onDeleteClassMember?: (name: string, index: number) => void;
+  onAddClassAnnotation?: (name: string, annotation: string) => void;
+  onDeleteClassAnnotation?: (name: string, annotation: string) => void;
+  onAddClassRelationship?: (relationship: ClassRelationship) => void;
+  onEditClassRelationship?: (index: number, relationship: ClassRelationship) => void;
+  onDeleteClassRelationship?: (index: number) => void;
+  onAddState?: (name: string) => void;
+  onEditState?: (id: string, patch: { id?: string; label?: string }) => void;
+  onDeleteState?: (id: string) => void;
+  onAddStateTransition?: (transition: StateTransition) => void;
+  onEditStateTransition?: (index: number, transition: StateTransition) => void;
+  onDeleteStateTransition?: (index: number) => void;
+  onAddRequirement?: (requirement: RequirementEntity) => void;
+  onEditRequirement?: (name: string, requirement: Partial<Pick<RequirementEntity, 'fields' | 'kind'>> & { name?: string }) => void;
+  onDeleteRequirement?: (name: string) => void;
+  onAddRequirementRelationship?: (relationship: RequirementRelationship) => void;
+  onEditRequirementRelationship?: (index: number, relationship: RequirementRelationship) => void;
+  onDeleteRequirementRelationship?: (index: number) => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
@@ -433,6 +465,9 @@ export function DiagramCanvas({
   mermaidSource = '',
   isSequence = false,
   isEr = false,
+  isClass = false,
+  isState = false,
+  isRequirement = false,
   nodePositions,
   preserveCamera = false,
   onAddEdge,
@@ -471,6 +506,29 @@ export function DiagramCanvas({
   onAddErRelationship,
   onEditErRelationship,
   onDeleteErRelationship,
+  onAddClass,
+  onEditClass,
+  onDeleteClass,
+  onAddClassMember,
+  onEditClassMember,
+  onDeleteClassMember,
+  onAddClassAnnotation,
+  onDeleteClassAnnotation,
+  onAddClassRelationship,
+  onEditClassRelationship,
+  onDeleteClassRelationship,
+  onAddState,
+  onEditState,
+  onDeleteState,
+  onAddStateTransition,
+  onEditStateTransition,
+  onDeleteStateTransition,
+  onAddRequirement,
+  onEditRequirement,
+  onDeleteRequirement,
+  onAddRequirementRelationship,
+  onEditRequirementRelationship,
+  onDeleteRequirementRelationship,
   onAddConnectedNode,
   onCanvasCursorChange,
   onChangeNodeShape,
@@ -501,6 +559,9 @@ export function DiagramCanvas({
   sequenceDiagram = null,
   sequenceTextItems = [],
   erDiagram = null,
+  classDiagram = null,
+  stateDiagram = null,
+  requirementDiagram = null,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -3030,6 +3091,48 @@ export function DiagramCanvas({
           />
         ) : null}
 
+        {isClass && !readOnly && classDiagram ? (
+          <ClassEditorControls
+            bottom={erEditorBottom}
+            diagram={classDiagram}
+            onAddAnnotation={onAddClassAnnotation}
+            onAddClass={onAddClass}
+            onAddMember={onAddClassMember}
+            onAddRelationship={onAddClassRelationship}
+            onDeleteAnnotation={onDeleteClassAnnotation}
+            onDeleteClass={onDeleteClass}
+            onDeleteMember={onDeleteClassMember}
+            onDeleteRelationship={onDeleteClassRelationship}
+            onEditClass={onEditClass}
+            onEditMember={onEditClassMember}
+            onEditRelationship={onEditClassRelationship}
+          />
+        ) : null}
+        {isState && !readOnly && stateDiagram ? (
+          <StateEditorControls
+            bottom={erEditorBottom}
+            diagram={stateDiagram}
+            onAddState={onAddState}
+            onAddTransition={onAddStateTransition}
+            onDeleteState={onDeleteState}
+            onDeleteTransition={onDeleteStateTransition}
+            onEditState={onEditState}
+            onEditTransition={onEditStateTransition}
+          />
+        ) : null}
+        {isRequirement && !readOnly && requirementDiagram ? (
+          <RequirementEditorControls
+            bottom={erEditorBottom}
+            diagram={requirementDiagram}
+            onAddRequirement={onAddRequirement}
+            onAddRelationship={onAddRequirementRelationship}
+            onDeleteRequirement={onDeleteRequirement}
+            onDeleteRelationship={onDeleteRequirementRelationship}
+            onEditRequirement={onEditRequirement}
+            onEditRelationship={onEditRequirementRelationship}
+          />
+        ) : null}
+
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
             {selection.length === 1 ? (
@@ -3936,6 +4039,112 @@ function ErRelationshipForm({ entities, onDelete, onSave, relationship }: { enti
     <input aria-label="Relationship label" onChange={(event) => { setDraft((current) => ({ ...current, label: event.target.value })); }} value={draft.label} />
     <button type="submit">{onDelete ? 'Save' : 'Add relationship'}</button>{onDelete ? <button aria-label={`Delete relationship ${relationship.label}`} onClick={onDelete} type="button">Delete</button> : null}
   </form>;
+}
+
+const SEMANTIC_PANEL_STYLE: CSSProperties = {
+  background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8,
+  maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12,
+  width: 'min(400px, calc(100% - 24px))', zIndex: 7,
+};
+
+function ClassEditorControls({
+  bottom, diagram, onAddAnnotation, onAddClass, onAddMember, onAddRelationship, onDeleteAnnotation, onDeleteClass,
+  onDeleteMember, onDeleteRelationship, onEditClass, onEditMember, onEditRelationship,
+}: {
+  bottom: number; diagram: ClassDiagramSnapshot;
+  onAddAnnotation?: (name: string, annotation: string) => void; onAddClass?: (name: string) => void;
+  onAddMember?: (name: string, member: ClassMember) => void; onAddRelationship?: (relationship: ClassRelationship) => void;
+  onDeleteAnnotation?: (name: string, annotation: string) => void; onDeleteClass?: (name: string) => void;
+  onDeleteMember?: (name: string, index: number) => void; onDeleteRelationship?: (index: number) => void;
+  onEditClass?: (name: string, patch: Partial<Pick<ClassEntity, 'name' | 'label'>>) => void;
+  onEditMember?: (name: string, index: number, member: ClassMember) => void;
+  onEditRelationship?: (index: number, relationship: ClassRelationship) => void;
+}) {
+  const [name, setName] = useState('Class');
+  const [relationship, setRelationship] = useState<ClassRelationship>({ from: diagram.classes[0]?.name ?? '', relation: '-->', to: diagram.classes[1]?.name ?? diagram.classes[0]?.name ?? '' });
+  useEffect(() => { setRelationship((current) => ({ ...current, from: diagram.classes.some((item) => item.name === current.from) ? current.from : diagram.classes[0]?.name ?? '', to: diagram.classes.some((item) => item.name === current.to) ? current.to : diagram.classes[1]?.name ?? diagram.classes[0]?.name ?? '' })); }, [diagram.classes]);
+  return <aside className="canvas-semantic-editor canvas-class-editor" data-canvas-pan-exclusion="true" data-testid="class-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
+    <form onSubmit={(event) => { event.preventDefault(); onAddClass?.(name); setName('Class'); }} style={{ display: 'flex', gap: 6 }}>
+      <strong style={{ fontSize: 12, whiteSpace: 'nowrap' }}>Classes</strong><input aria-label="New class" onChange={(event) => setName(event.target.value)} value={name} /><button aria-label="Add class" type="submit">Add</button>
+    </form>
+    {diagram.classes.map((item) => <ClassEntityForm entity={item} key={item.name} onAddAnnotation={onAddAnnotation} onAddMember={onAddMember} onDeleteAnnotation={onDeleteAnnotation} onDelete={onDeleteClass} onDeleteMember={onDeleteMember} onEdit={onEditClass} onEditMember={onEditMember} />)}
+    <section aria-label="Class relationships" style={{ borderTop: '1px solid var(--line-subtle)', marginTop: 10, paddingTop: 8 }}>
+      <strong style={{ fontSize: 12 }}>Relationships</strong>
+      {diagram.relationships.map((item, index) => <ClassRelationshipForm classes={diagram.classes.map((entry) => entry.name)} key={`${index}:${item.from}:${item.to}:${item.relation}`} onDelete={() => onDeleteRelationship?.(index)} onSave={(next) => onEditRelationship?.(index, next)} relationship={item} />)}
+      {diagram.classes.length > 0 ? <ClassRelationshipForm classes={diagram.classes.map((entry) => entry.name)} onSave={onAddRelationship} relationship={relationship} /> : <small>Add classes before relating them.</small>}
+    </section>
+  </aside>;
+}
+
+function ClassEntityForm({ entity, onAddAnnotation, onAddMember, onDeleteAnnotation, onDelete, onDeleteMember, onEdit, onEditMember }: {
+  entity: ClassEntity; onAddAnnotation?: (name: string, annotation: string) => void; onAddMember?: (name: string, member: ClassMember) => void;
+  onDeleteAnnotation?: (name: string, annotation: string) => void; onDelete?: (name: string) => void; onDeleteMember?: (name: string, index: number) => void;
+  onEdit?: (name: string, patch: Partial<Pick<ClassEntity, 'name' | 'label'>>) => void; onEditMember?: (name: string, index: number, member: ClassMember) => void;
+}) {
+  const [label, setLabel] = useState(entity.label ?? entity.name); const [member, setMember] = useState('member'); const [annotation, setAnnotation] = useState('');
+  return <section style={{ border: '1px solid var(--line-subtle)', borderRadius: 6, marginTop: 8, padding: 7 }}>
+    <form onSubmit={(event) => { event.preventDefault(); onEdit?.(entity.name, { label }); }} style={{ display: 'flex', gap: 4 }}><input aria-label={`Class ${entity.name} label`} onChange={(event) => setLabel(event.target.value)} value={label} /><button type="submit">Save</button><button aria-label={`Delete class ${entity.name}`} onClick={() => onDelete?.(entity.name)} type="button">Delete</button></form>
+    {entity.members.map((item, index) => <ClassMemberForm className={entity.name} index={index} key={`${index}:${item.name}`} member={item} onDelete={onDeleteMember} onSave={onEditMember} />)}
+    <form onSubmit={(event) => { event.preventDefault(); onAddMember?.(entity.name, { name: member }); setMember('member'); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label={`New member for ${entity.name}`} onChange={(event) => setMember(event.target.value)} value={member} /><button type="submit">Add member</button></form>
+    {entity.annotations.map((item) => <div key={item}><span>{item}</span><button aria-label={`Delete annotation ${item}`} onClick={() => onDeleteAnnotation?.(entity.name, item)} type="button">×</button></div>)}
+    <form onSubmit={(event) => { event.preventDefault(); if (annotation.trim()) onAddAnnotation?.(entity.name, annotation); setAnnotation(''); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label={`New annotation for ${entity.name}`} onChange={(event) => setAnnotation(event.target.value)} value={annotation} /><button type="submit">Add annotation</button></form>
+  </section>;
+}
+
+function ClassMemberForm({ className, index, member, onDelete, onSave }: { className: string; index: number; member: ClassMember; onDelete?: (name: string, index: number) => void; onSave?: (name: string, index: number, member: ClassMember) => void }) {
+  const [draft, setDraft] = useState(member);
+  return <form aria-label={`Member ${member.name} on ${className}`} onSubmit={(event) => { event.preventDefault(); onSave?.(className, index, draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><input aria-label={`Name for ${member.name}`} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} value={draft.name} /><input aria-label={`Signature for ${member.name}`} onChange={(event) => setDraft((current) => ({ ...current, signature: event.target.value || undefined }))} placeholder="signature" value={draft.signature ?? ''} /><input aria-label={`Return type for ${member.name}`} onChange={(event) => setDraft((current) => ({ ...current, returnType: event.target.value || undefined }))} placeholder="return type" value={draft.returnType ?? ''} /><button type="submit">Save</button><button aria-label={`Delete member ${member.name}`} onClick={() => onDelete?.(className, index)} type="button">Delete</button></form>;
+}
+
+function ClassRelationshipForm({ classes, onDelete, onSave, relationship }: { classes: string[]; onDelete?: () => void; onSave?: (relationship: ClassRelationship) => void; relationship: ClassRelationship }) {
+  const [draft, setDraft] = useState(relationship);
+  return <form aria-label={`Class relationship ${relationship.from} ${relationship.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label="Class relationship source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{classes.map((name) => <option key={name}>{name}</option>)}</select><select aria-label="Class relationship type" onChange={(event) => setDraft((current) => ({ ...current, relation: event.target.value as ClassRelationship['relation'] }))} value={draft.relation}>{(['-->', '<|--', '*--', 'o--', '--', '..>'] as const).map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Class relationship target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{classes.map((name) => <option key={name}>{name}</option>)}</select><input aria-label="Class relationship label" onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value || undefined }))} placeholder="label" value={draft.label ?? ''} /><button type="submit">{onDelete ? 'Save' : 'Add relationship'}</button>{onDelete ? <button aria-label="Delete class relationship" onClick={onDelete} type="button">Delete</button> : null}</form>;
+}
+
+function StateEditorControls({ bottom, diagram, onAddState, onAddTransition, onDeleteState, onDeleteTransition, onEditState, onEditTransition }: {
+  bottom: number; diagram: StateDiagramSnapshot; onAddState?: (name: string) => void; onAddTransition?: (transition: StateTransition) => void;
+  onDeleteState?: (id: string) => void; onDeleteTransition?: (index: number) => void; onEditState?: (id: string, patch: { id?: string; label?: string }) => void; onEditTransition?: (index: number, transition: StateTransition) => void;
+}) {
+  const editableStates = diagram.states.filter((state) => state.kind === 'state'); const [name, setName] = useState('State');
+  const [transition, setTransition] = useState<StateTransition>({ from: editableStates[0]?.id ?? '[*]', to: editableStates[1]?.id ?? editableStates[0]?.id ?? 'State' });
+  return <aside className="canvas-semantic-editor canvas-state-editor" data-canvas-pan-exclusion="true" data-testid="state-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
+    <form onSubmit={(event) => { event.preventDefault(); onAddState?.(name); setName('State'); }} style={{ display: 'flex', gap: 6 }}><strong style={{ fontSize: 12 }}>States</strong><input aria-label="New state" onChange={(event) => setName(event.target.value)} value={name} /><button aria-label="Add state" type="submit">Add</button></form>
+    {editableStates.map((state) => <StateNodeForm key={state.id} onDelete={onDeleteState} onSave={onEditState} state={state} />)}
+    <section aria-label="State transitions" style={{ borderTop: '1px solid var(--line-subtle)', marginTop: 10, paddingTop: 8 }}><strong style={{ fontSize: 12 }}>Transitions</strong>{diagram.transitions.map((item, index) => <StateTransitionForm key={`${index}:${item.from}:${item.to}:${item.label ?? ''}`} onDelete={() => onDeleteTransition?.(index)} onSave={(next) => onEditTransition?.(index, next)} states={diagram.states} transition={item} />)}<StateTransitionForm onSave={onAddTransition} states={diagram.states} transition={transition} /></section>
+  </aside>;
+}
+
+function StateNodeForm({ onDelete, onSave, state }: { onDelete?: (id: string) => void; onSave?: (id: string, patch: { id?: string; label?: string }) => void; state: StateDiagramSnapshot['states'][number] }) {
+  const [label, setLabel] = useState(state.label ?? state.id);
+  return <form aria-label={`State ${state.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(state.id, { label }); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label={`State ${state.id} label`} onChange={(event) => setLabel(event.target.value)} value={label} /><button type="submit">Save</button><button aria-label={`Delete state ${state.id}`} onClick={() => onDelete?.(state.id)} type="button">Delete</button></form>;
+}
+
+function StateTransitionForm({ onDelete, onSave, states, transition }: { onDelete?: () => void; onSave?: (transition: StateTransition) => void; states: readonly StateDiagramSnapshot['states'][number][]; transition: StateTransition }) {
+  const [draft, setDraft] = useState(transition); const endpoints = states.map((state) => state.id);
+  return <form aria-label={`State transition ${transition.from} ${transition.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label="State transition source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{endpoints.map((id) => <option key={id}>{id}</option>)}</select><span>→</span><select aria-label="State transition target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{endpoints.map((id) => <option key={id}>{id}</option>)}</select><input aria-label="State transition label" onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value || undefined }))} placeholder="label" value={draft.label ?? ''} /><button type="submit">{onDelete ? 'Save' : 'Add transition'}</button>{onDelete ? <button aria-label="Delete state transition" onClick={onDelete} type="button">Delete</button> : null}</form>;
+}
+
+function RequirementEditorControls({ bottom, diagram, onAddRequirement, onAddRelationship, onDeleteRequirement, onDeleteRelationship, onEditRequirement, onEditRelationship }: {
+  bottom: number; diagram: RequirementDiagramSnapshot; onAddRequirement?: (requirement: RequirementEntity) => void; onAddRelationship?: (relationship: RequirementRelationship) => void;
+  onDeleteRequirement?: (name: string) => void; onDeleteRelationship?: (index: number) => void; onEditRequirement?: (name: string, requirement: Partial<Pick<RequirementEntity, 'fields' | 'kind'>> & { name?: string }) => void; onEditRelationship?: (index: number, relationship: RequirementRelationship) => void;
+}) {
+  const [name, setName] = useState('requirement'); const [kind, setKind] = useState<RequirementEntity['kind']>('requirement');
+  const [relationship, setRelationship] = useState<RequirementRelationship>({ from: diagram.entities[0]?.name ?? '', kind: 'satisfies', to: diagram.entities[1]?.name ?? diagram.entities[0]?.name ?? '' });
+  return <aside className="canvas-semantic-editor canvas-requirement-editor" data-canvas-pan-exclusion="true" data-testid="requirement-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
+    <form onSubmit={(event) => { event.preventDefault(); onAddRequirement?.({ kind, name, fields: kind === 'element' ? { type: 'element' } : { id: name, text: 'Requirement', risk: 'low', verifyMethod: 'test' } }); setName('requirement'); }} style={{ display: 'flex', gap: 6 }}><strong style={{ fontSize: 12 }}>Requirements</strong><select aria-label="New requirement type" onChange={(event) => setKind(event.target.value as RequirementEntity['kind'])} value={kind}>{(['requirement', 'functionalRequirement', 'interfaceRequirement', 'performanceRequirement', 'physicalRequirement', 'designConstraint', 'element'] as const).map((value) => <option key={value}>{value}</option>)}</select><input aria-label="New requirement" onChange={(event) => setName(event.target.value)} value={name} /><button aria-label="Add requirement" type="submit">Add</button></form>
+    {diagram.entities.map((item) => <RequirementEntityForm entity={item} key={item.name} onDelete={onDeleteRequirement} onSave={onEditRequirement} />)}
+    <section aria-label="Requirement relationships" style={{ borderTop: '1px solid var(--line-subtle)', marginTop: 10, paddingTop: 8 }}><strong style={{ fontSize: 12 }}>Relationships</strong>{diagram.relationships.map((item, index) => <RequirementRelationshipForm entities={diagram.entities.map((entry) => entry.name)} key={`${index}:${item.from}:${item.kind}:${item.to}`} onDelete={() => onDeleteRelationship?.(index)} onSave={(next) => onEditRelationship?.(index, next)} relationship={item} />)}{diagram.entities.length > 0 ? <RequirementRelationshipForm entities={diagram.entities.map((entry) => entry.name)} onSave={onAddRelationship} relationship={relationship} /> : <small>Add requirements before relating them.</small>}</section>
+  </aside>;
+}
+
+function RequirementEntityForm({ entity, onDelete, onSave }: { entity: RequirementEntity; onDelete?: (name: string) => void; onSave?: (name: string, entity: Partial<Pick<RequirementEntity, 'fields' | 'kind'>> & { name?: string }) => void }) {
+  const [fields, setFields] = useState(() => Object.entries(entity.fields).map(([key, value]) => `${key}: ${value}`).join('\n'));
+  return <form aria-label={`${entity.kind} ${entity.name}`} onSubmit={(event) => { event.preventDefault(); const nextFields = Object.fromEntries(fields.split('\n').map((line) => line.split(/:\s*/u, 2)).filter(([key]) => Boolean(key?.trim())).map(([key, value]) => [key.trim(), value?.trim() ?? ''])); onSave?.(entity.name, { fields: nextFields }); }} style={{ border: '1px solid var(--line-subtle)', borderRadius: 6, display: 'grid', gap: 4, marginTop: 8, padding: 7 }}><strong>{entity.kind}: {entity.name}</strong><textarea aria-label={`Fields for ${entity.name}`} onChange={(event) => setFields(event.target.value)} value={fields} /><div><button type="submit">Save</button><button aria-label={`Delete requirement ${entity.name}`} onClick={() => onDelete?.(entity.name)} type="button">Delete</button></div></form>;
+}
+
+function RequirementRelationshipForm({ entities, onDelete, onSave, relationship }: { entities: string[]; onDelete?: () => void; onSave?: (relationship: RequirementRelationship) => void; relationship: RequirementRelationship }) {
+  const [draft, setDraft] = useState(relationship);
+  return <form aria-label={`Requirement relationship ${relationship.from} ${relationship.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label="Requirement relationship source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{entities.map((name) => <option key={name}>{name}</option>)}</select><select aria-label="Requirement relationship type" onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value as RequirementRelationship['kind'] }))} value={draft.kind}>{(['contains', 'copies', 'derives', 'satisfies', 'verifies', 'refines', 'traces'] as const).map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Requirement relationship target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{entities.map((name) => <option key={name}>{name}</option>)}</select><button type="submit">{onDelete ? 'Save' : 'Add relationship'}</button>{onDelete ? <button aria-label="Delete requirement relationship" onClick={onDelete} type="button">Delete</button> : null}</form>;
 }
 
 function ToolbarButton({

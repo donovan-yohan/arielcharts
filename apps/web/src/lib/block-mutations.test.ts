@@ -11,10 +11,13 @@ import {
   deleteBlockNode,
   editBlockLink,
   editBlockNode,
+  setBlockColumns,
   editBlockComposite,
   getBlockDiagramSnapshot,
   getBlockLinkIdentity,
   isBlockSourceRepresentable,
+  moveBlockComposite,
+  moveBlockNode,
 } from './block-mutations';
 
 const SOURCE = `---
@@ -46,7 +49,7 @@ describe('block source mutations', () => {
       nodes: [
         { id: 'api', label: 'Public API', span: 2 },
         { id: 'worker', label: 'worker', span: 1 },
-        { id: 'db', label: 'Database', span: 1 },
+        { id: 'db', label: 'Database', parentId: 'storage', span: 1 },
       ],
       composites: [{ id: 'storage', span: 2, columns: 2 }],
       links: [{ from: 'api', to: 'worker' }, { from: 'worker', to: 'db' }],
@@ -77,6 +80,39 @@ describe('block source mutations', () => {
     expect(renamed).toContain('api --> archive');
     expect(renamed).toContain('block:archive:2\n    columns 3');
     expect(deleteBlockComposite(renamed, 'archive')).not.toContain('archive');
+  });
+
+  it('inserts root columns after the header without separating it from the first authored statement', () => {
+    expect(setBlockColumns('block-beta\n  api["API"]', 2)).toBe('block-beta\n  columns 2\n  api["API"]');
+  });
+
+  it('keeps parent membership and removes every descendant incident link with a composite', () => {
+    const source = `block-beta
+  block:outer
+    block:inner
+      child["Child"]
+    end
+  end
+  outside["Outside"]
+  child --> outside`;
+    expect(getBlockDiagramSnapshot(source).nodes[0]).toMatchObject({ id: 'child', parentId: 'inner' });
+    expect(getBlockDiagramSnapshot(source).composites.find((item) => item.id === 'inner')).toMatchObject({ parentId: 'outer' });
+    expect(deleteBlockComposite(source, 'outer')).not.toContain('child --> outside');
+  });
+
+  it('moves nodes and composite ranges while rejecting cyclic composite containment', () => {
+    const source = `block-beta
+  block:outer
+    block:inner
+      child["Child"]
+    end
+  end
+  item["Item"]`;
+    const movedNode = moveBlockNode(source, 'item', 'inner');
+    expect(movedNode).toContain('      item["Item"]');
+    const movedComposite = moveBlockComposite(movedNode, 'inner', null);
+    expect(movedComposite).toContain('  block:inner');
+    expect(() => moveBlockComposite(source, 'outer', 'inner')).toThrow('cannot contain itself');
   });
 
   it('re-resolves a unique link after remote movement and rejects duplicate fingerprints', () => {

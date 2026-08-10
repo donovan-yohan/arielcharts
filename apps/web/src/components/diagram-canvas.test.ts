@@ -77,7 +77,7 @@ describe('relationship and architecture semantic editors', () => {
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'architecture'\)/u);
     expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addArchitectureService/u);
     expect(canvasSource).toMatch(/data-testid="architecture-editor-controls"/u);
-    expect(canvasSource).toMatch(/Architecture group editor[^]*?Architecture group title/u);
+    expect(canvasSource).toMatch(/Architecture group \$\{group\.id\} editor[^]*?Architecture group \$\{group\.id\} title/u);
     expect(canvasSource).toMatch(/data-testid="c4-editor-controls"/u);
     expect(canvasSource).toMatch(/data-testid="block-editor-controls"/u);
     expect(canvasSource).toMatch(/data-testid="swimlane-editor-controls"/u);
@@ -91,12 +91,14 @@ describe('relationship and architecture semantic editors', () => {
     expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addBlockNode/u);
     expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addSwimlaneNode/u);
     expect(canvasSource).toMatch(/onSave\?\.\(group\.id, draft\)/u);
-    expect(canvasSource).toMatch(/Architecture service editor[^]*?Architecture service title/u);
+    expect(canvasSource).toMatch(/Architecture service \$\{service\.id\} editor[^]*?Architecture service \$\{service\.id\} title/u);
     expect(canvasSource).toMatch(/onSave\?\.\(service\.id, draft\)/u);
-    expect(canvasSource).toMatch(/Architecture junction editor[^]*?Architecture junction parent/u);
+    expect(canvasSource).toMatch(/Architecture junction \$\{junction\.id\} editor[^]*?Architecture junction \$\{junction\.id\} parent/u);
     expect(canvasSource).toMatch(/onSave\?\.\(junction\.id, draft\)/u);
-    expect(canvasSource).toMatch(/Architecture edge editor[^]*?Architecture edge source port[^]*?Architecture edge target port/u);
-    expect(canvasSource).toMatch(/Architecture alignment editor[^]*?Architecture alignment members/u);
+    expect(canvasSource).toMatch(/Architecture edge \$\{signature\} editor[^]*?Architecture edge \$\{signature\} source port[^]*?Architecture edge \$\{signature\} target port/u);
+    expect(canvasSource).toMatch(/Architecture alignment \$\{signature\} editor[^]*?Architecture alignment \$\{signature\} members/u);
+    expect(canvasSource).toMatch(/data-testid="c4-containment-controls"[^]*?C4 boundary \$\{boundary\.id\} parent/u);
+    expect(canvasSource).toMatch(/data-testid="block-containment-controls"[^]*?Block composite \$\{composite\.id\} parent/u);
   });
 });
 

@@ -100,8 +100,8 @@ import {
   editArchitectureAlignment, editArchitectureEdge, editArchitectureGroup, editArchitectureJunction, editArchitectureService,
   getArchitectureDiagramSnapshot,
 } from '../lib/architecture-mutations';
-import { addC4Boundary, addC4Element, addC4Relationship, deleteC4Boundary, deleteC4Element, deleteC4Relationship, editC4Boundary, editC4Element, editC4Relationship, getC4DiagramSnapshot } from '../lib/c4-mutations';
-import { addBlockComposite, addBlockLink, addBlockNode, deleteBlockComposite, deleteBlockLink, deleteBlockNode, editBlockComposite, editBlockLink, editBlockNode, getBlockDiagramSnapshot, setBlockColumns } from '../lib/block-mutations';
+import { addC4Boundary, addC4Element, addC4Relationship, deleteC4Boundary, deleteC4Element, deleteC4Relationship, editC4Boundary, editC4Element, editC4Relationship, getC4DiagramSnapshot, moveC4Boundary, moveC4Element } from '../lib/c4-mutations';
+import { addBlockComposite, addBlockLink, addBlockNode, deleteBlockComposite, deleteBlockLink, deleteBlockNode, editBlockComposite, editBlockLink, editBlockNode, getBlockDiagramSnapshot, moveBlockComposite, moveBlockNode, setBlockColumns } from '../lib/block-mutations';
 import { addSwimlane, addSwimlaneHandoff, addSwimlaneNode, deleteSwimlane, deleteSwimlaneHandoff, deleteSwimlaneNode, editSwimlane, editSwimlaneHandoff, editSwimlaneNode, getSwimlaneDiagramSnapshot, moveSwimlaneNode } from '../lib/swimlane-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
@@ -2356,6 +2356,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onAddC4Element={(value) => { mutateCanvasSource((source) => addC4Element(source, value), 'Added a C4 element'); }}
             onEditC4Element={(id, value) => { mutateCanvasSource((source) => editC4Element(source, id, value), 'Edited a C4 element'); }}
             onDeleteC4Element={(id) => { mutateCanvasSource((source) => deleteC4Element(source, id), 'Deleted a C4 element'); }}
+            onMoveC4Element={(id, parentId) => { mutateCanvasSource((source) => moveC4Element(source, id, parentId), 'Moved a C4 element'); }}
+            onMoveC4Boundary={(id, parentId) => { mutateCanvasSource((source) => moveC4Boundary(source, id, parentId), 'Moved a C4 boundary'); }}
             onAddC4Boundary={(value) => { mutateCanvasSource((source) => addC4Boundary(source, value), 'Added a C4 boundary'); }}
             onEditC4Boundary={(id, value) => { mutateCanvasSource((source) => editC4Boundary(source, id, value), 'Edited a C4 boundary'); }}
             onDeleteC4Boundary={(id) => { mutateCanvasSource((source) => deleteC4Boundary(source, id), 'Deleted a C4 boundary'); }}
@@ -2365,6 +2367,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onAddBlockNode={(value) => { mutateCanvasSource((source) => addBlockNode(source, value), 'Added a block'); }}
             onEditBlockNode={(id, value) => { mutateCanvasSource((source) => editBlockNode(source, id, value), 'Edited a block'); }}
             onDeleteBlockNode={(id) => { mutateCanvasSource((source) => deleteBlockNode(source, id), 'Deleted a block'); }}
+            onMoveBlockNode={(id, parentId) => { mutateCanvasSource((source) => moveBlockNode(source, id, parentId), 'Moved a block'); }}
+            onMoveBlockComposite={(id, parentId) => { mutateCanvasSource((source) => moveBlockComposite(source, id, parentId), 'Moved a block composite'); }}
             onAddBlockComposite={(value) => { mutateCanvasSource((source) => addBlockComposite(source, value), 'Added a block composite'); }}
             onEditBlockComposite={(id, value) => { mutateCanvasSource((source) => editBlockComposite(source, id, value), 'Edited a block composite'); }}
             onDeleteBlockComposite={(id) => { mutateCanvasSource((source) => deleteBlockComposite(source, id), 'Deleted a block composite'); }}

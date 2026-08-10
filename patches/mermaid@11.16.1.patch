@@ -1,0 +1,31 @@
+diff --git a/dist/chunks/mermaid.core/blockDiagram-VBNYF7ZC.mjs b/dist/chunks/mermaid.core/blockDiagram-VBNYF7ZC.mjs
+index 8960ddddd61b7bb1a1793b240afa08a13c29e0d6..1317a0045cd2fc34ef25980102ccc5da6baf433f 100644
+--- a/dist/chunks/mermaid.core/blockDiagram-VBNYF7ZC.mjs
++++ b/dist/chunks/mermaid.core/blockDiagram-VBNYF7ZC.mjs
+@@ -1645,9 +1645,14 @@ function setBlockSizes(block, db2, siblingWidth = 0, siblingHeight = 0, padding
+     log.debug("setBlockSizes abc95 maxWidth of", block.id, ":s children is ", maxWidth, maxHeight);
+     for (const child of block.children) {
+       if (child.size) {
+-        log.debug(
+-          `abc95 Setting size of children of ${block.id} id=${child.id} ${maxWidth} ${maxHeight} ${JSON.stringify(child.size)}`
+-        );
++        log.debug("setBlockSizes child", {
++          blockId: block.id,
++          childId: child.id,
++          maxWidth,
++          maxHeight,
++          width: child.size.width,
++          height: child.size.height
++        });
+         child.size.width = maxWidth * (child.widthInColumns ?? 1) + padding * ((child.widthInColumns ?? 1) - 1);
+         child.size.height = maxHeight;
+         child.size.x = 0;
+@@ -1845,7 +1850,7 @@ function layout(db2) {
+   const padding = getConfig2()?.block?.padding ?? 8;
+   setBlockSizes(root, db2, 0, 0, padding);
+   layoutBlocks(root, db2, padding);
+-  log.debug("getBlocks", JSON.stringify(root, null, 2));
++  log.debug("getBlocks", { id: root.id, childCount: root.children?.length ?? 0 });
+   const { minX, minY, maxX, maxY } = findBounds(root);
+   const height = maxY - minY;
+   const width = maxX - minX;

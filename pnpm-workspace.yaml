@@ -1,3 +1,6 @@
 packages:
   - apps/*
   - packages/*
+
+patchedDependencies:
+  mermaid@11.16.1: patches/mermaid@11.16.1.patch

@@ -15,6 +15,8 @@ import {
   getC4DiagramSnapshot,
   getC4RelationshipIdentity,
   isC4SourceRepresentable,
+  moveC4Boundary,
+  moveC4Element,
 } from './c4-mutations';
 
 const SOURCE = `---
@@ -44,8 +46,8 @@ describe('C4 source mutations', () => {
       boundaries: [{ id: 'shop', kind: 'System_Boundary', label: 'Shop' }],
       elements: [
         { id: 'customer', kind: 'Person', label: 'Customer', description: 'Places orders' },
-        { id: 'web', kind: 'Container', label: 'Web app', technology: 'Next.js', description: 'Receives orders' },
-        { id: 'db', kind: 'ContainerDb', label: 'Database', technology: 'PostgreSQL' },
+        { id: 'web', kind: 'Container', label: 'Web app', parentId: 'shop', technology: 'Next.js', description: 'Receives orders' },
+        { id: 'db', kind: 'ContainerDb', label: 'Database', parentId: 'shop', technology: 'PostgreSQL' },
       ],
       relationships: [
         { from: 'customer', to: 'web', label: 'Uses', technology: 'HTTPS' },
@@ -76,6 +78,31 @@ describe('C4 source mutations', () => {
     const renamed = editC4Boundary(added, 'shop2', { id: 'checkout', label: 'Checkout area' });
     expect(renamed).toContain('Container_Boundary(checkout, "Checkout area") {');
     expect(deleteC4Boundary(renamed, 'checkout')).not.toContain('checkout');
+  });
+
+  it('models and writes explicit boundary containment without rewriting surrounding source', () => {
+    const nested = `C4Context
+  Boundary(zone, "Zone") {
+    Person(user, "User")
+  }`;
+    expect(getC4DiagramSnapshot(nested).elements[0]).toMatchObject({ id: 'user', parentId: 'zone' });
+    const added = addC4Element(nested, { id: 'app', kind: 'System', label: 'App', parentId: 'zone' });
+    expect(added).toContain('  System(app, "App")\n  }');
+  });
+
+  it('moves C4 elements and bounded boundary ranges without allowing cyclic containment', () => {
+    const source = `C4Context
+  Boundary(zone, "Zone") {
+    Boundary(team, "Team") {
+      Person(user, "User")
+    }
+  }
+  System(app, "App")`;
+    const movedElement = moveC4Element(source, 'app', 'team');
+    expect(movedElement).toContain('      System(app, "App")');
+    const movedBoundary = moveC4Boundary(movedElement, 'team', null);
+    expect(movedBoundary).toContain('  Boundary(team, "Team") {');
+    expect(() => moveC4Boundary(source, 'zone', 'team')).toThrow('cannot contain itself');
   });
 
   it('re-resolves a unique semantic fingerprint after a remote insertion and rejects stale ambiguity', () => {

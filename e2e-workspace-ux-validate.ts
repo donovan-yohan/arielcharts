@@ -82,6 +82,12 @@ const TRANSPARENT_MERMAID_FIXTURE = `flowchart LR
   classDef ghost fill:none,stroke:transparent,color:transparent;
   Ghost[Ghost]:::ghost --> Visible[Visible]`;
 
+const SHAPE_HANDLE_FIXTURE = `flowchart LR
+  classDef cylinder fill:#e7f5ff,stroke:#1864ab,color:#0b2e59;
+  Start[Start] --> Diamond{Diamond shape}
+  Diamond --> Hexagon{{Hexagon shape}}
+  Hexagon --> Cylinder[(A cylinder node with a deliberately much longer label)]:::cylinder`;
+
 const HISTORY_PREVIOUS_FLOWCHART = `flowchart LR
   Browser[Browser] --> Prior[Prior revision]
   Prior --> API[API]`;
@@ -138,6 +144,104 @@ async function waitForNodeColors(
 async function waitForFlowchartFixtureRender(page: Page): Promise<void> {
   await page.locator('.mermaid-flow-node').filter({ hasText: 'Database' }).first()
     .waitFor({ state: 'visible', timeout: 15_000 });
+}
+
+async function expectUnclippedShapeHandles(page: Page): Promise<void> {
+  await replaceSource(page, SHAPE_HANDLE_FIXTURE);
+  await waitForSource(page, SHAPE_HANDLE_FIXTURE);
+  await waitForCanvas(page, 'flowchart');
+  await triggerCanvasFit(page, 'shape handle fit diagram');
+  await waitForStableCanvasTransform(page, 'shape handle fit diagram');
+
+  for (const label of ['Diamond shape', 'Hexagon shape', 'A cylinder node with a deliberately much longer label']) {
+    const node = page.locator('.mermaid-flow-node').filter({ hasText: label }).first();
+    await node.waitFor({ state: 'visible', timeout: 15_000 });
+    await node.hover();
+    const geometry = await node.evaluate((element) => {
+      const surface = element.querySelector<HTMLElement>('.mermaid-flow-node-surface');
+      if (!surface) return null;
+      const surfaceRect = surface.getBoundingClientRect();
+      const nodeRect = element.getBoundingClientRect();
+      const handles: Record<string, {
+        extendsPastSurface: boolean;
+        hitClassName: string | null;
+        outerEdgeHit: boolean;
+        visible: boolean;
+      } | null> = {};
+      for (const position of ['left', 'right', 'top', 'bottom']) {
+        const handle = element.querySelector<HTMLElement>(`.mermaid-flow-handle--${position}.mermaid-flow-handle--source`);
+        if (!handle) {
+          handles[position] = null;
+          continue;
+        }
+        const rect = handle.getBoundingClientRect();
+        const x = position === 'left' ? rect.left + 1 : position === 'right' ? rect.right - 1 : rect.left + (rect.width / 2);
+        const y = position === 'top' ? rect.top + 1 : position === 'bottom' ? rect.bottom - 1 : rect.top + (rect.height / 2);
+        const hit = document.elementFromPoint(x, y);
+        handles[position] = {
+          extendsPastSurface: position === 'left' ? rect.left < surfaceRect.left
+            : position === 'right' ? rect.right > surfaceRect.right
+              : position === 'top' ? rect.top < surfaceRect.top
+              : rect.bottom > surfaceRect.bottom,
+          hitClassName: hit instanceof HTMLElement ? hit.className : null,
+          outerEdgeHit: hit === handle || hit?.closest('.mermaid-flow-handle') === handle,
+          visible: getComputedStyle(handle).opacity !== '0',
+        };
+      }
+      const cylinder = surface.classList.contains('mermaid-flow-node-surface--cylinder');
+      const before = getComputedStyle(surface, '::before');
+      const surfaceStyle = getComputedStyle(surface);
+      return {
+        cylinder,
+        handles,
+        nodeMatchesSurface: Math.abs(nodeRect.width - surfaceRect.width) < 0.5 && Math.abs(nodeRect.height - surfaceRect.height) < 0.5,
+        cylinderRimMatchesSurface: !cylinder || (
+          before.left === '-1px'
+          && before.right === '-1px'
+          && Math.abs(parseFloat(before.width) - surface.offsetWidth) <= 2
+        ),
+        cylinderRimLeft: before.left,
+        cylinderRimRight: before.right,
+        cylinderRimStrokeMatchesSurface: !cylinder || before.borderTopColor === surfaceStyle.borderTopColor,
+        cylinderRimWidth: before.width,
+        surfaceLayoutWidth: surface.offsetWidth,
+        surfaceWidth: surfaceRect.width,
+        wrapperClipPath: getComputedStyle(element).clipPath,
+      };
+    });
+    assert(geometry !== null, `${label} did not render a shape surface.`);
+    assert(geometry.nodeMatchesSurface, `${label} shape surface changed the measured React Flow node geometry: ${JSON.stringify(geometry)}.`);
+    assert(geometry.wrapperClipPath === 'none', `${label} React Flow node wrapper still clips its handles: ${JSON.stringify(geometry)}.`);
+    for (const position of ['left', 'right', 'top', 'bottom']) {
+      const handle = geometry.handles[position];
+      assert(handle?.visible && handle.extendsPastSurface && handle.outerEdgeHit,
+        `${label} ${position} handle was clipped or lost its outer hit target: ${JSON.stringify(geometry)}.`);
+    }
+    if (geometry.cylinder) {
+      assert(geometry.surfaceWidth > 200 && geometry.cylinderRimMatchesSurface && geometry.cylinderRimStrokeMatchesSurface,
+        `Large-label cylinder decoration no longer tracks the painted surface width: ${JSON.stringify(geometry)}.`);
+    }
+  }
+  await saveScreenshot(page, 'shape-handle-surfaces');
+
+  const diamond = page.locator('.mermaid-flow-node').filter({ hasText: 'Diamond shape' }).first();
+  const start = page.locator('.mermaid-flow-node').filter({ hasText: 'Start' }).first();
+  const sourceHandle = diamond.locator('.mermaid-flow-handle--left.mermaid-flow-handle--source');
+  const targetHandle = start.locator('.mermaid-flow-handle--right.mermaid-flow-handle--target');
+  const [sourceBox, targetBox] = await Promise.all([sourceHandle.boundingBox(), targetHandle.boundingBox()]);
+  assert(sourceBox && targetBox, 'Shape fixture did not expose a source and target handle for connection validation.');
+  await page.mouse.move(sourceBox.x + (sourceBox.width / 2), sourceBox.y + (sourceBox.height / 2));
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + (targetBox.width / 2), targetBox.y + (targetBox.height / 2), { steps: 12 });
+  await page.waitForFunction(() => {
+    const target = document.querySelector('.mermaid-flow-node .mermaid-flow-handle--right.mermaid-flow-handle--target');
+    return target?.classList.contains('connectionindicator') ?? false;
+  }, undefined, { timeout: 5_000 });
+  await page.mouse.up();
+  const edgeLabel = page.getByPlaceholder('label (optional)', { exact: true });
+  await edgeLabel.waitFor({ state: 'visible', timeout: 5_000 });
+  await edgeLabel.press('Enter');
+  await page.waitForFunction(() => !document.querySelector('input[placeholder="label (optional)"]'), undefined, { timeout: 5_000 });
 }
 
 async function waitForFocusedTestId(page: Page, testId: string, label: string): Promise<void> {
@@ -272,6 +376,20 @@ async function assertDotGridTransition(page: Page, expected: boolean, label: str
 
 async function triggerCanvasFit(page: Page, label: string): Promise<void> {
   await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), label);
+}
+
+async function expectCanvasCameraControlHitTargets(page: Page, label: string): Promise<void> {
+  const controls = page.getByTestId('canvas-controls-toolbar');
+  await controls.waitFor({ state: 'visible', timeout: 15_000 });
+  for (const actionName of ['Zoom out', 'Zoom in'] as const) {
+    const before = await renderedCanvasCameraTransform(page, `${label} ${actionName} baseline`);
+    await verifiedClick(page, controls.getByRole('button', { name: actionName, exact: true }), `${label} ${actionName}`);
+    await page.waitForFunction((previous) => {
+      const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
+      return layer instanceof HTMLElement && layer.style.transform !== previous;
+    }, before, { timeout: 5_000 });
+  }
+  await verifiedClick(page, controls.getByRole('button', { name: 'Fit diagram', exact: true }), `${label} Fit diagram`);
 }
 
 async function waitForStableCanvasTransform(page: Page, label: string): Promise<string> {
@@ -493,6 +611,94 @@ async function expectStableFlyoutAnchors(page: Page, label: string): Promise<voi
   console.log(`anchors stable ±1px (${label})`);
 }
 
+async function expectSourceFlyoutResizeAndCodeOverflow(page: Page): Promise<void> {
+  await ensureSourceFlyoutOpen(page);
+  const flyout = page.getByTestId('source-flyout');
+  const handle = page.getByTestId('source-flyout-resize-handle');
+  await handle.waitFor({ state: 'visible', timeout: 15_000 });
+  assert(await handle.getAttribute('role') === 'separator', 'Source flyout resize control is not an accessible separator.');
+  assert(await handle.getAttribute('aria-orientation') === 'vertical', 'Source flyout resize control did not expose its vertical orientation.');
+
+  const anchorsBeforeResize = await snapshotAnchors(page, ANCHORS);
+  const cameraBeforeResize = await renderedCanvasCameraTransform(page, 'source resize baseline');
+  const initialBounds = await flyout.boundingBox();
+  const handleBounds = await handle.boundingBox();
+  assert(initialBounds !== null && handleBounds !== null, 'Source flyout resize geometry was unavailable.');
+  await page.mouse.move(handleBounds.x + (handleBounds.width / 2), handleBounds.y + (handleBounds.height / 2));
+  await page.mouse.down();
+  await page.mouse.move(handleBounds.x - 140, handleBounds.y + (handleBounds.height / 2));
+  await page.mouse.up();
+  const widenedBounds = await flyout.boundingBox();
+  assert(widenedBounds !== null && widenedBounds.width > initialBounds.width + 100,
+    `Dragging the source resize separator did not widen the panel: ${JSON.stringify({ initialBounds, widenedBounds })}.`);
+  assertAnchorsStable(anchorsBeforeResize, await snapshotAnchors(page, ANCHORS));
+  assert(await renderedCanvasCameraTransform(page, 'source resize drag') === cameraBeforeResize,
+    'Dragging the source panel separator changed the canvas camera.');
+
+  await handle.focus();
+  const widthBeforeKeyboard = Number(await handle.getAttribute('aria-valuenow'));
+  await handle.press('ArrowRight');
+  const widthAfterArrow = Number(await handle.getAttribute('aria-valuenow'));
+  assert(widthAfterArrow < widthBeforeKeyboard, 'ArrowRight did not move the source panel separator toward its minimum width.');
+  await handle.press('End');
+  const keyboardMaximum = Number(await handle.getAttribute('aria-valuemax'));
+  assert(Number(await handle.getAttribute('aria-valuenow')) === keyboardMaximum, 'End did not set the source panel to its accessible maximum width.');
+  await handle.press('Home');
+  const keyboardMinimum = Number(await handle.getAttribute('aria-valuemin'));
+  assert(Number(await handle.getAttribute('aria-valuenow')) === keyboardMinimum, 'Home did not set the source panel to its accessible minimum width.');
+  await assertContainedInViewport(page, flyout, 'resized desktop Mermaid source flyout');
+
+  const longSource = `flowchart LR\n  Browser --> API\n  %% ${'a'.repeat(1_200)}`;
+  await replaceSource(page, longSource);
+  await waitForSource(page, longSource);
+  const scrollMetrics = await flyout.locator('.cm-scroller').evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    whiteSpace: getComputedStyle(element.querySelector('.cm-content') ?? element).whiteSpace,
+  }));
+  assert(scrollMetrics.scrollWidth > scrollMetrics.clientWidth,
+    `Long Mermaid source line wrapped or was clipped instead of horizontally scrolling: ${JSON.stringify(scrollMetrics)}.`);
+  assert(scrollMetrics.whiteSpace === 'pre', `Source editor did not preserve unwrapped code whitespace: ${JSON.stringify(scrollMetrics)}.`);
+
+  const persistedWidth = await flyout.boundingBox();
+  await closeFlyout(page, 'source');
+  await ensureSourceFlyoutOpen(page);
+  const reopenedWidth = await flyout.boundingBox();
+  assert(persistedWidth !== null && reopenedWidth !== null && Math.abs(reopenedWidth.width - persistedWidth.width) <= 1,
+    `Source flyout width did not persist locally across close/open: ${JSON.stringify({ persistedWidth, reopenedWidth })}.`);
+  await closeFlyout(page, 'source');
+}
+
+async function expectSourceFlyoutViewportSettlement(page: Page): Promise<void> {
+  const beforeAnchors = await snapshotAnchors(page, ANCHORS);
+  const beforeCamera = await renderedCanvasCameraTransform(page, 'source flyout viewport stress baseline');
+  const canvas = page.getByTestId('diagram-canvas');
+  const controls = page.getByTestId('canvas-controls-toolbar');
+  const addNode = page.getByRole('button', { name: 'Add node to Mermaid text', exact: true });
+
+  for (let iteration = 1; iteration <= 3; iteration += 1) {
+    await ensureSourceFlyoutOpen(page);
+    await page.evaluate(async () => {
+      await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
+    });
+    const [canvasBounds, controlBounds, addNodeBounds] = await Promise.all([canvas.boundingBox(), controls.boundingBox(), addNode.boundingBox()]);
+    assert(
+      canvasBounds && canvasBounds.width > 320 && canvasBounds.height > 120
+      && controlBounds && controlBounds.width > 100 && controlBounds.height >= 32
+      && addNodeBounds && addNodeBounds.width >= 20 && addNodeBounds.height >= 20,
+      `Source flyout open ${iteration} left a canvas control with transient bounds: ${JSON.stringify({ addNodeBounds, canvasBounds, controlBounds })}.`);
+    assert(await controls.isVisible() && await addNode.isVisible(),
+      `Source flyout open ${iteration} hid canvas controls or Add node after layout settled.`);
+    assertAnchorsStable(beforeAnchors, await snapshotAnchors(page, ANCHORS));
+    assert(await renderedCanvasCameraTransform(page, `source flyout viewport stress open ${iteration}`) === beforeCamera,
+      `Opening source flyout ${iteration} changed the canvas camera.`);
+    await closeFlyout(page, 'source');
+    assertAnchorsStable(beforeAnchors, await snapshotAnchors(page, ANCHORS));
+    assert(await renderedCanvasCameraTransform(page, `source flyout viewport stress close ${iteration}`) === beforeCamera,
+      `Closing source flyout ${iteration} changed the canvas camera.`);
+  }
+}
+
 async function expectFlyoutExclusivity(page: Page): Promise<void> {
   await ensureFlyout(page, 'source');
   await verifiedClick(page, page.getByTestId('activity-flyout-toggle'), 'activity flyout toggle');
@@ -523,6 +729,31 @@ async function expectFlyoutFocusAndEscape(page: Page): Promise<void> {
   assert(await activityToggle.evaluate((element) => document.activeElement === element), 'Closing activity with Escape did not return focus to its toggle.');
 }
 
+async function expectGitHubMermaidCopy(page: Page, baseUrl: string): Promise<void> {
+  const source = 'flowchart LR\n  Browser --> GitHub';
+  await ensureSourceFlyoutOpen(page);
+  await replaceSource(page, source);
+  await waitForSource(page, source);
+  const before = await canonicalSource(page);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseUrl });
+  const copyAction = page.getByTestId('copy-github-mermaid');
+  await verifiedClick(page, copyAction, 'Copy for GitHub PR');
+  await expect(copyAction).toContainText('Copied for GitHub PR');
+  await expect(page.locator('#source-github-copy-status')).toHaveText('GitHub Mermaid block copied.');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('```mermaid\nflowchart LR\n  Browser --> GitHub\n```');
+  assert(await canonicalSource(page) === before, 'Copying Mermaid for GitHub changed the canonical source.');
+
+  await page.evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', {
+    configurable: true,
+    value: function () { return Promise.reject(new Error('Clipboard unavailable')); }
+  })`);
+  await verifiedClick(page, copyAction, 'Copy for GitHub PR failure state');
+  await expect(copyAction).toContainText('Copy failed — try again');
+  await expect(page.locator('#source-github-copy-status')).toHaveText('Could not copy the GitHub Mermaid block.');
+  assert(await canonicalSource(page) === before, 'A failed GitHub copy changed the canonical source.');
+  await expect(copyAction).toContainText('Copy for GitHub PR', { timeout: 3_000 });
+}
+
 async function expectTabKeyboardAndRename(page: Page, created: string): Promise<string> {
   await selectTabByName(page, created);
   const renamed = 'API timing';
@@ -544,10 +775,13 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await waitForSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   await waitForFlowchartFixtureRender(page);
+  await expectSourceFlyoutViewportSettlement(page);
+  await expectCanvasCameraControlHitTargets(page, 'closed-flyout canvas controls');
   await saveScreenshot(page, 'issue-14-source');
   await closeFlyout(page, 'source');
   await saveScreenshot(page, 'issue-14-light-canvas');
   await ensureSourceFlyoutOpen(page);
+  await expectCanvasCameraControlHitTargets(page, 'source-flyout canvas controls');
   const nodeLabel = page.getByRole('textbox', { name: 'New node label', exact: true });
   await nodeLabel.fill('Toolbar node');
   await verifiedClick(page, page.getByRole('button', { name: 'Add node to Mermaid text', exact: true }), 'add node toolbar');
@@ -561,6 +795,36 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   for (const label of ['Edit label', 'Change shape', 'Connect nodes', 'Delete selected nodes', 'Add node']) {
     await assertHitTarget(page, nodeToolbar.getByRole('button', { name: label, exact: true }), `node toolbar ${label}`);
   }
+  for (const [label, hint, title] of [
+    ['Edit label', 'F2', 'Edit label (F2)'],
+    ['Connect nodes', 'C', 'Connect nodes (C)'],
+    ['Delete selected nodes', '⌫', 'Delete selected nodes (Delete or Backspace)'],
+    ['Add node', 'N', 'Add node (N)'],
+  ] as const) {
+    const action = nodeToolbar.getByRole('button', { name: label, exact: true });
+    await expect(action.locator('.canvas-toolbar-shortcut')).toHaveText(hint);
+    assert(await action.getAttribute('title') === title, `${label} must retain its full shortcut in the tooltip.`);
+  }
+  const copyAction = nodeToolbar.getByRole('button', { name: 'Copy selected nodes', exact: true });
+  await expect(copyAction.locator('.canvas-toolbar-shortcut')).toHaveText('C');
+  assert(await copyAction.getAttribute('title') === 'Copy selected nodes (Ctrl/Cmd+C)', 'Copy must retain its full shortcut in the tooltip.');
+  await verifiedClick(page, copyAction, 'node toolbar Copy selected nodes');
+  const pasteAction = page.getByRole('button', { name: 'Paste copied nodes', exact: true });
+  await pasteAction.waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(pasteAction.locator('.canvas-toolbar-shortcut')).toHaveText('V');
+  assert(await pasteAction.getAttribute('title') === 'Paste copied nodes (Ctrl/Cmd+V)', 'Paste must retain its full shortcut in the tooltip.');
+  const nodesBeforePasteAction = await page.locator('.mermaid-flow-node').count();
+  await verifiedClick(page, pasteAction, 'canvas controls Paste copied nodes');
+  await expect.poll(() => page.locator('.mermaid-flow-node').count(), {
+    message: 'Clicking the visible Paste copied nodes control did not add its copied node.',
+    timeout: 15_000,
+  }).toBeGreaterThan(nodesBeforePasteAction);
+  const simplifyAction = page.getByRole('button', { name: 'Simplify layout', exact: true });
+  await simplifyAction.waitFor({ state: 'visible', timeout: 15_000 });
+  await verifiedClick(page, simplifyAction, 'canvas controls Simplify layout');
+  await simplifyAction.waitFor({ state: 'detached', timeout: 15_000 });
+  await verifiedClick(page, firstNode, 'first diagram node after simplifying pasted layout');
+  await nodeToolbar.waitFor({ state: 'visible', timeout: 15_000 });
   await verifiedClick(page, nodeToolbar.getByRole('button', { name: 'Add node', exact: true }), 'node toolbar Add node');
   await page.waitForFunction(() => [...document.querySelectorAll('.cm-line')].some((line) => line.textContent?.includes('New Node')), undefined, { timeout: 15_000 });
   await verifiedClick(page, firstNode, 'first diagram node after add');
@@ -575,10 +839,12 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await closeFlyout(page, 'source');
   await saveScreenshot(page, 'issue-14-flowchart-selected');
 
+  await expectUnclippedShapeHandles(page);
+
   await replaceSource(page, SOURCE_OWNED_COLOR_FIXTURE);
   await waitForSource(page, SOURCE_OWNED_COLOR_FIXTURE);
   await waitForCanvas(page, 'flowchart');
-  const coloredNode = page.locator('.mermaid-flow-node').filter({ hasText: 'Browser' }).first();
+  const coloredNode = page.locator('.mermaid-flow-node-surface').filter({ hasText: 'Browser' }).first();
   const expectedSourceOwnedColors = {
     background: 'rgb(255, 236, 153)',
     border: 'rgb(217, 72, 15)',
@@ -608,7 +874,7 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await replaceSource(page, TRANSPARENT_MERMAID_FIXTURE);
   await waitForSource(page, TRANSPARENT_MERMAID_FIXTURE);
   await waitForCanvas(page, 'flowchart');
-  const transparentNode = page.locator('.mermaid-flow-node').filter({ hasText: 'Ghost' }).first();
+  const transparentNode = page.locator('.mermaid-flow-node-surface').filter({ hasText: 'Ghost' }).first();
   const transparentColors = await waitForNodeColors(transparentNode, {
     background: 'rgba(0, 0, 0, 0)',
     border: 'rgba(0, 0, 0, 0)',
@@ -980,10 +1246,10 @@ async function expectFlatChrome(page: Page): Promise<void> {
   await verifiedClick(page, outerNode, 'outer React Flow node selection for flat chrome audit');
   await expect(visibleNode).toHaveClass(/is-selected/u, { timeout: 5_000 });
   const selectedNodeStyles = await outerNode.evaluate((element) => {
-    const visibleNode = element.querySelector<HTMLElement>('.mermaid-flow-node');
-    if (!visibleNode) throw new Error('Selected outer React Flow node has no visible Mermaid node.');
+    const visibleSurface = element.querySelector<HTMLElement>('.mermaid-flow-node-surface');
+    if (!visibleSurface) throw new Error('Selected outer React Flow node has no visible Mermaid node surface.');
     const outerStyle = getComputedStyle(element);
-    const visibleStyle = getComputedStyle(visibleNode);
+    const visibleStyle = getComputedStyle(visibleSurface);
     return {
       background: visibleStyle.backgroundColor,
       boxShadow: outerStyle.boxShadow,
@@ -1088,8 +1354,9 @@ async function expectUnstyledNodesUseNeutralThemeColors(page: Page): Promise<voi
     const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
     const unselectedNode = [...document.querySelectorAll<HTMLElement>('.mermaid-flow-node')]
       .find((candidate) => !candidate.classList.contains('is-selected'));
+    const unselectedSurface = unselectedNode?.querySelector<HTMLElement>('.mermaid-flow-node-surface');
     const edge = document.querySelector<SVGPathElement>('.react-flow__edge:not(.selected) .react-flow__edge-path');
-    if (!canvas || !unselectedNode || !edge) {
+    if (!canvas || !unselectedNode || !unselectedSurface || !edge) {
       throw new Error(`Neutral fallback audit requires an unselected node, edge, and canvas: ${JSON.stringify({
         canvas: !!canvas,
         edgeCount: document.querySelectorAll('.react-flow__edge').length,
@@ -1108,11 +1375,11 @@ async function expectUnstyledNodesUseNeutralThemeColors(page: Page): Promise<voi
     probe.remove();
     return {
       arrow: markerColor,
-      background: getComputedStyle(unselectedNode).backgroundColor,
-      border: getComputedStyle(unselectedNode).borderTopColor,
+      background: getComputedStyle(unselectedSurface).backgroundColor,
+      border: getComputedStyle(unselectedSurface).borderTopColor,
       canvas: getComputedStyle(canvas).backgroundColor,
       edge: getComputedStyle(edge).stroke,
-      text: getComputedStyle(unselectedNode).color,
+      text: getComputedStyle(unselectedSurface).color,
     };
   });
   const assertFallbacks = (theme: string, value: Awaited<ReturnType<typeof colors>>) => {
@@ -1167,6 +1434,9 @@ async function expectActivityFlyoutFitSafety(page: Page): Promise<void> {
   await page.getByTestId('canvas-node-toolbar').waitFor({ state: 'visible', timeout: 15_000 });
   const before = await snapshotAnchors(page, ANCHORS);
   await ensureFlyout(page, 'activity');
+  await page.getByTestId('canvas-node-toolbar').waitFor({ state: 'detached', timeout: 15_000 });
+  assert((await canonicalSelectedNodeIds(page)).length === 0,
+    'Opening activity did not apply the workspace click-away deselection contract.');
   await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), 'Fit diagram while activity flyout is open');
   const after = await snapshotAnchors(page, ANCHORS);
   assertAnchorsStable(before, after);
@@ -1175,19 +1445,19 @@ async function expectActivityFlyoutFitSafety(page: Page): Promise<void> {
   assert(flyout && canvas, 'Activity Fit safety requires canvas and activity flyout bounds.');
   const canvasRect = { bottom: canvas.y + canvas.height, left: canvas.x, right: canvas.x + canvas.width, top: canvas.y };
   const flyoutRect = { bottom: flyout.y + flyout.height, left: flyout.x, right: flyout.x + flyout.width, top: flyout.y };
-  const safeRight = Math.min(canvasRect.right, flyoutRect.left - SAFE_FLYOUT_MARGIN);
-  for (const [label, locator] of [
-    ['graph node', page.locator('.mermaid-flow-node')],
-    ['selected node toolbar', page.getByTestId('canvas-node-toolbar')],
+  for (const [label, locator, margin] of [
+    ['graph node', page.locator('.mermaid-flow-node'), SAFE_FLYOUT_MARGIN],
+    ['canvas controls', page.getByTestId('canvas-controls-toolbar'), 12],
   ] as const) {
+    const safeRight = Math.min(canvasRect.right, flyoutRect.left - margin);
     const boxes = await locator.evaluateAll((elements) => elements.map((element) => {
       const rect = element.getBoundingClientRect();
       return { bottom: rect.bottom, left: rect.left, right: rect.right, top: rect.top };
     }));
     assert(boxes.length > 0, `Activity Fit did not render ${label}.`);
     for (const box of boxes) {
-      assert(box.left >= canvasRect.left + SAFE_FLYOUT_MARGIN && box.right <= safeRight
-        && box.top >= canvasRect.top + SAFE_FLYOUT_MARGIN && box.bottom <= canvasRect.bottom - SAFE_FLYOUT_MARGIN,
+      assert(box.left >= canvasRect.left + margin && box.right <= safeRight
+        && box.top >= canvasRect.top + margin && box.bottom <= canvasRect.bottom - margin,
       `${label} is outside unobscured activity-safe canvas: ${JSON.stringify({ box, canvas: canvasRect, flyout: flyoutRect, safeRight })}.`);
     }
   }
@@ -1330,6 +1600,13 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     assert(await shortcutHints.count() > 0, `${label} did not render any desktop shortcut hints to suppress.`);
     const visibleShortcutHints = await shortcutHints.evaluateAll((hints) => hints.filter((hint) => getComputedStyle(hint).display !== 'none').length);
     assert(visibleShortcutHints === 0, `${label} exposed ${visibleShortcutHints} canvas shortcut hint(s) on a coarse-pointer viewport.`);
+    await verifiedClick(page, sourceToggle, `${label} source flyout resize handle`);
+    await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+    const sourceResizeHandle = page.getByTestId('source-flyout-resize-handle');
+    assert(await sourceResizeHandle.evaluate((element) => getComputedStyle(element).display === 'none'),
+      `${label} exposed a desktop source resize handle on a mobile or coarse-pointer layout.`);
+    await verifiedClick(page, page.getByLabel('Close source panel', { exact: true }), `${label} close source resize check`);
+    await page.getByTestId('source-flyout').waitFor({ state: 'detached', timeout: 15_000 });
   }
   if (label === 'mobile-320') {
     const topbarOverflow = page.getByTestId('topbar-collaborator-overflow');
@@ -1903,6 +2180,28 @@ function historyItem(page: Page, revisionId: string): Locator {
   return page.getByTestId(`history-revision-${revisionId}`);
 }
 
+async function assertCurrentHistoryCardEdges(page: Page): Promise<void> {
+  const current = page.locator('.history-item.is-current');
+  await current.waitFor({ state: 'visible', timeout: 15_000 });
+  await current.evaluate((element) => { element.scrollIntoView({ behavior: 'auto', block: 'center' }); });
+  const edges = await current.evaluate((element) => {
+    const marker = element.querySelector<HTMLElement>('.history-current-head');
+    const style = getComputedStyle(element);
+    return {
+      bottom: { color: style.borderBottomColor, width: style.borderBottomWidth },
+      left: { color: style.borderLeftColor, width: style.borderLeftWidth },
+      markerColor: marker ? getComputedStyle(marker).color : null,
+      right: { color: style.borderRightColor, width: style.borderRightWidth },
+      top: { color: style.borderTopColor, width: style.borderTopWidth },
+    };
+  });
+  assert(edges.markerColor !== null, 'Current history card did not render its current-head marker.');
+  for (const [edge, value] of Object.entries({ bottom: edges.bottom, left: edges.left, right: edges.right, top: edges.top })) {
+    assert(value.width === '1px' && value.color === edges.markerColor,
+      `Current history card ${edge} edge lost its selection border: ${JSON.stringify(edges)}.`);
+  }
+}
+
 async function prepareHistoryActionForClick(
   page: Page,
   item: Locator,
@@ -2231,12 +2530,15 @@ async function expectRevisionHistoryCollaboration(
     const localBeforePreview = await snapshotLocalWorkspace(page, 'primary history preview baseline');
     const peerBeforePreview = await snapshotLocalWorkspace(peer, 'peer history preview baseline');
     const renderedSelectionBeforePreview = await renderedSelectedNodeIds(page);
+    assert(renderedSelectionBeforePreview.length > 0, 'History preview click-away fixture did not begin with a selected node.');
+    const localAfterPreviewClickAway = { ...localBeforePreview, selected: [] };
     const sharedBeforePreview = observer.snapshot(target.id);
     const previewTracker = observer.trackSnapshot(target.id);
     const desktopAnchors = await snapshotAnchors(page, ANCHORS);
     const currentSvgBeforePreview = await page.locator('.diagram-canvas-svg svg').innerHTML();
 
     await ensureFlyout(page, 'activity');
+    await assertCurrentHistoryCardEdges(page);
     const historicalItem = historyItem(page, historical.revision.id);
     await historicalItem.waitFor({ state: 'visible', timeout: 15_000 });
     await verifiedClick(page, historicalItem.getByRole('button', { name: 'Preview', exact: true }), 'desktop immutable history preview');
@@ -2248,8 +2550,8 @@ async function expectRevisionHistoryCollaboration(
     assert(snapshotsMatch(sharedBeforePreview, observer.snapshot(target.id)), 'History preview wrote canonical Yjs state.');
     const localDuringPreview = await snapshotLocalWorkspace(page, 'primary during history preview');
     const peerDuringPreview = await snapshotLocalWorkspace(peer, 'peer during history preview');
-    assert(JSON.stringify(localBeforePreview) === JSON.stringify(localDuringPreview),
-      `History preview changed local active tab, selection, camera, or Awareness presence: before=${JSON.stringify(localBeforePreview)} after=${JSON.stringify(localDuringPreview)}.`);
+    assert(JSON.stringify(localAfterPreviewClickAway) === JSON.stringify(localDuringPreview),
+      `History preview changed local state beyond the expected workspace click-away deselection: expected=${JSON.stringify(localAfterPreviewClickAway)} after=${JSON.stringify(localDuringPreview)}.`);
     assert(JSON.stringify(peerBeforePreview) === JSON.stringify(peerDuringPreview),
       `History preview changed the peer active tab, selection, camera, or Awareness presence: before=${JSON.stringify(peerBeforePreview)} after=${JSON.stringify(peerDuringPreview)}.`);
     assertAnchorsStable(desktopAnchors, await snapshotAnchors(page, ANCHORS));
@@ -2259,15 +2561,15 @@ async function expectRevisionHistoryCollaboration(
     await page.getByTestId('history-preview-notice').waitFor({ state: 'detached', timeout: 15_000 });
     await waitForCanvas(page, 'flowchart');
     await expect.poll(() => renderedSelectedNodeIds(page), {
-      message: 'Cancelling history preview did not restore React Flow selection chrome.',
+      message: 'Cancelling history preview restored selection after the Preview action explicitly cleared it.',
       timeout: 15_000,
-    }).toEqual(renderedSelectionBeforePreview);
+    }).toEqual([]);
     await previewTracker.expectUnchangedFor(HISTORY_NEGATIVE_OBSERVATION_MS, 'detached history preview and cancellation');
     previewTracker.destroy();
     assert(snapshotsMatch(sharedBeforePreview, observer.snapshot(target.id)), 'Cancelling history preview changed canonical Yjs state.');
     const localAfterPreviewCancellation = await snapshotLocalWorkspace(page, 'primary after history preview cancellation');
-    assert(JSON.stringify(localBeforePreview) === JSON.stringify(localAfterPreviewCancellation),
-      `Cancelling history preview changed primary local state: before=${JSON.stringify(localBeforePreview)} after=${JSON.stringify(localAfterPreviewCancellation)}.`);
+    assert(JSON.stringify(localAfterPreviewClickAway) === JSON.stringify(localAfterPreviewCancellation),
+      `Cancelling history preview changed primary state beyond the expected click-away deselection: expected=${JSON.stringify(localAfterPreviewClickAway)} after=${JSON.stringify(localAfterPreviewCancellation)}.`);
     assert(JSON.stringify(peerBeforePreview) === JSON.stringify(await snapshotLocalWorkspace(peer, 'peer after history preview cancellation')),
       'Cancelling history preview changed peer local state.');
 
@@ -2527,6 +2829,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'activity and interaction/focus contrast roles meet WCAG thresholds');
       await expectStableFlyoutAnchors(page, 'desktop');
       record(results, 'desktop source flyout anchors');
+      await expectSourceFlyoutResizeAndCodeOverflow(page);
+      record(results, 'desktop source flyout resize, keyboard bounds, stable camera, and unwrapped code overflow');
       await ensureFlyout(page, 'source');
       await saveScreenshot(page, 'issue-14-source');
       await closeFlyout(page, 'source');
@@ -2537,6 +2841,8 @@ async function validateWorkspaceUx(): Promise<void> {
       await closeFlyout(page, 'activity');
       await expectFlyoutFocusAndEscape(page);
       record(results, 'flyout autofocus, Escape close, and focus return');
+      await expectGitHubMermaidCopy(page, baseUrl);
+      record(results, 'GitHub Mermaid copy fence, clipboard content, and source preservation');
       const diagramName = await expectTabKeyboardAndRename(page, blankDiagramName);
       record(results, 'blank tab create, rename, and keyboard navigation');
       await selectTabByName(page, diagramName);

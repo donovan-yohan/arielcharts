@@ -1,7 +1,14 @@
 import type { ActivityEvent, DiagramRevision, DiagramRevisionSummary, ListDiagramHistoryOutput, Participant } from '@arielcharts/shared';
-import { Code2, Eye, History, RotateCcw, X } from 'lucide-react';
-import type { RefObject } from 'react';
+import { Check, Code2, Copy, Eye, History, RotateCcw, X } from 'lucide-react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, RefObject } from 'react';
 import type { ActivityFlyoutView, WorkspaceFlyout } from '../lib/workspace-flyout-state';
+import {
+  SOURCE_FLYOUT_MIN_WIDTH,
+  clampSourceFlyoutWidth,
+  getSourceFlyoutKeyboardWidth,
+  getSourceFlyoutMaximumWidth,
+  getSourceFlyoutWidthFromPointer,
+} from '../lib/source-flyout-resize';
 
 interface WorkspaceFlyoutsProps {
   activeDiagramName: string;
@@ -18,6 +25,7 @@ interface WorkspaceFlyoutsProps {
   historyLoading: boolean;
   historyView: ActivityFlyoutView;
   onCancelPreview: () => void;
+  onCopyGitHubMermaid: () => void;
   onHistoryViewChange: (view: ActivityFlyoutView) => void;
   onPreviewRevision: (revision: DiagramRevisionSummary) => void;
   onRestoreCancel: () => void;
@@ -32,6 +40,9 @@ interface WorkspaceFlyoutsProps {
   restorePending: boolean;
   restoreConfirmRef: RefObject<HTMLButtonElement | null>;
   sourceError: string | null;
+  sourceGitHubCopyState: 'idle' | 'copied' | 'error';
+  sourceFlyoutWidth: number;
+  onSourceFlyoutWidthChange: (width: number) => void;
 }
 
 function getRevisionLabel(revision: DiagramRevisionSummary): string {
@@ -59,6 +70,7 @@ export function WorkspaceFlyouts({
   historyLoading,
   historyView,
   onCancelPreview,
+  onCopyGitHubMermaid,
   onHistoryViewChange,
   onPreviewRevision,
   onRestoreCancel,
@@ -73,11 +85,73 @@ export function WorkspaceFlyouts({
   restorePending,
   restoreConfirmRef,
   sourceError,
+  sourceGitHubCopyState,
+  sourceFlyoutWidth,
+  onSourceFlyoutWidthChange,
 }: WorkspaceFlyoutsProps) {
+  const sourceGitHubCopyLabel = sourceGitHubCopyState === 'copied'
+    ? 'Copied for GitHub PR'
+    : sourceGitHubCopyState === 'error' ? 'Copy failed — try again' : 'Copy for GitHub PR';
+  const viewportWidth = typeof window === 'undefined' ? 1440 : window.innerWidth;
+  const currentSourceFlyoutWidth = clampSourceFlyoutWidth(sourceFlyoutWidth, viewportWidth);
+  const sourceFlyoutMaximumWidth = getSourceFlyoutMaximumWidth(viewportWidth);
+
+  const updateSourceFlyoutWidthFromPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+    onSourceFlyoutWidthChange(getSourceFlyoutWidthFromPointer(event.clientX, window.innerWidth));
+  };
+
+  const handleSourceFlyoutResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateSourceFlyoutWidthFromPointer(event);
+  };
+
+  const handleSourceFlyoutResizeMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    event.preventDefault();
+    updateSourceFlyoutWidthFromPointer(event);
+  };
+
+  const handleSourceFlyoutResizeEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const handleSourceFlyoutResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const nextWidth = getSourceFlyoutKeyboardWidth(currentSourceFlyoutWidth, window.innerWidth, event.key);
+    if (nextWidth === null) return;
+    event.preventDefault();
+    onSourceFlyoutWidthChange(nextWidth);
+  };
+
   return (
     <>
       {openFlyout === 'source' ? (
-        <aside aria-label="Mermaid source" className="workspace-flyout" data-testid="source-flyout" id="source-flyout">
+        <aside
+          aria-label="Mermaid source"
+          className="workspace-flyout workspace-source-flyout"
+          data-testid="source-flyout"
+          id="source-flyout"
+          style={{ '--source-flyout-width': `${currentSourceFlyoutWidth}px` } as CSSProperties}
+        >
+          <div
+            aria-label="Resize Mermaid source panel"
+            aria-orientation="vertical"
+            aria-valuemax={sourceFlyoutMaximumWidth}
+            aria-valuemin={Math.min(SOURCE_FLYOUT_MIN_WIDTH, sourceFlyoutMaximumWidth)}
+            aria-valuenow={currentSourceFlyoutWidth}
+            className="workspace-source-resize-handle"
+            data-testid="source-flyout-resize-handle"
+            onKeyDown={handleSourceFlyoutResizeKeyDown}
+            onPointerCancel={handleSourceFlyoutResizeEnd}
+            onPointerDown={handleSourceFlyoutResizeStart}
+            onPointerMove={handleSourceFlyoutResizeMove}
+            onPointerUp={handleSourceFlyoutResizeEnd}
+            role="separator"
+            tabIndex={0}
+          />
           <header className="workspace-flyout-header">
             <div><Code2 aria-hidden="true" size={16} /><span>Mermaid source</span></div>
             <button aria-label="Close source panel" className="workspace-icon-button workspace-touch-label" data-touch-label="Close" onClick={closeFlyout} type="button"><X aria-hidden="true" size={16} /></button>
@@ -85,6 +159,22 @@ export function WorkspaceFlyouts({
           <div className="workspace-flyout-meta">
             <span>{activeDiagramName}</span>
             <span data-testid="connection-status-badge">{editorStatusLabel}</span>
+          </div>
+          <div className="workspace-source-github-copy">
+            <span>Paste this diagram into a GitHub PR.</span>
+            <button
+              aria-describedby="source-github-copy-status"
+              className="workspace-copy-button"
+              data-testid="copy-github-mermaid"
+              onClick={onCopyGitHubMermaid}
+              type="button"
+            >
+              {sourceGitHubCopyState === 'copied' ? <Check aria-hidden="true" size={14} /> : <Copy aria-hidden="true" size={14} />}
+              {sourceGitHubCopyLabel}
+            </button>
+            <span aria-live="polite" className="visually-hidden" id="source-github-copy-status" role="status">
+              {sourceGitHubCopyState === 'copied' ? 'GitHub Mermaid block copied.' : sourceGitHubCopyState === 'error' ? 'Could not copy the GitHub Mermaid block.' : ''}
+            </span>
           </div>
           {sourceError ? (
             <div aria-live="polite" className="workspace-source-status" data-testid="source-parse-status" role="status">

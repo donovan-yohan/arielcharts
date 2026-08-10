@@ -365,6 +365,23 @@ function writeParticipants(doc: Y.Doc, participants: Participant[]): void {
   }
 }
 
+function ensureParticipants(doc: Y.Doc, participants: readonly Participant[]): Participant[] {
+  const map = doc.getMap<Participant>(PRESENCE_KEY);
+  const ensured: Participant[] = [];
+
+  for (const participant of participants) {
+    const existing = map.get(participant.name);
+    if (isParticipant(existing)) {
+      ensured.push(existing);
+      continue;
+    }
+    map.set(participant.name, participant);
+    ensured.push(participant);
+  }
+
+  return ensured;
+}
+
 function readParticipantsFromAwareness(awareness: Awareness): Participant[] {
   const participants: Participant[] = [];
 
@@ -379,8 +396,54 @@ function readParticipantsFromAwareness(awareness: Awareness): Participant[] {
   return participants.sort((left, right) => left.name.localeCompare(right.name));
 }
 
+function readCollaborators(doc: Y.Doc, awareness: Awareness): Participant[] {
+  const collaborators = new Map<string, Participant>();
+  for (const participant of readParticipants(doc)) {
+    if (participant.type === 'agent') {
+      collaborators.set(participant.name, participant);
+    }
+  }
+  for (const participant of readParticipantsFromAwareness(awareness)) {
+    if (!collaborators.has(participant.name)) {
+      collaborators.set(participant.name, participant);
+    }
+  }
+  return [...collaborators.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function readParticipantMirror(doc: Y.Doc, awareness: Awareness): Participant[] {
+  const participants = new Map<string, Participant>();
+  for (const participant of readParticipants(doc)) {
+    if (participant.type === 'agent') {
+      participants.set(participant.name, participant);
+    }
+  }
+  for (const participant of readParticipantsFromAwareness(awareness)) {
+    if (participant.type === 'human' && !participants.has(participant.name)) {
+      participants.set(participant.name, participant);
+    }
+  }
+  return [...participants.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function areParticipantsEqual(left: readonly Participant[], right: readonly Participant[]): boolean {
+  return left.length === right.length && left.every((participant, index) => {
+    const candidate = right[index];
+    return candidate !== undefined
+      && participant.name === candidate.name
+      && participant.color === candidate.color
+      && participant.type === candidate.type;
+  });
+}
+
 function syncParticipantsFromAwareness(session: SessionState): void {
-  const participants = readParticipantsFromAwareness(session.awareness);
+  const participants = readParticipantMirror(session.doc, session.awareness);
+  const currentParticipants = readParticipants(session.doc);
+  // Cursor and canvas-selection awareness updates must not create a document
+  // transaction when the durable participant mirror is already current.
+  if (areParticipantsEqual(currentParticipants, participants)) {
+    return;
+  }
   session.doc.transact(() => {
     writeParticipants(session.doc, participants);
   }, MANAGED_AWARENESS_ORIGIN);
@@ -548,7 +611,7 @@ export class SessionManager {
     const live = this.sessions.get(sessionId);
     if (live) {
       live.lastAccessedAt = Date.now();
-      return { diagram: readDiagram(live.doc, diagramId), participants: readParticipantsFromAwareness(live.awareness) };
+      return { diagram: readDiagram(live.doc, diagramId), participants: readCollaborators(live.doc, live.awareness) };
     }
     const snapshot = await this.readSession(sessionId);
     if (!snapshot) {
@@ -623,7 +686,7 @@ export class SessionManager {
       return { status: 'stale', current: currentBeforeRestore, current_revision: currentBeforeRestore.revision };
     }
 
-    session.doc.transact(() => {
+    const ensuredParticipants = this.mutateWithParticipants(session, participants, () => {
       const text = getMermaidText(diagram);
       text.delete(0, text.length);
       text.insert(0, target.mermaid_text);
@@ -632,8 +695,8 @@ export class SessionManager {
         ...restoreEvent,
         result_revision: revisionForDiagram(diagram, diagramId),
       });
-    }, MANAGED_AWARENESS_ORIGIN);
-    const revisions = await this.afterMutation(session, participants, restoreEvent.id, origin);
+    });
+    const revisions = await this.afterMutation(session, ensuredParticipants, restoreEvent.id, origin);
     const revision = revisions.find((candidate) => candidate.activity_id === restoreEvent.id);
     if (!revision) {
       throw new Error('Restore history checkpoint was not persisted.');
@@ -646,8 +709,8 @@ export class SessionManager {
     this.assertRevision(session.doc, revision);
     const id = diagramId();
     const normalizedName = normalizeDiagramName(name);
-    session.doc.transact(() => {
-      this.assertUniqueDiagramName(session.doc, normalizedName);
+    this.assertUniqueDiagramName(session.doc, normalizedName);
+    const ensuredParticipants = this.mutateWithParticipants(session, participants, () => {
       diagramsMap(session.doc).set(id, createDiagram(id, normalizedName, mermaidText));
       diagramOrder(session.doc).push([id]);
       this.appendActivity(session.doc, {
@@ -656,8 +719,8 @@ export class SessionManager {
         base_revision: revision,
         result_revision: revisionForDiagram(diagramsMap(session.doc).get(id)!, id),
       });
-    }, MANAGED_AWARENESS_ORIGIN);
-    await this.afterMutation(session, participants, event.id);
+    });
+    await this.afterMutation(session, ensuredParticipants, event.id);
     return readDiagram(session.doc, id);
   }
 
@@ -670,13 +733,15 @@ export class SessionManager {
     }
     this.assertDiagramRevision(diagram, diagramId, revision);
     const nextName = name === undefined ? undefined : normalizeDiagramName(name);
-    session.doc.transact(() => {
+    if (nextName !== undefined) {
+      this.assertUniqueDiagramName(session.doc, nextName, diagramId);
+    }
+    const ensuredParticipants = this.mutateWithParticipants(session, participants, () => {
       const text = getMermaidText(diagram);
       text.delete(0, text.length);
       text.insert(0, mermaidText);
       reconcileNodePositionsForSource(diagram, sourceLayoutPolicy);
       if (nextName !== undefined) {
-        this.assertUniqueDiagramName(session.doc, nextName, diagramId);
         diagram.set(DIAGRAM_NAME_KEY, nextName);
       }
       this.appendActivity(session.doc, {
@@ -685,8 +750,8 @@ export class SessionManager {
         base_revision: revision,
         result_revision: revisionForDiagram(diagram, diagramId),
       });
-    }, MANAGED_AWARENESS_ORIGIN);
-    await this.afterMutation(session, participants, event.id);
+    });
+    await this.afterMutation(session, ensuredParticipants, event.id);
     return readDiagram(session.doc, diagramId);
   }
 
@@ -697,9 +762,9 @@ export class SessionManager {
       throw new Error(`Diagram not found: ${diagramId}`);
     }
     this.assertDiagramRevision(diagram, diagramId, revision);
-    session.doc.transact(() => {
-      const normalizedName = normalizeDiagramName(name);
-      this.assertUniqueDiagramName(session.doc, normalizedName, diagramId);
+    const normalizedName = normalizeDiagramName(name);
+    this.assertUniqueDiagramName(session.doc, normalizedName, diagramId);
+    const ensuredParticipants = this.mutateWithParticipants(session, participants, () => {
       diagram.set(DIAGRAM_NAME_KEY, normalizedName);
       this.appendActivity(session.doc, {
         ...event,
@@ -707,8 +772,8 @@ export class SessionManager {
         base_revision: revision,
         result_revision: revisionForDiagram(diagram, diagramId),
       });
-    }, MANAGED_AWARENESS_ORIGIN);
-    await this.afterMutation(session, participants, event.id);
+    });
+    await this.afterMutation(session, ensuredParticipants, event.id);
     return readDiagram(session.doc, diagramId);
   }
 
@@ -722,7 +787,7 @@ export class SessionManager {
     if (diagrams.size <= 1) {
       throw new Error('A session must retain at least one diagram.');
     }
-    session.doc.transact(() => {
+    const ensuredParticipants = this.mutateWithParticipants(session, participants, () => {
       diagrams.delete(diagramId);
       const order = diagramOrder(session.doc);
       const index = order.toArray().indexOf(diagramId);
@@ -730,8 +795,8 @@ export class SessionManager {
         order.delete(index, 1);
       }
       this.appendActivity(session.doc, { ...event, diagram_id: diagramId, base_revision: revision });
-    }, MANAGED_AWARENESS_ORIGIN);
-    await this.afterMutation(session, participants, event.id);
+    });
+    await this.afterMutation(session, ensuredParticipants, event.id);
     return revisionFromDoc(session.doc);
   }
 
@@ -835,7 +900,7 @@ export class SessionManager {
   }
 
   private snapshot(session: SessionState): SessionSnapshot {
-    return this.snapshotFromDoc({ id: session.id, doc: session.doc, updatedAt: session.updatedAt, participants: readParticipantsFromAwareness(session.awareness) });
+    return this.snapshotFromDoc({ id: session.id, doc: session.doc, updatedAt: session.updatedAt, participants: readCollaborators(session.doc, session.awareness) });
   }
 
   private snapshotFromDoc(options: { id: string; doc: Y.Doc; updatedAt: number; participants: Participant[] }): SessionSnapshot {
@@ -1064,17 +1129,34 @@ export class SessionManager {
     return result;
   }
 
+  private mutateWithParticipants(
+    session: SessionState,
+    participants: readonly Participant[] | undefined,
+    mutation: () => void,
+  ): Participant[] | undefined {
+    let ensuredParticipants: Participant[] | undefined;
+    session.doc.transact(() => {
+      ensuredParticipants = participants === undefined ? undefined : ensureParticipants(session.doc, participants);
+      mutation();
+    }, MANAGED_AWARENESS_ORIGIN);
+    return ensuredParticipants;
+  }
+
   private setManagedParticipants(session: SessionState, participants: Participant[]): void {
-    const nextClientIds = new Set<number>();
     const updates: Array<{ clientId: number; clock: number; state: Record<string, unknown> | null }> = [];
     for (const participant of participants) {
       const clientId = stableParticipantClientId(participant);
-      nextClientIds.add(clientId);
+      const existing = session.awareness.getStates().get(clientId) as { user?: unknown } | undefined;
+      if (isParticipant(existing?.user)
+        && existing.user.name === participant.name
+        && existing.user.color === participant.color
+        && existing.user.type === participant.type) {
+        session.managedAwarenessClientIds.add(clientId);
+        continue;
+      }
       updates.push({ clientId, clock: (session.awareness.meta.get(clientId)?.clock ?? 0) + 1, state: { user: participant } });
+      session.managedAwarenessClientIds.add(clientId);
     }
-    const removedClientIds = [...session.managedAwarenessClientIds].filter((clientId) => !nextClientIds.has(clientId));
-    if (removedClientIds.length > 0) removeAwarenessStates(session.awareness, removedClientIds, MANAGED_AWARENESS_ORIGIN);
     if (updates.length > 0) applyAwarenessUpdate(session.awareness, encodeAwarenessStateUpdate(updates), MANAGED_AWARENESS_ORIGIN);
-    session.managedAwarenessClientIds = nextClientIds;
   }
 }

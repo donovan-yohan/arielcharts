@@ -41,6 +41,189 @@ describe('handleMcpToolCall', () => {
     return positions as Y.Map<{ x: number; y: number }>;
   }
 
+  async function durableParticipants(): Promise<Y.Map<{ name: string; color: string; type: 'human' | 'agent' }>> {
+    const session = await resources.manager.getOrCreateSession('abc123de');
+    return session.doc.getMap<{ name: string; color: string; type: 'human' | 'agent' }>('presence');
+  }
+
+  it('lazily joins an authenticated MCP actor only with its first successful mutation', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+
+    await handleMcpToolCall(resources.manager, {
+      tool: 'read_diagram', input: { session_id: 'abc123de', diagram_id: 'main' },
+    });
+    expect([...((await durableParticipants()).entries())]).toEqual([]);
+
+    const written = await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: {
+        session_id: 'abc123de',
+        diagram_id: 'main',
+        mermaid_text: 'flowchart LR\n  Agent --> API',
+        revision: initial.diagrams[0]!.revision,
+        actor_name: 'Diagram Agent',
+      },
+    }) as { diagram: { revision: string } };
+
+    expect((await durableParticipants()).get('Diagram Agent')).toEqual({ name: 'Diagram Agent', color: '#7c3aed', type: 'agent' });
+    expect((await resources.manager.readSession('abc123de'))?.activity).toHaveLength(1);
+
+    await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: {
+        session_id: 'abc123de',
+        diagram_id: 'main',
+        mermaid_text: 'flowchart LR\n  Agent --> API\n  API --> Database',
+        revision: written.diagram.revision,
+        actor_name: 'Diagram Agent',
+      },
+    });
+    expect([...((await durableParticipants()).entries())]).toEqual([
+      ['Diagram Agent', { name: 'Diagram Agent', color: '#7c3aed', type: 'agent' }],
+    ]);
+    expect((await resources.manager.readSession('abc123de'))?.activity).toHaveLength(2);
+  });
+
+  it('preserves an already joined agent identity while applying a mutation', async () => {
+    const session = await resources.manager.getOrCreateSession('abc123de');
+    const existing = { name: 'Diagram Agent', color: '#0ea5e9', type: 'agent' as const };
+    session.doc.getMap('presence').set(existing.name, existing);
+    const initial = await getSession();
+
+    await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: {
+        session_id: 'abc123de',
+        diagram_id: 'main',
+        mermaid_text: 'flowchart LR\n  Agent --> API',
+        revision: initial.diagrams[0]!.revision,
+        actor_name: existing.name,
+      },
+    });
+
+    expect((await durableParticipants()).get(existing.name)).toEqual(existing);
+  });
+
+  it('does not join an actor when duplicate create or rename validation rejects the mutation', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'create_diagram',
+      input: {
+        session_id: 'abc123de',
+        name: 'Main',
+        mermaid_text: 'flowchart LR\n  Duplicate --> Main',
+        revision: initial.revision,
+        actor_name: 'Rejected Agent',
+      },
+    })).rejects.toThrow('Diagram name already exists');
+    expect([...((await durableParticipants()).entries())]).toEqual([]);
+
+    const second = await resources.manager.createDiagram(
+      'abc123de',
+      'Second',
+      'flowchart LR\n  Second --> Diagram',
+      initial.revision,
+      { action: 'created', actor: { name: 'Browser', type: 'human' }, id: 'browser-created-second', timestamp: 1 },
+    );
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'rename_diagram',
+      input: {
+        session_id: 'abc123de',
+        diagram_id: second.id,
+        name: 'Main',
+        revision: second.revision,
+        actor_name: 'Rejected Agent',
+      },
+    })).rejects.toThrow('Diagram name already exists');
+    expect([...((await durableParticipants()).entries())]).toEqual([]);
+  });
+
+  it('preserves a durable MCP agent across reload and human awareness churn', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+    await handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: {
+        session_id: 'abc123de',
+        diagram_id: 'main',
+        mermaid_text: 'flowchart LR\n  Agent --> API',
+        revision: initial.diagrams[0]!.revision,
+        actor_name: 'Persistent Agent',
+      },
+    });
+
+    const active = await resources.manager.getOrCreateSession('abc123de');
+    await resources.manager.cleanupExpiredSessions({ ttlMs: 0, diskTtlMs: Infinity, now: active.lastAccessedAt + 1 });
+    const reloaded = await resources.manager.getOrCreateSession('abc123de');
+    const human = { name: 'Browser Human', color: '#2563eb', type: 'human' as const };
+    reloaded.awareness.setLocalState({ user: human });
+    expect(Object.fromEntries(reloaded.doc.getMap('presence').entries())).toEqual({
+      'Browser Human': human,
+      'Persistent Agent': { name: 'Persistent Agent', color: '#7c3aed', type: 'agent' },
+    });
+
+    reloaded.awareness.setLocalState(null);
+    expect([...reloaded.doc.getMap('presence').entries()]).toEqual([
+      ['Persistent Agent', { name: 'Persistent Agent', color: '#7c3aed', type: 'agent' }],
+    ]);
+    await expect(resources.manager.readDiagram('abc123de', 'main')).resolves.toMatchObject({
+      participants: [{ name: 'Persistent Agent', color: '#7c3aed', type: 'agent' }],
+    });
+    await expect(resources.manager.getSession('abc123de')).resolves.toMatchObject({
+      participants: [{ name: 'Persistent Agent', color: '#7c3aed', type: 'agent' }],
+    });
+  });
+
+  it('does not join a room-mismatched or stale concurrent MCP mutation', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await getSession();
+
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'write_diagram',
+      input: {
+        session_id: 'abc123de',
+        diagram_id: 'main',
+        mermaid_text: 'flowchart LR\n  Rejected --> Write',
+        revision: initial.diagrams[0]!.revision,
+        actor_name: 'Rejected Agent',
+      },
+    }, 'other123')).rejects.toThrow('Room access denied.');
+    expect([...((await durableParticipants()).entries())]).toEqual([]);
+
+    const concurrent = await Promise.allSettled([
+      handleMcpToolCall(resources.manager, {
+        tool: 'write_diagram',
+        input: {
+          session_id: 'abc123de',
+          diagram_id: 'main',
+          mermaid_text: 'flowchart LR\n  Agent --> API',
+          revision: initial.diagrams[0]!.revision,
+          actor_name: 'Concurrent Agent',
+        },
+      }),
+      handleMcpToolCall(resources.manager, {
+        tool: 'write_diagram',
+        input: {
+          session_id: 'abc123de',
+          diagram_id: 'main',
+          mermaid_text: 'flowchart LR\n  Agent --> Database',
+          revision: initial.diagrams[0]!.revision,
+          actor_name: 'Concurrent Agent',
+        },
+      }),
+    ]);
+
+    expect(concurrent.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(concurrent.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+    expect([...((await durableParticipants()).entries())]).toEqual([
+      ['Concurrent Agent', { name: 'Concurrent Agent', color: '#7c3aed', type: 'agent' }],
+    ]);
+    expect((await resources.manager.readSession('abc123de'))?.activity).toHaveLength(1);
+  });
+
   it('orients an agent with ordered names and stable IDs, then creates, reads, and writes one exact diagram', async () => {
     await resources.manager.getOrCreateSession('abc123de');
     const initial = await getSession();

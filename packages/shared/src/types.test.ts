@@ -6,6 +6,11 @@ describe('shared types', () => {
     const awareness: AwarenessState = {
       user: { name: 'Sarah', color: '#a371f7', type: 'human' },
       cursor: { anchor: 0, head: 4 },
+      canvas: {
+        diagram_id: 'main',
+        cursor: { x: 120, y: 64 },
+        selected_node_ids: ['Gateway'],
+      },
     };
 
     const event: ActivityEvent = {
@@ -17,6 +22,7 @@ describe('shared types', () => {
     };
 
     expect(awareness.user.type).toBe('human');
+    expect(awareness.canvas?.selected_node_ids).toEqual(['Gateway']);
     expect(event.actor.type).toBe('agent');
   });
 

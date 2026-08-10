@@ -185,6 +185,25 @@ async function validate() {
   results.push({ test: 'canvas Ctrl+C/Ctrl+V copies internal edges with collision-safe layout', pass: pastePass });
   console.log(`   Repeated paste nodes/edges/layout: ${pastePass ? 'PASS' : 'FAIL'}`);
 
+  await canvas.focus();
+  await page.keyboard.press('Control+Z');
+  await page.waitForFunction((expected) => document.querySelectorAll('.react-flow__node').length === expected, nodesBeforePaste + 2, { timeout: 15_000 });
+  const undoRemovedPastedLayout = await durableObserver.waitFor(
+    (observer) => !observer.hasNodePosition('main', 'A_copy_2'),
+    'undo removes the second pasted canvas layout',
+    15_000,
+  ).then(() => true).catch(() => false);
+  await page.keyboard.press('Control+Shift+Z');
+  await page.waitForFunction((expected) => document.querySelectorAll('.react-flow__node').length === expected, nodesBeforePaste + 4, { timeout: 15_000 });
+  const redoRestoredPastedLayout = await durableObserver.waitFor(
+    (observer) => observer.hasNodePosition('main', 'A_copy_2'),
+    'redo restores the second pasted canvas layout',
+    15_000,
+  ).then(() => true).catch(() => false);
+  const canvasUndoRedoPass = undoRemovedPastedLayout && redoRestoredPastedLayout;
+  results.push({ test: 'canvas Ctrl+Z/Ctrl+Shift+Z undo and redo source plus layout', pass: canvasUndoRedoPass });
+  console.log(`   Canvas undo/redo source and layout: ${canvasUndoRedoPass ? 'PASS' : 'FAIL'}`);
+
   const sourceNativeClipboard = `flowchart LR
     Source[Source shortcut] --> Target[Native paste]`;
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseUrl });
@@ -254,7 +273,8 @@ async function validate() {
   const semanticState = await page.evaluate<SemanticState>(() => {
     const svg = document.querySelector('.diagram-canvas-svg--reactflow svg') as SVGSVGElement | null;
     const edgePath = svg?.querySelector('path.flowchart-link') as SVGPathElement | null;
-    const cylinder = document.querySelector('.mermaid-flow-node--cylinder') as HTMLElement | null;
+    const cylinderSurface = document.querySelector('.mermaid-flow-node-surface--cylinder') as HTMLElement | null;
+    const cylinderNode = cylinderSurface?.closest('.mermaid-flow-node') as HTMLElement | null;
     const reactFlowEdges = Array.from(document.querySelectorAll('.react-flow__edge'));
     const edgePaths = reactFlowEdges
       .map((edge) => edge.querySelector('path.react-flow__edge-path') as SVGPathElement | null)
@@ -271,8 +291,8 @@ async function validate() {
     return {
       circleMarker: circleEdge?.getAttribute('marker-end') ?? null,
       crossMarker: crossEdge?.getAttribute('marker-end') ?? null,
-      cylinderAria: cylinder?.getAttribute('aria-label') ?? null,
-      cylinderPseudoRadius: cylinder ? window.getComputedStyle(cylinder, '::before').borderRadius : '',
+      cylinderAria: cylinderNode?.getAttribute('aria-label') ?? null,
+      cylinderPseudoRadius: cylinderSurface ? window.getComputedStyle(cylinderSurface, '::before').borderRadius : '',
       dottedDasharray: dottedEdge ? window.getComputedStyle(dottedEdge).strokeDasharray : null,
       edgeOpacity: edgePath ? window.getComputedStyle(edgePath).opacity : null,
       edgePaths: svg?.querySelectorAll('path.flowchart-link').length ?? 0,
@@ -353,6 +373,60 @@ async function validate() {
   console.log(`   Zoom after fit: ${zoomText} — ${fitPass ? 'PASS' : 'FAIL'}`);
   await page.screenshot({ path: '/tmp/arielcharts-fit.png' });
 
+  // --- Test: middle-mouse release stops panning before subsequent movement ---
+  const middlePanPoint = await page.evaluate(() => {
+    const canvas = document.querySelector('[data-testid="diagram-canvas"]');
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const candidates = [
+      { x: rect.left + (rect.width * 0.15), y: rect.top + (rect.height * 0.2) },
+      { x: rect.left + (rect.width * 0.85), y: rect.top + (rect.height * 0.2) },
+      { x: rect.left + (rect.width * 0.15), y: rect.top + (rect.height * 0.75) },
+    ];
+    return candidates.find(({ x, y }) => {
+      const target = document.elementFromPoint(x, y);
+      return target?.closest('button, input, select, .react-flow__node, .react-flow__edge, .react-flow__handle') === null;
+    }) ?? null;
+  });
+  let middleMouseReleasePass = false;
+  if (middlePanPoint) {
+    const viewportTransformBefore = await page.locator('.react-flow__viewport').getAttribute('style');
+    await page.mouse.move(middlePanPoint.x, middlePanPoint.y);
+    await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(middlePanPoint.x + 72, middlePanPoint.y + 36, { steps: 3 });
+    await page.mouse.up({ button: 'middle' });
+    const viewportTransformAtRelease = await page.locator('.react-flow__viewport').getAttribute('style');
+    await page.mouse.move(middlePanPoint.x + 220, middlePanPoint.y + 140, { steps: 10 });
+    await page.waitForTimeout(100);
+    const viewportTransformAfterTrailingMove = await page.locator('.react-flow__viewport').getAttribute('style');
+    middleMouseReleasePass = viewportTransformBefore !== viewportTransformAtRelease
+      && viewportTransformAtRelease === viewportTransformAfterTrailingMove;
+  }
+  results.push({ test: 'middle-mouse pan stops at release', pass: middleMouseReleasePass });
+  console.log(`   Middle-mouse panning stays stable after release: ${middleMouseReleasePass ? 'PASS' : 'FAIL'}`);
+
+  let spacePanPass = false;
+  if (middlePanPoint) {
+    const canvasSelectionBeforeSpacePan = await canvas.getAttribute('data-selected-node-ids');
+    const viewportTransformBeforeSpacePan = await page.locator('.react-flow__viewport').getAttribute('style');
+    await canvas.focus();
+    await page.keyboard.down('Space');
+    await page.mouse.move(middlePanPoint.x, middlePanPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(middlePanPoint.x - 68, middlePanPoint.y + 44, { steps: 5 });
+    await page.mouse.up();
+    await page.keyboard.up('Space');
+    await page.waitForTimeout(100);
+    const viewportTransformAfterSpacePan = await page.locator('.react-flow__viewport').getAttribute('style');
+    const canvasSelectionAfterSpacePan = await canvas.getAttribute('data-selected-node-ids');
+    const lingeringSelectionRectangle = await page.locator('.react-flow__selection').count();
+    spacePanPass = viewportTransformBeforeSpacePan !== viewportTransformAfterSpacePan
+      && canvasSelectionBeforeSpacePan === canvasSelectionAfterSpacePan
+      && lingeringSelectionRectangle === 0;
+  }
+  results.push({ test: 'Space-drag pans without marquee selection', pass: spacePanPass });
+  console.log(`   Space-drag avoids React Flow marquee selection: ${spacePanPass ? 'PASS' : 'FAIL'}`);
+
   // --- Test: node click / toolbar ---
   console.log('\n5. Testing node click...');
   await clickFirstNodeTarget(page);
@@ -364,9 +438,12 @@ async function validate() {
   console.log(`   Toolbar appeared: ${toolbarVisible} — ${toolbarVisible ? 'PASS' : 'FAIL'}`);
   await page.screenshot({ path: '/tmp/arielcharts-click.png' });
 
-  // --- Test: React Flow drag + reset layout ---
-  console.log('\n6. Testing React Flow drag/reset...');
+  // --- Test: React Flow drag + simplify layout ---
+  console.log('\n6. Testing React Flow drag/simplify...');
   const dragTarget = nodeTargetLocator(page).first();
+  const canvasBeforeDrag = await page.getByTestId('diagram-canvas').elementHandle();
+  const simplifyButton = page.locator('button[aria-label="Simplify layout"]');
+  const simplifyActionAbsentInitially = await simplifyButton.count() === 0;
   const beforeDragEditorText = await editor.textContent();
   const beforeDragZoomText = await page.locator('span').filter({ hasText: /^\d+%$/ }).first().textContent();
   const beforeDrag = await dragTarget.boundingBox();
@@ -390,6 +467,32 @@ async function validate() {
   console.log(`   Mermaid text unchanged by drag: ${dragKeptMermaidText} — ${dragKeptMermaidText ? 'PASS' : 'FAIL'}`);
   console.log(`   Zoom before/after drag: ${beforeDragZoomText}/${afterDragZoomText} — ${dragKeptZoom ? 'PASS' : 'FAIL'}`);
 
+  let dragUndoRedoPass = false;
+  if (beforeDrag && afterDrag) {
+    await page.getByTestId('diagram-canvas').focus();
+    await page.keyboard.press('Control+Z');
+    await page.waitForFunction(({ before, selector }) => {
+      const element = document.querySelector(selector);
+      const bounds = element?.getBoundingClientRect();
+      return Boolean(bounds && Math.abs(bounds.x - before.x) <= 5 && Math.abs(bounds.y - before.y) <= 5);
+    }, { before: beforeDrag, selector: '.mermaid-flow-node[role="button"], .diagram-node-target' }, { timeout: 15_000 });
+    const afterDragUndo = await dragTarget.boundingBox();
+    await page.keyboard.press('Control+Shift+Z');
+    await page.waitForFunction(({ after, selector }) => {
+      const element = document.querySelector(selector);
+      const bounds = element?.getBoundingClientRect();
+      return Boolean(bounds && Math.abs(bounds.x - after.x) <= 5 && Math.abs(bounds.y - after.y) <= 5);
+    }, { after: afterDrag, selector: '.mermaid-flow-node[role="button"], .diagram-node-target' }, { timeout: 15_000 });
+    const afterDragRedo = await dragTarget.boundingBox();
+    dragUndoRedoPass = Boolean(afterDragUndo && afterDragRedo)
+      && Math.abs(afterDragUndo.x - beforeDrag.x) <= 5
+      && Math.abs(afterDragUndo.y - beforeDrag.y) <= 5
+      && Math.abs(afterDragRedo.x - afterDrag.x) <= 5
+      && Math.abs(afterDragRedo.y - afterDrag.y) <= 5;
+  }
+  results.push({ test: 'canvas Ctrl+Z/Ctrl+Shift+Z undo and redo node drag', pass: dragUndoRedoPass });
+  console.log(`   Drag undo/redo: ${dragUndoRedoPass ? 'PASS' : 'FAIL'}`);
+
   const manualEdgeState = await page.evaluate<ManualLayoutEdgeState>(() => {
     const mermaidEdgePath = document.querySelector('.diagram-canvas-svg--reactflow path.flowchart-link') as SVGPathElement | null;
     const reactFlowEdgePath = document.querySelector('.react-flow__edge path.react-flow__edge-path') as SVGPathElement | null;
@@ -408,17 +511,34 @@ async function validate() {
   results.push({ test: 'manual layout edges follow React Flow nodes', pass: manualEdgesPass });
   console.log(`   Manual layout edges: RF=${manualEdgeState.reactFlowEdges}, Mermaid opacity=${manualEdgeState.mermaidEdgeOpacity}, bbox=${manualEdgeState.reactFlowEdgeWidth}x${manualEdgeState.reactFlowEdgeHeight} — ${manualEdgesPass ? 'PASS' : 'FAIL'}`);
 
-  const resetButton = page.locator('button[aria-label="Reset shared layout to Mermaid"]');
-  const hasResetButton = await resetButton.count() > 0;
-  let resetPass = false;
-  if (hasResetButton) {
-    await resetButton.click({ timeout: 5000 });
+  const hasSimplifyButton = await simplifyButton.count() > 0;
+  const simplifyHint = hasSimplifyButton ? await simplifyButton.locator('.canvas-toolbar-shortcut').textContent() : null;
+  const sourceBeforeSimplify = await editor.textContent();
+  let simplifyPass = false;
+  let simplifyPreservedSource = false;
+  let simplifyActionDisappeared = false;
+  let simplifyKeptCanvasMounted = false;
+  if (hasSimplifyButton) {
+    await page.getByTestId('diagram-canvas').focus();
+    await page.keyboard.press('s');
+    await simplifyButton.waitFor({ state: 'detached', timeout: 5_000 });
     await page.waitForTimeout(500);
-    const afterReset = await dragTarget.boundingBox();
-    resetPass = !!beforeDrag && !!afterReset && Math.abs(afterReset.x - beforeDrag.x) <= 5;
+    const afterSimplify = await dragTarget.boundingBox();
+    simplifyPass = !!beforeDrag && !!afterSimplify && Math.abs(afterSimplify.x - beforeDrag.x) <= 5;
+    simplifyPreservedSource = await editor.textContent() === sourceBeforeSimplify;
+    simplifyActionDisappeared = await simplifyButton.count() === 0;
+    simplifyKeptCanvasMounted = canvasBeforeDrag
+      ? await canvasBeforeDrag.evaluate((element) => document.querySelector('[data-testid="diagram-canvas"]') === element)
+      : false;
   }
-  results.push({ test: 'reactflow reset layout', pass: resetPass });
-  console.log(`   Node reset: ${resetPass} — ${resetPass ? 'PASS' : 'FAIL'}`);
+  const simplifyLayoutPass = simplifyActionAbsentInitially
+    && simplifyPass
+    && simplifyPreservedSource
+    && simplifyActionDisappeared
+    && simplifyHint === 'S'
+    && simplifyKeptCanvasMounted;
+  results.push({ test: 'reactflow simplify layout keyboard shortcut', pass: simplifyLayoutPass });
+  console.log(`   Simplified with S: ${simplifyLayoutPass} — ${simplifyLayoutPass ? 'PASS' : 'FAIL'}`);
 
   // --- Test: fixed add-node toolbar ---
   console.log('\n7. Testing fixed add-node toolbar...');

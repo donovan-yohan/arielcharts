@@ -1255,11 +1255,11 @@ code {
   border: 1px solid var(--surface-inset);
   height: 8px;
   width: 8px;
+  z-index: 2;
 }
 
 .diagram-reactflow-layer .mermaid-flow-handle--target {
   opacity: 0;
-  pointer-events: auto;
 }
 
 .diagram-reactflow-layer .mermaid-flow-handle--source {
@@ -1285,6 +1285,14 @@ code {
 }
 
 .mermaid-flow-node {
+  height: 100%;
+  min-height: 28px;
+  min-width: 48px;
+  position: relative;
+  width: 100%;
+}
+
+.mermaid-flow-node-surface {
   align-items: center;
   background: var(--control-surface);
   border: 1px solid var(--diagram-item-stroke-fallback);
@@ -1298,97 +1306,157 @@ code {
   min-height: 28px;
   min-width: 48px;
   padding: 8px 12px;
+  pointer-events: none;
   position: relative;
   text-align: center;
   width: 100%;
 }
 
-.mermaid-flow-node.is-selected {
+.mermaid-flow-node.is-selected .mermaid-flow-node-surface {
   border-color: var(--focus-ring);
   outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }
 
-.mermaid-flow-node.is-focused {
+.mermaid-flow-node.is-focused .mermaid-flow-node-surface {
   outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }
 
-.mermaid-flow-node > span {
+.mermaid-flow-node-surface > span {
   position: relative;
   z-index: 1;
 }
 
-.mermaid-flow-node--round,
-.mermaid-flow-node--stadium {
+.mermaid-flow-node-remote-outline {
+  box-shadow: inset 0 0 0 2px var(--remote-selection-color);
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
+.mermaid-flow-node-remote-outline--round,
+.mermaid-flow-node-remote-outline--stadium {
   border-radius: 999px;
 }
 
-.mermaid-flow-node--circle,
-.mermaid-flow-node--doublecircle,
-.mermaid-flow-node--ellipse {
+.mermaid-flow-node-remote-outline--circle,
+.mermaid-flow-node-remote-outline--doublecircle,
+.mermaid-flow-node-remote-outline--ellipse {
   border-radius: 50%;
 }
 
-.mermaid-flow-node--diamond {
+.mermaid-flow-node-remote-outline--diamond {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.mermaid-flow-node-remote-outline--hexagon {
+  clip-path: polygon(18% 0, 82% 0, 100% 50%, 82% 100%, 18% 100%, 0 50%);
+}
+
+.mermaid-flow-node-remote-outline--trapezoid {
+  clip-path: polygon(12% 0, 88% 0, 100% 100%, 0 100%);
+}
+
+.mermaid-flow-node-remote-outline--inv_trapezoid {
+  clip-path: polygon(0 0, 100% 0, 88% 100%, 12% 100%);
+}
+
+.mermaid-flow-node-remote-outline--lean_right {
+  clip-path: polygon(12% 0, 100% 0, 88% 100%, 0 100%);
+}
+
+.mermaid-flow-node-remote-outline--lean_left {
+  clip-path: polygon(0 0, 88% 0, 100% 100%, 12% 100%);
+}
+
+.mermaid-flow-node-remote-outline--odd {
+  clip-path: polygon(0 0, 88% 0, 100% 50%, 88% 100%, 0 100%);
+}
+
+.mermaid-flow-node-remote-label {
+  border: 1px solid var(--surface-canvas);
+  border-radius: 3px;
+  color: var(--surface-canvas);
+  font: 700 10px/1.2 var(--font-mono);
+  left: 50%;
+  max-width: calc(100% + 28px);
+  overflow: hidden;
+  padding: 2px 4px;
+  pointer-events: none;
+  position: absolute;
+  text-overflow: ellipsis;
+  top: -18px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  z-index: 4;
+}
+
+.mermaid-flow-node-surface--round,
+.mermaid-flow-node-surface--stadium {
+  border-radius: 999px;
+}
+
+.mermaid-flow-node-surface--circle,
+.mermaid-flow-node-surface--doublecircle,
+.mermaid-flow-node-surface--ellipse {
+  border-radius: 50%;
+}
+
+.mermaid-flow-node-surface--diamond {
   clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
   padding: 14px;
 }
 
-.mermaid-flow-node--hexagon {
+.mermaid-flow-node-surface--hexagon {
   clip-path: polygon(18% 0, 82% 0, 100% 50%, 82% 100%, 18% 100%, 0 50%);
 }
 
-.mermaid-flow-node--trapezoid {
+.mermaid-flow-node-surface--trapezoid {
   clip-path: polygon(12% 0, 88% 0, 100% 100%, 0 100%);
 }
 
-.mermaid-flow-node--inv_trapezoid {
+.mermaid-flow-node-surface--inv_trapezoid {
   clip-path: polygon(0 0, 100% 0, 88% 100%, 12% 100%);
 }
 
-.mermaid-flow-node--lean_right {
+.mermaid-flow-node-surface--lean_right {
   clip-path: polygon(12% 0, 100% 0, 88% 100%, 0 100%);
 }
 
-.mermaid-flow-node--lean_left {
+.mermaid-flow-node-surface--lean_left {
   clip-path: polygon(0 0, 88% 0, 100% 100%, 12% 100%);
 }
 
-.mermaid-flow-node--odd {
+.mermaid-flow-node-surface--odd {
   clip-path: polygon(0 0, 88% 0, 100% 50%, 88% 100%, 0 100%);
 }
 
-.mermaid-flow-node--cylinder {
-  border-bottom-color: transparent;
+.mermaid-flow-node-surface--cylinder {
   border-radius: 50% / 14%;
   padding-top: 12px;
 }
 
-.mermaid-flow-node--cylinder::before,
-.mermaid-flow-node--cylinder::after {
-  border: 1px solid var(--control-border);
+.mermaid-flow-node-surface--cylinder::before {
+  border: 1px solid;
+  border-color: inherit;
   border-radius: 50%;
   content: '';
-  height: 22%;
+  height: clamp(6px, 22%, 18px);
   left: -1px;
   pointer-events: none;
   position: absolute;
   right: -1px;
 }
 
-.mermaid-flow-node--cylinder::before {
-  background: var(--canvas-item-overlay);
+.mermaid-flow-node-surface--cylinder::before {
+  background: inherit;
   top: -1px;
 }
 
-.mermaid-flow-node--cylinder::after {
-  border-top-color: transparent;
-  bottom: -1px;
-}
-
-.mermaid-flow-node--subroutine::before,
-.mermaid-flow-node--subroutine::after {
+.mermaid-flow-node-surface--subroutine::before,
+.mermaid-flow-node-surface--subroutine::after {
   background: var(--control-border);
   content: '';
   height: 100%;
@@ -1397,11 +1465,11 @@ code {
   width: 1px;
 }
 
-.mermaid-flow-node--subroutine::before {
+.mermaid-flow-node-surface--subroutine::before {
   left: 10px;
 }
 
-.mermaid-flow-node--subroutine::after {
+.mermaid-flow-node-surface--subroutine::after {
   right: 10px;
 }
 
@@ -1419,6 +1487,45 @@ code {
   border-left: 1px solid var(--control-border);
   border-bottom: 1px solid var(--control-border);
   background: var(--surface-overlay);
+}
+
+.workspace-source-flyout {
+  width: var(--source-flyout-width, clamp(320px, 29vw, 345px));
+}
+
+.workspace-source-resize-handle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: -6px;
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.workspace-source-resize-handle::after {
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 2px;
+  height: 42px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  content: '';
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease;
+}
+
+.workspace-source-resize-handle:hover::after,
+.workspace-source-resize-handle:focus-visible::after {
+  opacity: 1;
+}
+
+.workspace-source-resize-handle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .workspace-flyout-header,
@@ -1474,6 +1581,36 @@ code {
 .workspace-flyout-editor {
   flex: 1;
   min-height: 0;
+}
+
+.workspace-flyout-editor .cm-scroller {
+  overflow: auto;
+}
+
+.workspace-flyout-editor .cm-content {
+  width: max-content;
+  min-width: 100%;
+  white-space: pre;
+}
+
+.workspace-source-github-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 7px 18px;
+  border-bottom: 1px solid var(--line-subtle);
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.workspace-source-github-copy .workspace-copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+  white-space: nowrap;
 }
 
 .workspace-source-status {
@@ -1552,6 +1689,18 @@ code {
 
 .history-item.is-current {
   border-color: var(--selection);
+}
+
+.history-item.is-current:last-child {
+  border-bottom-color: var(--selection);
+}
+
+.history-item.is-current:not(:last-child) {
+  border-bottom: 1px solid var(--selection);
+}
+
+.history-item.is-current + .history-item {
+  border-top: 0;
 }
 
 .history-item-heading,
@@ -1891,26 +2040,24 @@ code {
 
 .canvas-toolbar-shortcut {
   position: absolute;
-  right: -3px;
-  bottom: -3px;
+  right: -2px;
+  bottom: -2px;
   z-index: 1;
-  max-width: 38px;
-  overflow: hidden;
-  padding: 1px 2px;
-  border: 1px solid var(--control-border);
-  border-radius: 3px;
-  background: var(--surface-raised);
-  color: var(--ink-muted);
+  color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 0.625rem;
+  font-size: 0.5625rem;
   font-weight: 600;
   line-height: 1;
-  text-overflow: ellipsis;
+  opacity: 0.9;
   white-space: nowrap;
 }
 
 @media (pointer: coarse) {
   .canvas-toolbar-shortcut {
+    display: none;
+  }
+
+  .workspace-source-resize-handle {
     display: none;
   }
 }
@@ -2282,11 +2429,24 @@ code {
     overscroll-behavior: contain;
   }
 
+  .workspace-source-resize-handle {
+    display: none;
+  }
+
   .workspace-flyout-header {
     min-height: 56px;
   }
 
   .workspace-flyout-meta {
+    min-height: 44px;
+  }
+
+  .workspace-source-github-copy {
+    min-height: 52px;
+    padding-inline: 16px;
+  }
+
+  .workspace-source-github-copy .workspace-copy-button {
     min-height: 44px;
   }
 

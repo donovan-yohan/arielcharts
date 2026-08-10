@@ -12,6 +12,14 @@ import type { SessionState, UpgradeContext } from './types.js';
 const MESSAGE_TYPE_SYNC = 0;
 const MESSAGE_TYPE_AWARENESS = 1;
 const MESSAGE_TYPE_QUERY_AWARENESS = 3;
+// Clients normally publish one owned state at a time. This still leaves room
+// for seven maximum-size states plus protocol overhead in a batched update.
+const MAX_AWARENESS_UPDATE_BYTES = 256 * 1024;
+const MAX_AWARENESS_STATE_JSON_BYTES = 32 * 1024;
+const MAX_CANVAS_AWARENESS_DIAGRAM_ID_LENGTH = 128;
+const MAX_CANVAS_AWARENESS_NODE_IDS = 100;
+const MAX_CANVAS_AWARENESS_NODE_ID_LENGTH = 256;
+const MAX_CANVAS_AWARENESS_COORDINATE = 1_000_000;
 
 function toUint8Array(message: RawData): Uint8Array {
   if (message instanceof ArrayBuffer) {
@@ -48,6 +56,9 @@ function parseAwarenessEntries(update: Uint8Array): AwarenessEntry[] {
     const clientId = decoding.readVarUint(decoderInstance);
     const clock = decoding.readVarUint(decoderInstance);
     const stateJson = decoding.readVarString(decoderInstance);
+    if (Buffer.byteLength(stateJson, 'utf8') > MAX_AWARENESS_STATE_JSON_BYTES) {
+      continue;
+    }
     const state: unknown = JSON.parse(stateJson);
     if (state !== null && (typeof state !== 'object' || Array.isArray(state))) {
       throw new Error(`Invalid awareness state for client ${clientId}.`);
@@ -67,6 +78,59 @@ function encodeAwarenessEntries(entries: AwarenessEntry[]): Uint8Array {
     encoding.writeVarString(encoderInstance, entry.stateJson);
   }
   return encoding.toUint8Array(encoderInstance);
+}
+
+function isFiniteCanvasCoordinate(value: unknown): value is number {
+  return typeof value === 'number'
+    && Number.isFinite(value)
+    && Math.abs(value) <= MAX_CANVAS_AWARENESS_COORDINATE;
+}
+
+function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
+  if (!entry.state || !Object.hasOwn(entry.state, 'canvas')) {
+    return entry;
+  }
+
+  const canvas = entry.state.canvas;
+  if (canvas === null) {
+    return entry;
+  }
+  if (!canvas || typeof canvas !== 'object' || Array.isArray(canvas)) {
+    const { canvas: _canvas, ...state } = entry.state;
+    return { ...entry, state, stateJson: JSON.stringify(state) };
+  }
+
+  const candidate = canvas as Record<string, unknown>;
+  const diagramId = candidate.diagram_id;
+  const cursor = candidate.cursor;
+  const selectedNodeIds = candidate.selected_node_ids;
+  const hasValidDiagramId = typeof diagramId === 'string'
+    && diagramId.length > 0
+    && diagramId.length <= MAX_CANVAS_AWARENESS_DIAGRAM_ID_LENGTH;
+  const hasValidCursor = cursor === undefined || (
+    cursor !== null
+    && typeof cursor === 'object'
+    && !Array.isArray(cursor)
+    && isFiniteCanvasCoordinate((cursor as Record<string, unknown>).x)
+    && isFiniteCanvasCoordinate((cursor as Record<string, unknown>).y)
+  );
+  const hasValidSelectedNodeIds = selectedNodeIds === undefined || (
+    Array.isArray(selectedNodeIds)
+    && selectedNodeIds.length <= MAX_CANVAS_AWARENESS_NODE_IDS
+    && selectedNodeIds.every((nodeId) => typeof nodeId === 'string' && nodeId.length > 0 && nodeId.length <= MAX_CANVAS_AWARENESS_NODE_ID_LENGTH)
+  );
+  if (!hasValidDiagramId || !hasValidCursor || !hasValidSelectedNodeIds) {
+    const { canvas: _canvas, ...state } = entry.state;
+    return { ...entry, state, stateJson: JSON.stringify(state) };
+  }
+
+  const normalizedCanvas = {
+    diagram_id: diagramId,
+    ...(cursor === undefined ? {} : { cursor }),
+    ...(selectedNodeIds === undefined ? {} : { selected_node_ids: selectedNodeIds }),
+  };
+  const state = { ...entry.state, canvas: normalizedCanvas };
+  return { ...entry, state, stateJson: JSON.stringify(state) };
 }
 
 export class SessionWebSocketServer {
@@ -238,6 +302,9 @@ export class SessionWebSocketServer {
 
       case MESSAGE_TYPE_AWARENESS: {
         const awarenessUpdate = decoding.readVarUint8Array(decoderInstance);
+        if (awarenessUpdate.byteLength > MAX_AWARENESS_UPDATE_BYTES) {
+          return;
+        }
         const filtered = this.filterAwarenessEntries(session, sender, parseAwarenessEntries(awarenessUpdate));
         if (filtered.entries.length === 0) {
           return;
@@ -330,7 +397,8 @@ export class SessionWebSocketServer {
     const allowed: AwarenessEntry[] = [];
     const claimedClientIds: number[] = [];
     const releasedClientIds: number[] = [];
-    for (const entry of entries) {
+    for (const rawEntry of entries) {
+      const entry = sanitizeCanvasAwarenessEntry(rawEntry);
       if (nextOwnedClientIds.has(entry.clientId)) {
         allowed.push(entry);
         if (entry.state === null) {

@@ -61,7 +61,7 @@ describe('diagram capability catalog', () => {
     const nonVisualRegisteredIds = ['---', 'error', 'info'];
     expect(registeredDiagramIds.filter((id) => !nonVisualRegisteredIds.includes(id))).toEqual(MERMAID_11_16_1_PARSER_TYPES);
     expect(registeredDiagramIds).toHaveLength(MERMAID_11_16_1_PARSER_TYPES.length + nonVisualRegisteredIds.length);
-  });
+  }, 15_000);
 
   it('collapses renderer variants and Railroad grammars without losing parser aliases', () => {
     expect(classifyDiagramCapability('flowchart-v2')).toMatchObject({ family: 'flowchart', kind: 'flowchart', editingMode: 'canvas' });

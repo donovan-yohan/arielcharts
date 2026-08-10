@@ -83,6 +83,12 @@ const TRANSPARENT_MERMAID_FIXTURE = `flowchart LR
   classDef ghost fill:none,stroke:transparent,color:transparent;
   Ghost[Ghost]:::ghost --> Visible[Visible]`;
 
+const CONNECT_SOURCE_SAFE_FIXTURE = `flowchart LR
+  Source["Session A (Worker 1)"]:::worker
+  Target["Session B (Worker 2)"]
+  classDef worker fill:#e7f5ff,stroke:#1864ab,color:#0b2e59;
+  class Source worker`;
+
 const SHAPE_HANDLE_FIXTURE = `flowchart LR
   classDef cylinder fill:#e7f5ff,stroke:#1864ab,color:#0b2e59;
   Start[Start] --> Diamond{Diamond shape}
@@ -1158,10 +1164,31 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await verifiedClick(page, page.getByRole('button', { name: 'diamond', exact: true }), 'diamond shape picker action');
   await verifiedClick(page, firstNode, 'first diagram node after shape change');
   await verifiedClick(page, nodeToolbar.getByRole('button', { name: 'Connect nodes', exact: true }), 'node toolbar Connect nodes');
-  await page.getByText('click source node [esc cancel]', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
-  await firstNode.click();
   await page.getByText('click target node [esc cancel]', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
   await page.getByTestId('diagram-canvas').press('Escape');
+
+  await replaceSource(page, CONNECT_SOURCE_SAFE_FIXTURE);
+  await waitForSource(page, CONNECT_SOURCE_SAFE_FIXTURE);
+  await waitForCanvas(page, 'flowchart');
+  await closeFlyout(page, 'source');
+  const sourceNode = page.locator('.mermaid-flow-node').filter({ hasText: 'Session A (Worker 1)' }).first();
+  const targetNode = page.locator('.mermaid-flow-node').filter({ hasText: 'Session B (Worker 2)' }).first();
+  await verifiedClick(page, sourceNode, 'parenthetical source node');
+  await nodeToolbar.waitFor({ state: 'visible', timeout: 15_000 });
+  await verifiedClick(page, nodeToolbar.getByRole('button', { name: 'Connect nodes', exact: true }), 'seeded Connect nodes action');
+  await page.getByText('click target node [esc cancel]', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+  await verifiedClick(page, targetNode, 'parenthetical target node');
+  const edgeLabel = page.getByPlaceholder('label (optional)', { exact: true });
+  await edgeLabel.waitFor({ state: 'visible', timeout: 15_000 });
+  await edgeLabel.press('Enter');
+  const expectedConnectedSource = `${CONNECT_SOURCE_SAFE_FIXTURE}\n  Source --> Target\n`;
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, expectedConnectedSource);
+  await waitForCanvas(page, 'flowchart');
+  assert((await canonicalSource(page)).includes('Source["Session A (Worker 1)"]:::worker'),
+    'Connecting parenthetical nodes rewrote the existing quoted source semantics.');
+  assert(await page.getByTestId('source-parse-status').count() === 0,
+    'Connecting parenthetical nodes produced a Mermaid parse error instead of a rendered flowchart.');
   await closeFlyout(page, 'source');
   await saveScreenshot(page, 'issue-14-flowchart-selected');
 

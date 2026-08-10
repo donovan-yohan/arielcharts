@@ -5,6 +5,11 @@ export type ConnectNodeActivation =
   | { kind: 'choose-target'; edge: { midpoint: SvgPoint; source: string; target: string } }
   | { kind: 'noop' };
 
+/** Select an existing node as the source only for an unambiguous connect action. */
+export function getConnectModeSourceId(selectedNodeIds: readonly string[]): string | null {
+  return selectedNodeIds.length === 1 ? selectedNodeIds[0] ?? null : null;
+}
+
 /** Resolve a node activation while the canvas is in connect mode. */
 export function getConnectNodeActivation(
   nodeId: string,

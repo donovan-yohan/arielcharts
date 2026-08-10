@@ -42,7 +42,7 @@ import { shouldCanvasHandleEscape } from '../lib/canvas-keyboard-ownership';
 import { getCanvasToolbarStackGeometry, getCanvasToolbarVisibility } from '../lib/canvas-toolbar-stack';
 import { applyCanvasTouchGesture, CanvasTouchGestureController, type CanvasTouchGesture } from '../lib/canvas-touch-gesture';
 import { applyCanvasWheelGesture, getCanvasWheelGesture } from '../lib/canvas-wheel-gesture';
-import { getConnectNodeActivation } from '../lib/diagram-connect-state';
+import { getConnectModeSourceId, getConnectNodeActivation } from '../lib/diagram-connect-state';
 import { getCanvasDotGridGeometry } from '../lib/canvas-dot-grid';
 import { beginCanvasMousePan, CanvasMousePanController } from '../lib/canvas-mouse-pan';
 import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
@@ -1014,6 +1014,14 @@ export function DiagramCanvas({
     }
   }, [interactionMode, isFlowchart, onInteractionModeChange]);
 
+  const toggleConnectMode = useCallback(() => {
+    const nextMode = mode === 'connect' ? 'select' : 'connect';
+    setPendingEdge(null);
+    setPendingEdgeLabel('');
+    setConnectSourceId(nextMode === 'connect' ? getConnectModeSourceId(selectionRef.current) : null);
+    setMode(nextMode);
+  }, [mode, setMode]);
+
   const copySelectedNodes = useCallback(() => {
     if (!canEditStructure || !graph || selectionRef.current.length === 0) {
       return false;
@@ -1547,10 +1555,7 @@ export function DiagramCanvas({
 
       if (!isModifierShortcut && canvasOwnsSingleKeyFocus && canEditStructure && key === 'c') {
         event.preventDefault();
-        setPendingEdge(null);
-        setPendingEdgeLabel('');
-        setConnectSourceId(null);
-        setMode(mode === 'connect' ? 'select' : 'connect');
+        toggleConnectMode();
         return;
       }
 
@@ -1633,7 +1638,7 @@ export function DiagramCanvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [canEditStructure, copySelectedNodes, fitToDiagram, graph, hasPersistedLayout, mode, nodeById, onAddNode, onDeleteEdge, onDeleteNodes, onRedo, onUndo, onUngroupNodes, pasteClipboard, readOnly, selectedCurrentEdgeIdentity, selection, setMode, setSelection, simplifyLayout, zoomCanvas]);
+  }, [canEditStructure, copySelectedNodes, fitToDiagram, graph, hasPersistedLayout, nodeById, onAddNode, onDeleteEdge, onDeleteNodes, onRedo, onUndo, onUngroupNodes, pasteClipboard, readOnly, selectedCurrentEdgeIdentity, selection, setMode, setSelection, simplifyLayout, toggleConnectMode, zoomCanvas]);
 
   useEffect(() => {
     if (viewport.zoom >= EDITOR_MIN_ZOOM) {
@@ -3043,11 +3048,8 @@ export function DiagramCanvas({
               </ToolbarButton>
             ) : null}
             <ToolbarButton label="Connect nodes" onClick={() => {
-              setPendingEdge(null);
-              setPendingEdgeLabel('');
-              setConnectSourceId(null);
+              toggleConnectMode();
               setToolbarOpen(true);
-              setMode(mode === 'connect' ? 'select' : 'connect');
             }} shortcut="C">
               <ArrowRightFromLine size={16} />
             </ToolbarButton>

@@ -6,6 +6,10 @@ import { addErAttribute } from './er-mutations';
 import { addClass } from './class-mutations';
 import { addState } from './state-mutations';
 import { addRequirement } from './requirement-mutations';
+import { editArchitectureService } from './architecture-mutations';
+import { addC4Element } from './c4-mutations';
+import { addBlockNode } from './block-mutations';
+import { addSwimlaneNode } from './swimlane-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -112,6 +116,10 @@ describe('collaboration transaction origins', () => {
     ['class', 'classDiagram', (source: string) => addClass(source, 'Account')],
     ['state', 'stateDiagram-v2\n  [*] --> Ready', (source: string) => addState(source, 'Done')],
     ['requirement', 'requirementDiagram\n  requirement req {\n    id: 1\n    text: Existing\n    risk: low\n    verifyMethod: test\n  }', (source: string) => addRequirement(source, { kind: 'requirement', name: 'next', fields: { id: '2', text: 'Next', risk: 'low', verifyMethod: 'test' } })],
+    ['architecture', 'architecture-beta\n  service api(server)[API]', (source: string) => editArchitectureService(source, 'api', { title: 'Public API' })],
+    ['c4', 'C4Context\n  Person(user, "User")', (source: string) => addC4Element(source, { id: 'system', kind: 'System', label: 'System' })],
+    ['block', 'block-beta\n  api["API"]', (source: string) => addBlockNode(source, { id: 'worker', label: 'Worker', span: 1 })],
+    ['swimlane', 'swimlane-beta\n  subgraph team [Team]\n  end', (source: string) => addSwimlaneNode(source, { id: 'work', label: 'Work', laneId: 'team' })],
   ])('keeps %s semantic form mutations in the local visual undo stack', (_family, initial, mutate) => {
     const doc = new Y.Doc();
     const source = doc.getText('semantic-source');

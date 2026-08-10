@@ -33,7 +33,7 @@ export function canUseErControls(source: string, preview: DiagramPreview | null)
 }
 
 /** Semantic families share only their current-preview gate; each owns its grammar. */
-export function canUseSemanticFamilyControls(source: string, preview: DiagramPreview | null, adapter: 'class' | 'state' | 'requirement'): boolean {
+export function canUseSemanticFamilyControls(source: string, preview: DiagramPreview | null, adapter: 'architecture' | 'block' | 'c4' | 'class' | 'state' | 'requirement' | 'swimlane'): boolean {
   return preview?.source === source
     && preview.capability.adapter === adapter
     && getDiagramSourceModelAdapter(preview.capability).getRepresentability(source).representable;

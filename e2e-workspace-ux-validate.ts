@@ -127,6 +127,39 @@ const REQUIREMENT_DIAGRAM_FIXTURE = `requirementDiagram
   }
   order - satisfies -> checkout`;
 
+const ARCHITECTURE_DIAGRAM_FIXTURE = `architecture-beta
+  group platform(cloud)[Platform]
+  service api(server)[API] in platform
+  service db(database)[Database] in platform
+  junction gateway in platform
+  api:R --> L:gateway
+  gateway:R --> L:db
+  align row api gateway db`;
+const C4_DIAGRAM_FIXTURE = `C4Context
+  Boundary(zone, "Zone") {
+    Person(user, "User")
+  }
+  System(app, "Application")
+  Rel(user, app, "Uses")`;
+const BLOCK_DIAGRAM_FIXTURE = `block-beta
+  columns 3
+  api["Public API"]:2
+  worker
+  block:storage:2
+    columns 2
+    db["Database"]
+  end
+  api --> worker
+  worker --> db`;
+const SWIMLANE_DIAGRAM_FIXTURE = `swimlane-beta LR
+  subgraph customer [Customer]
+    request[Request]
+  end
+  subgraph support [Support]
+    answer[Answer]
+  end
+  request --> answer`;
+
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
 
@@ -1011,8 +1044,103 @@ async function expectRelationshipArchitectureEditors(page: Page): Promise<void> 
   await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('requirement req {');
   await closeFlyout(page, 'source');
   await expect(page.getByTestId('diagram-mode')).toContainText('Requirement · editable · form');
+  await replaceSource(page, ARCHITECTURE_DIAGRAM_FIXTURE);
+  await waitForSource(page, ARCHITECTURE_DIAGRAM_FIXTURE);
+  await page.locator('.diagram-canvas-svg svg').waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(page.getByTestId('diagram-mode')).toContainText('Architecture · editable · form');
+  const architectureEditor = page.getByTestId('architecture-editor-controls');
+  await architectureEditor.waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+  const apiService = architectureEditor.getByRole('form', { name: 'Architecture service api editor', exact: true });
+  const serviceTitle = apiService.getByLabel('Architecture service api title');
+  await assertHitTarget(page, serviceTitle, 'architecture service title control');
+  await serviceTitle.fill('Public API');
+  await verifiedClick(page, apiService.getByRole('button', { name: 'Save', exact: true }), 'architecture service save control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('service api(server)[Public API] in platform');
+  await closeFlyout(page, 'source');
+  const edgeEditor = architectureEditor.getByRole('form', { name: 'Architecture edge gateway:R:db:L editor', exact: true });
+  await scrollErControlIntoView(edgeEditor);
+  const edgeTarget = edgeEditor.getByLabel('Architecture edge gateway:R:db:L target', { exact: true });
+  await edgeTarget.selectOption('api');
+  await verifiedClick(page, edgeEditor.getByRole('button', { name: 'Save', exact: true }), 'architecture edge save control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('gateway:R --> L:api');
+  await closeFlyout(page, 'source');
+  await replaceSource(page, C4_DIAGRAM_FIXTURE);
+  await waitForSource(page, C4_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'C4 · editable · form');
+  const c4Editor = page.getByTestId('c4-editor-controls');
+  await c4Editor.waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+  const addC4 = c4Editor.getByRole('button', { name: 'Add element', exact: true });
+  await assertHitTarget(page, addC4, 'C4 add-element control');
+  await verifiedClick(page, addC4, 'C4 add-element control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('System(system, "System")');
+  await closeFlyout(page, 'source');
+  const c4Containment = page.getByTestId('c4-containment-controls');
+  await c4Containment.getByLabel('C4 element system boundary', { exact: true }).selectOption('zone');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('    System(system, "System")');
+  await closeFlyout(page, 'source');
+  await replaceSource(page, 'C4Dynamic\n  Person(user, "User")');
+  await waitForSource(page, 'C4Dynamic\n  Person(user, "User")');
+  await expect(page.getByTestId('diagram-mode')).toContainText('C4 · source only');
+  await expect(page.getByTestId('c4-editor-controls')).toHaveCount(0);
+
+  await replaceSource(page, BLOCK_DIAGRAM_FIXTURE);
+  await waitForSource(page, BLOCK_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Block · editable · form');
+  const blockEditor = page.getByTestId('block-editor-controls');
+  await blockEditor.waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+  const addBlock = blockEditor.getByRole('button', { name: 'Add block', exact: true });
+  await scrollErControlIntoView(addBlock);
+  await assertHitTarget(page, addBlock, 'Block add-node control');
+  await verifiedClick(page, addBlock, 'Block add-node control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('item["Block"]');
+  await closeFlyout(page, 'source');
+  const blockContainment = page.getByTestId('block-containment-controls');
+  await blockContainment.getByLabel('Block item composite', { exact: true }).selectOption('storage');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('    item["Block"]');
+  await closeFlyout(page, 'source');
+  await replaceSource(page, 'block-beta\n  api worker');
+  await waitForSource(page, 'block-beta\n  api worker');
+  await expect(page.getByTestId('diagram-mode')).toContainText('Block · source only');
+  await expect(page.getByTestId('block-editor-controls')).toHaveCount(0);
+
+  await replaceSource(page, SWIMLANE_DIAGRAM_FIXTURE);
+  await waitForSource(page, SWIMLANE_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Swimlane · editable · form');
+  const swimlaneEditor = page.getByTestId('swimlane-editor-controls');
+  await swimlaneEditor.waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+  const addLane = swimlaneEditor.getByRole('button', { name: 'Add lane', exact: true });
+  await scrollErControlIntoView(addLane);
+  await assertHitTarget(page, addLane, 'Swimlane add-lane control');
+  await verifiedClick(page, addLane, 'Swimlane add-lane control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('subgraph lane [Lane]');
+  await closeFlyout(page, 'source');
+  await replaceSource(page, 'swimlane-beta\n  subgraph lane\n    nested[A]\n    subgraph nested\n      item[B]\n    end\n  end');
+  await waitForSource(page, 'swimlane-beta\n  subgraph lane\n    nested[A]\n    subgraph nested\n      item[B]\n    end\n  end');
+  await expect(page.getByTestId('diagram-mode')).toContainText('Swimlane · source only');
+  await expect(page.getByTestId('swimlane-editor-controls')).toHaveCount(0);
   assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
   assert(await canvasTransform(page) === beforeTransform, 'Relationship/architecture semantic forms changed the generic Mermaid camera transform.');
+}
+
+async function waitForSemanticMode(page: Page, mode: string): Promise<void> {
+  try {
+    await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toContain(mode);
+  } catch (error) {
+    await ensureSourceFlyoutOpen(page);
+    console.log(`SEMANTIC MODE DIAGNOSTIC (${mode}): ${await page.getByTestId('source-parse-status').textContent()}`);
+    throw error;
+  }
 }
 
 async function expectStableFlyoutAnchors(page: Page, label: string): Promise<void> {

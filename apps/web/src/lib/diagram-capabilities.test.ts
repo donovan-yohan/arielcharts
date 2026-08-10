@@ -88,6 +88,10 @@ describe('diagram capability catalog', () => {
     const classDiagram = classifyDiagramCapability('classDiagram');
     const state = classifyDiagramCapability('state');
     const requirement = classifyDiagramCapability('requirement');
+    const architecture = classifyDiagramCapability('architecture');
+    const c4 = classifyDiagramCapability('c4');
+    const block = classifyDiagramCapability('block');
+    const swimlane = classifyDiagramCapability('swimlane');
     const sourceOnly = classifyDiagramCapability('timeline');
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
@@ -99,6 +103,11 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(state).getOperationResult('stateDiagram-v2\n  [*] --> Ready', 'add-transition')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(state).getOperationResult('stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }', 'add-state')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(requirement).getOperationResult('requirementDiagram\n  requirement req {\n    id: 1\n    text: Example\n    risk: low\n    verifyMethod: test\n  }', 'add-requirement')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(architecture).getOperationResult('architecture-beta\n  service api(server)[API]', 'add-service')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(c4).getOperationResult('C4Context\n  Person(user, "User")', 'add-element')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(block).getOperationResult('block-beta\n  api', 'add-node')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(block).getOperationResult('block-beta\n  api', 'set-columns')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(swimlane).getOperationResult('swimlane-beta\n  subgraph api [API]\n  end', 'add-lane')).toEqual({ supported: true });
     const noteOnlySequence = 'sequenceDiagram\n  Note over A: details';
     await expect(mermaid.parse(noteOnlySequence)).resolves.toMatchObject({ diagramType: 'sequence' });
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult(noteOnlySequence, 'add-message')).toEqual({ supported: true });
@@ -112,6 +121,10 @@ describe('diagram capability catalog', () => {
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('classDiagram'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('state'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('requirement'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('architecture'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('c4'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('block'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('swimlane'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('timeline'))).toBe(false);
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('flowchart-v2'))).toBe('Flowchart · editable · canvas');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('sequence'))).toBe('Sequence · editable · form');
@@ -119,6 +132,9 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('classDiagram'))).toBe('Class · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('state'))).toBe('State · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('requirement'))).toBe('Requirement · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('c4'))).toBe('C4 · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('block'))).toBe('Block · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('swimlane'))).toBe('Swimlane · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('timeline'))).toBe('Timeline · source only');
   });
 
@@ -133,6 +149,9 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(flowchart, 'flowchart TD\nA-->')).toBe('Flowchart · source only');
     expect(getDiagramCapabilityLabel(er, 'erDiagram\nA ||--o{ B')).toBe('Entity relationship · source only');
     expect(getDiagramCapabilityLabel(state, 'stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }')).toBe('State · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('c4'), 'C4Dynamic\n  Person(user, "User")')).toBe('C4 · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('block'), 'block-beta\n  space:2')).toBe('Block · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('swimlane'), 'swimlane-beta\n  subgraph Sales\n    a(A)\n  end')).toBe('Swimlane · source only');
     expect(getDiagramCapabilityLabel(null, 'sequenceDiagram\nA->>B: request')).toBe('Mermaid · source only');
   });
 });

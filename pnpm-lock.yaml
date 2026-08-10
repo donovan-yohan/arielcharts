@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  mermaid@11.16.1:
+    hash: 9ddb76cfb8ef085daf010aae377ad9d995245c96ce359d73fe24fce484079ef7
+    path: patches/mermaid@11.16.1.patch
+
 importers:
 
   .:
@@ -90,6 +95,9 @@ importers:
       '@codemirror/view':
         specifier: 6.38.6
         version: 6.38.6
+      '@mermaid-js/parser':
+        specifier: 1.2.0
+        version: 1.2.0
       '@xyflow/react':
         specifier: ^12.11.0
         version: 12.11.0(@types/react-dom@19.1.9(@types/react@19.1.13))(@types/react@19.1.13)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
@@ -104,7 +112,7 @@ importers:
         version: 1.8.0(react@19.1.1)
       mermaid:
         specifier: 11.16.1
-        version: 11.16.1
+        version: 11.16.1(patch_hash=9ddb76cfb8ef085daf010aae377ad9d995245c96ce359d73fe24fce484079ef7)
       mermaid-ast:
         specifier: ^0.8.2
         version: 0.8.2
@@ -147,7 +155,7 @@ importers:
     dependencies:
       mermaid:
         specifier: 11.16.1
-        version: 11.16.1
+        version: 11.16.1(patch_hash=9ddb76cfb8ef085daf010aae377ad9d995245c96ce359d73fe24fce484079ef7)
       mermaid-ast:
         specifier: ^0.8.2
         version: 0.8.2
@@ -3394,7 +3402,7 @@ snapshots:
     dependencies:
       '@mermaid-js/parser': 0.6.3
 
-  mermaid@11.16.1:
+  mermaid@11.16.1(patch_hash=9ddb76cfb8ef085daf010aae377ad9d995245c96ce359d73fe24fce484079ef7):
     dependencies:
       '@braintree/sanitize-url': 7.1.2
       '@iconify/utils': 3.1.0

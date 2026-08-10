@@ -2388,6 +2388,12 @@ export function DiagramCanvas({
                     openSubgraphEditor(subgraph.id);
                   }}
                   onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      selectSubgraph(subgraph.id);
+                      return;
+                    }
                     if (event.key !== 'F2') return;
                     event.preventDefault();
                     event.stopPropagation();

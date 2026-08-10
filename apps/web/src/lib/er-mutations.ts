@@ -316,10 +316,10 @@ function parseAttribute(line: SourceLine): ErAttributeRecord | null {
   if (!ATTRIBUTE_TYPE_PATTERN.test(type)) return null;
   let rest = match[3].trim();
   let comment: string | undefined;
-  const commentMatch = rest.match(/\s+"((?:[^"\\]|\\.)*)"\s*$/);
+  const commentMatch = rest.match(/^(?:(.*?)\s+)?"((?:[^"\\]|\\.)*)"\s*$/);
   if (commentMatch) {
-    comment = commentMatch[1]?.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-    rest = rest.slice(0, commentMatch.index).trim();
+    comment = commentMatch[2]?.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    rest = commentMatch[1]?.trim() ?? '';
   }
   const keys = rest ? rest.split(/\s*,\s*|\s+/).filter(Boolean) : [];
   if (!keys.every((key): key is ErKeyMarker => VALID_KEYS.has(key as ErKeyMarker))) return null;

@@ -97,6 +97,29 @@ describe('ER source mutations', () => {
     ].join('\r\n'));
   });
 
+  it('represents and mutates attribute comments without key markers', async () => {
+    const source = `erDiagram
+  A {
+    timestamp created_at "created"
+  }`;
+    expect(isErSourceRepresentable(source)).toBe(true);
+    expect(getErDiagramSnapshot(source).entities[0]?.attributes).toEqual([
+      { type: 'timestamp', name: 'created_at', keys: [], comment: 'created' },
+    ]);
+
+    const edited = editErAttribute(source, 'A', 'created_at', {
+      type: 'timestamp', name: 'updated_at', keys: [], comment: 'updated',
+    });
+    expect(edited).toContain('timestamp updated_at "updated"');
+    await expectValidMutation(edited);
+
+    const added = addErAttribute(source, 'A', {
+      type: 'timestamp', name: 'deleted_at', comment: 'deleted',
+    });
+    expect(added).toContain('timestamp deleted_at "deleted"');
+    await expectValidMutation(added);
+  });
+
   it('generates only Mermaid-valid and representable source for every mutation', async () => {
     mermaid.initialize({ startOnLoad: false });
     const withEntity = addErEntity(SOURCE, 'INVOICE');

@@ -120,6 +120,10 @@ describe('diagram capability catalog', () => {
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('classDiagram'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('state'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('requirement'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('architecture'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('c4'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('block'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('swimlane'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('timeline'))).toBe(false);
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('flowchart-v2'))).toBe('Flowchart · editable · canvas');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('sequence'))).toBe('Sequence · editable · form');
@@ -127,6 +131,9 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('classDiagram'))).toBe('Class · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('state'))).toBe('State · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('requirement'))).toBe('Requirement · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('c4'))).toBe('C4 · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('block'))).toBe('Block · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('swimlane'))).toBe('Swimlane · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('timeline'))).toBe('Timeline · source only');
   });
 

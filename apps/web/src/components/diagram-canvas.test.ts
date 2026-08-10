@@ -78,6 +78,18 @@ describe('relationship and architecture semantic editors', () => {
     expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addArchitectureService/u);
     expect(canvasSource).toMatch(/data-testid="architecture-editor-controls"/u);
     expect(canvasSource).toMatch(/Architecture group editor[^]*?Architecture group title/u);
+    expect(canvasSource).toMatch(/data-testid="c4-editor-controls"/u);
+    expect(canvasSource).toMatch(/data-testid="block-editor-controls"/u);
+    expect(canvasSource).toMatch(/data-testid="swimlane-editor-controls"/u);
+    expect(canvasSource).toMatch(/C4 <small>experimental safe subset/u);
+    expect(canvasSource).toMatch(/Block <small>beta safe subset/u);
+    expect(canvasSource).toMatch(/Swimlane <small>beta safe subset/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'c4'\)/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'block'\)/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'swimlane'\)/u);
+    expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addC4Element/u);
+    expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addBlockNode/u);
+    expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addSwimlaneNode/u);
     expect(canvasSource).toMatch(/onSave\?\.\(group\.id, draft\)/u);
     expect(canvasSource).toMatch(/Architecture service editor[^]*?Architecture service title/u);
     expect(canvasSource).toMatch(/onSave\?\.\(service\.id, draft\)/u);

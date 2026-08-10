@@ -100,6 +100,9 @@ import {
   editArchitectureAlignment, editArchitectureEdge, editArchitectureGroup, editArchitectureJunction, editArchitectureService,
   getArchitectureDiagramSnapshot,
 } from '../lib/architecture-mutations';
+import { addC4Boundary, addC4Element, addC4Relationship, deleteC4Boundary, deleteC4Element, deleteC4Relationship, editC4Boundary, editC4Element, editC4Relationship, getC4DiagramSnapshot } from '../lib/c4-mutations';
+import { addBlockComposite, addBlockLink, addBlockNode, deleteBlockComposite, deleteBlockLink, deleteBlockNode, editBlockComposite, editBlockLink, editBlockNode, getBlockDiagramSnapshot, setBlockColumns } from '../lib/block-mutations';
+import { addSwimlane, addSwimlaneHandoff, addSwimlaneNode, deleteSwimlane, deleteSwimlaneHandoff, deleteSwimlaneNode, editSwimlane, editSwimlaneHandoff, editSwimlaneNode, getSwimlaneDiagramSnapshot, moveSwimlaneNode } from '../lib/swimlane-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -1713,6 +1716,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isState = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'state');
   const isRequirement = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'requirement');
   const isArchitecture = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'architecture');
+  const isC4 = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'c4');
+  const isBlock = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'block');
+  const isSwimlane = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'swimlane');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1736,6 +1742,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const stateDiagram = useMemo(() => isState ? getStateDiagramSnapshot(renderedMermaidText) : null, [isState, renderedMermaidText]);
   const requirementDiagram = useMemo(() => isRequirement ? getRequirementDiagramSnapshot(renderedMermaidText) : null, [isRequirement, renderedMermaidText]);
   const architectureDiagram = useMemo(() => isArchitecture ? getArchitectureDiagramSnapshot(renderedMermaidText) : null, [isArchitecture, renderedMermaidText]);
+  const c4Diagram = useMemo(() => isC4 ? getC4DiagramSnapshot(renderedMermaidText) : null, [isC4, renderedMermaidText]);
+  const blockDiagram = useMemo(() => isBlock ? getBlockDiagramSnapshot(renderedMermaidText) : null, [isBlock, renderedMermaidText]);
+  const swimlaneDiagram = useMemo(() => isSwimlane ? getSwimlaneDiagramSnapshot(renderedMermaidText) : null, [isSwimlane, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2186,6 +2195,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             isRequirement={isRequirement}
             isArchitecture={isArchitecture}
             architectureDiagram={architectureDiagram}
+            isC4={isC4}
+            c4Diagram={c4Diagram}
+            isBlock={isBlock}
+            blockDiagram={blockDiagram}
+            isSwimlane={isSwimlane}
+            swimlaneDiagram={swimlaneDiagram}
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
@@ -2338,6 +2353,35 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onAddArchitectureAlignment={(alignment) => { mutateCanvasSource((source) => addArchitectureAlignment(source, alignment), 'Added an architecture alignment'); }}
             onEditArchitectureAlignment={(identity, alignment) => { mutateCanvasSource((source) => editArchitectureAlignment(source, identity, alignment), 'Edited an architecture alignment'); }}
             onDeleteArchitectureAlignment={(identity) => { mutateCanvasSource((source) => deleteArchitectureAlignment(source, identity), 'Deleted an architecture alignment'); }}
+            onAddC4Element={(value) => { mutateCanvasSource((source) => addC4Element(source, value), 'Added a C4 element'); }}
+            onEditC4Element={(id, value) => { mutateCanvasSource((source) => editC4Element(source, id, value), 'Edited a C4 element'); }}
+            onDeleteC4Element={(id) => { mutateCanvasSource((source) => deleteC4Element(source, id), 'Deleted a C4 element'); }}
+            onAddC4Boundary={(value) => { mutateCanvasSource((source) => addC4Boundary(source, value), 'Added a C4 boundary'); }}
+            onEditC4Boundary={(id, value) => { mutateCanvasSource((source) => editC4Boundary(source, id, value), 'Edited a C4 boundary'); }}
+            onDeleteC4Boundary={(id) => { mutateCanvasSource((source) => deleteC4Boundary(source, id), 'Deleted a C4 boundary'); }}
+            onAddC4Relationship={(value) => { mutateCanvasSource((source) => addC4Relationship(source, value), 'Added a C4 relationship'); }}
+            onEditC4Relationship={(identity, value) => { mutateCanvasSource((source) => editC4Relationship(source, identity, value), 'Edited a C4 relationship'); }}
+            onDeleteC4Relationship={(identity) => { mutateCanvasSource((source) => deleteC4Relationship(source, identity), 'Deleted a C4 relationship'); }}
+            onAddBlockNode={(value) => { mutateCanvasSource((source) => addBlockNode(source, value), 'Added a block'); }}
+            onEditBlockNode={(id, value) => { mutateCanvasSource((source) => editBlockNode(source, id, value), 'Edited a block'); }}
+            onDeleteBlockNode={(id) => { mutateCanvasSource((source) => deleteBlockNode(source, id), 'Deleted a block'); }}
+            onAddBlockComposite={(value) => { mutateCanvasSource((source) => addBlockComposite(source, value), 'Added a block composite'); }}
+            onEditBlockComposite={(id, value) => { mutateCanvasSource((source) => editBlockComposite(source, id, value), 'Edited a block composite'); }}
+            onDeleteBlockComposite={(id) => { mutateCanvasSource((source) => deleteBlockComposite(source, id), 'Deleted a block composite'); }}
+            onSetBlockColumns={(value) => { mutateCanvasSource((source) => setBlockColumns(source, value), 'Set block columns'); }}
+            onAddBlockLink={(value) => { mutateCanvasSource((source) => addBlockLink(source, value), 'Added a block link'); }}
+            onEditBlockLink={(identity, value) => { mutateCanvasSource((source) => editBlockLink(source, identity, value), 'Edited a block link'); }}
+            onDeleteBlockLink={(identity) => { mutateCanvasSource((source) => deleteBlockLink(source, identity), 'Deleted a block link'); }}
+            onAddSwimlane={(value) => { mutateCanvasSource((source) => addSwimlane(source, value), 'Added a swimlane'); }}
+            onEditSwimlane={(id, value) => { mutateCanvasSource((source) => editSwimlane(source, id, value), 'Edited a swimlane'); }}
+            onDeleteSwimlane={(id) => { mutateCanvasSource((source) => deleteSwimlane(source, id), 'Deleted a swimlane'); }}
+            onAddSwimlaneNode={(value) => { mutateCanvasSource((source) => addSwimlaneNode(source, value), 'Added a swimlane node'); }}
+            onEditSwimlaneNode={(id, value) => { mutateCanvasSource((source) => editSwimlaneNode(source, id, value), 'Edited a swimlane node'); }}
+            onMoveSwimlaneNode={(id, laneId) => { mutateCanvasSource((source) => moveSwimlaneNode(source, id, laneId), 'Moved a swimlane node'); }}
+            onDeleteSwimlaneNode={(id) => { mutateCanvasSource((source) => deleteSwimlaneNode(source, id), 'Deleted a swimlane node'); }}
+            onAddSwimlaneHandoff={(value) => { mutateCanvasSource((source) => addSwimlaneHandoff(source, value), 'Added a swimlane handoff'); }}
+            onEditSwimlaneHandoff={(identity, value) => { mutateCanvasSource((source) => editSwimlaneHandoff(source, identity, value), 'Edited a swimlane handoff'); }}
+            onDeleteSwimlaneHandoff={(identity) => { mutateCanvasSource((source) => deleteSwimlaneHandoff(source, identity), 'Deleted a swimlane handoff'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onChangeNodeShape={(nodeId, shape) => {

@@ -73,8 +73,9 @@ describe('block source mutations', () => {
     const added = addBlockComposite(SOURCE, { id: 'storage', span: 2, columns: 2 });
     expect(added).toContain('block:storage2:2');
     const linked = addBlockLink(added, { from: 'api', to: 'storage2' });
-    const renamed = editBlockComposite(linked, 'storage2', { id: 'archive' });
+    const renamed = editBlockComposite(linked, 'storage2', { id: 'archive', columns: 3 });
     expect(renamed).toContain('api --> archive');
+    expect(renamed).toContain('block:archive:2\n    columns 3');
     expect(deleteBlockComposite(renamed, 'archive')).not.toContain('archive');
   });
 

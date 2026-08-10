@@ -10,9 +10,22 @@ const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.ur
 const workspaceSource = readFileSync(new URL('./session-workspace.tsx', import.meta.url), 'utf8');
 
 describe('canvas cursor callback lifecycle', () => {
-  it('withdraws presence only on true canvas unmount and keeps preview gating behind a stable publisher ref', () => {
-    expect(canvasSource).toMatch(/onCanvasCursorChangeRef\.current = onCanvasCursorChange;[^]*?useEffect\(\(\) => \(\) => \{\s*onCanvasCursorChangeRef\.current\?\.\(null\);\s*\}, \[\]\);/u);
+  it('withdraws cursor and editing presence only on true canvas unmount and keeps preview gating behind a stable publisher ref', () => {
+    expect(canvasSource).toMatch(/onCanvasCursorChangeRef\.current = onCanvasCursorChange;[^]*?onNodeEditingChangeRef\.current = onNodeEditingChange;[^]*?useEffect\(\(\) => \(\) => \{\s*onCanvasCursorChangeRef\.current\?\.\(null\);\s*onNodeEditingChangeRef\.current\?\.\(null\);\s*\}, \[\]\);/u);
     expect(workspaceSource).toMatch(/historyPreviewRef\.current = historyPreview;[^]*?if \(!collaboration \|\| !diagramId \|\| historyPreviewRef\.current !== null\)[^]*?\}, \[collaboration\]\);/u);
+  });
+
+  it('derives remote edit indicators independently from selection and clears a removed edited node', () => {
+    expect(canvasSource).toMatch(/const remoteEditorsByNodeId = useMemo/u);
+    expect(canvasSource).toMatch(/remoteEditors: remoteEditorsByNodeId\.get\(node\.id\) \?\? \[\]/u);
+    expect(canvasSource).toMatch(/if \(editingNodeId && !nodeById\.has\(editingNodeId\)\) \{\s*setEditingNodeId\(null\);/u);
+    expect(canvasSource).toMatch(/if \(readOnly && editingNodeId\) \{\s*setEditingNodeId\(null\);/u);
+    expect(canvasSource).not.toMatch(/cancelNodeEditWhenInactive/u);
+    expect(workspaceSource).toMatch(/if \(connectionState === 'reconnecting' \|\| connectionState === 'disconnected'\) \{\s*clearCanvasPresence\(true\);/u);
+    expect(workspaceSource).toMatch(/historyPreview !== null \|\| connectionState === 'disconnected'/u);
+    expect(workspaceSource).toMatch(/window\.addEventListener\('focus', resumeCanvasPresence\);/u);
+    expect(canvasSource).toMatch(/data-testid=\{remoteEditor \? `remote-node-editing-\$\{id\}` : `remote-node-selection-\$\{id\}`\}/u);
+    expect(canvasSource).toMatch(/!presence\.canvas\.editing_node_id \? \(\s*<span/u);
   });
 });
 

@@ -10,7 +10,7 @@ describe('canvas presence', () => {
   it('keeps only active-diagram, remote canvas awareness with stable client ids', () => {
     const states = new Map<number, unknown>([
       [1, { user: { name: 'Local', color: '#0af', type: 'human' }, canvas: { diagram_id: 'main', cursor: { x: 4, y: 8 } } }],
-      [9, { user: { name: 'Other', color: '#f0a', type: 'human' }, canvas: { diagram_id: 'main', cursor: { x: 12, y: 16 }, selected_node_ids: ['A', 'A', 'B'] } }],
+      [9, { user: { name: 'Other', color: '#f0a', type: 'human' }, canvas: { diagram_id: 'main', cursor: { x: 12, y: 16 }, selected_node_ids: ['A', 'A', 'B'], editing_node_id: 'A' } }],
       [3, { user: { name: 'Elsewhere', color: '#0f8', type: 'human' }, canvas: { diagram_id: 'other', cursor: { x: 1, y: 2 } } }],
       [4, { user: { name: 'Malformed', color: '#0f8', type: 'human' }, canvas: { diagram_id: 'main', cursor: { x: Number.NaN, y: 2 } } }],
     ]);
@@ -18,7 +18,7 @@ describe('canvas presence', () => {
     expect(getRemoteCanvasPresence(states, 1, 'main')).toEqual([{
       client_id: 9,
       participant: { name: 'Other', color: '#f0a', type: 'human' },
-      canvas: { diagram_id: 'main', cursor: { x: 12, y: 16 }, selected_node_ids: ['A', 'B'] },
+      canvas: { diagram_id: 'main', cursor: { x: 12, y: 16 }, selected_node_ids: ['A', 'B'], editing_node_id: 'A' },
     }]);
   });
 
@@ -34,5 +34,16 @@ describe('canvas presence', () => {
       { diagram_id: 'main', selected_node_ids: ['A'] },
       { diagram_id: 'main', selected_node_ids: ['B'] },
     )).toBe(false);
+    expect(areCanvasAwarenessStatesEqual(
+      { diagram_id: 'main', editing_node_id: 'A' },
+      { diagram_id: 'main', editing_node_id: 'B' },
+    )).toBe(false);
+  });
+
+  it('drops malformed editing awareness with the same all-or-nothing policy as other canvas fields', () => {
+    const states = new Map<number, unknown>([
+      [9, { user: { name: 'Other', color: '#f0a', type: 'human' }, canvas: { diagram_id: 'main', editing_node_id: '' } }],
+    ]);
+    expect(getRemoteCanvasPresence(states, 1, 'main')).toEqual([]);
   });
 });

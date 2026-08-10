@@ -509,6 +509,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const activeTouchLabelRef = useRef<HTMLElement | null>(null);
   const touchLabelTimeoutRef = useRef<number | null>(null);
   const selectedNodeIdsRef = useRef<string[]>([]);
+  const editingNodeIdRef = useRef<string | null>(null);
   const localCanvasCursorRef = useRef<CanvasWorldPoint | null>(null);
   const localCanvasPresenceRef = useRef<CanvasAwarenessState | null>(null);
   const pendingCanvasCursorRef = useRef<CanvasWorldPoint | null>(null);
@@ -611,17 +612,22 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     });
   }, []);
 
-  const publishCanvasPresence = useCallback((cursor: CanvasWorldPoint | null, selectedNodeIds: readonly string[]) => {
+  const publishCanvasPresence = useCallback((
+    cursor: CanvasWorldPoint | null,
+    selectedNodeIds: readonly string[],
+    editingNodeId = editingNodeIdRef.current,
+  ) => {
     const diagramId = activeDiagramIdRef.current;
     if (!collaboration || !diagramId || historyPreviewRef.current !== null) {
       return;
     }
 
-    const next: CanvasAwarenessState | null = cursor || selectedNodeIds.length > 0
+    const next: CanvasAwarenessState | null = cursor || selectedNodeIds.length > 0 || editingNodeId
       ? {
         diagram_id: diagramId,
         ...(cursor ? { cursor } : {}),
         ...(selectedNodeIds.length > 0 ? { selected_node_ids: [...selectedNodeIds] } : {}),
+        ...(editingNodeId ? { editing_node_id: editingNodeId } : {}),
       }
       : null;
     if (areCanvasAwarenessStatesEqual(localCanvasPresenceRef.current, next)) {
@@ -630,6 +636,14 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     localCanvasPresenceRef.current = next;
     collaboration.awareness.setLocalStateField('canvas', next);
   }, [collaboration]);
+
+  const handleNodeEditingChange = useCallback((nodeId: string | null) => {
+    if (editingNodeIdRef.current === nodeId) {
+      return;
+    }
+    editingNodeIdRef.current = nodeId;
+    publishCanvasPresence(localCanvasCursorRef.current, selectedNodeIdsRef.current, nodeId);
+  }, [publishCanvasPresence]);
 
   const flushCanvasCursor = useCallback(() => {
     if (canvasCursorTimerRef.current !== null) {
@@ -677,7 +691,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     }
   }, [flushCanvasCursor, publishCanvasPresence]);
 
-  const clearCanvasPresence = useCallback(() => {
+  const clearCanvasPresence = useCallback((preserveEditingNode = false) => {
     if (canvasCursorTimerRef.current !== null) {
       window.clearTimeout(canvasCursorTimerRef.current);
       canvasCursorTimerRef.current = null;
@@ -685,6 +699,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     pendingCanvasCursorRef.current = null;
     localCanvasCursorRef.current = null;
     lastPublishedCanvasCursorRef.current = null;
+    if (!preserveEditingNode) {
+      editingNodeIdRef.current = null;
+    }
     localCanvasPresenceRef.current = null;
     if (collaboration) {
       collaboration.awareness.setLocalStateField('canvas', null);
@@ -697,6 +714,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       canvasCursorTimerRef.current = null;
     }
     pendingCanvasCursorRef.current = null;
+    editingNodeIdRef.current = null;
     localCanvasPresenceRef.current = null;
     if (collaboration) {
       collaboration.awareness.setLocalStateField('canvas', null);
@@ -734,7 +752,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   }, [publishCanvasPresence]);
 
   useEffect(() => {
-    if (!collaboration || !activeDiagramId || historyPreview !== null) {
+    if (!collaboration || !activeDiagramId || historyPreview !== null || connectionState === 'disconnected') {
       return;
     }
     if (canvasPresenceReadyDiagramIdRef.current !== activeDiagramId) {
@@ -747,26 +765,35 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       canvasPresenceReadyDiagramIdRef.current = activeDiagramId;
     }
     publishCanvasPresence(localCanvasCursorRef.current, selectedNodeIds);
-  }, [activeDiagramId, collaboration, historyPreview, publishCanvasPresence, selectedNodeIds]);
+  }, [activeDiagramId, collaboration, connectionState, historyPreview, publishCanvasPresence, selectedNodeIds]);
 
   useEffect(() => {
-    const clearInactiveCanvasPresence = () => { clearCanvasPresence(); };
+    const clearInactiveCanvasPresence = () => { clearCanvasPresence(true); };
+    const resumeCanvasPresence = () => {
+      if (document.visibilityState !== 'hidden') {
+        publishCanvasPresence(localCanvasCursorRef.current, selectedNodeIdsRef.current);
+      }
+    };
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         clearInactiveCanvasPresence();
+      } else {
+        resumeCanvasPresence();
       }
     };
     window.addEventListener('blur', clearInactiveCanvasPresence);
+    window.addEventListener('focus', resumeCanvasPresence);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       window.removeEventListener('blur', clearInactiveCanvasPresence);
+      window.removeEventListener('focus', resumeCanvasPresence);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [clearCanvasPresence]);
+  }, [clearCanvasPresence, publishCanvasPresence]);
 
   useEffect(() => {
-    if (connectionState === 'disconnected') {
-      clearCanvasPresence();
+    if (connectionState === 'reconnecting' || connectionState === 'disconnected') {
+      clearCanvasPresence(true);
     }
   }, [clearCanvasPresence, connectionState]);
 
@@ -2125,6 +2152,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.editNodeLabel(nodeId, label));
             }}
+            onNodeEditingChange={handleNodeEditingChange}
             onEditSubgraphLabel={(subgraphId, label) => {
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.editSubgraphLabel(subgraphId, label), 'Renamed a diagram section');

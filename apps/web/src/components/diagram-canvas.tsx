@@ -74,25 +74,34 @@ import {
   type SvgPoint,
 } from '../lib/svg-hit-map';
 import { getSafeToolbarPosition } from '../lib/toolbar-safe-area';
+import type { SequenceParticipant } from '../lib/sequence-mutations';
+
+export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
 export interface DiagramCanvasProps {
   className?: string;
   emptyMessage?: string;
   graph: FlowchartSnapshot | null;
   interactionMode?: 'select' | 'connect';
+  emptyState?: DiagramEmptyState;
   isFlowchart?: boolean;
   mermaidSource?: string;
+  isSequence?: boolean;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
   selectedNodeIds?: string[];
   svg: string;
+  sequenceParticipants?: readonly SequenceParticipant[];
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
+  onAddSequenceMessage?: (from: string, to: string, message: string) => void;
+  onAddSequenceParticipant?: (label: string) => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
+  onChooseDiagramType?: (type: 'flowchart' | 'sequence') => void;
   onDeleteEdge?: (edge: DiagramEdgeIdentity) => void;
   onDeleteNodes?: (nodeIds: string[]) => void;
   onEditEdgeLabel?: (edge: DiagramEdgeIdentity, label?: string) => void;
@@ -330,12 +339,14 @@ const TOOLBAR_BUTTON_STYLE: CSSProperties = {
   width: 24,
 };
 
+export const CANVAS_PAN_EXCLUSION_SELECTOR = 'a, button, input, select, textarea, form, [contenteditable="true"], [role="button"], [data-canvas-pan-exclusion="true"], [data-subgraph-drag-target="true"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle';
+
 function canStartTouchCanvasGesture(target: EventTarget | null, root: HTMLDivElement): boolean {
   if (!(target instanceof Element)) {
     return false;
   }
 
-  if (target.closest('a, button, input, select, textarea, [contenteditable="true"], [role="button"], [data-subgraph-drag-target="true"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle')) {
+  if (target.closest(CANVAS_PAN_EXCLUSION_SELECTOR)) {
     return false;
   }
 
@@ -351,23 +362,28 @@ function canStartMouseCanvasPan(target: EventTarget | null, root: HTMLDivElement
     return true;
   }
 
-  return !target.closest('a, button, input, select, textarea, [contenteditable="true"], [role="button"], [data-testid*="toolbar"]');
+  return !target.closest(CANVAS_PAN_EXCLUSION_SELECTOR);
 }
 
 export function DiagramCanvas({
   className,
   emptyMessage = 'start typing mermaid syntax',
+  emptyState = null,
   graph,
   interactionMode,
   isFlowchart = true,
   mermaidSource = '',
+  isSequence = false,
   nodePositions,
   preserveCamera = false,
   onAddEdge,
   onAddNode,
+  onAddSequenceMessage,
+  onAddSequenceParticipant,
   onAddConnectedNode,
   onCanvasCursorChange,
   onChangeNodeShape,
+  onChooseDiagramType,
   onDeleteEdge,
   onDeleteNodes,
   onEditEdgeLabel,
@@ -389,6 +405,7 @@ export function DiagramCanvas({
   readOnly = false,
   remoteCanvasPresence = [],
   selectedNodeIds,
+  sequenceParticipants = [],
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -2560,7 +2577,7 @@ export function DiagramCanvas({
       </div>
 
       <div onClick={(event) => { event.stopPropagation(); }} style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 20 }}>
-        {isFlowchart && !readOnly ? (
+        {isFlowchart && !readOnly && emptyState === null ? (
           <form
             aria-label="Add Mermaid node"
             data-testid="canvas-add-node-toolbar"
@@ -2630,7 +2647,9 @@ export function DiagramCanvas({
           </form>
         ) : null}
 
-        {(!hasGraphNodes && isFlowchart && !readOnly) ? (
+        {emptyState === 'chooser' && !readOnly ? (
+          <DiagramTypeChooser onChoose={onChooseDiagramType} />
+        ) : emptyState === 'flowchart' && !readOnly ? (
           <div
             style={{
               alignItems: 'center',
@@ -2653,9 +2672,16 @@ export function DiagramCanvas({
               }}
               type="button"
             >
-              Add your first node
+              Add your first flowchart node
             </button>
           </div>
+        ) : emptyState === 'sequence' && !readOnly ? (
+          <SequenceEditorControls
+            centered
+            onAddMessage={onAddSequenceMessage}
+            onAddParticipant={onAddSequenceParticipant}
+            participants={sequenceParticipants}
+          />
         ) : (!svg ? (
           <div className="empty-state" style={{ alignItems: 'center', display: 'flex', height: '100%', justifyContent: 'center' }}>
             {emptyMessage}
@@ -2668,6 +2694,14 @@ export function DiagramCanvas({
               <Pencil size={16} />
             </ToolbarButton>
           </div>
+        ) : null}
+
+        {isSequence && emptyState === null && !readOnly ? (
+          <SequenceEditorControls
+            onAddMessage={onAddSequenceMessage}
+            onAddParticipant={onAddSequenceParticipant}
+            participants={sequenceParticipants}
+          />
         ) : null}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
@@ -3191,6 +3225,88 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
           type="source"
         />
       ))}
+    </div>
+  );
+}
+
+function DiagramTypeChooser({ onChoose }: { onChoose?: (type: 'flowchart' | 'sequence') => void }) {
+  return (
+    <div className="canvas-empty-chooser" data-testid="diagram-type-chooser">
+      <div className="canvas-empty-chooser-card">
+        <span>Start a diagram</span>
+        <strong>What are you mapping?</strong>
+        <div className="canvas-empty-chooser-actions">
+          <button onClick={() => { onChoose?.('flowchart'); }} type="button">
+            <ArrowRightFromLine size={18} />
+            <span><strong>Flowchart</strong><small>Nodes and connections</small></span>
+          </button>
+          <button onClick={() => { onChoose?.('sequence'); }} type="button">
+            <ScanSearch size={18} />
+            <span><strong>Sequence</strong><small>Participants and messages</small></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SequenceEditorControls({
+  centered = false,
+  onAddMessage,
+  onAddParticipant,
+  participants,
+}: {
+  centered?: boolean;
+  onAddMessage?: (from: string, to: string, message: string) => void;
+  onAddParticipant?: (label: string) => void;
+  participants: readonly SequenceParticipant[];
+}) {
+  const [participantLabel, setParticipantLabel] = useState('');
+  const [message, setMessage] = useState('');
+  const [from, setFrom] = useState(participants[0]?.id ?? '');
+  const [to, setTo] = useState(participants[1]?.id ?? participants[0]?.id ?? '');
+
+  useEffect(() => {
+    if (!participants.some((participant) => participant.id === from)) setFrom(participants[0]?.id ?? '');
+    if (!participants.some((participant) => participant.id === to)) setTo(participants[1]?.id ?? participants[0]?.id ?? '');
+  }, [from, participants, to]);
+
+  const addParticipant = () => {
+    onAddParticipant?.(participantLabel.trim() || 'Participant');
+    setParticipantLabel('');
+  };
+  const addMessage = () => {
+    if (!from || !to) return;
+    onAddMessage?.(from, to, message.trim() || 'Message');
+    setMessage('');
+  };
+
+  return (
+    <div className={centered ? 'canvas-sequence-editor is-centered' : 'canvas-sequence-editor'} data-testid="sequence-editor-controls">
+      <form className="canvas-sequence-participant-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); addParticipant(); }}>
+        <span>participant</span>
+        <input
+          aria-label="New sequence participant"
+          onChange={(event) => { setParticipantLabel(event.target.value); }}
+          placeholder="name"
+          value={participantLabel}
+        />
+        <button aria-label="Add sequence participant" onClick={addParticipant} type="button"><Plus size={15} /></button>
+      </form>
+      {participants.length > 0 ? (
+        <form className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); addMessage(); }}>
+          <span>message</span>
+          <select aria-label="Message sender" onChange={(event) => { setFrom(event.target.value); }} value={from}>
+            {participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}
+          </select>
+          <span aria-hidden="true">→</span>
+          <select aria-label="Message recipient" onChange={(event) => { setTo(event.target.value); }} value={to}>
+            {participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}
+          </select>
+          <input aria-label="Sequence message" onChange={(event) => { setMessage(event.target.value); }} placeholder="message" value={message} />
+          <button aria-label="Add sequence message" onClick={addMessage} type="button"><Plus size={15} /></button>
+        </form>
+      ) : <small>Add a participant to begin.</small>}
     </div>
   );
 }

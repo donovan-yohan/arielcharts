@@ -105,18 +105,19 @@ async function validate() {
   await page.waitForTimeout(2000);
   const editor = page.locator('.cm-content');
 
-  console.log('2. Checking empty-canvas builder...');
-  const emptyBuilderVisible = await page.locator('button', { hasText: 'Add your first node' }).isVisible({ timeout: 5000 });
-  results.push({ test: 'empty canvas shows first-node builder', pass: emptyBuilderVisible });
-  console.log(`   Empty first-node builder visible: ${emptyBuilderVisible} — ${emptyBuilderVisible ? 'PASS' : 'FAIL'}`);
-  await page.locator('button', { hasText: 'Add your first node' }).click({ timeout: 5000 });
+  console.log('2. Checking empty-canvas chooser...');
+  const chooser = page.getByTestId('diagram-type-chooser');
+  const emptyBuilderVisible = await chooser.isVisible({ timeout: 5000 });
+  results.push({ test: 'empty canvas shows diagram-type chooser', pass: emptyBuilderVisible });
+  console.log(`   Diagram-type chooser visible: ${emptyBuilderVisible} — ${emptyBuilderVisible ? 'PASS' : 'FAIL'}`);
+  await chooser.getByRole('button', { name: /Flowchart/ }).click({ timeout: 5000 });
   await page.waitForTimeout(3000);
   const emptyBuilderEditorText = await editor.textContent();
   const emptyBuilderCreated = (emptyBuilderEditorText?.includes('flowchart') ?? false)
     && (emptyBuilderEditorText?.includes('New Node') ?? false)
     && (await page.locator('.react-flow__node, .diagram-node-target').count()) > 0;
-  results.push({ test: 'empty canvas first node creates mermaid text', pass: emptyBuilderCreated });
-  console.log(`   Empty builder created Mermaid text: ${emptyBuilderCreated} — ${emptyBuilderCreated ? 'PASS' : 'FAIL'}`);
+  results.push({ test: 'flowchart choice creates Mermaid text and first node', pass: emptyBuilderCreated });
+  console.log(`   Flowchart choice created Mermaid text: ${emptyBuilderCreated} — ${emptyBuilderCreated ? 'PASS' : 'FAIL'}`);
 
   console.log('2b. Typing flowchart...');
   await ensureSourceFlyoutOpen(page);

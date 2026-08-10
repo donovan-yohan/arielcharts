@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 const css = readFileSync(new URL('./globals.css', import.meta.url), 'utf8');
 const mobileCss = css.slice(css.indexOf('@media (max-width: 720px), (max-height: 480px) and (pointer: coarse)'));
+const narrowCanvasCss = css.slice(css.indexOf('@media (max-width: 420px)'));
 
 describe('mobile workspace CSS contracts', () => {
   it('keeps capped error banners touch-scrollable without blocking the rest of the canvas', () => {
@@ -46,5 +47,16 @@ describe('revision history selection CSS contracts', () => {
 describe('editable section presentation', () => {
   it('hides stale Mermaid cluster geometry behind the derived interactive section layer', () => {
     expect(css).toMatch(/\.diagram-canvas-svg--reactflow svg g\.cluster,[^}]*\{\s*opacity:\s*0;/u);
+  });
+});
+
+describe('narrow sequence controls', () => {
+  it('stacks the chooser, constrains both sequence forms, and keeps add actions touch-sized', () => {
+    expect(narrowCanvasCss).toMatch(/\.canvas-empty-chooser-actions\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/u);
+    expect(narrowCanvasCss).toMatch(/\.canvas-sequence-editor\s*\{[^}]*left:\s*8px;[^}]*right:\s*8px;[^}]*width:\s*auto;/u);
+    expect(narrowCanvasCss).toMatch(/\.canvas-sequence-editor form\s*\{[^}]*display:\s*grid;[^}]*width:\s*100%;/u);
+    expect(narrowCanvasCss).toMatch(/\.canvas-sequence-participant-form\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 44px;/u);
+    expect(narrowCanvasCss).toMatch(/\.canvas-sequence-message-form\s*\{[^}]*minmax\(0, 1fr\).*44px/u);
+    expect(mobileCss).toMatch(/\.canvas-sequence-editor button\s*\{[^}]*min-height:\s*44px;[^}]*width:\s*44px;/u);
   });
 });

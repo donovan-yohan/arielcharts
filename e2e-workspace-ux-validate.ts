@@ -642,9 +642,13 @@ async function expectTemplateDiagramCreation(page: Page): Promise<void> {
   await saveScreenshot(page, 'issue-15-service-flowchart');
 
   const sequenceName = await createDiagramFromTemplate(page, 'End-to-end API sequence');
-  await waitForCanvas(page, 'generic');
+  await waitForCanvas(page, 'sequence');
   assert(await page.locator('form[aria-label="Add Mermaid node"]').count() === 0,
     'API sequence template retained flowchart structural controls.');
+  assert(await page.locator('form.canvas-sequence-participant-form').count() === 1,
+    'API sequence template did not expose participant controls.');
+  assert(await page.locator('form.canvas-sequence-message-form').count() === 1,
+    'API sequence template did not expose message controls.');
   await renameActiveDiagram(page, 'API request timing');
   await ensureSourceFlyoutOpen(page);
   const sequenceSource = await canonicalSource(page);
@@ -942,8 +946,8 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   assertExactColor(transparentColors.text, 'rgba(0, 0, 0, 0)', 'Mermaid transparent text');
 
   await replaceSource(page, API_SEQUENCE_FIXTURE);
-  await waitForCanvas(page, 'generic');
-  assert(await page.locator('form[aria-label="Add Mermaid node"]').count() === 0, 'Static Mermaid retained flowchart mutation controls.');
+  await waitForCanvas(page, 'sequence');
+  assert(await page.locator('form[aria-label="Add Mermaid node"]').count() === 0, 'Sequence Mermaid retained flowchart mutation controls.');
   await closeFlyout(page, 'source');
   await saveScreenshot(page, 'issue-14-sequence-static');
 
@@ -976,7 +980,7 @@ async function expectRendererTransitionPreservesCamera(page: Page): Promise<void
   assert(JSON.stringify(pannedFlowchartGrid) !== JSON.stringify(zoomedFlowchartGrid),
     'Flowchart pan did not change the dot-grid visual state.');
   await replaceSource(page, API_SEQUENCE_FIXTURE);
-  await waitForCanvas(page, 'generic');
+  await waitForCanvas(page, 'sequence');
   await closeFlyout(page, 'source');
   const staticTransform = await waitForStableCanvasTransform(page, 'Static renderer transition');
   assert(staticTransform === pannedFlowchartTransform, `Editable-to-static renderer transition changed the camera: ${pannedFlowchartTransform} -> ${staticTransform}`);
@@ -1964,11 +1968,22 @@ async function assertMobileErrorBannerScrollability(page: Page, label: string): 
 }
 
 async function waitForCameraChange(page: Page, previous: string, label: string): Promise<string> {
-  await page.waitForFunction((before) => {
-    const layer = document.querySelector('.diagram-canvas-svg')?.parentElement;
-    return layer instanceof HTMLElement && layer.style.transform !== before;
-  }, previous, { timeout: 5_000 });
-  return renderedCanvasCameraTransform(page, label);
+  let current = previous;
+  try {
+    await expect.poll(async () => {
+      current = await renderedCanvasCameraTransform(page, `${label} camera poll`);
+      return current !== previous;
+    }, {
+      message: `${label} camera did not change from ${JSON.stringify(previous)}.`,
+      timeout: 5_000,
+    }).toBe(true);
+  } catch (error) {
+    throw new Error(
+      `${label} camera did not change within 5000ms: previous=${JSON.stringify(previous)}, current=${JSON.stringify(current)}.`,
+      { cause: error },
+    );
+  }
+  return current;
 }
 
 type CanvasGesturePoint = { x: number; y: number };
@@ -1982,7 +1997,9 @@ async function allowedCanvasGesturePoints(
   const points = await page.getByTestId('diagram-canvas').evaluate((canvas, options) => {
     const root = canvas as HTMLElement;
     const rect = root.getBoundingClientRect();
-    const forbiddenSelector = 'button, input, select, textarea, [contenteditable="true"], [role="button"], .react-flow__node, .react-flow__edge, .react-flow__handle';
+    // Keep the test's blank-point contract aligned with DiagramCanvas: a drag
+    // beginning on a sequence editor form is intentionally not a canvas pan.
+    const forbiddenSelector = 'a, button, input, select, textarea, form, [contenteditable="true"], [role="button"], [data-canvas-pan-exclusion="true"], [data-subgraph-drag-target="true"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle';
     const ratios = [0.12, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.88];
     const candidates: CanvasGesturePoint[] = [];
 
@@ -2027,7 +2044,7 @@ function parseCameraTransform(transform: string, label: string): { panX: number;
   return camera;
 }
 
-async function assertPinchZoomIncrease(page: Page, label: string, renderer: 'flowchart' | 'generic', residuals: string[]): Promise<void> {
+async function assertPinchZoomIncrease(page: Page, label: string, renderer: 'flowchart' | 'sequence' | 'generic', residuals: string[]): Promise<void> {
   const initial = await allowedCanvasGesturePoints(page, `${label} ${renderer} pinch`, 2, 72);
   const [first, second] = initial;
   assert(first && second, `${label} ${renderer} pinch did not resolve two blank canvas points.`);
@@ -2090,7 +2107,7 @@ async function assertPinchZoomIncrease(page: Page, label: string, renderer: 'flo
 async function expectTouchCanvasControls(
   page: Page,
   label: string,
-  renderer: 'flowchart' | 'generic',
+  renderer: 'flowchart' | 'sequence' | 'generic',
   residuals: string[],
 ): Promise<void> {
   const controls = page.getByTestId('canvas-controls-toolbar');
@@ -2102,6 +2119,41 @@ async function expectTouchCanvasControls(
     const addNode = page.getByRole('button', { name: 'Add node to Mermaid text', exact: true });
     await assertTouchTarget(page, addNode, `${label} flowchart add-node control`);
     await addNode.click({ trial: true, timeout: 15_000 });
+  }
+  if (renderer === 'sequence') {
+    const canvas = page.getByTestId('canvas-first-workspace');
+    const participantForm = page.locator('form.canvas-sequence-participant-form');
+    const messageForm = page.locator('form.canvas-sequence-message-form');
+    const participantAdd = page.getByRole('button', { name: 'Add sequence participant', exact: true });
+    const messageAdd = page.getByRole('button', { name: 'Add sequence message', exact: true });
+    await Promise.all([
+      assertTouchTarget(page, participantAdd, `${label} sequence add participant`),
+      assertTouchTarget(page, messageAdd, `${label} sequence add message`),
+      assertContainedInViewport(page, participantForm, `${label} sequence participant form`),
+      assertContainedInViewport(page, messageForm, `${label} sequence message form`),
+    ]);
+    await assertDocumentHasNoHorizontalOverflow(page);
+    const layout = await page.evaluate(() => {
+      const canvas = document.querySelector<HTMLElement>('[data-testid="canvas-first-workspace"]');
+      const forms = [...document.querySelectorAll<HTMLElement>('form.canvas-sequence-participant-form, form.canvas-sequence-message-form')];
+      if (!canvas || forms.length !== 2) return null;
+      const canvasBounds = canvas.getBoundingClientRect();
+      return forms.map((form) => {
+        const bounds = form.getBoundingClientRect();
+        return {
+          bottom: bounds.bottom,
+          left: bounds.left,
+          right: bounds.right,
+          top: bounds.top,
+          withinCanvas: bounds.top >= canvasBounds.top - 0.5
+            && bounds.bottom <= canvasBounds.bottom + 0.5
+            && bounds.left >= canvasBounds.left - 0.5
+            && bounds.right <= canvasBounds.right + 0.5,
+        };
+      });
+    });
+    assert(layout !== null && layout.every((form) => form.withinCanvas),
+      `${label} sequence forms overflowed or overlapped workspace chrome: ${JSON.stringify(layout)}.`);
   }
 
   const beforeZoom = await renderedCanvasCameraTransform(page, `${label} ${renderer} touch zoom baseline`);
@@ -2205,9 +2257,9 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   await replaceSource(page, API_SEQUENCE_FIXTURE);
   await waitForSource(page, API_SEQUENCE_FIXTURE);
   await closeFlyout(page, 'source');
-  await waitForCanvas(page, 'generic');
-  await expectTouchCanvasControls(page, label, 'generic', residuals);
-  await assertPhoneSurface(page, label, 'generic-touch-controls');
+  await waitForCanvas(page, 'sequence');
+  await expectTouchCanvasControls(page, label, 'sequence', residuals);
+  await assertPhoneSurface(page, label, 'sequence-touch-controls');
 
   await replaceSource(page, INVALID_MERMAID_FIXTURE);
   await waitForInvalidPreview(page);
@@ -2488,14 +2540,14 @@ async function expectCrossRendererHistoryPreviewCameraHandoff(
   sessionId: string,
   diagramId: string,
 ): Promise<void> {
-  await mcp.writeLatest(sessionId, diagramId, HISTORY_GENERIC_SEQUENCE, 'Prepared generic history camera handoff');
+  await mcp.writeLatest(sessionId, diagramId, HISTORY_GENERIC_SEQUENCE, 'Prepared sequence history camera handoff');
   await ensureSourceFlyoutOpen(page);
   await waitForSource(page, HISTORY_GENERIC_SEQUENCE);
   await closeFlyout(page, 'source');
-  await waitForCanvas(page, 'generic');
+  await waitForCanvas(page, 'sequence');
   const genericHistory = await waitForHistoryRevision(mcp, sessionId, diagramId, HISTORY_GENERIC_SEQUENCE);
 
-  await mcp.writeLatest(sessionId, diagramId, HISTORY_CURRENT_FLOWCHART, 'Prepared live flowchart after generic history');
+  await mcp.writeLatest(sessionId, diagramId, HISTORY_CURRENT_FLOWCHART, 'Prepared live flowchart after sequence history');
   await ensureSourceFlyoutOpen(page);
   await waitForSource(page, HISTORY_CURRENT_FLOWCHART);
   await closeFlyout(page, 'source');
@@ -2506,17 +2558,17 @@ async function expectCrossRendererHistoryPreviewCameraHandoff(
   await ensureFlyout(page, 'activity');
   const genericRevision = historyItem(page, genericHistory.revision.id);
   await genericRevision.waitFor({ state: 'visible', timeout: 15_000 });
-  await verifiedClick(page, genericRevision.getByRole('button', { name: 'Preview', exact: true }), 'cross-renderer historical generic preview');
+  await verifiedClick(page, genericRevision.getByRole('button', { name: 'Preview', exact: true }), 'cross-renderer historical sequence preview');
   await page.getByTestId('history-preview-notice').waitFor({ state: 'visible', timeout: 15_000 });
-  await waitForCanvas(page, 'generic');
-  assert(await waitForStableCanvasTransform(page, 'cross-renderer generic history preview camera') === beforeCamera,
+  await waitForCanvas(page, 'sequence-readonly');
+  assert(await waitForStableCanvasTransform(page, 'cross-renderer sequence history preview camera') === beforeCamera,
     'Cross-renderer history preview changed the active local camera.');
 
   await verifiedClick(page, page.getByRole('button', { name: 'Cancel preview', exact: true }), 'cross-renderer historical preview cancel');
   await page.getByTestId('history-preview-notice').waitFor({ state: 'detached', timeout: 15_000 });
   await waitForCanvas(page, 'flowchart');
   assert(await waitForStableCanvasTransform(page, 'cross-renderer history cancel camera') === beforeCamera,
-    'Cancelling a generic historical preview into the live flowchart changed the active local camera.');
+    'Cancelling a sequence historical preview into the live flowchart changed the active local camera.');
   await closeFlyout(page, 'activity');
 }
 

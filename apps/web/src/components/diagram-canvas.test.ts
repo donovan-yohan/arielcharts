@@ -4,7 +4,7 @@ import type { DiagramLink } from '../lib/diagram-mutations';
 import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
-import { areMermaidPresentationsEqual, areSvgHitMapsEqual, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getRendererInteractionMode, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
+import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getRendererInteractionMode, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
 
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
 const workspaceSource = readFileSync(new URL('./session-workspace.tsx', import.meta.url), 'utf8');
@@ -13,6 +13,15 @@ describe('canvas cursor callback lifecycle', () => {
   it('withdraws presence only on true canvas unmount and keeps preview gating behind a stable publisher ref', () => {
     expect(canvasSource).toMatch(/onCanvasCursorChangeRef\.current = onCanvasCursorChange;[^]*?useEffect\(\(\) => \(\) => \{\s*onCanvasCursorChangeRef\.current\?\.\(null\);\s*\}, \[\]\);/u);
     expect(workspaceSource).toMatch(/historyPreviewRef\.current = historyPreview;[^]*?if \(!collaboration \|\| !diagramId \|\| historyPreviewRef\.current !== null\)[^]*?\}, \[collaboration\]\);/u);
+  });
+});
+
+describe('canvas pan exclusions', () => {
+  it('keeps complete forms and marked overlays out of touch, middle-mouse, and Space pan starts', () => {
+    expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('form');
+    expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('[data-canvas-pan-exclusion="true"]');
+    expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('[data-subgraph-drag-target="true"]');
+    expect(canvasSource).toMatch(/return !target\.closest\(CANVAS_PAN_EXCLUSION_SELECTOR\);/u);
   });
 });
 

@@ -166,13 +166,20 @@ export async function renameActiveDiagram(page: Page, name: string): Promise<voi
   assert(await activeTabName(page) === name, `Renamed tab was not active: ${name}`);
 }
 
-export async function waitForCanvas(page: Page, mode: 'flowchart' | 'generic'): Promise<void> {
+export async function waitForCanvas(page: Page, mode: 'flowchart' | 'sequence' | 'sequence-readonly' | 'generic'): Promise<void> {
   await page.waitForFunction((expectedMode) => {
     const label = document.querySelector('[data-testid="diagram-mode"]')?.textContent ?? '';
     const svg = document.querySelector('.diagram-canvas-svg svg');
     const structureToolbar = document.querySelector('form[aria-label="Add Mermaid node"]');
+    const sequenceControls = document.querySelector('[data-testid="sequence-editor-controls"]');
     return !!svg?.getAttribute('viewBox')
-      && (expectedMode === 'flowchart' ? label.includes('editable') && !!structureToolbar : label.includes('source only') && !structureToolbar);
+      && (expectedMode === 'flowchart'
+        ? label.includes('Flowchart · editable') && !!structureToolbar && !sequenceControls
+        : expectedMode === 'sequence'
+          ? label.includes('Sequence · editable') && !structureToolbar && !!sequenceControls
+          : expectedMode === 'sequence-readonly'
+            ? label.includes('Sequence · editable') && !structureToolbar && !sequenceControls
+            : label.includes('source only') && !structureToolbar && !sequenceControls);
   }, mode, { timeout: 15_000 });
 }
 

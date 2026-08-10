@@ -1,4 +1,4 @@
-export type DiagramKind = 'flowchart' | 'generic';
+export type DiagramKind = 'flowchart' | 'sequence' | 'generic';
 
 export interface DiagramCapability {
   diagramType: string;
@@ -14,10 +14,12 @@ export function classifyDiagramCapability(diagramType: string): DiagramCapabilit
 
   return {
     diagramType,
-    kind: normalizedType.startsWith('flowchart') ? 'flowchart' : 'generic',
+    kind: normalizedType.startsWith('flowchart')
+      ? 'flowchart'
+      : normalizedType === 'sequence' ? 'sequence' : 'generic',
   };
 }
 
 export function isStructurallyEditableDiagram(capability: DiagramCapability | null): boolean {
-  return capability?.kind === 'flowchart';
+  return capability?.kind === 'flowchart' || capability?.kind === 'sequence';
 }

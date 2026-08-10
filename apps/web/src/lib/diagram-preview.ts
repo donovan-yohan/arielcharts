@@ -1,6 +1,5 @@
 import type { FlowchartSnapshot } from './diagram-mutations';
-import type { DiagramCapability } from './diagram-capabilities';
-import { isSequenceSourceRepresentable } from './sequence-mutations';
+import { getDiagramSourceModelAdapter, type DiagramCapability } from './diagram-capabilities';
 
 export interface DiagramPreview {
   capability: DiagramCapability;
@@ -17,13 +16,14 @@ export function canUseFlowchartControls(source: string, preview: DiagramPreview 
 
   return preview?.source === source
     && preview.capability.kind === 'flowchart'
-    && preview.flowchartSnapshot !== null;
+    && preview.flowchartSnapshot !== null
+    && getDiagramSourceModelAdapter(preview.capability).getRepresentability(source).representable;
 }
 
 export function canUseSequenceControls(source: string, preview: DiagramPreview | null): boolean {
   return preview?.source === source
     && preview.capability.kind === 'sequence'
-    && isSequenceSourceRepresentable(source);
+    && getDiagramSourceModelAdapter(preview.capability).getRepresentability(source).representable;
 }
 
 /** Last-known-good previews are intentionally local and isolated by stable tab id. */

@@ -40,7 +40,7 @@ import {
   type DiagramNodePositions,
   type NodePositionsSyncMode,
 } from '../lib/diagram-layout';
-import { classifyDiagramCapability } from '../lib/diagram-capabilities';
+import { classifyDiagramCapability, getDiagramCapabilityLabel } from '../lib/diagram-capabilities';
 import { canUseFlowchartControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
 import { addSequenceMessage, addSequenceParticipant, getSequenceParticipants } from '../lib/sequence-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
@@ -1663,9 +1663,10 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       : isSequence && sequenceParticipants.length === 0 ? 'sequence' as const : null;
   const diagramModeLabel = !renderedMermaidText.trim()
     ? 'Choose diagram type'
-    : isFlowchart
-      ? 'Flowchart · editable'
-      : isSequence ? 'Sequence · editable' : 'Mermaid · source only';
+    : getDiagramCapabilityLabel(
+      renderedPreview?.source === renderedMermaidText ? renderedPreview.capability : null,
+      renderedMermaidText,
+    );
   const shareButtonLabel = !roomKey
     ? 'reset key to share'
     : shareCopyState === 'copied' ? 'copied' : shareCopyState === 'error' ? 'copy failed' : 'share';

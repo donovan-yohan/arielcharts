@@ -1,101 +1,48 @@
 # ArielCharts
 
-ArielCharts is a collaborative Mermaid diagram editor with a Next.js web client, a Node.js realtime/MCP server, and shared TypeScript contracts.
+ArielCharts is a collaborative Mermaid workspace for people and agents. A
+browser user and an MCP client work on the same named diagrams in real time,
+while Mermaid source remains the canonical representation.
 
-## Current architecture
+## What it does
 
-The repo now includes the Phase 2 + Phase 3 implementation baseline:
+- Creates private, capability-protected rooms with share links that exchange a
+  fragment-only room key for an HttpOnly browser cookie.
+- Keeps named diagram tabs, Mermaid source, accepted node positions, activity,
+  and agent membership convergent through Yjs.
+- Provides a canvas-first workspace with CodeMirror source editing, flowchart
+  structure controls, sequence participant/message controls, last-valid SVG
+  fallback, local camera/selection state, and responsive light/dark themes.
+- Includes curated starters for blank sheets, API sequences, service flows,
+  ER diagrams, state machines, timelines, and deployment diagrams.
+- Stores immutable per-diagram revision history that can be previewed and
+  deliberately restored as a new revision.
+- Exposes a room-scoped, revision-checked MCP server so agents can safely read,
+  create, update, rename, delete, inspect history, and restore named tabs.
 
-- `apps/web` — Next.js 15 app with:
-  - landing page to create or join sessions
-  - `/s/[id]` session route with route validation
-  - CodeMirror 6 + Yjs collaborative editor
-  - Mermaid preview with last-valid-SVG fallback on parse errors
-  - presence strip, activity feed, share URL, and connection status UI
-  - configurable server/websocket endpoints via `NEXT_PUBLIC_SERVER_URL` and `NEXT_PUBLIC_WS_URL`
-- `apps/server` — Node.js TypeScript server with:
-  - protected-room creation, browser access exchange, key rotation, and cookie-gated Yjs/history routes
-  - modern-only MCP `2026-07-28` `POST /mcp` endpoint for the one room named by its bearer capability (`getSession`, `createDiagram`, `readDiagram`, `listDiagramHistory`, `readDiagramRevision`, `writeDiagram`, `renameDiagram`, `deleteDiagram`, and `restoreDiagramRevision`)
-  - `OPTIONS /mcp` preflight handling and CORS response headers for browser-origin MCP requests
-  - `/health` health endpoint
-  - cookie-authorized `/ws/:roomId` Yjs-compatible websocket rooms
-  - LevelDB-backed session persistence and cleanup timers
-  - origin allowlisting via `ALLOWED_ORIGINS`
-- `packages/shared` — shared contracts and types consumed by both apps
+## Architecture and repository map
 
-## Workspace layout
+Start with [ARCHITECTURE.md](ARCHITECTURE.md) for the stack and request/data
+flows. [docs/context-map.md](docs/context-map.md) is the detailed ownership,
+invariant, scaling, and evidence map. Public shapes live in
+[packages/shared/src/types.ts](packages/shared/src/types.ts).
 
-- `apps/web`
-- `apps/server`
-- `packages/shared`
-- `docs` — phase plan and shared contracts
-- `reports` — verification and planning notes
+| Path | Purpose |
+| --- | --- |
+| `apps/web` | Next.js 16 / React browser workspace, including the editor, canvas, room gate, and local interaction state. |
+| `apps/server` | Node.js TypeScript HTTP, WebSocket, Yjs, LevelDB, protected-room, history, and MCP service. |
+| `packages/shared` | Browser- and server-neutral contracts, Mermaid/source helpers, and starter-template registry. |
+| `docs` | Current context and architecture documents; `arielcharts-spec.md` is explicitly historical product-planning material. |
+| `e2e` and `e2e-*-validate.ts` | Playwright support plus focused browser/collaboration validation. |
+| `reports` | Design and verification artifacts. |
 
 ## Prerequisites
 
-- Node.js 24+
-- pnpm 10+
+- Node.js 24 or newer
+- pnpm 10.15.0 (the version pinned in `package.json` and CI)
 
-## Environment setup
-
-### Web
-
-Copy `apps/web/.env.example` to `apps/web/.env.local` and adjust as needed:
-
-```bash
-cp apps/web/.env.example apps/web/.env.local
-```
-
-Default local values:
-
-- `NEXT_PUBLIC_SERVER_URL=http://localhost:4000`
-- `NEXT_PUBLIC_WS_URL=ws://localhost:4000`
-
-### Server
-
-The server reads configuration from environment variables with sensible defaults for local development. No `.env` file is needed for `pnpm dev`. To override values, export them in your shell or use a tool like `dotenv-cli`.
-
-Runtime variables used by `apps/server/src/lib/env.ts`:
-
-- `PORT` — HTTP port, defaults to `4000`
-- `DATA_DIR` — LevelDB/session storage directory, defaults to `.data/arielcharts`
-- `CLEANUP_INTERVAL_MS` — cleanup timer interval
-- `SESSION_TTL_MS` — idle session TTL before cleanup
-- `ALLOWED_ORIGINS` — comma-separated browser/websocket origin allowlist
-- `ROOM_COOKIE_SECRET` — long random production secret used to sign room cookies; required when `NODE_ENV=production`
-- `ROOM_COOKIE_TTL_MS` — browser-access cookie lifetime, defaulting to eight hours
-- `ROOM_COOKIE_SECURE` — set `true` in production
-- `ROOM_COOKIE_SAME_SITE` — `Lax`, `Strict`, or `None`; use `Lax` for the canonical same-site deployment below
-- `CLIENT_ADDRESS_PROFILE` — `none` locally/default; `fly` trusts only one valid `Fly-Client-IP` header and ignores `X-Forwarded-For`
-- `UV_THREADPOOL_SIZE` — pinned to `2` on Fly to bound concurrent scrypt memory; do not increase it on the single machine
-
-For local development, `ALLOWED_ORIGINS=http://localhost:3000` is sufficient for the default Next.js dev server.
-
-### Production room-access topology
-
-Use `https://arielcharts.donovanyohan.com` for the web app and
-`https://api.arielcharts.donovanyohan.com` for HTTP, WebSocket, and MCP. They
-are same-site subdomains, so the browser origin allowlist should contain the
-web origin exactly:
-
-```bash
-ALLOWED_ORIGINS=https://arielcharts.donovanyohan.com
-ROOM_COOKIE_SECRET=<long-random-secret>
-ROOM_COOKIE_SECURE=true
-ROOM_COOKIE_SAME_SITE=Lax
-CLIENT_ADDRESS_PROFILE=fly
-UV_THREADPOOL_SIZE=2
-```
-
-Each production scrypt verification uses roughly 128 MiB through Node's shared
-libuv pool. `fly.toml` pins the server to shared-cpu-1x with 512 MiB so two
-bounded verifications plus Node/Yjs overhead do not rely on Fly's default
-memory. A process-wide queued-work limiter remains follow-up security debt.
-
-Set `NEXT_PUBLIC_SERVER_URL=https://api.arielcharts.donovanyohan.com` and
-`NEXT_PUBLIC_WS_URL=wss://api.arielcharts.donovanyohan.com` in the web
-deployment. Do not use wildcard origins, put a room key in a query string, or
-use `SameSite=None` merely to bridge unrelated production domains.
+If `pnpm` is not installed, use `npx --yes pnpm@10.15.0` in place of `pnpm`
+in the commands below.
 
 ## Local development
 
@@ -105,59 +52,158 @@ Install dependencies once:
 pnpm install
 ```
 
-Run both apps together from the repo root:
+The browser defaults to `http://localhost:3000`; the server defaults to
+`http://localhost:4000`. Credentialed browser requests require an explicit
+allowed origin, so start the default pair with:
 
 ```bash
-pnpm dev
+ALLOWED_ORIGINS=http://localhost:3000 pnpm dev
 ```
 
-This starts:
-
-- web app on `http://localhost:3000`
-- server on `http://localhost:4000`
-
-You can also run each workspace separately:
+To override the browser's public endpoints, copy the app-local example before
+starting Next.js:
 
 ```bash
-pnpm --filter @arielcharts/server dev
+cp apps/web/.env.example apps/web/.env.local
+```
+
+Or start them separately:
+
+```bash
+ALLOWED_ORIGINS=http://localhost:3000 pnpm --filter @arielcharts/server dev
 pnpm --filter @arielcharts/web dev
 ```
 
-## Build, typecheck, and test
+`apps/server/.env.example` is an environment-variable inventory, not a file
+that the server loads automatically. Export server variables in your shell or
+use a dotenv runner deliberately. The root [.env.example](.env.example) is a
+small cross-workspace reference only; normal commands read browser settings
+from `apps/web/.env.local` and server settings from the process environment.
 
-Run the full workspace checks from the repo root:
+### Server configuration
+
+Set `ALLOWED_ORIGINS=http://localhost:3000` for the normal `3000` web / `4000`
+server pair. The server accepts these variables:
+
+| Variable | Runtime default or rule |
+| --- | --- |
+| `PORT` | `4000` |
+| `DATA_DIR` | `.data/arielcharts` |
+| `CLEANUP_INTERVAL_MS` | `30000` |
+| `SESSION_TTL_MS` | `300000` (five minutes of inactivity) |
+| `DISK_TTL_MS` | `604800000` (seven days) |
+| `ALLOWED_ORIGINS` | Comma-separated explicit browser origins; required for credentialed browser requests, including local development. |
+| `ROOM_COOKIE_SECRET` | Required in production; use a unique, long random secret. |
+| `ROOM_COOKIE_TTL_MS` | `28800000` (eight hours) |
+| `ROOM_COOKIE_SECURE` / `ROOM_COOKIE_SAME_SITE` | Production defaults to secure cookies; `None` requires `ROOM_COOKIE_SECURE=true`. |
+| `CLIENT_ADDRESS_PROFILE` | `none` locally; `fly` trusts only one valid `Fly-Client-IP` header. |
+| `UV_THREADPOOL_SIZE` | Set to `2` for the documented single-machine Fly deployment. |
+
+`TRUST_PROXY` is intentionally rejected; use `CLIENT_ADDRESS_PROFILE` instead.
+`ROOM_ACCESS_CRYPTO_PROFILE=test` is guarded for `NODE_ENV=test` E2E use only
+and must not be set in local or production deployment configuration.
+
+## Verification
+
+The baseline CI sequence is:
 
 ```bash
-pnpm build
+pnpm --filter @arielcharts/shared build
+pnpm lint
 pnpm typecheck
 pnpm test
+pnpm build
 ```
 
-Run server-only checks:
+Focused package checks are also available:
 
 ```bash
-pnpm --filter @arielcharts/server build
-pnpm --filter @arielcharts/server typecheck
 pnpm --filter @arielcharts/server test
-```
-
-Run web-only checks:
-
-```bash
-pnpm --filter @arielcharts/web build
-pnpm --filter @arielcharts/web typecheck
 pnpm --filter @arielcharts/web test
 ```
 
-For the protected collaboration boundary, run:
+Install Chromium once for local Playwright runs:
 
 ```bash
-pnpm test:e2e-collaboration
+pnpm exec playwright install chromium
 ```
 
-After a deployment to the canonical DNS names, run the production smoke gate
-explicitly. It creates and rotates a real private room, so it refuses any
-other target:
+### Browser and collaboration gates
+
+| Command | Coverage | Service lifecycle |
+| --- | --- | --- |
+| `pnpm test:e2e-workspace-ux` | Production-mode workspace, templates, themes, flyouts, history, focus, layout, and responsive behavior. | Builds and owns loopback services on `3303` (web) and `4300` (server) by default. |
+| `pnpm test:e2e-subgraphs` | Nested-subgraph editing and layout behavior. | Uses the same owned-service harness and default ports. |
+| `pnpm test:e2e-collaboration` | Room access, cookie/key rotation, browser/MCP concurrency, awareness, persistence, and local-state isolation. | Uses the same owned-service harness and default ports. |
+| `pnpm test:e2e-sequence` | Flowchart, sequence, and generic Mermaid canvas behavior, including screenshots in `/tmp`. | Requires a manually started web app on `3003` and server on `4000` unless endpoints are overridden. |
+| `npx tsx e2e-validate.ts` | Legacy canvas interaction and alignment coverage. | Requires the same manually started `3003` web / `4000` server pair unless endpoints are overridden. |
+
+The owned-service gates accept an external target only when both
+`E2E_BASE_URL` and `E2E_MCP_URL` are set. For the manually started gates, use
+three terminals:
+
+```bash
+# terminal 1
+ALLOWED_ORIGINS=http://localhost:3003 PORT=4000 pnpm --filter @arielcharts/server dev
+
+# terminal 2
+PORT=3003 NEXT_PUBLIC_SERVER_URL=http://localhost:4000 NEXT_PUBLIC_WS_URL=ws://localhost:4000 pnpm --filter @arielcharts/web dev
+
+# terminal 3
+pnpm test:e2e-sequence
+```
+
+Run `npx tsx e2e-validate.ts` in terminal 3 instead when validating its legacy
+coverage. Inspect `/tmp/arielcharts-sequence.png` and
+`/tmp/arielcharts-sequence-isolation.png` after Mermaid canvas changes.
+
+## Private rooms and MCP workflow
+
+`POST /api/rooms` creates a protected room and returns a session ID plus room
+key. Share the browser link as `/s/<sessionId>#roomKey=<roomKey>`: the browser
+exchanges the fragment for an HttpOnly cookie and removes it before mounting
+the workspace. The key is a capability; do not put it in query parameters,
+browser storage, logs, or source control.
+
+MCP uses `Authorization: Bearer <sessionId>.<roomKey>` for one room only. It
+has no room-directory capability. Use the tool workflow below whenever an
+agent changes a live workspace:
+
+1. Call `getSession` before creating a tab and pass its returned session
+   revision to `createDiagram`.
+2. Call `readDiagram` immediately before writing, renaming, deleting, or
+   restoring an existing tab; pass that diagram revision as `expectedRevision`.
+3. On a stale write, re-read, merge the concurrent change deliberately, then
+   retry with the fresh revision. Never replace a tab blindly.
+4. Before restore, read the current diagram again. A stale restore is a no-op
+   that requires review and explicit reconfirmation, not an automatic retry.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) and
+[docs/context-map.md](docs/context-map.md) for the HTTP, WebSocket, Yjs,
+history, and MCP boundaries.
+
+## Deployment topology
+
+The configured topology uses a Vercel-hosted web app at
+`https://arielcharts.donovanyohan.com` and a Fly-hosted server at
+`https://api.arielcharts.donovanyohan.com`. The API host serves HTTP, MCP,
+`/health`, and cookie-authorized Yjs at `/ws/:sessionId`; `fly.toml` provides
+the persistent LevelDB mount and production cookie/origin settings.
+
+Set the web deployment's public variables to the API host:
+
+```bash
+NEXT_PUBLIC_SERVER_URL=https://api.arielcharts.donovanyohan.com
+NEXT_PUBLIC_WS_URL=wss://api.arielcharts.donovanyohan.com
+```
+
+Set `ALLOWED_ORIGINS=https://arielcharts.donovanyohan.com`, a real
+`ROOM_COOKIE_SECRET`, `ROOM_COOKIE_SECURE=true`, `ROOM_COOKIE_SAME_SITE=Lax`,
+`CLIENT_ADDRESS_PROFILE=fly`, and `UV_THREADPOOL_SIZE=2` for the server. The
+main-branch CI deploy job publishes the server only after its baseline and
+browser/collaboration gates succeed. The production smoke gate is intentionally
+restricted to the canonical topology because it creates and rotates a real
+private room:
 
 ```bash
 E2E_PRODUCTION_SMOKE=1 \
@@ -165,23 +211,3 @@ E2E_BASE_URL=https://arielcharts.donovanyohan.com \
 E2E_MCP_URL=https://api.arielcharts.donovanyohan.com/mcp \
 pnpm test:e2e-production-smoke
 ```
-
-## Core HTTP and websocket contracts
-
-- `POST /mcp` implements MCP protocol `2026-07-28`. It is modern-only: use `server/discover` instead of `initialize`; requests carry the MCP protocol envelope plus `MCP-Protocol-Version`, `Mcp-Method`, and (for `tools/call`) `Mcp-Name` headers. MCP transport sessions and `Mcp-Session-Id` are not used.
-- `POST /api/rooms` creates the only kind of room: a protected one. It returns `{ session_id, room_key }`; share it as `https://…/s/<sessionId>#roomKey=<roomKey>`. The fragment is exchanged for a signed, HttpOnly room cookie and removed before the workspace mounts. A bare room URL shows the RoomGate instead of session content.
-- `POST /api/rooms/:sessionId/access` exchanges a room key for that browser cookie. `POST /api/rooms/:sessionId/rotate` requires that cookie, returns a replacement key, advances the access version, and closes current room sockets. Keep the raw key in memory only; a cookie-only reload can open an already-authorized room but cannot re-share its key.
-- MCP is room-scoped rather than a session directory. Configure `Authorization: Bearer <sessionId>.<roomKey>` on every MCP request. The bearer may access only that session; no `listSessions` discovery capability exists.
-- ArielCharts collaboration is application state, not MCP transport state: pass the authorized `sessionId` and stable `diagramId` to diagram tools. Always call `getSession` before creating a tab, then pass its fresh session revision as `expectedRevision`. Immediately before writing, renaming, deleting, or restoring a tab, call `readDiagram` and use its latest diagram revision. On a stale-revision error, re-read, merge deliberately, and retry only with that fresh revision—never blindly overwrite.
-- `OPTIONS /mcp` supports browser preflight for the protocol headers above.
-- `/health` returns a simple readiness payload
-- `/ws/:roomId` hosts Yjs collaboration rooms only after the browser has a valid room cookie
-
-The detailed contract source of truth lives in `docs/shared-contracts.md` and `packages/shared/src/types.ts`.
-
-## Current status
-
-- Phase 1 scaffold: complete
-- Phase 2 realtime server + MCP foundation: implemented
-- Phase 3 collaborative frontend MVP: implemented
-- Phase 4 deployment/E2E hardening: in progress

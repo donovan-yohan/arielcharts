@@ -4315,37 +4315,1142 @@ function useCanonicalDraft<T extends object>(canonical: T) {
   return { draft, resetDraft, updateDraft };
 }
 
-function C4EditorControls({ bottom, diagram, onAddBoundary, onAddElement, onAddRelationship, onDeleteBoundary, onDeleteElement, onDeleteRelationship, onEditBoundary, onEditElement, onEditRelationship, placement }: { bottom: number; diagram: C4DiagramSnapshot; onAddBoundary?: (value: C4Boundary) => void; onAddElement?: (value: C4Element) => void; onAddRelationship?: (value: C4Relationship) => void; onDeleteBoundary?: (id: string) => void; onDeleteElement?: (id: string) => void; onDeleteRelationship?: (identity: C4RelationshipIdentity) => void; onEditBoundary?: (id: string, value: Partial<C4Boundary>) => void; onEditElement?: (id: string, value: Partial<C4Element>) => void; onEditRelationship?: (identity: C4RelationshipIdentity, value: Partial<C4Relationship>) => void; placement?: PairedSemanticPanelPlacement['editor'] }) {
-  const [element, setElement] = useState<C4Element>({ id: 'system', kind: 'System', label: 'System' }); const [boundary, setBoundary] = useState<C4Boundary>({ id: 'boundary', kind: 'Boundary', label: 'Boundary' }); const ids = diagram.elements.map((item) => item.id); const [relationship, setRelationship] = useState<C4Relationship>({ from: ids[0] ?? '', to: ids[1] ?? ids[0] ?? '', label: 'Uses' });
-  return <aside className="canvas-semantic-editor canvas-c4-editor" data-canvas-pan-exclusion="true" data-testid="c4-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, ...placement, bottom: placement?.bottom ?? bottom, right: placement ? 'auto' : 12 }}><strong>C4 <small>experimental safe subset</small></strong><form onSubmit={(event) => { event.preventDefault(); onAddElement?.(element); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label="New C4 element type" onChange={(event) => setElement((current) => ({ ...current, kind: event.target.value as C4Element['kind'] }))} value={element.kind}>{(['Person', 'Person_Ext', 'System', 'System_Ext', 'SystemDb', 'SystemDb_Ext', 'Container', 'Container_Ext', 'ContainerDb', 'ContainerDb_Ext', 'Component', 'Component_Ext', 'ComponentDb', 'ComponentDb_Ext'] as const).map((value) => <option key={value}>{value}</option>)}</select><input aria-label="New C4 element id" onChange={(event) => setElement((current) => ({ ...current, id: event.target.value }))} value={element.id} /><input aria-label="New C4 element label" onChange={(event) => setElement((current) => ({ ...current, label: event.target.value }))} value={element.label} /><button type="submit">Add element</button></form><form onSubmit={(event) => { event.preventDefault(); onAddBoundary?.(boundary); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label="New C4 boundary type" onChange={(event) => setBoundary((current) => ({ ...current, kind: event.target.value as C4Boundary['kind'] }))} value={boundary.kind}>{(['Boundary', 'Enterprise_Boundary', 'System_Boundary', 'Container_Boundary'] as const).map((value) => <option key={value}>{value}</option>)}</select><input aria-label="New C4 boundary id" onChange={(event) => setBoundary((current) => ({ ...current, id: event.target.value }))} value={boundary.id} /><input aria-label="New C4 boundary label" onChange={(event) => setBoundary((current) => ({ ...current, label: event.target.value }))} value={boundary.label} /><button type="submit">Add boundary</button></form>{diagram.elements.map((item) => <C4ElementForm element={item} key={item.id} onDelete={onDeleteElement} onSave={onEditElement} />)}{diagram.boundaries.map((item) => <C4BoundaryForm boundary={item} key={item.id} onDelete={onDeleteBoundary} onSave={onEditBoundary} />)}<section aria-label="C4 relationships"><strong>Relationships</strong>{diagram.relationships.map((item, index) => <C4RelationshipForm ids={ids} key={`${index}:${item.from}:${item.to}:${item.label}`} onDelete={() => onDeleteRelationship?.(getC4RelationshipIdentity(item, index, diagram.relationships))} onSave={(value) => onEditRelationship?.(getC4RelationshipIdentity(item, index, diagram.relationships), value)} relationship={item} />)}{ids.length ? <C4RelationshipForm ids={ids} onSave={onAddRelationship} relationship={relationship} /> : <small>Add elements before relating them.</small>}</section></aside>;
+function C4EditorControls({
+  bottom,
+  diagram,
+  onAddBoundary,
+  onAddElement,
+  onAddRelationship,
+  onDeleteBoundary,
+  onDeleteElement,
+  onDeleteRelationship,
+  onEditBoundary,
+  onEditElement,
+  onEditRelationship,
+  placement,
+}: {
+  bottom: number;
+  diagram: C4DiagramSnapshot;
+  onAddBoundary?: (value: C4Boundary) => void;
+  onAddElement?: (value: C4Element) => void;
+  onAddRelationship?: (value: C4Relationship) => void;
+  onDeleteBoundary?: (id: string) => void;
+  onDeleteElement?: (id: string) => void;
+  onDeleteRelationship?: (identity: C4RelationshipIdentity) => void;
+  onEditBoundary?: (id: string, value: Partial<C4Boundary>) => void;
+  onEditElement?: (id: string, value: Partial<C4Element>) => void;
+  onEditRelationship?: (
+    identity: C4RelationshipIdentity,
+    value: Partial<C4Relationship>,
+  ) => void;
+  placement?: PairedSemanticPanelPlacement["editor"];
+}) {
+  const [element, setElement] = useState<C4Element>({
+    id: "system",
+    kind: "System",
+    label: "System",
+  });
+  const [boundary, setBoundary] = useState<C4Boundary>({
+    id: "boundary",
+    kind: "Boundary",
+    label: "Boundary",
+  });
+  const ids = diagram.elements.map((item) => item.id);
+  const [relationship, setRelationship] = useState<C4Relationship>({
+    from: ids[0] ?? "",
+    to: ids[1] ?? ids[0] ?? "",
+    label: "Uses",
+  });
+  return (
+    <aside
+      className="canvas-semantic-editor canvas-c4-editor"
+      data-canvas-pan-exclusion="true"
+      data-testid="c4-editor-controls"
+      style={{
+        ...SEMANTIC_PANEL_STYLE,
+        ...placement,
+        bottom: placement?.bottom ?? bottom,
+        right: placement ? "auto" : 12,
+      }}
+    >
+      <strong>
+        C4 <small>experimental safe subset</small>
+      </strong>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onAddElement?.(element);
+        }}
+        style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}
+      >
+        <select
+          aria-label="New C4 element type"
+          onChange={(event) =>
+            setElement((current) => ({
+              ...current,
+              kind: event.target.value as C4Element["kind"],
+            }))
+          }
+          value={element.kind}
+        >
+          {(
+            [
+              "Person",
+              "Person_Ext",
+              "System",
+              "System_Ext",
+              "SystemDb",
+              "SystemDb_Ext",
+              "Container",
+              "Container_Ext",
+              "ContainerDb",
+              "ContainerDb_Ext",
+              "Component",
+              "Component_Ext",
+              "ComponentDb",
+              "ComponentDb_Ext",
+            ] as const
+          ).map((value) => (
+            <option key={value}>{value}</option>
+          ))}
+        </select>
+        <input
+          aria-label="New C4 element id"
+          onChange={(event) =>
+            setElement((current) => ({ ...current, id: event.target.value }))
+          }
+          value={element.id}
+        />
+        <input
+          aria-label="New C4 element label"
+          onChange={(event) =>
+            setElement((current) => ({ ...current, label: event.target.value }))
+          }
+          value={element.label}
+        />
+        <button type="submit">Add element</button>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onAddBoundary?.(boundary);
+        }}
+        style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}
+      >
+        <select
+          aria-label="New C4 boundary type"
+          onChange={(event) =>
+            setBoundary((current) => ({
+              ...current,
+              kind: event.target.value as C4Boundary["kind"],
+            }))
+          }
+          value={boundary.kind}
+        >
+          {(
+            [
+              "Boundary",
+              "Enterprise_Boundary",
+              "System_Boundary",
+              "Container_Boundary",
+            ] as const
+          ).map((value) => (
+            <option key={value}>{value}</option>
+          ))}
+        </select>
+        <input
+          aria-label="New C4 boundary id"
+          onChange={(event) =>
+            setBoundary((current) => ({ ...current, id: event.target.value }))
+          }
+          value={boundary.id}
+        />
+        <input
+          aria-label="New C4 boundary label"
+          onChange={(event) =>
+            setBoundary((current) => ({
+              ...current,
+              label: event.target.value,
+            }))
+          }
+          value={boundary.label}
+        />
+        <button type="submit">Add boundary</button>
+      </form>
+      {diagram.elements.map((item) => (
+        <C4ElementForm
+          element={item}
+          key={item.id}
+          onDelete={onDeleteElement}
+          onSave={onEditElement}
+        />
+      ))}
+      {diagram.boundaries.map((item) => (
+        <C4BoundaryForm
+          boundary={item}
+          key={item.id}
+          onDelete={onDeleteBoundary}
+          onSave={onEditBoundary}
+        />
+      ))}
+      <section aria-label="C4 relationships">
+        <strong>Relationships</strong>
+        {diagram.relationships.map((item, index) => (
+          <C4RelationshipForm
+            ids={ids}
+            key={`${index}:${item.from}:${item.to}:${item.label}`}
+            onDelete={() =>
+              onDeleteRelationship?.(
+                getC4RelationshipIdentity(item, index, diagram.relationships),
+              )
+            }
+            onSave={(value) =>
+              onEditRelationship?.(
+                getC4RelationshipIdentity(item, index, diagram.relationships),
+                value,
+              )
+            }
+            relationship={item}
+          />
+        ))}
+        {ids.length ? (
+          <C4RelationshipForm
+            ids={ids}
+            onSave={onAddRelationship}
+            relationship={relationship}
+          />
+        ) : (
+          <small>Add elements before relating them.</small>
+        )}
+      </section>
+    </aside>
+  );
 }
-function C4ElementForm({ element, onDelete, onSave }: { element: C4Element; onDelete?: (id: string) => void; onSave?: (id: string, value: Partial<C4Element>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(element); return <form aria-label={`C4 element ${element.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(element.id, draft); resetDraft(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><span>{element.kind}</span><input aria-label={`C4 element ${element.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><input aria-label={`C4 element ${element.id} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><input aria-label={`C4 element ${element.id} technology`} onChange={(event) => updateDraft((current) => ({ ...current, technology: event.target.value || undefined }))} placeholder="technology" value={draft.technology ?? ''} /><input aria-label={`C4 element ${element.id} description`} onChange={(event) => updateDraft((current) => ({ ...current, description: event.target.value || undefined }))} placeholder="description" value={draft.description ?? ''} /><button type="submit">Save</button><button aria-label={`Delete C4 element ${element.id}`} onClick={() => onDelete?.(element.id)} type="button">Delete</button></form>; }
-function C4BoundaryForm({ boundary, onDelete, onSave }: { boundary: C4Boundary; onDelete?: (id: string) => void; onSave?: (id: string, value: Partial<C4Boundary>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(boundary); return <form aria-label={`C4 boundary ${boundary.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(boundary.id, draft); resetDraft(); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><span>{boundary.kind}</span><input aria-label={`C4 boundary ${boundary.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><input aria-label={`C4 boundary ${boundary.id} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><button type="submit">Save</button><button aria-label={`Delete C4 boundary ${boundary.id}`} onClick={() => onDelete?.(boundary.id)} type="button">Delete</button></form>; }
-function C4RelationshipForm({ ids, onDelete, onSave, relationship }: { ids: string[]; onDelete?: () => void; onSave?: (value: C4Relationship) => void; relationship: C4Relationship }) { const [draft, setDraft] = useState(relationship); return <form aria-label={`C4 relationship ${relationship.from} ${relationship.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label="C4 relationship source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{ids.map((id) => <option key={id}>{id}</option>)}</select><select aria-label="C4 relationship target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{ids.map((id) => <option key={id}>{id}</option>)}</select><input aria-label="C4 relationship label" onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><input aria-label="C4 relationship technology" onChange={(event) => setDraft((current) => ({ ...current, technology: event.target.value || undefined }))} placeholder="technology" value={draft.technology ?? ''} /><button type="submit">{onDelete ? 'Save' : 'Add relationship'}</button>{onDelete ? <button aria-label="Delete C4 relationship" onClick={onDelete} type="button">Delete</button> : null}</form>; }
+function C4ElementForm({
+  element,
+  onDelete,
+  onSave,
+}: {
+  element: C4Element;
+  onDelete?: (id: string) => void;
+  onSave?: (id: string, value: Partial<C4Element>) => void;
+}) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(element);
+  return (
+    <form
+      aria-label={`C4 element ${element.id}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave?.(element.id, draft);
+        resetDraft();
+      }}
+      style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}
+    >
+      <span>{element.kind}</span>
+      <input
+        aria-label={`C4 element ${element.id} id`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, id: event.target.value }))
+        }
+        value={draft.id}
+      />
+      <input
+        aria-label={`C4 element ${element.id} label`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, label: event.target.value }))
+        }
+        value={draft.label}
+      />
+      <input
+        aria-label={`C4 element ${element.id} technology`}
+        onChange={(event) =>
+          updateDraft((current) => ({
+            ...current,
+            technology: event.target.value || undefined,
+          }))
+        }
+        placeholder="technology"
+        value={draft.technology ?? ""}
+      />
+      <input
+        aria-label={`C4 element ${element.id} description`}
+        onChange={(event) =>
+          updateDraft((current) => ({
+            ...current,
+            description: event.target.value || undefined,
+          }))
+        }
+        placeholder="description"
+        value={draft.description ?? ""}
+      />
+      <button type="submit">Save</button>
+      <button
+        aria-label={`Delete C4 element ${element.id}`}
+        onClick={() => onDelete?.(element.id)}
+        type="button"
+      >
+        Delete
+      </button>
+    </form>
+  );
+}
+function C4BoundaryForm({
+  boundary,
+  onDelete,
+  onSave,
+}: {
+  boundary: C4Boundary;
+  onDelete?: (id: string) => void;
+  onSave?: (id: string, value: Partial<C4Boundary>) => void;
+}) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(boundary);
+  return (
+    <form
+      aria-label={`C4 boundary ${boundary.id}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave?.(boundary.id, draft);
+        resetDraft();
+      }}
+      style={{ display: "flex", gap: 4, marginTop: 5 }}
+    >
+      <span>{boundary.kind}</span>
+      <input
+        aria-label={`C4 boundary ${boundary.id} id`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, id: event.target.value }))
+        }
+        value={draft.id}
+      />
+      <input
+        aria-label={`C4 boundary ${boundary.id} label`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, label: event.target.value }))
+        }
+        value={draft.label}
+      />
+      <button type="submit">Save</button>
+      <button
+        aria-label={`Delete C4 boundary ${boundary.id}`}
+        onClick={() => onDelete?.(boundary.id)}
+        type="button"
+      >
+        Delete
+      </button>
+    </form>
+  );
+}
+function C4RelationshipForm({
+  ids,
+  onDelete,
+  onSave,
+  relationship,
+}: {
+  ids: string[];
+  onDelete?: () => void;
+  onSave?: (value: C4Relationship) => void;
+  relationship: C4Relationship;
+}) {
+  const [draft, setDraft] = useState(relationship);
+  return (
+    <form
+      aria-label={`C4 relationship ${relationship.from} ${relationship.to}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave?.(draft);
+      }}
+      style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}
+    >
+      <select
+        aria-label="C4 relationship source"
+        onChange={(event) =>
+          setDraft((current) => ({ ...current, from: event.target.value }))
+        }
+        value={draft.from}
+      >
+        {ids.map((id) => (
+          <option key={id}>{id}</option>
+        ))}
+      </select>
+      <select
+        aria-label="C4 relationship target"
+        onChange={(event) =>
+          setDraft((current) => ({ ...current, to: event.target.value }))
+        }
+        value={draft.to}
+      >
+        {ids.map((id) => (
+          <option key={id}>{id}</option>
+        ))}
+      </select>
+      <input
+        aria-label="C4 relationship label"
+        onChange={(event) =>
+          setDraft((current) => ({ ...current, label: event.target.value }))
+        }
+        value={draft.label}
+      />
+      <input
+        aria-label="C4 relationship technology"
+        onChange={(event) =>
+          setDraft((current) => ({
+            ...current,
+            technology: event.target.value || undefined,
+          }))
+        }
+        placeholder="technology"
+        value={draft.technology ?? ""}
+      />
+      <button type="submit">{onDelete ? "Save" : "Add relationship"}</button>
+      {onDelete ? (
+        <button
+          aria-label="Delete C4 relationship"
+          onClick={onDelete}
+          type="button"
+        >
+          Delete
+        </button>
+      ) : null}
+    </form>
+  );
+}
 
-function BlockEditorControls({ bottom, diagram, onAddComposite, onAddLink, onAddNode, onDeleteComposite, onDeleteLink, onDeleteNode, onEditComposite, onEditLink, onEditNode, onSetColumns, placement }: { bottom: number; diagram: BlockDiagramSnapshot; onAddComposite?: (value: Partial<BlockComposite>) => void; onAddLink?: (value: BlockLink) => void; onAddNode?: (value: BlockNode) => void; onDeleteComposite?: (id: string) => void; onDeleteLink?: (identity: BlockLinkIdentity) => void; onDeleteNode?: (id: string) => void; onEditComposite?: (id: string, value: Partial<BlockComposite>) => void; onEditLink?: (identity: BlockLinkIdentity, value: Partial<BlockLink>) => void; onEditNode?: (id: string, value: Partial<BlockNode>) => void; onSetColumns?: (value: number) => void; placement?: PairedSemanticPanelPlacement['editor'] }) { const [node, setNode] = useState<BlockNode>({ id: 'item', label: 'Block', span: 1 }); const [composite, setComposite] = useState<Partial<BlockComposite>>({ id: 'group', span: 1 }); const ids = [...diagram.nodes, ...diagram.composites].map((item) => item.id); const [link, setLink] = useState<BlockLink>({ from: ids[0] ?? '', to: ids[1] ?? ids[0] ?? '' }); const [columns, setColumns] = useState(diagram.columns ?? 1); return <aside className="canvas-semantic-editor canvas-block-editor" data-canvas-pan-exclusion="true" data-testid="block-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, ...placement, bottom: placement?.bottom ?? bottom, right: placement ? 'auto' : 12 }}><strong>Block <small>beta safe subset</small></strong><form onSubmit={(event) => { event.preventDefault(); onSetColumns?.(columns); }}><label>columns <input aria-label="Block columns" min="1" onChange={(event) => setColumns(Number(event.target.value))} type="number" value={columns} /></label><button type="submit">Set</button></form><form onSubmit={(event) => { event.preventDefault(); onAddNode?.(node); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label="New block id" onChange={(event) => setNode((current) => ({ ...current, id: event.target.value }))} value={node.id} /><input aria-label="New block label" onChange={(event) => setNode((current) => ({ ...current, label: event.target.value }))} value={node.label} /><input aria-label="New block span" min="1" onChange={(event) => setNode((current) => ({ ...current, span: Number(event.target.value) }))} type="number" value={node.span} /><button type="submit">Add block</button></form><form onSubmit={(event) => { event.preventDefault(); onAddComposite?.(composite); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label="New block composite id" onChange={(event) => setComposite((current) => ({ ...current, id: event.target.value }))} value={composite.id ?? ''} /><button type="submit">Add composite</button></form>{diagram.nodes.map((item) => <BlockNodeForm item={item} key={item.id} onDelete={onDeleteNode} onSave={onEditNode} />)}{diagram.composites.map((item) => <BlockCompositeForm item={item} key={item.id} onDelete={onDeleteComposite} onSave={onEditComposite} />)}<section aria-label="Block links">{diagram.links.map((item, index) => <BlockLinkForm ids={ids} key={`${index}:${item.from}:${item.to}`} link={item} onDelete={() => onDeleteLink?.(getBlockLinkIdentity(item, index, diagram.links))} onSave={(value) => onEditLink?.(getBlockLinkIdentity(item, index, diagram.links), value)} />)}{ids.length ? <BlockLinkForm ids={ids} link={link} onSave={onAddLink} /> : null}</section></aside>; }
-function BlockNodeForm({ item, onDelete, onSave }: { item: BlockNode; onDelete?: (id: string) => void; onSave?: (id: string, value: Partial<BlockNode>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(item); return <form aria-label={`Block ${item.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(item.id, draft); resetDraft(); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label={`Block ${item.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><input aria-label={`Block ${item.id} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><input aria-label={`Block ${item.id} span`} min="1" onChange={(event) => updateDraft((current) => ({ ...current, span: Number(event.target.value) }))} type="number" value={draft.span} /><button type="submit">Save</button><button aria-label={`Delete block ${item.id}`} onClick={() => onDelete?.(item.id)} type="button">Delete</button></form>; }
-function BlockCompositeForm({ item, onDelete, onSave }: { item: BlockComposite; onDelete?: (id: string) => void; onSave?: (id: string, value: Partial<BlockComposite>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(item); return <form aria-label={`Block composite ${item.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(item.id, draft); resetDraft(); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><span>group</span><input aria-label={`Block composite ${item.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><input aria-label={`Block composite ${item.id} span`} min="1" onChange={(event) => updateDraft((current) => ({ ...current, span: Number(event.target.value) }))} type="number" value={draft.span} /><input aria-label={`Block composite ${item.id} columns`} min="1" onChange={(event) => updateDraft((current) => ({ ...current, columns: Number(event.target.value) }))} type="number" value={draft.columns ?? 1} /><button type="submit">Save</button><button aria-label={`Delete block composite ${item.id}`} onClick={() => onDelete?.(item.id)} type="button">Delete</button></form>; }
-function BlockLinkForm({ ids, link, onDelete, onSave }: { ids: string[]; link: BlockLink; onDelete?: () => void; onSave?: (value: BlockLink) => void }) { const [draft, setDraft] = useState(link); return <form aria-label={`Block link ${link.from} ${link.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><select aria-label="Block link source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{ids.map((id) => <option key={id}>{id}</option>)}</select><select aria-label="Block link target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{ids.map((id) => <option key={id}>{id}</option>)}</select><button type="submit">{onDelete ? 'Save' : 'Add link'}</button>{onDelete ? <button aria-label="Delete block link" onClick={onDelete} type="button">Delete</button> : null}</form>; }
+function BlockEditorControls({
+  bottom,
+  diagram,
+  onAddComposite,
+  onAddLink,
+  onAddNode,
+  onDeleteComposite,
+  onDeleteLink,
+  onDeleteNode,
+  onEditComposite,
+  onEditLink,
+  onEditNode,
+  onSetColumns,
+  placement,
+}: {
+  bottom: number;
+  diagram: BlockDiagramSnapshot;
+  onAddComposite?: (value: Partial<BlockComposite>) => void;
+  onAddLink?: (value: BlockLink) => void;
+  onAddNode?: (value: BlockNode) => void;
+  onDeleteComposite?: (id: string) => void;
+  onDeleteLink?: (identity: BlockLinkIdentity) => void;
+  onDeleteNode?: (id: string) => void;
+  onEditComposite?: (id: string, value: Partial<BlockComposite>) => void;
+  onEditLink?: (identity: BlockLinkIdentity, value: Partial<BlockLink>) => void;
+  onEditNode?: (id: string, value: Partial<BlockNode>) => void;
+  onSetColumns?: (value: number) => void;
+  placement?: PairedSemanticPanelPlacement["editor"];
+}) {
+  const [node, setNode] = useState<BlockNode>({
+    id: "item",
+    label: "Block",
+    span: 1,
+  });
+  const [composite, setComposite] = useState<Partial<BlockComposite>>({
+    id: "group",
+    span: 1,
+  });
+  const ids = [...diagram.nodes, ...diagram.composites].map((item) => item.id);
+  const [link, setLink] = useState<BlockLink>({
+    from: ids[0] ?? "",
+    to: ids[1] ?? ids[0] ?? "",
+  });
+  const [columns, setColumns] = useState(diagram.columns ?? 1);
+  return (
+    <aside
+      className="canvas-semantic-editor canvas-block-editor"
+      data-canvas-pan-exclusion="true"
+      data-testid="block-editor-controls"
+      style={{
+        ...SEMANTIC_PANEL_STYLE,
+        ...placement,
+        bottom: placement?.bottom ?? bottom,
+        right: placement ? "auto" : 12,
+      }}
+    >
+      <strong>
+        Block <small>beta safe subset</small>
+      </strong>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSetColumns?.(columns);
+        }}
+      >
+        <label>
+          columns{" "}
+          <input
+            aria-label="Block columns"
+            min="1"
+            onChange={(event) => setColumns(Number(event.target.value))}
+            type="number"
+            value={columns}
+          />
+        </label>
+        <button type="submit">Set</button>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onAddNode?.(node);
+        }}
+        style={{ display: "flex", gap: 4, marginTop: 5 }}
+      >
+        <input
+          aria-label="New block id"
+          onChange={(event) =>
+            setNode((current) => ({ ...current, id: event.target.value }))
+          }
+          value={node.id}
+        />
+        <input
+          aria-label="New block label"
+          onChange={(event) =>
+            setNode((current) => ({ ...current, label: event.target.value }))
+          }
+          value={node.label}
+        />
+        <input
+          aria-label="New block span"
+          min="1"
+          onChange={(event) =>
+            setNode((current) => ({
+              ...current,
+              span: Number(event.target.value),
+            }))
+          }
+          type="number"
+          value={node.span}
+        />
+        <button type="submit">Add block</button>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onAddComposite?.(composite);
+        }}
+        style={{ display: "flex", gap: 4, marginTop: 5 }}
+      >
+        <input
+          aria-label="New block composite id"
+          onChange={(event) =>
+            setComposite((current) => ({ ...current, id: event.target.value }))
+          }
+          value={composite.id ?? ""}
+        />
+        <button type="submit">Add composite</button>
+      </form>
+      {diagram.nodes.map((item) => (
+        <BlockNodeForm
+          item={item}
+          key={item.id}
+          onDelete={onDeleteNode}
+          onSave={onEditNode}
+        />
+      ))}
+      {diagram.composites.map((item) => (
+        <BlockCompositeForm
+          item={item}
+          key={item.id}
+          onDelete={onDeleteComposite}
+          onSave={onEditComposite}
+        />
+      ))}
+      <section aria-label="Block links">
+        {diagram.links.map((item, index) => (
+          <BlockLinkForm
+            ids={ids}
+            key={`${index}:${item.from}:${item.to}`}
+            link={item}
+            onDelete={() =>
+              onDeleteLink?.(getBlockLinkIdentity(item, index, diagram.links))
+            }
+            onSave={(value) =>
+              onEditLink?.(
+                getBlockLinkIdentity(item, index, diagram.links),
+                value,
+              )
+            }
+          />
+        ))}
+        {ids.length ? (
+          <BlockLinkForm ids={ids} link={link} onSave={onAddLink} />
+        ) : null}
+      </section>
+    </aside>
+  );
+}
+function BlockNodeForm({
+  item,
+  onDelete,
+  onSave,
+}: {
+  item: BlockNode;
+  onDelete?: (id: string) => void;
+  onSave?: (id: string, value: Partial<BlockNode>) => void;
+}) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(item);
+  return (
+    <form
+      aria-label={`Block ${item.id}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave?.(item.id, draft);
+        resetDraft();
+      }}
+      style={{ display: "flex", gap: 4, marginTop: 5 }}
+    >
+      <input
+        aria-label={`Block ${item.id} id`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, id: event.target.value }))
+        }
+        value={draft.id}
+      />
+      <input
+        aria-label={`Block ${item.id} label`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, label: event.target.value }))
+        }
+        value={draft.label}
+      />
+      <input
+        aria-label={`Block ${item.id} span`}
+        min="1"
+        onChange={(event) =>
+          updateDraft((current) => ({
+            ...current,
+            span: Number(event.target.value),
+          }))
+        }
+        type="number"
+        value={draft.span}
+      />
+      <button type="submit">Save</button>
+      <button
+        aria-label={`Delete block ${item.id}`}
+        onClick={() => onDelete?.(item.id)}
+        type="button"
+      >
+        Delete
+      </button>
+    </form>
+  );
+}
+function BlockCompositeForm({
+  item,
+  onDelete,
+  onSave,
+}: {
+  item: BlockComposite;
+  onDelete?: (id: string) => void;
+  onSave?: (id: string, value: Partial<BlockComposite>) => void;
+}) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(item);
+  return (
+    <form
+      aria-label={`Block composite ${item.id}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave?.(item.id, draft);
+        resetDraft();
+      }}
+      style={{ display: "flex", gap: 4, marginTop: 5 }}
+    >
+      <span>group</span>
+      <input
+        aria-label={`Block composite ${item.id} id`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, id: event.target.value }))
+        }
+        value={draft.id}
+      />
+      <input
+        aria-label={`Block composite ${item.id} span`}
+        min="1"
+        onChange={(event) =>
+          updateDraft((current) => ({
+            ...current,
+            span: Number(event.target.value),
+          }))
+        }
+        type="number"
+        value={draft.span}
+      />
+      <input
+        aria-label={`Block composite ${item.id} columns`}
+        min="1"
+        onChange={(event) =>
+          updateDraft((current) => ({
+            ...current,
+            columns: Number(event.target.value),
+          }))
+        }
+        type="number"
+        value={draft.columns ?? 1}
+      />
+      <button type="submit">Save</button>
+      <button
+        aria-label={`Delete block composite ${item.id}`}
+        onClick={() => onDelete?.(item.id)}
+        type="button"
+      >
+        Delete
+      </button>
+    </form>
+  );
+}
+function BlockLinkForm({
+  ids,
+  link,
+  onDelete,
+  onSave,
+}: {
+  ids: string[];
+  link: BlockLink;
+  onDelete?: () => void;
+  onSave?: (value: BlockLink) => void;
+}) {
+  const [draft, setDraft] = useState(link);
+  return (
+    <form
+      aria-label={`Block link ${link.from} ${link.to}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave?.(draft);
+      }}
+      style={{ display: "flex", gap: 4, marginTop: 5 }}
+    >
+      <select
+        aria-label="Block link source"
+        onChange={(event) =>
+          setDraft((current) => ({ ...current, from: event.target.value }))
+        }
+        value={draft.from}
+      >
+        {ids.map((id) => (
+          <option key={id}>{id}</option>
+        ))}
+      </select>
+      <select
+        aria-label="Block link target"
+        onChange={(event) =>
+          setDraft((current) => ({ ...current, to: event.target.value }))
+        }
+        value={draft.to}
+      >
+        {ids.map((id) => (
+          <option key={id}>{id}</option>
+        ))}
+      </select>
+      <button type="submit">{onDelete ? "Save" : "Add link"}</button>
+      {onDelete ? (
+        <button aria-label="Delete block link" onClick={onDelete} type="button">
+          Delete
+        </button>
+      ) : null}
+    </form>
+  );
+}
 
-function SwimlaneEditorControls({ bottom, diagram, onAddHandoff, onAddLane, onAddNode, onDeleteHandoff, onDeleteLane, onDeleteNode, onEditHandoff, onEditLane, onEditNode, onMoveNode }: { bottom: number; diagram: SwimlaneDiagramSnapshot; onAddHandoff?: (value: SwimlaneHandoff) => void; onAddLane?: (value: Swimlane) => void; onAddNode?: (value: SwimlaneNode) => void; onDeleteHandoff?: (identity: SwimlaneHandoffIdentity) => void; onDeleteLane?: (id: string) => void; onDeleteNode?: (id: string) => void; onEditHandoff?: (identity: SwimlaneHandoffIdentity, value: Partial<SwimlaneHandoff>) => void; onEditLane?: (id: string, value: Partial<Swimlane>) => void; onEditNode?: (id: string, value: Partial<Pick<SwimlaneNode, 'id' | 'label'>>) => void; onMoveNode?: (id: string, laneId: string) => void }) { const [lane, setLane] = useState<Swimlane>({ id: 'lane', label: 'Lane' }); const [node, setNode] = useState<SwimlaneNode>({ id: 'task', label: 'Task', laneId: diagram.lanes[0]?.id ?? '' }); const ids = diagram.nodes.map((item) => item.id); const [handoff, setHandoff] = useState<SwimlaneHandoff>({ from: ids[0] ?? '', to: ids[1] ?? ids[0] ?? '' }); return <aside className="canvas-semantic-editor canvas-swimlane-editor" data-canvas-pan-exclusion="true" data-testid="swimlane-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}><strong>Swimlane <small>beta safe subset</small></strong><form onSubmit={(event) => { event.preventDefault(); onAddLane?.(lane); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label="New swimlane id" onChange={(event) => setLane((current) => ({ ...current, id: event.target.value }))} value={lane.id} /><input aria-label="New swimlane label" onChange={(event) => setLane((current) => ({ ...current, label: event.target.value }))} value={lane.label} /><button type="submit">Add lane</button></form><form onSubmit={(event) => { event.preventDefault(); onAddNode?.(node); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><select aria-label="New swimlane node lane" onChange={(event) => setNode((current) => ({ ...current, laneId: event.target.value }))} value={node.laneId}>{diagram.lanes.map((item) => <option key={item.id}>{item.id}</option>)}</select><input aria-label="New swimlane node id" onChange={(event) => setNode((current) => ({ ...current, id: event.target.value }))} value={node.id} /><input aria-label="New swimlane node label" onChange={(event) => setNode((current) => ({ ...current, label: event.target.value }))} value={node.label} /><button type="submit">Add node</button></form>{diagram.lanes.map((item) => <SwimlaneForm item={item} key={item.id} onDelete={onDeleteLane} onSave={onEditLane} />)}{diagram.nodes.map((item) => <SwimlaneNodeForm item={item} key={item.id} lanes={diagram.lanes.map((laneItem) => laneItem.id)} onDelete={onDeleteNode} onMove={onMoveNode} onSave={onEditNode} />)}<section aria-label="Swimlane handoffs">{diagram.handoffs.map((item, index) => <SwimlaneHandoffForm ids={ids} item={item} key={`${index}:${item.from}:${item.to}:${item.label ?? ''}`} onDelete={() => onDeleteHandoff?.(getSwimlaneHandoffIdentity(item, index, diagram.handoffs))} onSave={(value) => onEditHandoff?.(getSwimlaneHandoffIdentity(item, index, diagram.handoffs), value)} />)}{ids.length ? <SwimlaneHandoffForm ids={ids} item={handoff} onSave={onAddHandoff} /> : null}</section></aside>; }
-function SwimlaneForm({ item, onDelete, onSave }: { item: Swimlane; onDelete?: (id: string) => void; onSave?: (id: string, value: Partial<Swimlane>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(item); return <form aria-label={`Swimlane ${item.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(item.id, draft); resetDraft(); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label={`Swimlane ${item.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><input aria-label={`Swimlane ${item.id} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><button type="submit">Save</button><button aria-label={`Delete swimlane ${item.id}`} onClick={() => onDelete?.(item.id)} type="button">Delete</button></form>; }
-function SwimlaneNodeForm({ item, lanes, onDelete, onMove, onSave }: { item: SwimlaneNode; lanes: string[]; onDelete?: (id: string) => void; onMove?: (id: string, laneId: string) => void; onSave?: (id: string, value: Partial<Pick<SwimlaneNode, 'id' | 'label'>>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(item); return <form aria-label={`Swimlane node ${item.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(item.id, draft); resetDraft(); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label={`Swimlane node ${item.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><input aria-label={`Swimlane node ${item.id} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><select aria-label={`Swimlane node ${item.id} lane`} onChange={(event) => onMove?.(item.id, event.target.value)} value={item.laneId}>{lanes.map((id) => <option key={id}>{id}</option>)}</select><button type="submit">Save</button><button aria-label={`Delete swimlane node ${item.id}`} onClick={() => onDelete?.(item.id)} type="button">Delete</button></form>; }
-function SwimlaneHandoffForm({ ids, item, onDelete, onSave }: { ids: string[]; item: SwimlaneHandoff; onDelete?: () => void; onSave?: (value: SwimlaneHandoff) => void }) { const [draft, setDraft] = useState(item); return <form aria-label={`Swimlane handoff ${item.from} ${item.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><select aria-label="Swimlane handoff source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{ids.map((id) => <option key={id}>{id}</option>)}</select><select aria-label="Swimlane handoff target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{ids.map((id) => <option key={id}>{id}</option>)}</select><input aria-label="Swimlane handoff label" onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value || undefined }))} placeholder="label" value={draft.label ?? ''} /><button type="submit">{onDelete ? 'Save' : 'Add handoff'}</button>{onDelete ? <button aria-label="Delete swimlane handoff" onClick={onDelete} type="button">Delete</button> : null}</form>; }
+function SwimlaneEditorControls({
+  bottom,
+  diagram,
+  onAddHandoff,
+  onAddLane,
+  onAddNode,
+  onDeleteHandoff,
+  onDeleteLane,
+  onDeleteNode,
+  onEditHandoff,
+  onEditLane,
+  onEditNode,
+  onMoveNode,
+}: {
+  bottom: number;
+  diagram: SwimlaneDiagramSnapshot;
+  onAddHandoff?: (value: SwimlaneHandoff) => void;
+  onAddLane?: (value: Swimlane) => void;
+  onAddNode?: (value: SwimlaneNode) => void;
+  onDeleteHandoff?: (identity: SwimlaneHandoffIdentity) => void;
+  onDeleteLane?: (id: string) => void;
+  onDeleteNode?: (id: string) => void;
+  onEditHandoff?: (
+    identity: SwimlaneHandoffIdentity,
+    value: Partial<SwimlaneHandoff>,
+  ) => void;
+  onEditLane?: (id: string, value: Partial<Swimlane>) => void;
+  onEditNode?: (
+    id: string,
+    value: Partial<Pick<SwimlaneNode, "id" | "label">>,
+  ) => void;
+  onMoveNode?: (id: string, laneId: string) => void;
+}) {
+  const [lane, setLane] = useState<Swimlane>({ id: "lane", label: "Lane" });
+  const [node, setNode] = useState<SwimlaneNode>({
+    id: "task",
+    label: "Task",
+    laneId: diagram.lanes[0]?.id ?? "",
+  });
+  const ids = diagram.nodes.map((item) => item.id);
+  const [handoff, setHandoff] = useState<SwimlaneHandoff>({
+    from: ids[0] ?? "",
+    to: ids[1] ?? ids[0] ?? "",
+  });
+  return (
+    <aside
+      className="canvas-semantic-editor canvas-swimlane-editor"
+      data-canvas-pan-exclusion="true"
+      data-testid="swimlane-editor-controls"
+      style={{ ...SEMANTIC_PANEL_STYLE, bottom }}
+    >
+      <strong>
+        Swimlane <small>beta safe subset</small>
+      </strong>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onAddLane?.(lane);
+        }}
+        style={{ display: "flex", gap: 4, marginTop: 5 }}
+      >
+        <input
+          aria-label="New swimlane id"
+          onChange={(event) =>
+            setLane((current) => ({ ...current, id: event.target.value }))
+          }
+          value={lane.id}
+        />
+        <input
+          aria-label="New swimlane label"
+          onChange={(event) =>
+            setLane((current) => ({ ...current, label: event.target.value }))
+          }
+          value={lane.label}
+        />
+        <button type="submit">Add lane</button>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onAddNode?.(node);
+        }}
+        style={{ display: "flex", gap: 4, marginTop: 5 }}
+      >
+        <select
+          aria-label="New swimlane node lane"
+          onChange={(event) =>
+            setNode((current) => ({ ...current, laneId: event.target.value }))
+          }
+          value={node.laneId}
+        >
+          {diagram.lanes.map((item) => (
+            <option key={item.id}>{item.id}</option>
+          ))}
+        </select>
+        <input
+          aria-label="New swimlane node id"
+          onChange={(event) =>
+            setNode((current) => ({ ...current, id: event.target.value }))
+          }
+          value={node.id}
+        />
+        <input
+          aria-label="New swimlane node label"
+          onChange={(event) =>
+            setNode((current) => ({ ...current, label: event.target.value }))
+          }
+          value={node.label}
+        />
+        <button type="submit">Add node</button>
+      </form>
+      {diagram.lanes.map((item) => (
+        <SwimlaneForm
+          item={item}
+          key={item.id}
+          onDelete={onDeleteLane}
+          onSave={onEditLane}
+        />
+      ))}
+      {diagram.nodes.map((item) => (
+        <SwimlaneNodeForm
+          item={item}
+          key={item.id}
+          lanes={diagram.lanes.map((laneItem) => laneItem.id)}
+          onDelete={onDeleteNode}
+          onMove={onMoveNode}
+          onSave={onEditNode}
+        />
+      ))}
+      <section aria-label="Swimlane handoffs">
+        {diagram.handoffs.map((item, index) => (
+          <SwimlaneHandoffForm
+            ids={ids}
+            item={item}
+            key={`${index}:${item.from}:${item.to}:${item.label ?? ""}`}
+            onDelete={() =>
+              onDeleteHandoff?.(
+                getSwimlaneHandoffIdentity(item, index, diagram.handoffs),
+              )
+            }
+            onSave={(value) =>
+              onEditHandoff?.(
+                getSwimlaneHandoffIdentity(item, index, diagram.handoffs),
+                value,
+              )
+            }
+          />
+        ))}
+        {ids.length ? (
+          <SwimlaneHandoffForm ids={ids} item={handoff} onSave={onAddHandoff} />
+        ) : null}
+      </section>
+    </aside>
+  );
+}
+function SwimlaneForm({
+  item,
+  onDelete,
+  onSave,
+}: {
+  item: Swimlane;
+  onDelete?: (id: string) => void;
+  onSave?: (id: string, value: Partial<Swimlane>) => void;
+}) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(item);
+  return (
+    <form
+      aria-label={`Swimlane ${item.id}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave?.(item.id, draft);
+        resetDraft();
+      }}
+      style={{ display: "flex", gap: 4, marginTop: 5 }}
+    >
+      <input
+        aria-label={`Swimlane ${item.id} id`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, id: event.target.value }))
+        }
+        value={draft.id}
+      />
+      <input
+        aria-label={`Swimlane ${item.id} label`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, label: event.target.value }))
+        }
+        value={draft.label}
+      />
+      <button type="submit">Save</button>
+      <button
+        aria-label={`Delete swimlane ${item.id}`}
+        onClick={() => onDelete?.(item.id)}
+        type="button"
+      >
+        Delete
+      </button>
+    </form>
+  );
+}
+function SwimlaneNodeForm({
+  item,
+  lanes,
+  onDelete,
+  onMove,
+  onSave,
+}: {
+  item: SwimlaneNode;
+  lanes: string[];
+  onDelete?: (id: string) => void;
+  onMove?: (id: string, laneId: string) => void;
+  onSave?: (
+    id: string,
+    value: Partial<Pick<SwimlaneNode, "id" | "label">>,
+  ) => void;
+}) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(item);
+  return (
+    <form
+      aria-label={`Swimlane node ${item.id}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave?.(item.id, draft);
+        resetDraft();
+      }}
+      style={{ display: "flex", gap: 4, marginTop: 5 }}
+    >
+      <input
+        aria-label={`Swimlane node ${item.id} id`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, id: event.target.value }))
+        }
+        value={draft.id}
+      />
+      <input
+        aria-label={`Swimlane node ${item.id} label`}
+        onChange={(event) =>
+          updateDraft((current) => ({ ...current, label: event.target.value }))
+        }
+        value={draft.label}
+      />
+      <select
+        aria-label={`Swimlane node ${item.id} lane`}
+        onChange={(event) => onMove?.(item.id, event.target.value)}
+        value={item.laneId}
+      >
+        {lanes.map((id) => (
+          <option key={id}>{id}</option>
+        ))}
+      </select>
+      <button type="submit">Save</button>
+      <button
+        aria-label={`Delete swimlane node ${item.id}`}
+        onClick={() => onDelete?.(item.id)}
+        type="button"
+      >
+        Delete
+      </button>
+    </form>
+  );
+}
+function SwimlaneHandoffForm({
+  ids,
+  item,
+  onDelete,
+  onSave,
+}: {
+  ids: string[];
+  item: SwimlaneHandoff;
+  onDelete?: () => void;
+  onSave?: (value: SwimlaneHandoff) => void;
+}) {
+  const [draft, setDraft] = useState(item);
+  return (
+    <form
+      aria-label={`Swimlane handoff ${item.from} ${item.to}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave?.(draft);
+      }}
+      style={{ display: "flex", gap: 4, marginTop: 5 }}
+    >
+      <select
+        aria-label="Swimlane handoff source"
+        onChange={(event) =>
+          setDraft((current) => ({ ...current, from: event.target.value }))
+        }
+        value={draft.from}
+      >
+        {ids.map((id) => (
+          <option key={id}>{id}</option>
+        ))}
+      </select>
+      <select
+        aria-label="Swimlane handoff target"
+        onChange={(event) =>
+          setDraft((current) => ({ ...current, to: event.target.value }))
+        }
+        value={draft.to}
+      >
+        {ids.map((id) => (
+          <option key={id}>{id}</option>
+        ))}
+      </select>
+      <input
+        aria-label="Swimlane handoff label"
+        onChange={(event) =>
+          setDraft((current) => ({
+            ...current,
+            label: event.target.value || undefined,
+          }))
+        }
+        placeholder="label"
+        value={draft.label ?? ""}
+      />
+      <button type="submit">{onDelete ? "Save" : "Add handoff"}</button>
+      {onDelete ? (
+        <button
+          aria-label="Delete swimlane handoff"
+          onClick={onDelete}
+          type="button"
+        >
+          Delete
+        </button>
+      ) : null}
+    </form>
+  );
+}
 
-function C4ContainmentControls({ bottom, boundaries, elements, onMoveBoundary, onMoveElement, placement }: {
+function C4ContainmentControls({
+  bottom,
+  boundaries,
+  elements,
+  onMoveBoundary,
+  onMoveElement,
+  placement,
+}: {
   bottom: number;
   boundaries: C4Boundary[];
   elements: C4Element[];
   onMoveBoundary?: (id: string, parentId: string | null) => void;
   onMoveElement?: (id: string, parentId: string | null) => void;
-  placement?: PairedSemanticPanelPlacement['containment'];
+  placement?: PairedSemanticPanelPlacement["containment"];
 }) {
-  return <aside data-canvas-pan-exclusion="true" data-testid="c4-containment-controls" style={{ ...SEMANTIC_PANEL_STYLE, ...placement, bottom: placement?.bottom ?? bottom, left: placement?.left ?? 12, right: 'auto' }}>
-    <strong>C4 containment</strong>
-    {elements.map((element) => <label key={element.id}>{element.id}<select aria-label={`C4 element ${element.id} boundary`} onChange={(event) => onMoveElement?.(element.id, event.target.value || null)} value={element.parentId ?? ''}><option value="">top level</option>{boundaries.map(({ id }) => <option key={id}>{id}</option>)}</select></label>)}
-    {boundaries.map((boundary) => <label key={boundary.id}>{boundary.id}<select aria-label={`C4 boundary ${boundary.id} parent`} onChange={(event) => onMoveBoundary?.(boundary.id, event.target.value || null)} value={boundary.parentId ?? ''}><option value="">top level</option>{boundaries.filter(({ id }) => id !== boundary.id).map(({ id }) => <option key={id}>{id}</option>)}</select></label>)}
-  </aside>;
+  return (
+    <aside
+      data-canvas-pan-exclusion="true"
+      data-testid="c4-containment-controls"
+      style={{
+        ...SEMANTIC_PANEL_STYLE,
+        ...placement,
+        bottom: placement?.bottom ?? bottom,
+        left: placement?.left ?? 12,
+        right: "auto",
+      }}
+    >
+      <strong>C4 containment</strong>
+      {elements.map((element) => (
+        <label key={element.id}>
+          {element.id}
+          <select
+            aria-label={`C4 element ${element.id} boundary`}
+            onChange={(event) =>
+              onMoveElement?.(element.id, event.target.value || null)
+            }
+            value={element.parentId ?? ""}
+          >
+            <option value="">top level</option>
+            {boundaries.map(({ id }) => (
+              <option key={id}>{id}</option>
+            ))}
+          </select>
+        </label>
+      ))}
+      {boundaries.map((boundary) => (
+        <label key={boundary.id}>
+          {boundary.id}
+          <select
+            aria-label={`C4 boundary ${boundary.id} parent`}
+            onChange={(event) =>
+              onMoveBoundary?.(boundary.id, event.target.value || null)
+            }
+            value={boundary.parentId ?? ""}
+          >
+            <option value="">top level</option>
+            {boundaries
+              .filter(({ id }) => id !== boundary.id)
+              .map(({ id }) => (
+                <option key={id}>{id}</option>
+              ))}
+          </select>
+        </label>
+      ))}
+    </aside>
+  );
 }
 
 function BlockContainmentControls({ bottom, composites, nodes, onMoveComposite, onMoveNode, placement }: {

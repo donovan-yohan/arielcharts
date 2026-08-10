@@ -170,10 +170,52 @@ async function assertNarrowSequenceControls(page: Page): Promise<void> {
       }),
     };
   });
-  if (!layout.documentFits || !layout.formsFit || layout.formCount !== 2) {
+  if (!layout.documentFits || !layout.formsFit || layout.formCount < 6) {
     throw new Error(`Sequence controls overflowed a 320px viewport: ${JSON.stringify(layout)}`);
   }
   await page.setViewportSize({ height: 900, width: 1400 });
+}
+
+async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
+  const source = `sequenceDiagram
+  participant A as Alpha
+  participant B as Beta
+  A->>B: request
+  Note over A,B: details
+  alt approved
+    B-->>A: response
+  end`;
+  await replaceSource(page, source);
+  await waitForCanvas(page, 'sequence');
+  await closeSourceFlyout(page);
+
+  const targets: Array<{ label: string; locator: Locator }> = [
+    { label: 'Edit sequence participant', locator: page.locator('.diagram-canvas-svg svg g[data-et="participant"]').first() },
+    { label: 'Edit sequence message', locator: page.locator('.diagram-canvas-svg svg .messageText').first() },
+    { label: 'Edit sequence note', locator: page.locator('.diagram-canvas-svg svg g[data-et="note"]').first() },
+    { label: 'Edit sequence fragment', locator: page.locator('.diagram-canvas-svg svg g[data-et="control-structure"]').first() },
+  ];
+
+  for (const { label, locator } of targets) {
+    await locator.waitFor({ state: 'visible', timeout: 15_000 });
+    await locator.dblclick();
+    const editor = page.getByLabel(label, { exact: true });
+    await editor.waitFor({ state: 'visible', timeout: 5_000 });
+    await editor.press('Escape');
+    await editor.waitFor({ state: 'detached', timeout: 5_000 });
+    const focusReturned = await locator.evaluate((target) => target === document.activeElement || target.contains(document.activeElement));
+    if (!focusReturned) throw new Error(`${label} did not return focus to its exact SVG target after Escape.`);
+  }
+
+  const message = targets[1]?.locator;
+  if (!message) throw new Error('Missing message target.');
+  await message.dblclick();
+  const editor = page.getByLabel('Edit sequence message', { exact: true });
+  await editor.fill('updated request');
+  await editor.press('Enter');
+  await page.waitForFunction(() => document.querySelector('.diagram-canvas-svg')?.textContent?.includes('updated request'), undefined, { timeout: 15_000 });
+  const nextSource = await canonicalSource(page);
+  if (!nextSource.includes('A->>B: updated request')) throw new Error(`Sequence inline Enter did not commit the message text: ${nextSource}`);
 }
 
 interface GenericFitBounds {
@@ -428,6 +470,7 @@ sequenceDiagram; A<<->>B: ping`;
       throw new Error(`Sequence append altered prior bytes or emitted unsafe statements: ${hardenedSequenceSource}`);
     }
     await assertNarrowSequenceControls(page);
+    await assertSequenceInlineTextEditing(page);
 
     const quotedParticipantSequence = `sequenceDiagram
   participant "Web browser" as Browser

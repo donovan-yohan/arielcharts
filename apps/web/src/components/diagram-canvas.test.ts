@@ -47,6 +47,21 @@ describe('ER editor safe area', () => {
   });
 });
 
+describe('sequence semantic editor', () => {
+  it('keeps every representable statement family behind explicit semantic controls', () => {
+    expect(canvasSource).toMatch(/New sequence participant kind/u);
+    expect(canvasSource).toMatch(/Sequence message sender[^]*?Sequence message recipient[^]*?Sequence message arrow[^]*?Sequence message text/u);
+    expect(canvasSource).toMatch(/Sequence note placement[^]*?Sequence note targets[^]*?Sequence note text/u);
+    expect(canvasSource).toMatch(/Sequence activation action[^]*?Sequence activation participant/u);
+    expect(canvasSource).toMatch(/Sequence fragment label/u);
+    expect(canvasSource).toMatch(/onDeleteActivation[^]*?onMoveActivation[^]*?onEditActivation/u);
+    expect(workspaceSource).toMatch(/onEditSequenceMessage[^]*?editSequenceMessage/u);
+    expect(workspaceSource).toMatch(/onEditSequenceNote[^]*?editSequenceNote/u);
+    expect(workspaceSource).toMatch(/onEditSequenceActivation[^]*?editSequenceActivation/u);
+    expect(workspaceSource).toMatch(/onEditSequenceFragment[^]*?editSequenceFragment/u);
+  });
+});
+
 describe('canvas blank-click selection ownership', () => {
   it('clears app-owned selection from both the generic canvas click and the React Flow pane while keeping focus roving-only', () => {
     const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');

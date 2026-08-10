@@ -66,16 +66,20 @@ import {
 } from '../lib/mermaid-presentation';
 import { shouldFitInitialCamera } from '../lib/renderer-camera-policy';
 import {
+  buildSequenceSvgTextHitMap,
   buildSvgHitMap,
   getBoundsCenter,
   getBoundsUnion,
   getNodePortPosition,
+  getSequenceSvgTextTarget,
   type SvgBounds,
   type SvgHitMap,
   type SvgPoint,
+  type SequenceSvgTextItem,
+  type SequenceSvgTextTarget,
 } from '../lib/svg-hit-map';
 import { getSafeToolbarPosition } from '../lib/toolbar-safe-area';
-import type { SequenceParticipant } from '../lib/sequence-mutations';
+import type { SequenceActivationAction, SequenceArrow, SequenceDiagramSnapshot, SequenceFragmentKind, SequenceMessage, SequenceNote, SequenceParticipant, SequenceParticipantKind } from '../lib/sequence-mutations';
 import { getErRelationshipIdentity, type ErAttribute, type ErDiagramSnapshot, type ErRelationship, type ErRelationshipIdentity } from '../lib/er-mutations';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
@@ -96,12 +100,35 @@ export interface DiagramCanvasProps {
   selectedNodeIds?: string[];
   svg: string;
   sequenceParticipants?: readonly SequenceParticipant[];
+  sequenceDiagram?: SequenceDiagramSnapshot | null;
+  sequenceTextItems?: readonly SequenceSvgTextItem[];
   erDiagram?: ErDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
-  onAddSequenceMessage?: (from: string, to: string, message: string) => void;
-  onAddSequenceParticipant?: (label: string) => void;
+  onAddSequenceMessage?: (from: string, to: string, message: string, arrow?: SequenceArrow) => void;
+  onAddSequenceParticipant?: (label: string, kind?: SequenceParticipantKind) => void;
+  onAddSequenceNote?: (placement: SequenceNote['placement'], participants: string[], text: string) => void;
+  onAddSequenceActivation?: (action: SequenceActivationAction, participant: string) => void;
+  onAddSequenceFragment?: (kind: SequenceFragmentKind, label: string) => void;
+  onDeleteSequenceParticipant?: (id: string) => void;
+  onDeleteSequenceMessage?: (id: string) => void;
+  onDeleteSequenceNote?: (id: string) => void;
+  onDeleteSequenceActivation?: (id: string) => void;
+  onDeleteSequenceFragment?: (id: string) => void;
+  onEditSequenceParticipant?: (id: string, label: string) => void;
+  onRenameSequenceParticipantId?: (id: string, nextId: string) => void;
+  onEditSequenceMessage?: (id: string, patch: Partial<Pick<SequenceMessage, 'from' | 'to' | 'arrow' | 'text'>>) => void;
+  onEditSequenceNote?: (id: string, patch: Partial<Pick<SequenceNote, 'placement' | 'participants' | 'text'>>) => void;
+  onEditSequenceActivation?: (id: string, action: SequenceActivationAction, participant: string) => void;
+  onEditSequenceFragment?: (id: string, label: string) => void;
+  onMoveSequenceParticipant?: (id: string, direction: 'up' | 'down') => void;
+  onMoveSequenceMessage?: (id: string, direction: 'up' | 'down') => void;
+  onMoveSequenceNote?: (id: string, direction: 'up' | 'down') => void;
+  onMoveSequenceActivation?: (id: string, direction: 'up' | 'down') => void;
+  onMoveSequenceFragment?: (id: string, direction: 'up' | 'down') => void;
+  onSetSequenceAutonumber?: (value: string) => void;
+  onEditSequenceStatement?: (id: string, text: string) => void;
   onAddErEntity?: (name: string) => void;
   onRenameErEntity?: (currentName: string, nextName: string) => void;
   onDeleteErEntity?: (name: string) => void;
@@ -412,6 +439,27 @@ export function DiagramCanvas({
   onAddNode,
   onAddSequenceMessage,
   onAddSequenceParticipant,
+  onAddSequenceNote,
+  onAddSequenceActivation,
+  onAddSequenceFragment,
+  onDeleteSequenceParticipant,
+  onDeleteSequenceMessage,
+  onDeleteSequenceNote,
+  onDeleteSequenceActivation,
+  onDeleteSequenceFragment,
+  onEditSequenceParticipant,
+  onRenameSequenceParticipantId,
+  onEditSequenceMessage,
+  onEditSequenceNote,
+  onEditSequenceActivation,
+  onEditSequenceFragment,
+  onMoveSequenceParticipant,
+  onMoveSequenceMessage,
+  onMoveSequenceNote,
+  onMoveSequenceActivation,
+  onMoveSequenceFragment,
+  onSetSequenceAutonumber,
+  onEditSequenceStatement,
   onAddErEntity,
   onRenameErEntity,
   onDeleteErEntity,
@@ -450,6 +498,8 @@ export function DiagramCanvas({
   remoteCanvasPresence = [],
   selectedNodeIds,
   sequenceParticipants = [],
+  sequenceDiagram = null,
+  sequenceTextItems = [],
   erDiagram = null,
   svg,
   theme = 'dark',
@@ -463,6 +513,7 @@ export function DiagramCanvas({
   const safariPinchScaleRef = useRef<number | null>(null);
   const nodeButtonRefs = useRef(new Map<string, HTMLElement | null>());
   const [hitMap, setHitMap] = useState<SvgHitMap | null>(null);
+  const [sequenceTextHitMap, setSequenceTextHitMap] = useState<Map<Element, SequenceSvgTextTarget> | null>(null);
   const [mermaidPresentation, setMermaidPresentation] = useState<MermaidPresentation>({ edges: [], nodes: new Map() });
   const [canvasViewport, setCanvasViewport] = useState<ViewportRect>({ height: 0, width: 0, x: 0, y: 0 });
   const [canvasViewportMeasured, setCanvasViewportMeasured] = useState(false);
@@ -502,6 +553,10 @@ export function DiagramCanvas({
   const [spacePressed, setSpacePressed] = useState(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
+  const [editingSequenceTarget, setEditingSequenceTarget] = useState<SequenceSvgTextTarget | null>(null);
+  const [editingSequenceText, setEditingSequenceText] = useState('');
+  const [editingSequenceAnchor, setEditingSequenceAnchor] = useState<{ x: number; y: number; width: number } | null>(null);
+  const sequenceEditorOriginRef = useRef<HTMLElement | null>(null);
   const [selectedEdgeIdentity, setSelectedEdgeIdentity] = useState<DiagramEdgeIdentity | null>(null);
   const [editingEdgeIdentity, setEditingEdgeIdentity] = useState<DiagramEdgeIdentity | null>(null);
   const [editingEdgeLabel, setEditingEdgeLabel] = useState('');
@@ -1131,6 +1186,7 @@ export function DiagramCanvas({
   useEffect(() => {
     if (!svg || !svgContainerRef.current) {
       setHitMap((current) => current === null ? current : null);
+      setSequenceTextHitMap((current) => current === null ? current : null);
       setMermaidPresentation((current) => current.edges.length === 0 && current.nodes.size === 0
         ? current
         : { edges: [], nodes: new Map() });
@@ -1142,6 +1198,7 @@ export function DiagramCanvas({
       const svgElement = svgContainerRef.current?.querySelector('svg');
       if (!svgElement) {
         setHitMap(null);
+        setSequenceTextHitMap(null);
         setMermaidPresentation({ edges: [], nodes: new Map() });
         return;
       }
@@ -1149,8 +1206,12 @@ export function DiagramCanvas({
       const expectedNodeIds = graph?.nodes.map((node) => node.id) ?? [];
       const expectedSubgraphIds = graph?.subgraphs.map((subgraph) => subgraph.id) ?? [];
       const nextHitMap = buildSvgHitMap(svgElement, { nodeIds: expectedNodeIds, subgraphIds: expectedSubgraphIds });
+      const nextSequenceTextHitMap = isSequence
+        ? buildSequenceSvgTextHitMap(svgElement, sequenceTextItems)
+        : null;
       const nextPresentation = extractMermaidPresentation(svgElement, expectedNodeIds);
       setHitMap((current) => areSvgHitMapsEqual(current, nextHitMap) ? current : nextHitMap);
+      setSequenceTextHitMap(nextSequenceTextHitMap);
       setMermaidPresentation((current) => areMermaidPresentationsEqual(current, nextPresentation) ? current : nextPresentation);
       onRenderSettledRef.current?.();
     });
@@ -1158,7 +1219,7 @@ export function DiagramCanvas({
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [graphMembershipKey, svg]);
+  }, [graphMembershipKey, isSequence, sequenceTextItems, svg]);
 
   useEffect(() => {
     const pendingFocusGeneration = pendingPasteFocusRef.current;
@@ -1908,6 +1969,54 @@ export function DiagramCanvas({
     setEditingNodeId(null);
   }, [canEditStructure, editingLabel, editingNodeId, onEditNodeLabel]);
 
+  const returnSequenceEditorFocus = useCallback(() => {
+    const origin = sequenceEditorOriginRef.current;
+    sequenceEditorOriginRef.current = null;
+    window.requestAnimationFrame(() => {
+      if (origin?.isConnected) {
+        origin.focus({ preventScroll: true });
+      }
+    });
+  }, []);
+
+  const closeSequenceEditor = useCallback((commit: boolean) => {
+    const target = editingSequenceTarget;
+    if (commit && target) {
+      onEditSequenceStatement?.(target.id, editingSequenceText);
+    }
+    setEditingSequenceTarget(null);
+    setEditingSequenceText('');
+    setEditingSequenceAnchor(null);
+    returnSequenceEditorFocus();
+  }, [editingSequenceTarget, editingSequenceText, onEditSequenceStatement, returnSequenceEditorFocus]);
+
+  const openSequenceEditor = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!isSequence || readOnly || !containerRef.current) {
+      return;
+    }
+    const target = getSequenceSvgTextTarget(sequenceTextHitMap, event.target);
+    if (!target || !(event.target instanceof HTMLElement || event.target instanceof SVGElement)) {
+      return;
+    }
+    const origin = event.target instanceof HTMLElement ? event.target : event.target as unknown as HTMLElement;
+    origin.tabIndex = 0;
+    const canvasRect = containerRef.current.getBoundingClientRect();
+    const rect = event.target.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    sequenceEditorOriginRef.current = origin;
+    setEditingSequenceTarget(target);
+    setEditingSequenceText(target.text);
+    setEditingSequenceAnchor({
+      width: Math.max(160, rect.width + 32),
+      x: Math.max(8, rect.left - canvasRect.left),
+      y: Math.max(8, rect.top - canvasRect.top),
+    });
+  }, [isSequence, readOnly, sequenceTextHitMap]);
+
   const selectSubgraph = useCallback((subgraphId: string) => {
     if (!canEditStructure || !subgraphById.has(subgraphId)) return;
     setSelection([]);
@@ -2324,13 +2433,14 @@ export function DiagramCanvas({
       <div style={transformStyle}>
         {svg ? (
           <div
-            aria-hidden="true"
+            aria-hidden={isSequence ? undefined : 'true'}
             className={useReactFlowRenderer
               ? 'diagram-canvas-svg diagram-canvas-svg--reactflow'
               : 'diagram-canvas-svg'}
             dangerouslySetInnerHTML={{ __html: svg }}
+            onDoubleClick={openSequenceEditor}
             ref={svgContainerRef}
-            style={{ pointerEvents: 'none' }}
+            style={{ pointerEvents: isSequence ? 'auto' : 'none' }}
           />
         ) : null}
 
@@ -2814,8 +2924,29 @@ export function DiagramCanvas({
         ) : emptyState === 'sequence' && !readOnly ? (
           <SequenceEditorControls
             centered
+            diagram={sequenceDiagram}
+            onAddActivation={onAddSequenceActivation}
+            onAddFragment={onAddSequenceFragment}
             onAddMessage={onAddSequenceMessage}
+            onAddNote={onAddSequenceNote}
             onAddParticipant={onAddSequenceParticipant}
+            onDeleteMessage={onDeleteSequenceMessage}
+            onDeleteNote={onDeleteSequenceNote}
+            onDeleteActivation={onDeleteSequenceActivation}
+            onDeleteFragment={onDeleteSequenceFragment}
+            onEditActivation={onEditSequenceActivation}
+            onEditFragment={onEditSequenceFragment}
+            onEditMessage={onEditSequenceMessage}
+            onEditNote={onEditSequenceNote}
+            onEditParticipant={onEditSequenceParticipant}
+            onDeleteParticipant={onDeleteSequenceParticipant}
+            onMoveMessage={onMoveSequenceMessage}
+            onMoveNote={onMoveSequenceNote}
+            onMoveActivation={onMoveSequenceActivation}
+            onMoveFragment={onMoveSequenceFragment}
+            onMoveParticipant={onMoveSequenceParticipant}
+            onRenameParticipantId={onRenameSequenceParticipantId}
+            onSetAutonumber={onSetSequenceAutonumber}
             participants={sequenceParticipants}
           />
         ) : (!svg ? (
@@ -2834,8 +2965,29 @@ export function DiagramCanvas({
 
         {isSequence && emptyState === null && !readOnly ? (
           <SequenceEditorControls
+            diagram={sequenceDiagram}
+            onAddActivation={onAddSequenceActivation}
+            onAddFragment={onAddSequenceFragment}
             onAddMessage={onAddSequenceMessage}
+            onAddNote={onAddSequenceNote}
             onAddParticipant={onAddSequenceParticipant}
+            onDeleteMessage={onDeleteSequenceMessage}
+            onDeleteNote={onDeleteSequenceNote}
+            onDeleteActivation={onDeleteSequenceActivation}
+            onDeleteFragment={onDeleteSequenceFragment}
+            onEditActivation={onEditSequenceActivation}
+            onEditFragment={onEditSequenceFragment}
+            onEditMessage={onEditSequenceMessage}
+            onEditNote={onEditSequenceNote}
+            onEditParticipant={onEditSequenceParticipant}
+            onDeleteParticipant={onDeleteSequenceParticipant}
+            onMoveMessage={onMoveSequenceMessage}
+            onMoveNote={onMoveSequenceNote}
+            onMoveActivation={onMoveSequenceActivation}
+            onMoveFragment={onMoveSequenceFragment}
+            onMoveParticipant={onMoveSequenceParticipant}
+            onRenameParticipantId={onRenameSequenceParticipantId}
+            onSetAutonumber={onSetSequenceAutonumber}
             participants={sequenceParticipants}
           />
         ) : null}
@@ -3105,6 +3257,50 @@ export function DiagramCanvas({
                 width: '100%',
               }}
               value={editingLabel}
+            />
+          </div>
+        ) : null}
+
+        {editingSequenceTarget && editingSequenceAnchor ? (
+          <div
+            data-canvas-pan-exclusion="true"
+            style={{
+              left: editingSequenceAnchor.x,
+              pointerEvents: 'auto',
+              position: 'absolute',
+              top: editingSequenceAnchor.y,
+              width: editingSequenceAnchor.width,
+            }}
+          >
+            <input
+              aria-label={`Edit sequence ${editingSequenceTarget.type}`}
+              autoFocus
+              onBlur={() => { closeSequenceEditor(true); }}
+              onChange={(event) => { setEditingSequenceText(event.target.value); }}
+              onFocus={(event) => { event.currentTarget.select(); }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  closeSequenceEditor(true);
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  closeSequenceEditor(false);
+                }
+              }}
+              style={{
+                background: 'var(--surface-canvas)',
+                border: '1px solid var(--control-border)',
+                borderBottomColor: 'var(--selection)',
+                borderRadius: 8,
+                color: 'var(--ink)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                outline: 'none',
+                padding: '8px 10px',
+                width: '100%',
+              }}
+              value={editingSequenceText}
             />
           </div>
         ) : null}
@@ -3416,19 +3612,68 @@ function DiagramTypeChooser({ onChoose }: { onChoose?: (type: 'flowchart' | 'seq
 
 function SequenceEditorControls({
   centered = false,
+  diagram,
+  onAddActivation,
+  onAddFragment,
   onAddMessage,
+  onAddNote,
   onAddParticipant,
+  onDeleteActivation,
+  onDeleteFragment,
+  onDeleteMessage,
+  onDeleteNote,
+  onDeleteParticipant,
+  onEditActivation,
+  onEditFragment,
+  onEditMessage,
+  onEditNote,
+  onEditParticipant,
+  onMoveMessage,
+  onMoveNote,
+  onMoveActivation,
+  onMoveFragment,
+  onMoveParticipant,
+  onRenameParticipantId,
+  onSetAutonumber,
   participants,
 }: {
   centered?: boolean;
-  onAddMessage?: (from: string, to: string, message: string) => void;
-  onAddParticipant?: (label: string) => void;
+  diagram: SequenceDiagramSnapshot | null;
+  onAddActivation?: (action: SequenceActivationAction, participant: string) => void;
+  onAddFragment?: (kind: SequenceFragmentKind, label: string) => void;
+  onAddMessage?: (from: string, to: string, message: string, arrow?: SequenceArrow) => void;
+  onAddNote?: (placement: SequenceNote['placement'], participants: string[], text: string) => void;
+  onAddParticipant?: (label: string, kind?: SequenceParticipantKind) => void;
+  onDeleteActivation?: (id: string) => void;
+  onDeleteFragment?: (id: string) => void;
+  onDeleteMessage?: (id: string) => void;
+  onDeleteNote?: (id: string) => void;
+  onDeleteParticipant?: (id: string) => void;
+  onEditActivation?: (id: string, action: SequenceActivationAction, participant: string) => void;
+  onEditFragment?: (id: string, label: string) => void;
+  onEditMessage?: (id: string, patch: Partial<Pick<SequenceMessage, 'from' | 'to' | 'arrow' | 'text'>>) => void;
+  onEditNote?: (id: string, patch: Partial<Pick<SequenceNote, 'placement' | 'participants' | 'text'>>) => void;
+  onEditParticipant?: (id: string, label: string) => void;
+  onMoveMessage?: (id: string, direction: 'up' | 'down') => void;
+  onMoveNote?: (id: string, direction: 'up' | 'down') => void;
+  onMoveActivation?: (id: string, direction: 'up' | 'down') => void;
+  onMoveFragment?: (id: string, direction: 'up' | 'down') => void;
+  onMoveParticipant?: (id: string, direction: 'up' | 'down') => void;
+  onRenameParticipantId?: (id: string, nextId: string) => void;
+  onSetAutonumber?: (value: string) => void;
   participants: readonly SequenceParticipant[];
 }) {
   const [participantLabel, setParticipantLabel] = useState('');
+  const [participantKind, setParticipantKind] = useState<SequenceParticipantKind>('participant');
   const [message, setMessage] = useState('');
+  const [arrow, setArrow] = useState<SequenceArrow>('->>');
   const [from, setFrom] = useState(participants[0]?.id ?? '');
   const [to, setTo] = useState(participants[1]?.id ?? participants[0]?.id ?? '');
+  const [note, setNote] = useState('');
+  const [activation, setActivation] = useState<SequenceActivationAction>('activate');
+  const [fragment, setFragment] = useState<SequenceFragmentKind>('alt');
+  const [fragmentLabel, setFragmentLabel] = useState('');
+  const [autonumber, setAutonumber] = useState(diagram?.autonumber?.value ?? '');
 
   useEffect(() => {
     if (!participants.some((participant) => participant.id === from)) setFrom(participants[0]?.id ?? '');
@@ -3436,19 +3681,25 @@ function SequenceEditorControls({
   }, [from, participants, to]);
 
   const addParticipant = () => {
-    onAddParticipant?.(participantLabel.trim() || 'Participant');
+    onAddParticipant?.(participantLabel.trim() || 'Participant', participantKind);
     setParticipantLabel('');
   };
   const addMessage = () => {
     if (!from || !to) return;
-    onAddMessage?.(from, to, message.trim() || 'Message');
+    onAddMessage?.(from, to, message.trim() || 'Message', arrow);
     setMessage('');
+  };
+  const addNote = () => {
+    if (!from) return;
+    onAddNote?.('over', [from], note.trim() || 'Note');
+    setNote('');
   };
 
   return (
     <div className={centered ? 'canvas-sequence-editor is-centered' : 'canvas-sequence-editor'} data-testid="sequence-editor-controls">
       <form className="canvas-sequence-participant-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); addParticipant(); }}>
         <span>participant</span>
+        <select aria-label="New sequence participant kind" onChange={(event) => { setParticipantKind(event.target.value as SequenceParticipantKind); }} value={participantKind}><option value="participant">participant</option><option value="actor">actor</option></select>
         <input
           aria-label="New sequence participant"
           onChange={(event) => { setParticipantLabel(event.target.value); }}
@@ -3467,12 +3718,49 @@ function SequenceEditorControls({
           <select aria-label="Message recipient" onChange={(event) => { setTo(event.target.value); }} value={to}>
             {participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}
           </select>
+          <select aria-label="Sequence message arrow" onChange={(event) => { setArrow(event.target.value as SequenceArrow); }} value={arrow}>{(['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '<<->>', '<<-->>'] as const).map((value) => <option key={value} value={value}>{value}</option>)}</select>
           <input aria-label="Sequence message" onChange={(event) => { setMessage(event.target.value); }} placeholder="message" value={message} />
           <button aria-label="Add sequence message" onClick={addMessage} type="button"><Plus size={15} /></button>
         </form>
       ) : <small>Add a participant to begin.</small>}
+      {participants.length > 0 ? (
+        <form className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); addNote(); }}>
+          <span>note</span>
+          <select aria-label="Note participant" onChange={(event) => { setFrom(event.target.value); }} value={from}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</select>
+          <input aria-label="Sequence note" onChange={(event) => { setNote(event.target.value); }} placeholder="note" value={note} />
+          <button aria-label="Add sequence note" type="submit"><Plus size={15} /></button>
+        </form>
+      ) : null}
+      {participants.length > 0 ? (
+        <form className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); if (from) onAddActivation?.(activation, from); }}>
+          <span>activation</span>
+          <select aria-label="Sequence activation action" onChange={(event) => { setActivation(event.target.value as SequenceActivationAction); }} value={activation}><option value="activate">activate</option><option value="deactivate">deactivate</option></select>
+          <select aria-label="Sequence activation participant" onChange={(event) => { setFrom(event.target.value); }} value={from}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</select>
+          <button aria-label="Add sequence activation" type="submit"><Plus size={15} /></button>
+        </form>
+      ) : null}
+      <form className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); onAddFragment?.(fragment, fragmentLabel); setFragmentLabel(''); }}>
+        <span>fragment</span>
+        <select aria-label="Sequence fragment kind" onChange={(event) => { setFragment(event.target.value as SequenceFragmentKind); }} value={fragment}>{(['alt', 'opt', 'loop', 'par', 'critical', 'break'] as const).map((kind) => <option key={kind} value={kind}>{kind}</option>)}</select>
+        <input aria-label="Sequence fragment label" onChange={(event) => { setFragmentLabel(event.target.value); }} placeholder="condition" value={fragmentLabel} />
+        <button aria-label="Add sequence fragment" type="submit"><Plus size={15} /></button>
+      </form>
+      <form className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); onSetAutonumber?.(autonumber); }}>
+        <span>autonumber</span><input aria-label="Sequence autonumber" onChange={(event) => { setAutonumber(event.target.value); }} placeholder="optional start" value={autonumber} /><button aria-label="Set sequence autonumber" type="submit">set</button>
+      </form>
+      {diagram ? <details data-canvas-pan-exclusion="true"><summary>sequence items</summary>
+        {diagram.participants.filter((participant) => !participant.implicit).map((participant, index, items) => <div key={participant.id}><input aria-label="Sequence participant label" defaultValue={participant.label} onBlur={(event) => { onEditParticipant?.(participant.id, event.target.value); }} /><input aria-label="Sequence participant id" defaultValue={participant.id} onBlur={(event) => { onRenameParticipantId?.(participant.id, event.target.value); }} /><SequenceMoveButtons deleteLabel={`Delete ${participant.label}`} disabledDown={index === items.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteParticipant?.(participant.id); }} onDown={() => { onMoveParticipant?.(participant.id, 'down'); }} onUp={() => { onMoveParticipant?.(participant.id, 'up'); }} /></div>)}
+        {diagram.messages.map((item, index) => <div key={item.id}><select aria-label="Sequence message sender" defaultValue={item.from} onChange={(event) => { onEditMessage?.(item.id, { from: event.target.value }); }}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</select><select aria-label="Sequence message recipient" defaultValue={item.to} onChange={(event) => { onEditMessage?.(item.id, { to: event.target.value }); }}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</select><select aria-label="Sequence message arrow" defaultValue={item.arrow} onChange={(event) => { onEditMessage?.(item.id, { arrow: event.target.value as SequenceArrow }); }}>{(['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '<<->>', '<<-->>'] as const).map((value) => <option key={value} value={value}>{value}</option>)}</select><input aria-label="Sequence message text" defaultValue={item.text} onBlur={(event) => { onEditMessage?.(item.id, { text: event.target.value }); }} /><SequenceMoveButtons deleteLabel="Delete sequence message" disabledDown={index === diagram.messages.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteMessage?.(item.id); }} onDown={() => { onMoveMessage?.(item.id, 'down'); }} onUp={() => { onMoveMessage?.(item.id, 'up'); }} /></div>)}
+        {diagram.notes.map((item, index) => <div key={item.id}><select aria-label="Sequence note placement" defaultValue={item.placement} onChange={(event) => { onEditNote?.(item.id, { placement: event.target.value as SequenceNote['placement'] }); }}><option value="over">over</option><option value="left of">left of</option><option value="right of">right of</option></select><input aria-label="Sequence note targets" defaultValue={item.participants.join(',')} onBlur={(event) => { onEditNote?.(item.id, { participants: event.target.value.split(',').map((id) => id.trim()).filter(Boolean) }); }} /><input aria-label="Sequence note text" defaultValue={item.text} onBlur={(event) => { onEditNote?.(item.id, { text: event.target.value }); }} /><SequenceMoveButtons deleteLabel="Delete sequence note" disabledDown={index === diagram.notes.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteNote?.(item.id); }} onDown={() => { onMoveNote?.(item.id, 'down'); }} onUp={() => { onMoveNote?.(item.id, 'up'); }} /></div>)}
+        {diagram.activations.map((item, index) => <div key={item.id}><select aria-label="Sequence activation action" defaultValue={item.action} onChange={(event) => { onEditActivation?.(item.id, event.target.value as SequenceActivationAction, item.participant); }}><option value="activate">activate</option><option value="deactivate">deactivate</option></select><select aria-label="Sequence activation participant" defaultValue={item.participant} onChange={(event) => { onEditActivation?.(item.id, item.action, event.target.value); }}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</select><SequenceMoveButtons deleteLabel="Delete sequence activation" disabledDown={index === diagram.activations.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteActivation?.(item.id); }} onDown={() => { onMoveActivation?.(item.id, 'down'); }} onUp={() => { onMoveActivation?.(item.id, 'up'); }} /></div>)}
+        {diagram.fragments.map((item, index) => <div key={item.id}><span>{item.kind}</span><input aria-label="Sequence fragment label" defaultValue={item.label} onBlur={(event) => { onEditFragment?.(item.id, event.target.value); }} /><SequenceMoveButtons deleteLabel="Delete sequence fragment" disabledDown={index === diagram.fragments.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteFragment?.(item.id); }} onDown={() => { onMoveFragment?.(item.id, 'down'); }} onUp={() => { onMoveFragment?.(item.id, 'up'); }} /></div>)}
+      </details> : null}
     </div>
   );
+}
+
+function SequenceMoveButtons({ deleteLabel, disabledDown, disabledUp, onDelete, onDown, onUp }: { deleteLabel: string; disabledDown: boolean; disabledUp: boolean; onDelete: () => void; onDown: () => void; onUp: () => void }) {
+  return <><button aria-label="Move up" disabled={disabledUp} onClick={onUp} type="button">↑</button><button aria-label="Move down" disabled={disabledDown} onClick={onDown} type="button">↓</button><button aria-label={deleteLabel} onClick={onDelete} type="button">×</button></>;
 }
 
 const ER_CARDINALITY_OPTIONS: Array<{ label: string; value: ErRelationship['leftCardinality'] }> = [

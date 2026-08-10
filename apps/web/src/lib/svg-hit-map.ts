@@ -29,6 +29,16 @@ export interface SvgHitMap {
   viewBox: SvgViewBox;
 }
 
+export type SequenceSvgTextKind = 'participant' | 'message' | 'note' | 'fragment';
+
+export interface SequenceSvgTextItem {
+  id: string;
+  text: string;
+  type: SequenceSvgTextKind;
+}
+
+export interface SequenceSvgTextTarget extends SequenceSvgTextItem {}
+
 export interface MermaidHitMapOptions {
   nodeIds?: readonly string[];
   subgraphIds?: readonly string[];
@@ -94,6 +104,43 @@ export function buildSvgHitMap(svg: SVGSVGElement, options: MermaidHitMapOptions
     subgraphs,
     viewBox,
   };
+}
+
+export function buildSequenceSvgTextHitMap(svg: SVGSVGElement, items: readonly SequenceSvgTextItem[]): Map<Element, SequenceSvgTextTarget> | null {
+  const targets = new Map<Element, SequenceSvgTextTarget>();
+  const seenIds = new Set<string>();
+  for (const item of items) {
+    if (!item.id || seenIds.has(item.id)) return null;
+    seenIds.add(item.id);
+  }
+  const mappings: Array<[SequenceSvgTextKind, Element[]]> = [
+    ['participant', [...svg.querySelectorAll('g[data-et="participant"]')]],
+    ['message', [...svg.querySelectorAll('.messageText')]],
+    ['note', [...svg.querySelectorAll('g[data-et="note"]')]],
+    ['fragment', [...svg.querySelectorAll('g[data-et="control-structure"]')]],
+  ];
+  for (const [type, elements] of mappings) {
+    const sourceItems = items.filter((item) => item.type === type);
+    if (sourceItems.length !== elements.length) return null;
+    for (const [index, element] of elements.entries()) {
+      const target = sourceItems[index];
+      if (!target) return null;
+      targets.set(element, target);
+      element.querySelectorAll('text, tspan, foreignObject').forEach((descendant) => { targets.set(descendant, target); });
+    }
+  }
+  return targets;
+}
+
+export function getSequenceSvgTextTarget(hitMap: ReadonlyMap<Element, SequenceSvgTextTarget> | null, start: EventTarget | null): SequenceSvgTextTarget | null {
+  if (!hitMap || !(start instanceof Element)) return null;
+  let candidate: Element | null = start;
+  while (candidate) {
+    const target = hitMap.get(candidate);
+    if (target) return target;
+    candidate = candidate.parentElement;
+  }
+  return null;
 }
 
 export function extractMermaidEntityId(rawId: string | null | undefined): string | null {

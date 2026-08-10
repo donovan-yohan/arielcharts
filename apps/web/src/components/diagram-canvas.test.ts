@@ -77,6 +77,14 @@ describe('relationship and architecture semantic editors', () => {
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'architecture'\)/u);
     expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addArchitectureService/u);
     expect(canvasSource).toMatch(/data-testid="architecture-editor-controls"/u);
+    expect(canvasSource).toMatch(/Architecture group editor[^]*?Architecture group title/u);
+    expect(canvasSource).toMatch(/onSave\?\.\(group\.id, draft\)/u);
+    expect(canvasSource).toMatch(/Architecture service editor[^]*?Architecture service title/u);
+    expect(canvasSource).toMatch(/onSave\?\.\(service\.id, draft\)/u);
+    expect(canvasSource).toMatch(/Architecture junction editor[^]*?Architecture junction parent/u);
+    expect(canvasSource).toMatch(/onSave\?\.\(junction\.id, draft\)/u);
+    expect(canvasSource).toMatch(/Architecture edge editor[^]*?Architecture edge source port[^]*?Architecture edge target port/u);
+    expect(canvasSource).toMatch(/Architecture alignment editor[^]*?Architecture alignment members/u);
   });
 });
 

@@ -127,6 +127,15 @@ const REQUIREMENT_DIAGRAM_FIXTURE = `requirementDiagram
   }
   order - satisfies -> checkout`;
 
+const ARCHITECTURE_DIAGRAM_FIXTURE = `architecture-beta
+  group platform(cloud)[Platform]
+  service api(server)[API] in platform
+  service db(database)[Database] in platform
+  junction gateway in platform
+  api:R --> L:gateway
+  gateway:R --> L:db
+  align row api gateway db`;
+
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
 
@@ -1011,6 +1020,28 @@ async function expectRelationshipArchitectureEditors(page: Page): Promise<void> 
   await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('requirement req {');
   await closeFlyout(page, 'source');
   await expect(page.getByTestId('diagram-mode')).toContainText('Requirement · editable · form');
+  await replaceSource(page, ARCHITECTURE_DIAGRAM_FIXTURE);
+  await waitForSource(page, ARCHITECTURE_DIAGRAM_FIXTURE);
+  await page.locator('.diagram-canvas-svg svg').waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(page.getByTestId('diagram-mode')).toContainText('Architecture · editable · form');
+  const architectureEditor = page.getByTestId('architecture-editor-controls');
+  await architectureEditor.waitFor({ state: 'visible', timeout: 15_000 });
+  await closeFlyout(page, 'source');
+  const serviceTitle = architectureEditor.getByLabel('Architecture service title').first();
+  await assertHitTarget(page, serviceTitle, 'architecture service title control');
+  await serviceTitle.fill('Public API');
+  await verifiedClick(page, architectureEditor.getByRole('button', { name: 'Save', exact: true }).nth(1), 'architecture service save control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('service api(server)[Public API] in platform');
+  await closeFlyout(page, 'source');
+  const edgeEditor = architectureEditor.getByLabel('Architecture edge editor').nth(1);
+  await scrollErControlIntoView(edgeEditor);
+  const edgeTarget = edgeEditor.getByLabel('Architecture edge target', { exact: true });
+  await edgeTarget.selectOption('api');
+  await verifiedClick(page, edgeEditor.getByRole('button', { name: 'Save', exact: true }), 'architecture edge save control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('gateway:R --> L:api');
+  await closeFlyout(page, 'source');
   assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
   assert(await canvasTransform(page) === beforeTransform, 'Relationship/architecture semantic forms changed the generic Mermaid camera transform.');
 }

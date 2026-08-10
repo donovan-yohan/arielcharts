@@ -6,6 +6,7 @@ import { addErAttribute } from './er-mutations';
 import { addClass } from './class-mutations';
 import { addState } from './state-mutations';
 import { addRequirement } from './requirement-mutations';
+import { editArchitectureService } from './architecture-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -112,6 +113,7 @@ describe('collaboration transaction origins', () => {
     ['class', 'classDiagram', (source: string) => addClass(source, 'Account')],
     ['state', 'stateDiagram-v2\n  [*] --> Ready', (source: string) => addState(source, 'Done')],
     ['requirement', 'requirementDiagram\n  requirement req {\n    id: 1\n    text: Existing\n    risk: low\n    verifyMethod: test\n  }', (source: string) => addRequirement(source, { kind: 'requirement', name: 'next', fields: { id: '2', text: 'Next', risk: 'low', verifyMethod: 'test' } })],
+    ['architecture', 'architecture-beta\n  service api(server)[API]', (source: string) => editArchitectureService(source, 'api', { title: 'Public API' })],
   ])('keeps %s semantic form mutations in the local visual undo stack', (_family, initial, mutate) => {
     const doc = new Y.Doc();
     const source = doc.getText('semantic-source');

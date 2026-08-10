@@ -1,0 +1,369 @@
+export type ErKeyMarker = 'PK' | 'FK' | 'UK';
+export type ErCardinality = '||' | '|o' | '}|' | '}o' | 'o|' | 'o{' | '|{' | '}{';
+
+export interface ErAttribute {
+  comment?: string;
+  keys: ErKeyMarker[];
+  name: string;
+  type: string;
+}
+
+export interface ErEntity {
+  attributes: ErAttribute[];
+  name: string;
+}
+
+export interface ErRelationship {
+  identifying: boolean;
+  label: string;
+  left: string;
+  leftCardinality: ErCardinality;
+  right: string;
+  rightCardinality: ErCardinality;
+}
+
+export interface ErDiagramSnapshot {
+  entities: ErEntity[];
+  relationships: ErRelationship[];
+}
+
+interface SourceRange { end: number; start: number; }
+interface ErAttributeRecord extends ErAttribute { line: SourceRange; }
+interface ErEntityRecord extends ErEntity { attributes: ErAttributeRecord[]; block: SourceRange; declaration: SourceRange; }
+interface ErRelationshipRecord extends ErRelationship { leftRange: SourceRange; line: SourceRange; rightRange: SourceRange; }
+interface ParsedErDiagram { entities: ErEntityRecord[]; relationships: ErRelationshipRecord[]; }
+
+const FRONTMATTER_PATTERN = /^\uFEFF?---[ \t]*(?:\r\n|\n|\r)[\s\S]*?(?:\r\n|\n|\r)---[ \t]*(?:(?:\r\n|\n|\r)|$)/;
+const HEADER_PATTERN = /^\s*erDiagram\b[ \t]*(?:%%[^\r\n]*)?$/i;
+const ENTITY_NAME_PATTERN = '[A-Za-z_][A-Za-z0-9_-]*';
+const ENTITY_START_PATTERN = new RegExp(`^(\\s*)(${ENTITY_NAME_PATTERN})\\s*\\{\\s*(?:%%[^\\r\\n]*)?$`);
+const ATTRIBUTE_PATTERN = new RegExp(`^\\s*(\\S+)\\s+(${ENTITY_NAME_PATTERN})(.*)$`);
+const RELATIONSHIP_PATTERN = new RegExp(`^\\s*(${ENTITY_NAME_PATTERN})\\s+([|o}]{2})\\s*(--|\\.\\.)\\s*([|o}{]{2})\\s+(${ENTITY_NAME_PATTERN})\\s*:\\s*(\\S(?:.*\\S)?)\\s*(?:%%.*)?$`);
+const COMMENT_OR_DIRECTIVE_PATTERN = /^\s*%%/;
+const CLOSE_PATTERN = /^\s*}\s*(?:%%[^\r\n]*)?$/;
+const LINE_ENDING_PATTERN = /\r\n|\n|\r/;
+const VALID_CARDINALITIES = new Set<ErCardinality>(['||', '|o', '}|', '}o', 'o|', 'o{', '|{', '}{']);
+const VALID_KEYS = new Set<ErKeyMarker>(['PK', 'FK', 'UK']);
+
+export function isErDiagramSource(source: string): boolean {
+  return parseErDiagram(source) !== null;
+}
+
+/**
+ * The editor deliberately accepts a smaller grammar than Mermaid. A source
+ * which it cannot round-trip exactly remains editable in the source flyout.
+ */
+export function isErSourceRepresentable(source: string): boolean {
+  return parseErDiagram(source) !== null;
+}
+
+export function getErDiagramSnapshot(source: string): ErDiagramSnapshot {
+  const parsed = requireErDiagram(source);
+  return {
+    entities: parsed.entities.map(({ attributes, name }) => ({
+      attributes: attributes.map(({ comment, keys, name: attributeName, type }) => ({ comment, keys: [...keys], name: attributeName, type })),
+      name,
+    })),
+    relationships: parsed.relationships.map(({ identifying, label, left, leftCardinality, right, rightCardinality }) => ({
+      identifying, label, left, leftCardinality, right, rightCardinality,
+    })),
+  };
+}
+
+export function addErEntity(source: string, name = 'ENTITY'): string {
+  if (!source.trim()) return `erDiagram\n  ${normalizeEntityName(name)} {\n  }`;
+  const parsed = requireErDiagram(source);
+  const entityName = uniqueEntityName(normalizeEntityName(name), parsed.entities.map((entity) => entity.name));
+  return appendErStatement(source, `  ${entityName} {\n  }`);
+}
+
+export function renameErEntity(source: string, currentName: string, nextName: string): string {
+  const parsed = requireErDiagram(source);
+  const entity = findEntity(parsed, currentName);
+  const normalized = normalizeEntityName(nextName);
+  if (normalized !== currentName && parsed.entities.some((candidate) => candidate.name === normalized)) {
+    throw new Error(`An entity named ${normalized} already exists.`);
+  }
+  return replaceRanges(source, [
+    { range: entity.declaration, value: normalized },
+    ...parsed.relationships.flatMap((relationship) => [
+      ...(relationship.left === currentName ? [{ range: relationship.leftRange, value: normalized }] : []),
+      ...(relationship.right === currentName ? [{ range: relationship.rightRange, value: normalized }] : []),
+    ]),
+  ]);
+}
+
+export function deleteErEntity(source: string, name: string): string {
+  const parsed = requireErDiagram(source);
+  const entity = findEntity(parsed, name);
+  const lines = splitLines(source);
+  const relationshipLines = new Set(parsed.relationships
+    .filter((relationship) => relationship.left === name || relationship.right === name)
+    .map((relationship) => lineIndexAt(lines, relationship.line.start)));
+  const entityStart = lineIndexAt(lines, entity.block.start);
+  const entityEnd = lineIndexAt(lines, entity.block.end - 1);
+  return lines
+    .filter((_, index) => (index < entityStart || index > entityEnd) && !relationshipLines.has(index))
+    .map((line) => line.raw)
+    .join('');
+}
+
+export function moveErEntity(source: string, name: string, direction: 'up' | 'down'): string {
+  const parsed = requireErDiagram(source);
+  const index = parsed.entities.findIndex((entity) => entity.name === name);
+  if (index < 0) throw new Error(`Entity ${name} does not exist.`);
+  const adjacent = parsed.entities[index + (direction === 'up' ? -1 : 1)];
+  if (!adjacent) return source;
+  const first = direction === 'up' ? adjacent : parsed.entities[index];
+  const second = direction === 'up' ? parsed.entities[index] : adjacent;
+  return `${source.slice(0, first.block.start)}${source.slice(second.block.start, second.block.end)}${source.slice(first.block.end, second.block.start)}${source.slice(first.block.start, first.block.end)}${source.slice(second.block.end)}`;
+}
+
+export function addErAttribute(source: string, entityName: string, attribute: Partial<ErAttribute> = {}): string {
+  const parsed = requireErDiagram(source);
+  const entity = findEntity(parsed, entityName);
+  const next = normalizeAttribute(attribute);
+  const lines = splitLines(source);
+  const closingLine = lines[lineIndexAt(lines, entity.block.end - 1)];
+  if (!closingLine) throw new Error(`Entity ${entityName} has no closing declaration.`);
+  return `${source.slice(0, closingLine.start)}${getIndentForEntity(source, entity)}${formatAttribute(next)}${getLineEnding(source)}${source.slice(closingLine.start)}`;
+}
+
+export function editErAttribute(source: string, entityName: string, attributeName: string, nextAttribute: ErAttribute): string {
+  const entity = findEntity(requireErDiagram(source), entityName);
+  const attribute = findAttribute(entity, attributeName);
+  const next = normalizeAttribute(nextAttribute);
+  if (next.name !== attributeName && entity.attributes.some((candidate) => candidate.name === next.name)) {
+    throw new Error(`Entity ${entityName} already has an attribute named ${next.name}.`);
+  }
+  return replaceRanges(source, [{ range: attribute.line, value: `${leadingWhitespace(source.slice(attribute.line.start, attribute.line.end))}${formatAttribute(next)}` }]);
+}
+
+export function deleteErAttribute(source: string, entityName: string, attributeName: string): string {
+  const entity = findEntity(requireErDiagram(source), entityName);
+  const attribute = findAttribute(entity, attributeName);
+  const lines = splitLines(source);
+  const index = lineIndexAt(lines, attribute.line.start);
+  return lines.filter((_, lineIndex) => lineIndex !== index).map((line) => line.raw).join('');
+}
+
+export function moveErAttribute(source: string, entityName: string, attributeName: string, direction: 'up' | 'down'): string {
+  const entity = findEntity(requireErDiagram(source), entityName);
+  const index = entity.attributes.findIndex((attribute) => attribute.name === attributeName);
+  if (index < 0) throw new Error(`Attribute ${attributeName} does not exist on ${entityName}.`);
+  const adjacent = entity.attributes[index + (direction === 'up' ? -1 : 1)];
+  if (!adjacent) return source;
+  const current = entity.attributes[index];
+  if (!current) return source;
+  const first = direction === 'up' ? adjacent : current;
+  const second = direction === 'up' ? current : adjacent;
+  return `${source.slice(0, first.line.start)}${source.slice(second.line.start, second.line.end)}${source.slice(first.line.end, second.line.start)}${source.slice(first.line.start, first.line.end)}${source.slice(second.line.end)}`;
+}
+
+export function addErRelationship(source: string, relationship: ErRelationship): string {
+  const parsed = requireErDiagram(source);
+  assertRelationshipEndpoints(parsed, relationship);
+  return appendErStatement(source, `  ${formatRelationship(normalizeRelationship(relationship))}`);
+}
+
+export function editErRelationship(source: string, index: number, relationship: ErRelationship): string {
+  const parsed = requireErDiagram(source);
+  const current = parsed.relationships[index];
+  if (!current) throw new Error('Relationship no longer exists.');
+  assertRelationshipEndpoints(parsed, relationship);
+  return replaceRanges(source, [{ range: current.line, value: `${leadingWhitespace(source.slice(current.line.start, current.line.end))}${formatRelationship(normalizeRelationship(relationship))}` }]);
+}
+
+export function deleteErRelationship(source: string, index: number): string {
+  const parsed = requireErDiagram(source);
+  const relationship = parsed.relationships[index];
+  if (!relationship) throw new Error('Relationship no longer exists.');
+  const lines = splitLines(source);
+  return lines.filter((_, lineIndex) => lineIndex !== lineIndexAt(lines, relationship.line.start)).map((line) => line.raw).join('');
+}
+
+function parseErDiagram(source: string): ParsedErDiagram | null {
+  const prefixLength = source.match(FRONTMATTER_PATTERN)?.[0].length ?? 0;
+  const body = source.slice(prefixLength);
+  const lines = splitLines(body, prefixLength);
+  const headerIndex = lines.findIndex((line) => line.text.trim() !== '' && !COMMENT_OR_DIRECTIVE_PATTERN.test(line.text));
+  const header = lines[headerIndex];
+  if (!header || !HEADER_PATTERN.test(header.text)) return null;
+  const entities: ErEntityRecord[] = [];
+  const relationships: ErRelationshipRecord[] = [];
+  let lineIndex = headerIndex + 1;
+  while (lineIndex < lines.length) {
+    const line = lines[lineIndex];
+    if (!line || line.text.trim() === '' || COMMENT_OR_DIRECTIVE_PATTERN.test(line.text)) { lineIndex += 1; continue; }
+    const entityStart = line.text.match(ENTITY_START_PATTERN);
+    if (entityStart?.[2]) {
+      const name = entityStart[2];
+      if (entities.some((entity) => entity.name === name)) return null;
+      const declarationStart = line.start + (entityStart.index ?? 0) + entityStart[1].length;
+      const attributes: ErAttributeRecord[] = [];
+      const blockStart = line.start;
+      lineIndex += 1;
+      let closed = false;
+      while (lineIndex < lines.length) {
+        const attributeLine = lines[lineIndex];
+        if (!attributeLine) return null;
+        if (CLOSE_PATTERN.test(attributeLine.text)) {
+          entities.push({ attributes, block: { start: blockStart, end: attributeLine.end }, declaration: { start: declarationStart, end: declarationStart + name.length }, name });
+          lineIndex += 1;
+          closed = true;
+          break;
+        }
+        if (attributeLine.text.trim() === '' || COMMENT_OR_DIRECTIVE_PATTERN.test(attributeLine.text)) { lineIndex += 1; continue; }
+        const attribute = parseAttribute(attributeLine);
+        if (!attribute || attributes.some((candidate) => candidate.name === attribute.name)) return null;
+        attributes.push(attribute);
+        lineIndex += 1;
+      }
+      if (!closed) return null;
+      continue;
+    }
+    const relationship = parseRelationship(line);
+    if (!relationship) return null;
+    relationships.push(relationship);
+    lineIndex += 1;
+  }
+  return { entities, relationships };
+}
+
+function parseAttribute(line: SourceLine): ErAttributeRecord | null {
+  const match = line.text.match(ATTRIBUTE_PATTERN);
+  if (!match?.[1] || !match[2]) return null;
+  const type = match[1];
+  const name = match[2];
+  let rest = match[3].replace(/\s*%%.*$/, '').trim();
+  let comment: string | undefined;
+  const commentMatch = rest.match(/\s+"((?:[^"\\]|\\.)*)"\s*$/);
+  if (commentMatch) {
+    comment = commentMatch[1]?.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    rest = rest.slice(0, commentMatch.index).trim();
+  }
+  const keys = rest ? rest.split(/\s*,\s*|\s+/).filter(Boolean) : [];
+  if (!keys.every((key): key is ErKeyMarker => VALID_KEYS.has(key as ErKeyMarker))) return null;
+  return { ...(comment ? { comment } : {}), keys, line: { start: line.start, end: line.endWithoutEnding }, name, type };
+}
+
+function parseRelationship(line: SourceLine): ErRelationshipRecord | null {
+  const match = line.text.match(RELATIONSHIP_PATTERN);
+  if (!match?.[1] || !match[2] || !match[3] || !match[4] || !match[5] || !match[6]) return null;
+  if (!VALID_CARDINALITIES.has(match[2] as ErCardinality) || !VALID_CARDINALITIES.has(match[4] as ErCardinality)) return null;
+  const leftStart = line.start + line.text.indexOf(match[1]);
+  const rightStart = line.start + line.text.indexOf(match[5], leftStart - line.start + match[1].length);
+  return {
+    identifying: match[3] === '--', label: match[6], left: match[1], leftCardinality: match[2] as ErCardinality,
+    leftRange: { start: leftStart, end: leftStart + match[1].length }, line: { start: line.start, end: line.endWithoutEnding },
+    right: match[5], rightCardinality: match[4] as ErCardinality, rightRange: { start: rightStart, end: rightStart + match[5].length },
+  };
+}
+
+interface SourceLine { end: number; endWithoutEnding: number; raw: string; start: number; text: string; }
+function splitLines(source: string, offset = 0): SourceLine[] {
+  const lines: SourceLine[] = [];
+  const matcher = /.*?(?:\r\n|\n|\r|$)/g;
+  let match: RegExpExecArray | null;
+  while ((match = matcher.exec(source)) !== null && match[0] !== '') {
+    const raw = match[0];
+    const ending = raw.match(/\r\n|\n|\r$/)?.[0] ?? '';
+    const start = offset + match.index;
+    lines.push({ end: start + raw.length, endWithoutEnding: start + raw.length - ending.length, raw, start, text: raw.slice(0, raw.length - ending.length) });
+  }
+  return lines;
+}
+
+function lineIndexAt(lines: SourceLine[], position: number): number {
+  const index = lines.findIndex((line) => position >= line.start && position < line.end);
+  if (index < 0) throw new Error('Source changed while resolving a Mermaid declaration.');
+  return index;
+}
+
+function requireErDiagram(source: string): ParsedErDiagram {
+  const parsed = parseErDiagram(source);
+  if (!parsed) throw new Error('ER form editing requires representable erDiagram source.');
+  return parsed;
+}
+
+function findEntity(parsed: ParsedErDiagram, name: string): ErEntityRecord {
+  const entity = parsed.entities.find((candidate) => candidate.name === name);
+  if (!entity) throw new Error(`Entity ${name} no longer exists.`);
+  return entity;
+}
+
+function findAttribute(entity: ErEntityRecord, name: string): ErAttributeRecord {
+  const attribute = entity.attributes.find((candidate) => candidate.name === name);
+  if (!attribute) throw new Error(`Attribute ${name} no longer exists on ${entity.name}.`);
+  return attribute;
+}
+
+function normalizeEntityName(value: string): string {
+  const normalized = value.trim().replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^([^A-Za-z_])/, '_$1');
+  if (!normalized || !new RegExp(`^${ENTITY_NAME_PATTERN}$`).test(normalized)) throw new Error('Entity names must start with a letter or underscore.');
+  return normalized;
+}
+
+function uniqueEntityName(base: string, existing: Iterable<string>): string {
+  const occupied = new Set(existing);
+  let candidate = base;
+  let suffix = 2;
+  while (occupied.has(candidate)) { candidate = `${base}_${suffix}`; suffix += 1; }
+  return candidate;
+}
+
+function normalizeAttribute(attribute: Partial<ErAttribute>): ErAttribute {
+  const type = (attribute.type ?? 'string').trim();
+  const name = normalizeEntityName(attribute.name ?? 'attribute');
+  if (!type || /\s|["{}]/.test(type)) throw new Error('Attribute types must be one Mermaid ER type token.');
+  const keys = [...new Set(attribute.keys ?? [])];
+  if (!keys.every((key): key is ErKeyMarker => VALID_KEYS.has(key))) throw new Error('Attribute keys must be PK, FK, or UK.');
+  const comment = attribute.comment?.replace(/[\r\n]/g, ' ').trim();
+  if (comment?.includes('"')) throw new Error('Attribute comments cannot contain quotes.');
+  return { ...(comment ? { comment } : {}), keys, name, type };
+}
+
+function normalizeRelationship(relationship: ErRelationship): ErRelationship {
+  const normalized = {
+    ...relationship,
+    label: relationship.label.replace(/[\r\n]/g, ' ').trim(),
+    left: normalizeEntityName(relationship.left), right: normalizeEntityName(relationship.right),
+  };
+  if (!normalized.label || normalized.label.includes('%%')) throw new Error('Relationship labels must be non-empty plain Mermaid text.');
+  if (!VALID_CARDINALITIES.has(normalized.leftCardinality) || !VALID_CARDINALITIES.has(normalized.rightCardinality)) throw new Error('Choose valid Mermaid ER endpoint cardinalities.');
+  return normalized;
+}
+
+function assertRelationshipEndpoints(parsed: ParsedErDiagram, relationship: ErRelationship): void {
+  const normalized = normalizeRelationship(relationship);
+  const entities = new Set(parsed.entities.map((entity) => entity.name));
+  if (!entities.has(normalized.left) || !entities.has(normalized.right)) throw new Error('Relationships require two existing entities.');
+}
+
+function formatAttribute(attribute: ErAttribute): string {
+  const keys = attribute.keys.length > 0 ? ` ${attribute.keys.join(', ')}` : '';
+  const comment = attribute.comment ? ` "${attribute.comment.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : '';
+  return `${attribute.type} ${attribute.name}${keys}${comment}`;
+}
+
+function formatRelationship(relationship: ErRelationship): string {
+  return `${relationship.left} ${relationship.leftCardinality}${relationship.identifying ? '--' : '..'}${relationship.rightCardinality} ${relationship.right} : ${relationship.label}`;
+}
+
+function appendErStatement(source: string, statement: string): string {
+  const separator = /(?:\r\n|\n|\r)$/.test(source) ? '' : getLineEnding(source);
+  return `${source}${separator}${statement}`;
+}
+
+function getLineEnding(source: string): string { return source.match(LINE_ENDING_PATTERN)?.[0] ?? '\n'; }
+function getIndentForEntity(source: string, entity: ErEntityRecord): string {
+  const declaration = source.slice(entity.block.start, entity.declaration.start);
+  return `${declaration}${declaration ? '  ' : '  '}`;
+}
+function leadingWhitespace(value: string): string { return value.match(/^\s*/)?.[0] ?? ''; }
+
+function replaceRanges(source: string, changes: Array<{ range: SourceRange; value: string }>): string {
+  return [...changes].sort((left, right) => right.range.start - left.range.start).reduce((next, { range, value }) => (
+    `${next.slice(0, range.start)}${value}${next.slice(range.end)}`
+  ), source);
+}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { applyDiff } from './diagram-mutations';
 import { addSequenceParticipant } from './sequence-mutations';
+import { addErAttribute } from './er-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -84,6 +85,23 @@ describe('collaboration transaction origins', () => {
     expect(undoManager.undoStack).toHaveLength(1);
     undoManager.undo();
     expect(source.toString()).toBe('sequenceDiagram');
+    destroyDiagramUndoManager(undoManager);
+  });
+
+  it('keeps ER form mutations in the local visual undo stack', () => {
+    const doc = new Y.Doc();
+    const source = doc.getText('er-source');
+    const undoManager = createDiagramUndoManager(source, doc.getMap('er-layout'));
+    source.insert(0, 'erDiagram\n  CUSTOMER {\n  }');
+    undoManager.stopCapturing();
+
+    const previous = source.toString();
+    const next = addErAttribute(previous, 'CUSTOMER', { type: 'int', name: 'id', keys: ['PK'] });
+    doc.transact(() => { applyDiff(source, next, previous); }, collaborationOrigins.visual);
+
+    expect(undoManager.undoStack).toHaveLength(1);
+    undoManager.undo();
+    expect(source.toString()).toBe('erDiagram\n  CUSTOMER {\n  }');
     destroyDiagramUndoManager(undoManager);
   });
 });

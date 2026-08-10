@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canUseFlowchartControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from './diagram-preview';
+import { canUseErControls, canUseFlowchartControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from './diagram-preview';
 
 const flowchartPreview: DiagramPreview = {
   capability: { diagramType: 'flowchart-v2', kind: 'flowchart' },
@@ -38,6 +38,16 @@ describe('DiagramPreviewRegistry', () => {
       source: 'sequenceDiagram\nparticipant "Web browser" as Browser\n"Web browser"->>API: request',
     };
     expect(canUseSequenceControls(quotedParticipantPreview.source, quotedParticipantPreview)).toBe(false);
+  });
+
+  it('permits ER controls only for a current parser-confirmed representable source', () => {
+    const erPreview: DiagramPreview = {
+      capability: { diagramType: 'er', kind: 'er' }, diagramId: 'schema', flowchartSnapshot: null,
+      source: 'erDiagram\n  CUSTOMER {\n    int id PK\n  }', svg: '<svg />',
+    };
+    expect(canUseErControls(erPreview.source, erPreview)).toBe(true);
+    expect(canUseErControls('erDiagram\n  CUSTOMER ||--o{ ORDER', erPreview)).toBe(false);
+    expect(canUseErControls(erPreview.source, { ...erPreview, source: 'erDiagram\n  direction LR' })).toBe(false);
   });
 
   it('isolates last-known-good previews by stable diagram id', () => {

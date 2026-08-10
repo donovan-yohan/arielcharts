@@ -19,6 +19,16 @@ export const API_SEQUENCE_FIXTURE = `sequenceDiagram
   Service-->>Gateway: 201 Created
   Gateway-->>Browser: 201 Created`;
 
+export const ER_DIAGRAM_FIXTURE = `erDiagram
+  CUSTOMER {
+    int id PK
+  }
+  ORDER {
+    int id PK
+    int customer_id FK
+  }
+  CUSTOMER ||--o{ ORDER : places`;
+
 export const INVALID_MERMAID_FIXTURE = 'this is not valid Mermaid syntax';
 
 export function sourceEditor(page: Page): Locator {
@@ -166,12 +176,13 @@ export async function renameActiveDiagram(page: Page, name: string): Promise<voi
   assert(await activeTabName(page) === name, `Renamed tab was not active: ${name}`);
 }
 
-export async function waitForCanvas(page: Page, mode: 'flowchart' | 'sequence' | 'sequence-readonly' | 'generic'): Promise<void> {
+export async function waitForCanvas(page: Page, mode: 'flowchart' | 'sequence' | 'sequence-readonly' | 'er' | 'generic'): Promise<void> {
   await page.waitForFunction((expectedMode) => {
     const label = document.querySelector('[data-testid="diagram-mode"]')?.textContent ?? '';
     const svg = document.querySelector('.diagram-canvas-svg svg');
     const structureToolbar = document.querySelector('form[aria-label="Add Mermaid node"]');
     const sequenceControls = document.querySelector('[data-testid="sequence-editor-controls"]');
+    const erControls = document.querySelector('[data-testid="er-editor-controls"]');
     return !!svg?.getAttribute('viewBox')
       && (expectedMode === 'flowchart'
         ? label.includes('Flowchart · editable') && !!structureToolbar && !sequenceControls
@@ -179,7 +190,9 @@ export async function waitForCanvas(page: Page, mode: 'flowchart' | 'sequence' |
           ? label.includes('Sequence · editable') && !structureToolbar && !!sequenceControls
           : expectedMode === 'sequence-readonly'
             ? label.includes('Sequence · editable') && !structureToolbar && !sequenceControls
-            : label.includes('source only') && !structureToolbar && !sequenceControls);
+            : expectedMode === 'er'
+              ? label.includes('Entity relationship · editable') && !structureToolbar && !sequenceControls && !!erControls
+              : label.includes('source only') && !structureToolbar && !sequenceControls && !erControls);
   }, mode, { timeout: 15_000 });
 }
 

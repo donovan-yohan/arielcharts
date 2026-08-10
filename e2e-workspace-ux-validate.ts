@@ -41,6 +41,7 @@ import { getWebsocketServerUrl } from './apps/web/src/lib/session.ts';
 import { getCanvasDotGridGeometry } from './apps/web/src/lib/canvas-dot-grid.ts';
 import {
   API_SEQUENCE_FIXTURE,
+  ER_DIAGRAM_FIXTURE,
   FLOWCHART_FIXTURE,
   INVALID_MERMAID_FIXTURE,
   activeTabName,
@@ -659,6 +660,24 @@ async function expectTemplateDiagramCreation(page: Page): Promise<void> {
   await saveScreenshot(page, 'issue-15-api-sequence');
   await assertTemplateIdentityAbsent(page);
   assert(flowchartName !== sequenceName, 'Flowchart and sequence templates reused the same created tab.');
+}
+
+async function expectErSemanticEditor(page: Page): Promise<void> {
+  await replaceSource(page, ER_DIAGRAM_FIXTURE);
+  await waitForSource(page, ER_DIAGRAM_FIXTURE);
+  await waitForCanvas(page, 'er');
+  await closeFlyout(page, 'source');
+  const controls = page.getByTestId('er-editor-controls');
+  const before = await snapshotAnchors(page, ANCHORS);
+  const addEntity = controls.getByRole('button', { name: 'Add ER entity', exact: true });
+  await assertHitTarget(page, addEntity, 'ER add-entity control');
+  await verifiedClick(page, addEntity, 'ER add-entity control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('ENTITY {');
+  await closeFlyout(page, 'source');
+  assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
+  assert(await page.locator('.react-flow__node').count() === 0,
+    'ER semantic form incorrectly exposed the generic React Flow editor.');
 }
 
 async function expectStableFlyoutAnchors(page: Page, label: string): Promise<void> {
@@ -2958,6 +2977,8 @@ async function validateWorkspaceUx(): Promise<void> {
       await saveScreenshot(page, 'issue-14-blank');
       await expectTemplateDiagramCreation(page);
       record(results, 'flowchart and API sequence templates render, rename, edit, and remain ordinary diagrams');
+      await expectErSemanticEditor(page);
+      record(results, 'ER semantic form has hit-tested entity controls, source-safe writes, stable anchors, and no generic graph editor');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');

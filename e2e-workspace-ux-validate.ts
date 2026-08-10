@@ -1326,6 +1326,10 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     const sourceBounds = await sourceToggle.boundingBox();
     assert(sourceBounds !== null && sourceBounds.width >= 44 && sourceBounds.height >= 44,
       `${label} source toggle must provide a 44px touch target: ${JSON.stringify(sourceBounds)}.`);
+    const shortcutHints = page.locator('.canvas-toolbar-shortcut');
+    assert(await shortcutHints.count() > 0, `${label} did not render any desktop shortcut hints to suppress.`);
+    const visibleShortcutHints = await shortcutHints.evaluateAll((hints) => hints.filter((hint) => getComputedStyle(hint).display !== 'none').length);
+    assert(visibleShortcutHints === 0, `${label} exposed ${visibleShortcutHints} canvas shortcut hint(s) on a coarse-pointer viewport.`);
   }
   if (label === 'mobile-320') {
     const topbarOverflow = page.getByTestId('topbar-collaborator-overflow');

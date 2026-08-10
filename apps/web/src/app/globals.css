@@ -1889,6 +1889,32 @@ code {
   transform: translate(-50%, 0);
 }
 
+.canvas-toolbar-shortcut {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  z-index: 1;
+  max-width: 38px;
+  overflow: hidden;
+  padding: 1px 2px;
+  border: 1px solid var(--control-border);
+  border-radius: 3px;
+  background: var(--surface-raised);
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 600;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .canvas-toolbar-shortcut {
+    display: none;
+  }
+}
+
 @media (max-width: 960px) {
   .workspace-topbar {
     height: auto;
@@ -2130,6 +2156,10 @@ code {
   .canvas-toolbar-button {
     width: 44px !important;
     height: 44px !important;
+  }
+
+  .canvas-toolbar-shortcut {
+    display: none;
   }
 
   .canvas-empty-add-button {

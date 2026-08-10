@@ -20,8 +20,11 @@ import { WorkspaceSettings } from './workspace-settings';
 import { WorkspaceTabStrip, type WorkspaceDiagramTab } from './workspace-tab-strip';
 import {
   MutationQueue,
+  getPastedClipboardPositions,
   observeMutationFailure,
   parseFlowchartSnapshot,
+  type DiagramClipboardPayload,
+  type DiagramClipboardPoint,
   type DiagramLinkType,
   type DiagramNodeShape,
   type FlowchartSnapshot,
@@ -1417,6 +1420,33 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     }));
   }, [activeDiagram, collaboration, runMutation]);
 
+  const handlePasteClipboard = useCallback((clipboard: DiagramClipboardPayload, offset: DiagramClipboardPoint) => {
+    const queue = mutationQueueRef.current;
+    const diagram = activeDiagram;
+    const actor = currentIdentityRef.current;
+    if (!queue || !diagram || !collaboration || !actor) {
+      return;
+    }
+
+    const mutation = queue.pasteClipboard(clipboard, {
+      onApplied: (result) => {
+        commitLayoutActivityCheckpoint(
+          collaboration.doc,
+          collaboration.activityArray,
+          diagram.nodePositionsMap,
+          getPastedClipboardPositions(clipboard, result.idMap, offset),
+          'merge',
+          createActivityEvent(actor, 'edited', 'Pasted diagram nodes on canvas', diagram.id),
+        );
+      },
+    });
+
+    runMutation(mutation.then((result) => {
+      setSelectedNodeIds(result.pastedNodeIds);
+      return result;
+    }));
+  }, [activeDiagram, collaboration, runMutation]);
+
   const handleResetSharedLayout = useCallback(() => {
     const diagram = activeDiagram;
     const actor = currentIdentityRef.current;
@@ -1752,6 +1782,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onNodeDragStart={handleNodeDragStart}
             onNodeDragStop={handleNodeDragStop}
             onNodePositionsChange={handleNodePositionsChange}
+            onPasteClipboard={handlePasteClipboard}
             onResetSharedLayout={handleResetSharedLayout}
             onRenderSettled={handleCanvasRenderSettled}
             onSelectedNodeIdsChange={setSelectedNodeIds}

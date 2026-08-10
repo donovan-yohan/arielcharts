@@ -56,8 +56,15 @@ describe('relationship and architecture semantic editors', () => {
     expect(canvasSource).toMatch(/data-testid="state-editor-controls"/u);
     expect(canvasSource).toMatch(/data-testid="requirement-editor-controls"/u);
     expect(canvasSource).toMatch(/ClassRelationshipForm[^]*?Class relationship type/u);
+    expect(canvasSource).toMatch(/Class relationship type[^]*?CLASS_RELATION_OPTIONS\.map/u);
+    expect(canvasSource).toMatch(/Class \$\{entity\.name\} id/u);
     expect(canvasSource).toMatch(/StateTransitionForm[^]*?State transition source[^]*?State transition target/u);
+    expect(canvasSource).toMatch(/State \$\{state\.id\} id/u);
+    expect(canvasSource).toMatch(/const endpoints = \[\.\.\.new Set\(states\.map\(\(state\) => state\.id\)\)\]/u);
     expect(canvasSource).toMatch(/RequirementRelationshipForm[^]*?Requirement relationship type/u);
+    expect(canvasSource).toMatch(/getClassRelationshipIdentity\(item, index, diagram\.relationships\)/u);
+    expect(canvasSource).toMatch(/getStateTransitionIdentity\(item, index, diagram\.transitions\)/u);
+    expect(canvasSource).toMatch(/getRequirementRelationshipIdentity\(item, index, diagram\.relationships\)/u);
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'class'\)/u);
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'state'\)/u);
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'requirement'\)/u);

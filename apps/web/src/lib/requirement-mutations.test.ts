@@ -1,3 +1,6 @@
+// @vitest-environment happy-dom
+
+import mermaid from 'mermaid';
 import { describe, expect, it } from 'vitest';
 import {
   addRequirement,
@@ -7,6 +10,7 @@ import {
   editRequirement,
   editRequirementRelationship,
   getRequirementDiagramSnapshot,
+  getRequirementRelationshipIdentity,
   isRequirementSourceRepresentable,
 } from './requirement-mutations';
 
@@ -40,9 +44,11 @@ describe('requirement source mutations', () => {
     const relation = addRequirementRelationship(added, { from: 'speed', kind: 'traces', to: 'checkout' });
     const renamed = editRequirement(relation, 'speed', { name: 'latency', fields: { id: 'PERF-1', text: 'low latency', risk: 'low', verifyMethod: 'analysis' } });
     expect(renamed).toContain('latency - traces -> checkout');
-    const changed = editRequirementRelationship(renamed, 1, { from: 'latency', kind: 'verifies', to: 'checkout' });
+    const relationships = getRequirementDiagramSnapshot(renamed).relationships;
+    const changed = editRequirementRelationship(renamed, getRequirementRelationshipIdentity(relationships[1]!, 1, relationships), { from: 'latency', kind: 'verifies', to: 'checkout' });
     expect(changed).toContain('latency - verifies -> checkout');
-    const withoutRelation = deleteRequirementRelationship(changed, 1);
+    const changedRelationships = getRequirementDiagramSnapshot(changed).relationships;
+    const withoutRelation = deleteRequirementRelationship(changed, getRequirementRelationshipIdentity(changedRelationships[1]!, 1, changedRelationships));
     const deleted = deleteRequirement(withoutRelation, 'latency');
     expect(deleted).not.toContain('latency');
     expect(deleted).toContain('%% preserve this comment');
@@ -51,5 +57,19 @@ describe('requirement source mutations', () => {
   it('fails closed for incomplete fields and unmodeled syntax', () => {
     expect(isRequirementSourceRepresentable('requirementDiagram\n  requirement req {\n    id: 1\n  }')).toBe(false);
     expect(isRequirementSourceRepresentable('requirementDiagram\n  requirement req {\n    id: 1\n    text: one\n    risk: low\n    verifyMethod: test\n  }\n  req <- satisfies - other')).toBe(false);
+  });
+
+  it('canonicalizes Mermaid-accepted declaration kinds and resolves relationships safely', async () => {
+    mermaid.initialize({ startOnLoad: false });
+    const mermaidBacked = SOURCE.replace('ORD-1', 'ORD_1').replace('order is accepted', 'order_is_accepted');
+    const upper = mermaidBacked.replace('  requirement order {', '  REQUIREMENT order {').replace('  element checkout {', '  ELEMENT checkout {').replace('  order - satisfies -> checkout', '  order - SATISFIES -> checkout');
+    await expect(mermaid.parse(upper)).resolves.toMatchObject({ diagramType: 'requirement' });
+    expect(getRequirementDiagramSnapshot(upper).entities.map((entity) => entity.kind)).toEqual(['requirement', 'element']);
+    const relationships = getRequirementDiagramSnapshot(SOURCE).relationships;
+    const identity = getRequirementRelationshipIdentity(relationships[0]!, 0, relationships);
+    const inserted = SOURCE.replace('  order - satisfies -> checkout', '  checkout - traces -> order\n  order - satisfies -> checkout');
+    expect(editRequirementRelationship(inserted, identity, { from: 'order', kind: 'verifies', to: 'checkout' })).toContain('order - verifies -> checkout');
+    const ambiguous = SOURCE.replace('  order - satisfies -> checkout', '  order - satisfies -> checkout\n  order - satisfies -> checkout');
+    expect(() => deleteRequirementRelationship(ambiguous, identity)).toThrow('resolved safely');
   });
 });

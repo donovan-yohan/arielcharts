@@ -7,6 +7,7 @@ import {
   editState,
   editStateTransition,
   getStateDiagramSnapshot,
+  getStateTransitionIdentity,
   isStateSourceRepresentable,
 } from './state-mutations';
 
@@ -35,9 +36,11 @@ describe('state source mutations', () => {
     const transition = addStateTransition(added, { from: 'Active', to: 'Paused', label: 'pause' });
     const renamed = editState(transition, 'Paused', { id: 'Holding', label: 'Hold' });
     expect(renamed).toContain('Active --> Holding : pause');
-    const updated = editStateTransition(renamed, 3, { from: 'Holding', to: 'Active', label: 'resume' });
+    const transitions = getStateDiagramSnapshot(renamed).transitions;
+    const updated = editStateTransition(renamed, getStateTransitionIdentity(transitions[3]!, 3, transitions), { from: 'Holding', to: 'Active', label: 'resume' });
     expect(updated).toContain('Holding --> Active : resume');
-    const noTransition = deleteStateTransition(updated, 3);
+    const updatedTransitions = getStateDiagramSnapshot(updated).transitions;
+    const noTransition = deleteStateTransition(updated, getStateTransitionIdentity(updatedTransitions[3]!, 3, updatedTransitions));
     expect(deleteState(noTransition, 'Holding')).not.toContain('Holding');
     expect(noTransition).toContain('%% preserve comment');
   });
@@ -46,5 +49,14 @@ describe('state source mutations', () => {
     expect(isStateSourceRepresentable('stateDiagram-v2\n  state Active {\n    [*] --> Ready\n  }')).toBe(false);
     expect(isStateSourceRepresentable('stateDiagram-v2\n  note right of Active\n    detail\n  end note')).toBe(false);
     expect(isStateSourceRepresentable('stateDiagram-v2\n  direction LR')).toBe(false);
+  });
+
+  it('re-resolves a transition after remote insertion and fails closed for duplicates', () => {
+    const transitions = getStateDiagramSnapshot(SOURCE).transitions;
+    const identity = getStateTransitionIdentity(transitions[1]!, 1, transitions);
+    const inserted = SOURCE.replace('  Idle --> Active : start', '  [*] --> Active : shortcut\n  Idle --> Active : start');
+    expect(editStateTransition(inserted, identity, { from: 'Idle', to: 'Active', label: 'continue' })).toContain('Idle --> Active : continue');
+    const ambiguous = SOURCE.replace('  Idle --> Active : start', '  Idle --> Active : start\n  Idle --> Active : start');
+    expect(() => deleteStateTransition(ambiguous, identity)).toThrow('resolved safely');
   });
 });

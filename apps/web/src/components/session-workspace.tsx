@@ -2294,25 +2294,25 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onEditClass={(name, patch) => { mutateCanvasSource((source) => editClass(source, name, patch), 'Edited a class'); }}
             onDeleteClass={(name) => { mutateCanvasSource((source) => deleteClass(source, name), 'Deleted a class and dependent relationships'); }}
             onAddClassMember={(name, member) => { mutateCanvasSource((source) => addClassMember(source, name, member), 'Added a class member'); }}
-            onEditClassMember={(name, index, member) => { mutateCanvasSource((source) => editClassMember(source, name, index, member), 'Edited a class member'); }}
-            onDeleteClassMember={(name, index) => { mutateCanvasSource((source) => deleteClassMember(source, name, index), 'Deleted a class member'); }}
+            onEditClassMember={(name, identity, member) => { mutateCanvasSource((source) => editClassMember(source, name, identity, member), 'Edited a class member'); }}
+            onDeleteClassMember={(name, identity) => { mutateCanvasSource((source) => deleteClassMember(source, name, identity), 'Deleted a class member'); }}
             onAddClassAnnotation={(name, annotation) => { mutateCanvasSource((source) => addClassAnnotation(source, name, annotation), 'Added a class annotation'); }}
             onDeleteClassAnnotation={(name, annotation) => { mutateCanvasSource((source) => deleteClassAnnotation(source, name, annotation), 'Deleted a class annotation'); }}
             onAddClassRelationship={(relationship) => { mutateCanvasSource((source) => addClassRelationship(source, relationship), 'Added a class relationship'); }}
-            onEditClassRelationship={(index, relationship) => { mutateCanvasSource((source) => editClassRelationship(source, index, relationship), 'Edited a class relationship'); }}
-            onDeleteClassRelationship={(index) => { mutateCanvasSource((source) => deleteClassRelationship(source, index), 'Deleted a class relationship'); }}
+            onEditClassRelationship={(identity, relationship) => { mutateCanvasSource((source) => editClassRelationship(source, identity, relationship), 'Edited a class relationship'); }}
+            onDeleteClassRelationship={(identity) => { mutateCanvasSource((source) => deleteClassRelationship(source, identity), 'Deleted a class relationship'); }}
             onAddState={(name) => { mutateCanvasSource((source) => addState(source, name), 'Added a state'); }}
             onEditState={(id, patch) => { mutateCanvasSource((source) => editState(source, id, patch), 'Edited a state'); }}
             onDeleteState={(id) => { mutateCanvasSource((source) => deleteState(source, id), 'Deleted a state and dependent transitions'); }}
             onAddStateTransition={(transition) => { mutateCanvasSource((source) => addStateTransition(source, transition), 'Added a state transition'); }}
-            onEditStateTransition={(index, transition) => { mutateCanvasSource((source) => editStateTransition(source, index, transition), 'Edited a state transition'); }}
-            onDeleteStateTransition={(index) => { mutateCanvasSource((source) => deleteStateTransition(source, index), 'Deleted a state transition'); }}
+            onEditStateTransition={(identity, transition) => { mutateCanvasSource((source) => editStateTransition(source, identity, transition), 'Edited a state transition'); }}
+            onDeleteStateTransition={(identity) => { mutateCanvasSource((source) => deleteStateTransition(source, identity), 'Deleted a state transition'); }}
             onAddRequirement={(requirement) => { mutateCanvasSource((source) => addRequirement(source, requirement), 'Added a requirement'); }}
             onEditRequirement={(name, requirement) => { mutateCanvasSource((source) => editRequirement(source, name, requirement), 'Edited a requirement'); }}
             onDeleteRequirement={(name) => { mutateCanvasSource((source) => deleteRequirement(source, name), 'Deleted a requirement and dependent relationships'); }}
             onAddRequirementRelationship={(relationship) => { mutateCanvasSource((source) => addRequirementRelationship(source, relationship), 'Added a requirement relationship'); }}
-            onEditRequirementRelationship={(index, relationship) => { mutateCanvasSource((source) => editRequirementRelationship(source, index, relationship), 'Edited a requirement relationship'); }}
-            onDeleteRequirementRelationship={(index) => { mutateCanvasSource((source) => deleteRequirementRelationship(source, index), 'Deleted a requirement relationship'); }}
+            onEditRequirementRelationship={(identity, relationship) => { mutateCanvasSource((source) => editRequirementRelationship(source, identity, relationship), 'Edited a requirement relationship'); }}
+            onDeleteRequirementRelationship={(identity) => { mutateCanvasSource((source) => deleteRequirementRelationship(source, identity), 'Deleted a requirement relationship'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onChangeNodeShape={(nodeId, shape) => {

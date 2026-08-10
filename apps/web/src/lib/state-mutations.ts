@@ -1,6 +1,8 @@
 export type StateNodeKind = 'final' | 'initial' | 'state';
 export interface StateNode { id: string; kind: StateNodeKind; label?: string; }
 export interface StateTransition { from: string; label?: string; to: string; }
+/** A transition remains addressable across an unrelated remote insertion. */
+export interface StateTransitionIdentity extends StateTransition { index: number; occurrenceCount: number; }
 export interface StateDiagramSnapshot { states: StateNode[]; transitions: StateTransition[]; }
 
 interface SourceLine { end: number; raw: string; start: number; text: string; }
@@ -45,10 +47,19 @@ export function deleteState(source: string, id: string): string {
 export function addStateTransition(source: string, transition: StateTransition): string {
   const parsed = requireState(source); assertTransition(parsed, transition); return append(source, `  ${formatTransition(transition)}`);
 }
-export function editStateTransition(source: string, index: number, transition: StateTransition): string {
-  const parsed = requireState(source); const current = parsed.transitions[index]; if (!current) throw new Error('State transition no longer exists.'); assertTransition(parsed, transition); return replace(source, current.line, `${indent(current.line)}${formatTransition(transition)}`);
+export function getStateTransitionIdentity(transition: StateTransition, index: number, transitions: readonly StateTransition[] = []): StateTransitionIdentity {
+  return { ...transition, index, occurrenceCount: transitions.length ? transitions.filter((candidate) => isSameTransition(candidate, transition)).length : 1 };
 }
-export function deleteStateTransition(source: string, index: number): string { const parsed = requireState(source); const transition = parsed.transitions[index]; if (!transition) throw new Error('State transition no longer exists.'); return deleteLines(source, [transition.line]); }
+export function resolveStateTransitionIndex(transitions: readonly StateTransition[], identity: StateTransitionIdentity): number {
+  if (identity.occurrenceCount !== 1) throw new Error('State transition changed remotely and can no longer be resolved safely.');
+  const matches = transitions.map((transition, index) => ({ index, transition })).filter(({ transition }) => isSameTransition(transition, identity));
+  if (matches.length !== 1 || !matches[0]) throw new Error('State transition changed remotely and can no longer be resolved safely.');
+  return matches[0].index;
+}
+export function editStateTransition(source: string, identity: StateTransitionIdentity, transition: StateTransition): string {
+  const parsed = requireState(source); const index = resolveStateTransitionIndex(parsed.transitions, identity); const current = parsed.transitions[index]; if (!current) throw new Error('State transition no longer exists.'); assertTransition(parsed, transition); return replace(source, current.line, `${indent(current.line)}${formatTransition(transition)}`);
+}
+export function deleteStateTransition(source: string, identity: StateTransitionIdentity): string { const parsed = requireState(source); const index = resolveStateTransitionIndex(parsed.transitions, identity); const transition = parsed.transitions[index]; if (!transition) throw new Error('State transition no longer exists.'); return deleteLines(source, [transition.line]); }
 
 function parseState(source: string): ParsedState | null {
   const lines = splitLines(source); const bodyStart = firstStatementIndex(lines); const headerIndex = lines.findIndex((line, index) => index >= bodyStart && line.text.trim() && !ignorable(line.text)); if (headerIndex < 0 || !HEADER.test(lines[headerIndex]?.text ?? '')) return null;
@@ -78,6 +89,7 @@ function requireState(source: string): ParsedState { const parsed = parseState(s
 function findState(parsed: ParsedState, id: string): StateRecord { const state = parsed.states.find((entry) => entry.kind === 'state' && entry.id === id); if (!state) throw new Error(`State ${id} no longer exists.`); return state; }
 function publicState(state: StateRecord): StateNode { return { id: state.id, kind: state.kind, ...(state.label ? { label: state.label } : {}) }; }
 function publicTransition(transition: TransitionRecord): StateTransition { return { from: transition.from, to: transition.to, ...(transition.label ? { label: transition.label } : {}) }; }
+function isSameTransition(left: StateTransition, right: StateTransition): boolean { return left.from === right.from && left.to === right.to && left.label === right.label; }
 function assertTransition(parsed: ParsedState, transition: StateTransition): void { if (!transition.from || !transition.to || transition.label?.includes('\n')) throw new Error('State transitions must be one line.'); const stateIds = new Set(parsed.states.map((state) => state.id)); if (!stateIds.has(transition.from) || !stateIds.has(transition.to)) throw new Error('State transitions require existing states.'); }
 function formatTransition(transition: StateTransition): string { return `${transition.from} --> ${transition.to}${transition.label?.trim() ? ` : ${transition.label.trim()}` : ''}`; }
 function normalizeId(value: string): string { const id = value.trim().replace(/[^A-Za-z0-9_.-]/g, '_').replace(/^[^A-Za-z_]+/, ''); if (!idPattern.test(id)) throw new Error('State names must be Mermaid-safe identifiers.'); return id; }

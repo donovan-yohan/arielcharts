@@ -22,6 +22,10 @@ export interface ClassRelationship {
 }
 
 export type ClassRelation = '<|--' | '<|..' | '*--' | 'o--' | '-->' | '--' | '..>' | '..' | '--*' | '--o' | '--|>' | '..|>';
+/** A semantic item can survive unrelated remote line insertion, but not ambiguity. */
+export interface ClassMemberIdentity extends ClassMember { className: string; index: number; occurrenceCount: number; }
+/** A semantic item can survive unrelated remote line insertion, but not ambiguity. */
+export interface ClassRelationshipIdentity extends ClassRelationship { index: number; occurrenceCount: number; }
 export interface ClassDiagramSnapshot { classes: ClassEntity[]; relationships: ClassRelationship[]; }
 
 interface SourceLine { end: number; raw: string; start: number; text: string; }
@@ -34,7 +38,8 @@ const NAME = '[A-Za-z_][A-Za-z0-9_.-]*';
 const namePattern = new RegExp(`^${NAME}$`);
 const CLASS = new RegExp(`^(\\s*)class\\s+(${NAME})(?:\\s*\\[\"([^\"\\r\\n]*)\"\\])?\\s*(\\{)?\\s*$`, 'i');
 const ANNOTATION = new RegExp(`^\\s*<<([^<>\\r\\n]+)>>\\s+(${NAME})\\s*$`);
-const RELATIONS: readonly ClassRelation[] = ['<|--', '<|..', '*--', 'o--', '-->', '--*', '--o', '--|>', '..>', '..|>', '--', '..'];
+export const CLASS_RELATION_OPTIONS: readonly ClassRelation[] = ['<|--', '<|..', '*--', 'o--', '-->', '--*', '--o', '--|>', '..>', '..|>', '--', '..'];
+const RELATIONS = CLASS_RELATION_OPTIONS;
 const relationshipPattern = new RegExp(`^\\s*(${NAME})\\s*(${RELATIONS.map(escape).join('|')})\\s*(${NAME})(?:\\s*:\\s*([^\\r\\n]*?))?\\s*$`);
 const MEMBER = /^(\s*)([+\-#~])?(?:(?<fieldType>[A-Za-z_][A-Za-z0-9_.<>,\[\]-]*)\s+)?(?<name>[A-Za-z_][A-Za-z0-9_.-]*)(?:\((?<signature>[^()\r\n]*)\))?(?:\s*(?::\s*|\s+)(?<returnType>[A-Za-z_][A-Za-z0-9_.<>,\[\]-]*))?(?<classifier>[*$])?\s*$/;
 
@@ -77,12 +82,25 @@ export function addClassMember(source: string, className: string, member: ClassM
   return `${source.slice(0, entry.block.close.start)}${indent(entry.block.close)}  ${formatMember(normalized)}${lineEnding(source)}${source.slice(entry.block.close.start)}`;
 }
 
-export function editClassMember(source: string, className: string, index: number, member: ClassMember): string {
-  const parsed = requireClass(source); const entry = findClass(parsed, className); const line = entry.memberLines[index]; if (!line) throw new Error('Class member no longer exists.');
+export function getClassMemberIdentity(className: string, member: ClassMember, index: number, members: readonly ClassMember[] = []): ClassMemberIdentity {
+  return { ...compactMember(member), className, index, occurrenceCount: members.length ? members.filter((candidate) => isSameMember(candidate, member)).length : 1 };
+}
+export function resolveClassMemberIndex(members: readonly ClassMember[], identity: ClassMemberIdentity): number {
+  if (identity.occurrenceCount !== 1) throw new Error('Class member changed remotely and can no longer be resolved safely.');
+  const matches = members.map((member, index) => ({ index, member })).filter(({ member }) => isSameMember(member, identity));
+  if (matches.length !== 1 || !matches[0]) throw new Error('Class member changed remotely and can no longer be resolved safely.');
+  return matches[0].index;
+}
+export function editClassMember(source: string, className: string, identity: ClassMemberIdentity, member: ClassMember): string {
+  const parsed = requireClass(source); const entry = findClass(parsed, className);
+  if (identity.className !== className) throw new Error('Class member changed remotely and can no longer be resolved safely.');
+  const index = resolveClassMemberIndex(entry.members, identity); const line = entry.memberLines[index]; if (!line) throw new Error('Class member no longer exists.');
   return replace(source, line, `${indent(line)}${formatMember(normalizeMember(member))}`);
 }
-export function deleteClassMember(source: string, className: string, index: number): string {
-  const entry = findClass(requireClass(source), className); const line = entry.memberLines[index]; if (!line) throw new Error('Class member no longer exists.'); return deleteLines(source, [line]);
+export function deleteClassMember(source: string, className: string, identity: ClassMemberIdentity): string {
+  const entry = findClass(requireClass(source), className);
+  if (identity.className !== className) throw new Error('Class member changed remotely and can no longer be resolved safely.');
+  const index = resolveClassMemberIndex(entry.members, identity); const line = entry.memberLines[index]; if (!line) throw new Error('Class member no longer exists.'); return deleteLines(source, [line]);
 }
 
 export function addClassAnnotation(source: string, className: string, annotation: string): string {
@@ -98,10 +116,19 @@ export function deleteClassAnnotation(source: string, className: string, annotat
 export function addClassRelationship(source: string, relationship: ClassRelationship): string {
   const parsed = requireClass(source); assertRelationship(parsed, relationship); return append(source, `  ${formatRelationship(relationship)}`);
 }
-export function editClassRelationship(source: string, index: number, relationship: ClassRelationship): string {
-  const parsed = requireClass(source); const current = parsed.relationships[index]; if (!current) throw new Error('Class relationship no longer exists.'); assertRelationship(parsed, relationship); return replace(source, current.line, `${indent(current.line)}${formatRelationship(relationship)}`);
+export function getClassRelationshipIdentity(relationship: ClassRelationship, index: number, relationships: readonly ClassRelationship[] = []): ClassRelationshipIdentity {
+  return { ...relationship, index, occurrenceCount: relationships.length ? relationships.filter((candidate) => isSameRelationship(candidate, relationship)).length : 1 };
 }
-export function deleteClassRelationship(source: string, index: number): string { const parsed = requireClass(source); const relationship = parsed.relationships[index]; if (!relationship) throw new Error('Class relationship no longer exists.'); return deleteLines(source, [relationship.line]); }
+export function resolveClassRelationshipIndex(relationships: readonly ClassRelationship[], identity: ClassRelationshipIdentity): number {
+  if (identity.occurrenceCount !== 1) throw new Error('Class relationship changed remotely and can no longer be resolved safely.');
+  const matches = relationships.map((relationship, index) => ({ index, relationship })).filter(({ relationship }) => isSameRelationship(relationship, identity));
+  if (matches.length !== 1 || !matches[0]) throw new Error('Class relationship changed remotely and can no longer be resolved safely.');
+  return matches[0].index;
+}
+export function editClassRelationship(source: string, identity: ClassRelationshipIdentity, relationship: ClassRelationship): string {
+  const parsed = requireClass(source); const index = resolveClassRelationshipIndex(parsed.relationships, identity); const current = parsed.relationships[index]; if (!current) throw new Error('Class relationship no longer exists.'); assertRelationship(parsed, relationship); return replace(source, current.line, `${indent(current.line)}${formatRelationship(relationship)}`);
+}
+export function deleteClassRelationship(source: string, identity: ClassRelationshipIdentity): string { const parsed = requireClass(source); const index = resolveClassRelationshipIndex(parsed.relationships, identity); const relationship = parsed.relationships[index]; if (!relationship) throw new Error('Class relationship no longer exists.'); return deleteLines(source, [relationship.line]); }
 
 function parseClass(source: string): ParsedClass | null {
   const lines = splitLines(source); const bodyStart = firstStatementIndex(lines); const headerIndex = lines.findIndex((line, index) => index >= bodyStart && line.text.trim() && !ignorable(line.text));
@@ -135,6 +162,9 @@ function requireClass(source: string): ParsedClass { const parsed = parseClass(s
 function findClass(parsed: ParsedClass, name: string): ClassRecord { const entry = parsed.classes.find((candidate) => candidate.name === name); if (!entry) throw new Error(`Class ${name} no longer exists.`); return entry; }
 function publicClass(entry: ClassRecord): ClassEntity { return { name: entry.name, ...(entry.label ? { label: entry.label } : {}), annotations: [...entry.annotations], members: entry.members.map(compactMember) }; }
 function publicRelationship(entry: RelationshipRecord): ClassRelationship { return { from: entry.from, relation: entry.relation, to: entry.to, ...(entry.label ? { label: entry.label } : {}) }; }
+function isSameMember(left: ClassMember, right: ClassMember): boolean { return memberSignature(left) === memberSignature(right); }
+function memberSignature(member: ClassMember): string { return [member.classifier ?? '', member.name, member.returnType ?? '', member.signature ?? '', member.type ?? '', member.visibility ?? ''].join('\u0000'); }
+function isSameRelationship(left: ClassRelationship, right: ClassRelationship): boolean { return left.from === right.from && left.relation === right.relation && left.to === right.to && left.label === right.label; }
 function assertRelationship(parsed: ParsedClass, relationship: ClassRelationship): void { if (!parsed.classes.some((entry) => entry.name === relationship.from) || !parsed.classes.some((entry) => entry.name === relationship.to)) throw new Error('Class relationships require existing classes.'); if (!RELATIONS.includes(relationship.relation)) throw new Error('Unsupported class relationship.'); if (relationship.label?.includes('\n')) throw new Error('Relationship labels must be one line.'); }
 function normalizeName(value: string): string { const name = value.trim().replace(/[^A-Za-z0-9_.-]/g, '_').replace(/^[^A-Za-z_]+/, ''); if (!namePattern.test(name)) throw new Error('Class names must be Mermaid-safe identifiers.'); return name; }
 function normalizeLabel(value: string): string { const label = value.trim().replace(/[\[\]\"\r\n]/g, ''); if (!label) return ''; return label; }

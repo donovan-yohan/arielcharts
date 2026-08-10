@@ -7,6 +7,7 @@ import {
   addClassAnnotation,
   addClassMember,
   addClassRelationship,
+  CLASS_RELATION_OPTIONS,
   deleteClass,
   deleteClassAnnotation,
   deleteClassMember,
@@ -15,6 +16,8 @@ import {
   editClassMember,
   editClassRelationship,
   getClassDiagramSnapshot,
+  getClassMemberIdentity,
+  getClassRelationshipIdentity,
   isClassSourceRepresentable,
 } from './class-mutations';
 
@@ -51,10 +54,12 @@ describe('class source mutations', () => {
 
   it('keeps comments and CRLF bytes outside semantic changes', () => {
     const source = SOURCE.replace(/\n/g, '\r\n').replace('  Animal <|-- Duck : inherits', '  %% keep me\r\n  Animal <|-- Duck : inherits');
-    const next = editClassRelationship(source, 0, { from: 'Animal', relation: '<|--', to: 'Duck', label: 'extends' });
+    const relationships = getClassDiagramSnapshot(source).relationships;
+    const next = editClassRelationship(source, getClassRelationshipIdentity(relationships[0]!, 0, relationships), { from: 'Animal', relation: '<|--', to: 'Duck', label: 'extends' });
     expect(next).toContain('Animal <|-- Duck : extends\r\n');
     expect(next).toContain('%% keep me');
-    expect(editClassMember(next, 'Animal', 1, { visibility: '+', name: 'speak', signature: '', returnType: 'void' }))
+    const members = getClassDiagramSnapshot(next).classes[0]!.members;
+    expect(editClassMember(next, 'Animal', getClassMemberIdentity('Animal', members[1]!, 1, members), { visibility: '+', name: 'speak', signature: '', returnType: 'void' }))
       .toContain('+speak() void');
   });
 
@@ -71,8 +76,10 @@ describe('class source mutations', () => {
     const renamed = editClass(relationship, 'Mallard', { name: 'Bird', label: 'Bird type' });
     await expectValid(renamed);
     await expectValid(deleteClassAnnotation(renamed, 'Bird', 'Service'));
-    await expectValid(deleteClassMember(renamed, 'Bird', 0));
-    await expectValid(deleteClassRelationship(renamed, 1));
+    const bird = getClassDiagramSnapshot(renamed).classes.find((entry) => entry.name === 'Bird')!;
+    await expectValid(deleteClassMember(renamed, 'Bird', getClassMemberIdentity('Bird', bird.members[0]!, 0, bird.members)));
+    const relationships = getClassDiagramSnapshot(renamed).relationships;
+    await expectValid(deleteClassRelationship(renamed, getClassRelationshipIdentity(relationships[1]!, 1, relationships)));
     const deleted = deleteClass(renamed, 'Bird');
     await expectValid(deleted);
     expect(deleted).not.toContain('Bird');
@@ -83,5 +90,21 @@ describe('class source mutations', () => {
     expect(isClassSourceRepresentable('classDiagram\n  namespace Animals {\n    class Duck\n  }')).toBe(false);
     expect(isClassSourceRepresentable('classDiagram\n  class Animal\n  click Animal href "https://example.test"')).toBe(false);
     expect(() => addClassRelationship(SOURCE, { from: 'Animal', relation: '-->' as const, to: 'Missing' })).toThrow('existing classes');
+  });
+
+  it('exposes every parsed relation and re-resolves semantic identities safely', () => {
+    expect(CLASS_RELATION_OPTIONS).toEqual(['<|--', '<|..', '*--', 'o--', '-->', '--*', '--o', '--|>', '..>', '..|>', '--', '..']);
+    const allRelations = `classDiagram\n  class Animal\n  class Duck\n${CLASS_RELATION_OPTIONS.map((relation, index) => `  Animal ${relation} Duck : r${index}`).join('\n')}`;
+    expect(getClassDiagramSnapshot(allRelations).relationships.map((relationship) => relationship.relation)).toEqual(CLASS_RELATION_OPTIONS);
+    const initial = getClassDiagramSnapshot(SOURCE);
+    const relationship = getClassRelationshipIdentity(initial.relationships[0]!, 0, initial.relationships);
+    const withRemoteInsertion = SOURCE.replace('  Animal <|-- Duck : inherits', '  Duck --> Animal : uses\n  Animal <|-- Duck : inherits');
+    expect(editClassRelationship(withRemoteInsertion, relationship, { from: 'Animal', relation: '<|--', to: 'Duck', label: 'extends' })).toContain('Animal <|-- Duck : extends');
+    const animal = initial.classes[0]!;
+    const member = getClassMemberIdentity('Animal', animal.members[1]!, 1, animal.members);
+    const memberInsertion = SOURCE.replace('    +makeSound() String', '    +int age\n    +makeSound() String');
+    expect(editClassMember(memberInsertion, 'Animal', member, { visibility: '+', name: 'speak', signature: '', returnType: 'void' })).toContain('+speak() void');
+    const ambiguous = SOURCE.replace('  Animal <|-- Duck : inherits', '  Animal <|-- Duck : inherits\n  Animal <|-- Duck : inherits');
+    expect(() => deleteClassRelationship(ambiguous, relationship)).toThrow('resolved safely');
   });
 });

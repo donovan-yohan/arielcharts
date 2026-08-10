@@ -2,6 +2,8 @@ export type RequirementKind = 'designConstraint' | 'element' | 'functionalRequir
 export type RequirementRelation = 'contains' | 'copies' | 'derives' | 'refines' | 'satisfies' | 'traces' | 'verifies';
 export interface RequirementEntity { fields: Record<string, string>; kind: RequirementKind; name: string; }
 export interface RequirementRelationship { from: string; kind: RequirementRelation; to: string; }
+/** A relationship remains addressable across an unrelated remote insertion. */
+export interface RequirementRelationshipIdentity extends RequirementRelationship { index: number; occurrenceCount: number; }
 export interface RequirementDiagramSnapshot { entities: RequirementEntity[]; relationships: RequirementRelationship[]; }
 
 interface SourceLine { end: number; raw: string; start: number; text: string; }
@@ -38,8 +40,17 @@ export function editRequirement(source: string, name: string, patch: Partial<Pic
 export function deleteRequirement(source: string, name: string): string { const parsed = requireDiagram(source); const entity = findEntity(parsed, name); return deleteRanges(source, [{ start: entity.block.open.start, end: entity.block.close.end }, ...parsed.relationships.filter((relation) => relation.from === name || relation.to === name).map((relation) => relation.line)]); }
 
 export function addRequirementRelationship(source: string, relationship: RequirementRelationship): string { const parsed = requireDiagram(source); assertRelationship(parsed, relationship); return append(source, `  ${formatRelationship(relationship)}`); }
-export function editRequirementRelationship(source: string, index: number, relationship: RequirementRelationship): string { const parsed = requireDiagram(source); const current = parsed.relationships[index]; if (!current) throw new Error('Requirement relationship no longer exists.'); assertRelationship(parsed, relationship); return replaceLine(source, current.line, `${indent(current.line)}${formatRelationship(relationship)}`); }
-export function deleteRequirementRelationship(source: string, index: number): string { const parsed = requireDiagram(source); const current = parsed.relationships[index]; if (!current) throw new Error('Requirement relationship no longer exists.'); return deleteRanges(source, [current.line]); }
+export function getRequirementRelationshipIdentity(relationship: RequirementRelationship, index: number, relationships: readonly RequirementRelationship[] = []): RequirementRelationshipIdentity {
+  return { ...relationship, index, occurrenceCount: relationships.length ? relationships.filter((candidate) => isSameRelationship(candidate, relationship)).length : 1 };
+}
+export function resolveRequirementRelationshipIndex(relationships: readonly RequirementRelationship[], identity: RequirementRelationshipIdentity): number {
+  if (identity.occurrenceCount !== 1) throw new Error('Requirement relationship changed remotely and can no longer be resolved safely.');
+  const matches = relationships.map((relationship, index) => ({ index, relationship })).filter(({ relationship }) => isSameRelationship(relationship, identity));
+  if (matches.length !== 1 || !matches[0]) throw new Error('Requirement relationship changed remotely and can no longer be resolved safely.');
+  return matches[0].index;
+}
+export function editRequirementRelationship(source: string, identity: RequirementRelationshipIdentity, relationship: RequirementRelationship): string { const parsed = requireDiagram(source); const index = resolveRequirementRelationshipIndex(parsed.relationships, identity); const current = parsed.relationships[index]; if (!current) throw new Error('Requirement relationship no longer exists.'); assertRelationship(parsed, relationship); return replaceLine(source, current.line, `${indent(current.line)}${formatRelationship(relationship)}`); }
+export function deleteRequirementRelationship(source: string, identity: RequirementRelationshipIdentity): string { const parsed = requireDiagram(source); const index = resolveRequirementRelationshipIndex(parsed.relationships, identity); const current = parsed.relationships[index]; if (!current) throw new Error('Requirement relationship no longer exists.'); return deleteRanges(source, [current.line]); }
 
 function parseRequirement(source: string): ParsedRequirement | null {
   const lines = splitLines(source); const bodyStart = firstStatementIndex(lines); const headerIndex = lines.findIndex((line, index) => index >= bodyStart && line.text.trim() && !ignorable(line.text)); if (headerIndex < 0 || !HEADER.test(lines[headerIndex]?.text ?? '')) return null;
@@ -52,7 +63,12 @@ function parseRequirement(source: string): ParsedRequirement | null {
       const field = text.match(FIELD); if (!field || Object.hasOwn(open.fields, field[1]!)) return null; open.fields[field[1]!] = field[2]!.trim(); open.lines.push(line); continue;
     }
     const declaration = text.match(DECLARATION);
-    if (declaration) { const name = declaration[3]!; if (entities.some((entry) => entry.name === name)) return null; open = { kind: declaration[2] as RequirementKind, name, fields: {}, lines: [], open: line }; continue; }
+    if (declaration) {
+      const name = declaration[3]!;
+      const kind = KINDS.find((candidate) => candidate.toLowerCase() === declaration[2]!.toLowerCase());
+      if (!kind || entities.some((entry) => entry.name === name)) return null;
+      open = { kind, name, fields: {}, lines: [], open: line }; continue;
+    }
     const relation = text.match(RELATION);
     if (relation) { relationships.push({ from: relation[1]!, kind: relation[2]!.toLowerCase() as RequirementRelation, to: relation[3]!, line }); continue; }
     return null;
@@ -65,6 +81,7 @@ function requireDiagram(source: string): ParsedRequirement { const parsed = pars
 function findEntity(parsed: ParsedRequirement, name: string): EntityRecord { const entity = parsed.entities.find((candidate) => candidate.name === name); if (!entity) throw new Error(`Requirement ${name} no longer exists.`); return entity; }
 function publicEntity(entity: EntityRecord): RequirementEntity { return { name: entity.name, kind: entity.kind, fields: { ...entity.fields } }; }
 function publicRelationship(relationship: RelationshipRecord): RequirementRelationship { return { from: relationship.from, kind: relationship.kind, to: relationship.to }; }
+function isSameRelationship(left: RequirementRelationship, right: RequirementRelationship): boolean { return left.from === right.from && left.kind === right.kind && left.to === right.to; }
 function normalizeEntity(entity: RequirementEntity): RequirementEntity { const kind = entity.kind; if (!KINDS.includes(kind)) throw new Error('Unsupported requirement kind.'); const fields = Object.fromEntries(Object.entries(entity.fields).map(([key, value]) => [normalizeFieldKey(key), normalizeFieldValue(value)])); if (!isValidFields(kind, fields)) throw new Error(kind === 'element' ? 'Elements require a type field.' : 'Requirements need id, text, risk, and verifyMethod fields.'); return { name: normalizeName(entity.name), kind, fields }; }
 function isValidFields(kind: RequirementKind, fields: Record<string, string>): boolean { if (kind === 'element') return typeof fields.type === 'string' && Boolean(fields.type); const required = ['id', 'text', 'risk', 'verifyMethod']; return required.every((key) => typeof fields[key] === 'string' && Boolean(fields[key])); }
 function assertRelationship(parsed: ParsedRequirement, relationship: RequirementRelationship): void { if (!RELATIONS.includes(relationship.kind)) throw new Error('Unsupported requirement relationship.'); if (!parsed.entities.some((entry) => entry.name === relationship.from) || !parsed.entities.some((entry) => entry.name === relationship.to)) throw new Error('Requirement relationships require existing entities.'); }

@@ -1,17 +1,103 @@
-import { describe, expect, it } from 'vitest';
-import { classifyDiagramCapability, isStructurallyEditableDiagram } from './diagram-capabilities';
+// @vitest-environment happy-dom
 
-describe('diagram capabilities', () => {
-  it('grants structural editing to parser-reported flowchart and sequence types', () => {
-    expect(classifyDiagramCapability('flowchart-v2')).toMatchObject({ kind: 'flowchart' });
-    expect(classifyDiagramCapability('Flowchart')).toMatchObject({ kind: 'flowchart' });
-    expect(classifyDiagramCapability('sequence')).toMatchObject({ kind: 'sequence' });
-    expect(isStructurallyEditableDiagram(classifyDiagramCapability('sequence'))).toBe(true);
+import { describe, expect, it } from 'vitest';
+import mermaid from 'mermaid';
+import {
+  EXTERNAL_MERMAID_PLUGIN_FAMILIES,
+  MERMAID_CAPABILITY_CATALOG_VERSION,
+  MERMAID_DIAGRAM_FAMILIES,
+  classifyDiagramCapability,
+  getDiagramCapabilityLabel,
+  getDiagramSourceModelAdapter,
+  isStructurallyEditableDiagram,
+} from './diagram-capabilities';
+import {
+  HEADER_ONLY_DETECTION_ONLY_FAMILIES,
+  MERMAID_CAPABILITY_FIXTURE_VERSION,
+  MERMAID_CAPABILITY_FIXTURES,
+} from './diagram-capabilities.fixtures';
+
+const MERMAID_11_16_1_PARSER_TYPES = [
+  'architecture', 'block', 'c4', 'class', 'classDiagram', 'cynefin', 'er', 'eventmodeling',
+  'flowchart', 'flowchart-elk', 'flowchart-v2', 'gantt', 'gitGraph', 'ishikawa', 'journey',
+  'kanban', 'mindmap', 'packet', 'pie', 'quadrantChart', 'radar', 'railroad', 'railroadAbnf',
+  'railroadEbnf', 'railroadPeg', 'requirement', 'sankey', 'sequence', 'state', 'stateDiagram',
+  'swimlane', 'timeline', 'treeView', 'treemap', 'venn', 'wardley', 'xychart',
+].sort();
+
+describe('diagram capability catalog', () => {
+  it('pins the complete Mermaid 11.16.1 visual detector matrix to 30 canonical families', async () => {
+    mermaid.initialize({ startOnLoad: false });
+    expect(MERMAID_CAPABILITY_CATALOG_VERSION).toBe('11.16.1');
+    expect(MERMAID_CAPABILITY_FIXTURE_VERSION).toBe(MERMAID_CAPABILITY_CATALOG_VERSION);
+    expect(MERMAID_DIAGRAM_FAMILIES).toHaveLength(30);
+    expect(MERMAID_CAPABILITY_FIXTURES).toHaveLength(30);
+    expect([...new Set(MERMAID_CAPABILITY_FIXTURES.map((fixture) => fixture.family))]).toHaveLength(30);
+    expect(MERMAID_DIAGRAM_FAMILIES.flatMap((family) => family.parserTypes).sort()).toEqual(MERMAID_11_16_1_PARSER_TYPES);
+    expect(MERMAID_CAPABILITY_FIXTURES.flatMap((fixture) => fixture.parserTypes).sort()).toEqual(MERMAID_11_16_1_PARSER_TYPES);
+    const headerOnlyDetectionOnlyFamilies = new Set(HEADER_ONLY_DETECTION_ONLY_FAMILIES);
+    for (const fixture of MERMAID_CAPABILITY_FIXTURES) {
+      expect(fixture.validSource.trim()).not.toBe('');
+      expect(fixture.advancedSource).not.toBe(fixture.validSource);
+      expect(fixture.invalidSource).not.toBe(fixture.validSource);
+      expect(classifyDiagramCapability(mermaid.detectType(fixture.validSource)).family).toBe(fixture.family);
+      for (const [fixtureClass, source] of [['valid', fixture.validSource], ['advanced', fixture.advancedSource]] as const) {
+        const result = await mermaid.parse(source);
+        expect(classifyDiagramCapability(result.diagramType).family, `${fixture.family} ${fixtureClass}`).toBe(fixture.family);
+      }
+      for (const parserType of fixture.parserTypes) {
+        expect(classifyDiagramCapability(parserType).family).toBe(fixture.family);
+      }
+      expect(classifyDiagramCapability(mermaid.detectType(fixture.headerOnlySource)).family).toBe(fixture.family);
+      if (headerOnlyDetectionOnlyFamilies.has(fixture.family)) {
+        await expect(mermaid.parse(fixture.headerOnlySource), `${fixture.family} header-only`).rejects.toThrow();
+      } else {
+        const result = await mermaid.parse(fixture.headerOnlySource);
+        expect(classifyDiagramCapability(result.diagramType).family).toBe(fixture.family);
+      }
+      await expect(mermaid.parse(fixture.invalidSource), `${fixture.family} invalid`).rejects.toThrow();
+    }
+    const registeredDiagramIds = mermaid.getRegisteredDiagramsMetadata().map(({ id }) => id).sort();
+    const nonVisualRegisteredIds = ['---', 'error', 'info'];
+    expect(registeredDiagramIds.filter((id) => !nonVisualRegisteredIds.includes(id))).toEqual(MERMAID_11_16_1_PARSER_TYPES);
+    expect(registeredDiagramIds).toHaveLength(MERMAID_11_16_1_PARSER_TYPES.length + nonVisualRegisteredIds.length);
   });
 
-  it('keeps unknown and future parser types generic and source-editable', () => {
-    expect(classifyDiagramCapability('timeline')).toMatchObject({ kind: 'generic' });
-    expect(classifyDiagramCapability('future-diagram-v9')).toMatchObject({ kind: 'generic' });
-    expect(classifyDiagramCapability('sequence-v2')).toMatchObject({ kind: 'generic' });
+  it('collapses renderer variants and Railroad grammars without losing parser aliases', () => {
+    expect(classifyDiagramCapability('flowchart-v2')).toMatchObject({ family: 'flowchart', kind: 'flowchart', editingMode: 'canvas' });
+    expect(classifyDiagramCapability('flowchart-elk')).toMatchObject({ family: 'flowchart', kind: 'flowchart', editingMode: 'canvas' });
+    expect(classifyDiagramCapability('classDiagram')).toMatchObject({ family: 'class', editingMode: 'source-only' });
+    expect(classifyDiagramCapability('stateDiagram')).toMatchObject({ family: 'state', editingMode: 'source-only' });
+    for (const parserType of ['railroad', 'railroadEbnf', 'railroadAbnf', 'railroadPeg']) {
+      expect(classifyDiagramCapability(parserType)).toMatchObject({ family: 'railroad', editingMode: 'source-only' });
+    }
+  });
+
+  it('keeps unknown and future parser types source-only while reserving ZenUML for plugin registration', () => {
+    expect(classifyDiagramCapability('future-diagram-v9')).toMatchObject({ family: 'unknown', kind: 'generic', editingMode: 'source-only' });
+    expect(classifyDiagramCapability('zenuml')).toMatchObject({ family: 'zenuml', kind: 'generic', editingMode: 'unavailable-plugin' });
+    expect(EXTERNAL_MERMAID_PLUGIN_FAMILIES).toHaveLength(1);
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('zenuml'))).toBe('ZenUML · plugin unavailable');
+  });
+
+  it('fails closed when a family source cannot safely represent a semantic operation', () => {
+    const flowchart = classifyDiagramCapability('flowchart-v2');
+    const sequence = classifyDiagramCapability('sequence');
+    const sourceOnly = classifyDiagramCapability('timeline');
+
+    expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A -->', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(sequence).getOperationResult('sequenceDiagram\n  A->>B: request', 'add-message')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(sequence).getOperationResult('sequenceDiagram\n  Note over A: details', 'add-message')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(sourceOnly).getOperationResult('timeline\n  2026 : Started', 'add-event')).toEqual({ supported: false, reason: 'source-only' });
+  });
+
+  it('exposes the existing canvas and semantic-form controls through the adapter contract', () => {
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('flowchart-v2'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('sequence'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('timeline'))).toBe(false);
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('flowchart-v2'))).toBe('Flowchart · editable · canvas');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('sequence'))).toBe('Sequence · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('timeline'))).toBe('Timeline · source only');
   });
 });

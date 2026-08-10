@@ -20,6 +20,9 @@ import { WorkspaceSettings } from './workspace-settings';
 import { WorkspaceTabStrip, type WorkspaceDiagramTab } from './workspace-tab-strip';
 import {
   MutationQueue,
+  applyDiff,
+  getHeaderOnlyFlowchartSnapshot,
+  isHeaderOnlyFlowchartSource,
   getPastedClipboardPositions,
   observeMutationFailure,
   parseFlowchartSnapshot,
@@ -38,7 +41,8 @@ import {
   type NodePositionsSyncMode,
 } from '../lib/diagram-layout';
 import { classifyDiagramCapability } from '../lib/diagram-capabilities';
-import { canUseFlowchartControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
+import { canUseFlowchartControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
+import { addSequenceMessage, addSequenceParticipant, getSequenceParticipants } from '../lib/sequence-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -250,7 +254,7 @@ export const AGENT_WORKFLOW_REQUIREMENTS = [
 export function reconcileSelectionForAcceptedRender(
   current: string[],
   context: 'detached-preview' | 'live',
-  outcome: 'empty' | 'flowchart' | 'generic' | 'invalid',
+  outcome: 'empty' | 'flowchart' | 'sequence' | 'generic' | 'invalid',
 ): string[] {
   return context === 'live' && outcome !== 'flowchart' ? [] : current;
 }
@@ -776,6 +780,22 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     }));
   }, [activeDiagramId, runMutation]);
 
+  const mutateCanvasSource = useCallback((mutate: (source: string) => string, detail: string) => {
+    if (!activeDiagram || !collaboration || historyPreview !== null) return;
+    try {
+      const previousText = activeDiagram.yText.toString();
+      const nextText = mutate(previousText);
+      if (nextText === previousText) return;
+      setMutationError(null);
+      collaboration.doc.transact(() => {
+        applyDiff(activeDiagram.yText, nextText, previousText);
+      }, collaborationOrigins.visual);
+      addActivityRef.current?.('edited', detail, activeDiagram.id);
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : 'The diagram update could not be applied.');
+    }
+  }, [activeDiagram, collaboration, historyPreview]);
+
   const refreshDiagramHistory = useCallback(async () => {
     if (!activeDiagramId) {
       return;
@@ -1233,20 +1253,27 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       }
 
       try {
-        const parseResult = await mermaid.parse(source);
-        const capability = classifyDiagramCapability(parseResult.diagramType);
-        if (!historyPreview && capability.kind === 'generic' && diagramId && isCurrentRender()) {
+        const sourceIsHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(source);
+        const headerOnlyFlowchartSnapshot = sourceIsHeaderOnlyFlowchart
+          ? getHeaderOnlyFlowchartSnapshot(source)
+          : null;
+        const capability = headerOnlyFlowchartSnapshot
+          ? classifyDiagramCapability('flowchart')
+          : classifyDiagramCapability((await mermaid.parse(source)).diagramType);
+        if (!historyPreview && capability.kind !== 'flowchart' && diagramId && isCurrentRender()) {
           applySourceLayoutPolicy(getAcceptedGenericSourceLayoutPolicy());
         }
-        const { svg } = await mermaid.render(getMermaidRenderId(sessionId, previewKey, renderId), source);
-        let snapshot: FlowchartSnapshot | null = null;
-        if (capability.kind === 'flowchart') {
+        let snapshot: FlowchartSnapshot | null = headerOnlyFlowchartSnapshot;
+        if (capability.kind === 'flowchart' && snapshot === null) {
           try {
             snapshot = parseFlowchartSnapshot(source);
           } catch {
             snapshot = null;
           }
         }
+        const svg = sourceIsHeaderOnlyFlowchart
+          ? ''
+          : (await mermaid.render(getMermaidRenderId(sessionId, previewKey, renderId), source)).svg;
         if (diagramId && isCurrentRender()) {
           setSelectedNodeIds((current) => reconcileSelectionForAcceptedRender(
             current,
@@ -1596,9 +1623,22 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       ? 'Offline'
       : 'Saving changes…';
   const isFlowchart = canUseFlowchartControls(renderedMermaidText, renderedPreview);
-  const diagramModeLabel = isFlowchart
-    ? 'Flowchart · editable'
-    : 'Mermaid · source only';
+  const isSequence = canUseSequenceControls(renderedMermaidText, renderedPreview);
+  const sequenceParticipants = useMemo(
+    () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
+    [isSequence, renderedMermaidText],
+  );
+  const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
+  const emptyState = !renderedMermaidText.trim()
+    ? 'chooser' as const
+    : isFlowchart && isHeaderOnlyFlowchart
+      ? 'chooser' as const
+      : isSequence && sequenceParticipants.length === 0 ? 'sequence' as const : null;
+  const diagramModeLabel = !renderedMermaidText.trim()
+    ? 'Choose diagram type'
+    : isFlowchart
+      ? 'Flowchart · editable'
+      : isSequence ? 'Sequence · editable' : 'Mermaid · source only';
   const shareButtonLabel = !roomKey
     ? 'reset key to share'
     : shareCopyState === 'copied' ? 'copied' : shareCopyState === 'error' ? 'copy failed' : 'share';
@@ -2025,10 +2065,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             key={activeDiagramId ?? 'no-active-diagram'}
             className="diagram-canvas"
             emptyMessage={renderedMermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
+            emptyState={emptyState}
             graph={renderedPreview?.flowchartSnapshot ?? null}
             interactionMode={interactionMode}
             isFlowchart={isFlowchart}
             mermaidSource={renderedMermaidText}
+            isSequence={isSequence}
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
@@ -2041,11 +2083,25 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.addNode(label, { shape }));
             }}
+            onAddSequenceMessage={(from, to, message) => {
+              mutateCanvasSource((source) => addSequenceMessage(source, from, to, message), 'Added a sequence message');
+            }}
+            onAddSequenceParticipant={(label) => {
+              mutateCanvasSource((source) => addSequenceParticipant(source, label), 'Added a sequence participant');
+            }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onChangeNodeShape={(nodeId, shape) => {
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.changeNodeShape(nodeId, shape));
+            }}
+            onChooseDiagramType={(type) => {
+              if (type === 'flowchart') {
+                const queue = mutationQueueRef.current;
+                if (queue) runVisualSourceMutation(queue.addNode(), 'Started a flowchart diagram');
+              } else {
+                mutateCanvasSource(() => 'sequenceDiagram', 'Started a sequence diagram');
+              }
             }}
             onDeleteNodes={(ids) => {
               for (const id of ids) {
@@ -2092,6 +2148,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
               if (queue) runVisualSourceMutation(queue.ungroupSubgraph(id));
             }}
             selectedNodeIds={selectedNodeIds}
+            sequenceParticipants={sequenceParticipants}
             svg={renderedPreview?.svg ?? ''}
             theme={resolvedTheme}
             onUndo={handleCanvasUndo}

@@ -3,11 +3,32 @@ import * as Y from 'yjs';
 import {
   MutationQueue,
   createDiagramClipboardPayload,
+  getHeaderOnlyFlowchartSnapshot,
+  isHeaderOnlyFlowchartSource,
   getPastedClipboardPositions,
   getDiagramEdgeIdentity,
   observeMutationFailure,
   parseFlowchartSnapshot,
 } from './diagram-mutations';
+
+describe('header-only flowchart source', () => {
+  it('recognizes only an ordinary direction-only Mermaid flowchart', () => {
+    expect(getHeaderOnlyFlowchartSnapshot('flowchart LR')).toEqual({
+      direction: 'LR',
+      links: [],
+      nodeIds: [],
+      nodes: [],
+      subgraphs: [],
+    });
+    expect(getHeaderOnlyFlowchartSnapshot('sequenceDiagram')).toBeNull();
+    expect(getHeaderOnlyFlowchartSnapshot('flowchart LR\n  A[Node]')).toBeNull();
+    expect(getHeaderOnlyFlowchartSnapshot('flowchart LR\n  classDef hot fill:red')).toBeNull();
+    expect(getHeaderOnlyFlowchartSnapshot('flowchart LR\n  subgraph Empty\n  end')).toBeNull();
+    expect(isHeaderOnlyFlowchartSource('graph TD\n  %% no nodes yet')).toBe(true);
+    expect(isHeaderOnlyFlowchartSource('flowchart RL\r\n\r\n  %% no nodes yet\r\n')).toBe(true);
+    expect(isHeaderOnlyFlowchartSource('graph TD\n  classDef hot fill:red')).toBe(false);
+  });
+});
 
 function setText(yText: Y.Text, text: string) {
   yText.delete(0, yText.length);

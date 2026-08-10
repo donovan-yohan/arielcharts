@@ -1190,6 +1190,207 @@ code {
   color: var(--ink-muted);
 }
 
+.canvas-empty-chooser,
+.canvas-sequence-editor.is-centered {
+  align-items: center;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.canvas-empty-chooser-card {
+  background: color-mix(in srgb, var(--control-surface) 94%, transparent);
+  border: 1px solid var(--control-border);
+  border-radius: 14px;
+  display: grid;
+  gap: 8px;
+  max-width: min(420px, calc(100% - 32px));
+  padding: 18px;
+  pointer-events: auto;
+  width: 100%;
+}
+
+.canvas-empty-chooser-card > span,
+.canvas-sequence-editor span,
+.canvas-sequence-editor small {
+  color: var(--ink-muted);
+  font: 11px/1.2 var(--font-mono);
+}
+
+.canvas-empty-chooser-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 6px;
+}
+
+.canvas-empty-chooser-actions button {
+  align-items: center;
+  background: var(--surface-canvas);
+  border: 1px solid var(--control-border);
+  border-radius: 9px;
+  color: var(--ink);
+  display: flex;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px;
+  text-align: left;
+}
+
+.canvas-empty-chooser-actions button:hover {
+  border-color: var(--selection);
+}
+
+.canvas-empty-chooser-actions button span {
+  display: grid;
+  gap: 2px;
+}
+
+.canvas-empty-chooser-actions small {
+  color: var(--ink-muted);
+}
+
+.canvas-sequence-editor {
+  align-items: center;
+  bottom: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  left: 50%;
+  max-width: calc(100% - 24px);
+  pointer-events: auto;
+  position: absolute;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 24;
+}
+
+.canvas-sequence-editor.is-centered {
+  bottom: auto;
+  left: auto;
+  position: static;
+  transform: none;
+}
+
+.canvas-sequence-editor form,
+.canvas-sequence-editor.is-centered > small {
+  align-items: center;
+  background: var(--control-surface);
+  border: 1px solid var(--control-border);
+  border-radius: 9px;
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  pointer-events: auto;
+}
+
+.canvas-sequence-editor input,
+.canvas-sequence-editor select,
+.canvas-sequence-editor button {
+  background: var(--surface-canvas);
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  color: var(--ink);
+  font: 11px/1.2 var(--font-mono);
+  min-height: 28px;
+  min-width: 0;
+  padding: 4px 6px;
+}
+
+.canvas-sequence-editor input {
+  width: 118px;
+}
+
+.canvas-sequence-editor button {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  padding: 4px;
+  width: 28px;
+}
+
+@media (max-width: 420px) {
+  .canvas-empty-chooser-card {
+    max-width: calc(100% - 16px);
+    padding: 12px;
+  }
+
+  .canvas-empty-chooser-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .canvas-sequence-editor {
+    display: grid;
+    left: 8px;
+    max-width: none;
+    right: 8px;
+    transform: none;
+    width: auto;
+  }
+
+  .canvas-sequence-editor form {
+    box-sizing: border-box;
+    display: grid;
+    width: 100%;
+  }
+
+  .canvas-sequence-editor.is-centered {
+    left: auto;
+    margin-inline: auto;
+    right: auto;
+    width: calc(100% - 16px);
+  }
+
+  .canvas-sequence-participant-form {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .canvas-sequence-participant-form > span {
+    grid-column: 1 / -1;
+  }
+
+  .canvas-sequence-participant-form input {
+    grid-column: 1;
+    width: auto;
+  }
+
+  .canvas-sequence-participant-form button {
+    grid-column: 2;
+  }
+
+  .canvas-sequence-message-form {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) 44px;
+  }
+
+  .canvas-sequence-message-form > span:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .canvas-sequence-message-form > select:first-of-type {
+    grid-column: 1;
+  }
+
+  .canvas-sequence-message-form > span[aria-hidden='true'] {
+    grid-column: 2;
+  }
+
+  .canvas-sequence-message-form > select:last-of-type {
+    grid-column: 3 / 5;
+  }
+
+  .canvas-sequence-message-form input {
+    grid-column: 1 / 4;
+    width: auto;
+  }
+
+  .canvas-sequence-message-form button {
+    grid-column: 4;
+  }
+}
+
 .diagram-canvas-svg--reactflow svg g.cluster,
 .diagram-canvas-svg--reactflow svg g.node,
 .diagram-canvas-svg--reactflow svg .edgePaths,
@@ -2309,6 +2510,11 @@ code {
 
   .canvas-empty-add-button {
     min-height: 44px;
+  }
+
+  .canvas-sequence-editor button {
+    min-height: 44px;
+    width: 44px;
   }
 
   [data-testid='canvas-controls-toolbar'] {

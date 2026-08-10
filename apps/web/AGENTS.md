@@ -15,8 +15,9 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
   rename draft, theme preference/system resolution, and transient drag state
   are local; remote updates must not take them over.
 - Mermaid source is canonical. Flowchart canvas mutations serialize through
-  `MutationQueue` and minimal Y.Text diffs. Other Mermaid diagrams are
-  currently source-editable with flowchart mutation controls withheld.
+  `MutationQueue`; sequence participant/message controls serialize through
+  `sequence-mutations.ts`. Both apply minimal Y.Text diffs. Other Mermaid
+  diagrams remain source-editable with structural controls withheld.
 - Source and activity flyouts overlay the canvas without moving outer anchors
   or camera state. Closing returns focus to the originating toggle.
 - Revision history is read from the server-private journal through
@@ -37,6 +38,8 @@ path; `diagram-layout.ts` owns per-diagram node-position encoding.
 ## Mermaid and collaboration invariants
 
 - Mermaid parser-result classification decides whether controls are structural.
+  Empty source and header-only flowcharts derive their chooser from source alone;
+  choosing a type writes ordinary Mermaid rather than durable UI metadata.
   Derived SVG, kind, and errors are kept in a local per-diagram preview
   registry; stale or invalid source remains source-only.
 - React Flow is a controlled view: Mermaid/parser output owns stable node ids,

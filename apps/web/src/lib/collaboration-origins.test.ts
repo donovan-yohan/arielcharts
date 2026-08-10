@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
+import { applyDiff } from './diagram-mutations';
+import { addSequenceParticipant } from './sequence-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -66,5 +68,22 @@ describe('collaboration transaction origins', () => {
     expect(doc.getText('first').toString()).toBe('first');
     destroyDiagramUndoManager(first);
     destroyDiagramUndoManager(second);
+  });
+
+  it('keeps sequence form mutations in the local visual undo stack', () => {
+    const doc = new Y.Doc();
+    const source = doc.getText('sequence-source');
+    const undoManager = createDiagramUndoManager(source, doc.getMap('sequence-layout'));
+    source.insert(0, 'sequenceDiagram');
+    undoManager.stopCapturing();
+
+    const previous = source.toString();
+    const next = addSequenceParticipant(previous, 'Browser');
+    doc.transact(() => { applyDiff(source, next, previous); }, collaborationOrigins.visual);
+
+    expect(undoManager.undoStack).toHaveLength(1);
+    undoManager.undo();
+    expect(source.toString()).toBe('sequenceDiagram');
+    destroyDiagramUndoManager(undoManager);
   });
 });

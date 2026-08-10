@@ -131,6 +131,22 @@ export function parseFlowchartSnapshot(text: string): FlowchartSnapshot {
   return getFlowchartSnapshot(Flowchart.parse(text));
 }
 
+export function getHeaderOnlyFlowchartSnapshot(text: string): FlowchartSnapshot | null {
+  const match = text.match(/^\s*(?:flowchart|graph)[ \t]+(TB|TD|BT|RL|LR)[ \t]*(?:%%[^\r\n]*)?(?:(?:\r\n|\n|\r)[ \t]*(?:%%[^\r\n]*)?)*$/iu);
+  if (!match?.[1]) return null;
+  return {
+    direction: match[1].toUpperCase() as FlowchartDirection,
+    links: [],
+    nodeIds: [],
+    nodes: [],
+    subgraphs: [],
+  };
+}
+
+export function isHeaderOnlyFlowchartSource(text: string): boolean {
+  return getHeaderOnlyFlowchartSnapshot(text) !== null;
+}
+
 export function getDiagramEdgeIdentity(link: FlowchartLink, index: number): DiagramEdgeIdentity {
   return {
     id: link.id,

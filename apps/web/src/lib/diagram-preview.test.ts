@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canUseFlowchartControls, DiagramPreviewRegistry, type DiagramPreview } from './diagram-preview';
+import { canUseFlowchartControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from './diagram-preview';
 
 const flowchartPreview: DiagramPreview = {
   capability: { diagramType: 'flowchart-v2', kind: 'flowchart' },
@@ -11,11 +11,33 @@ const flowchartPreview: DiagramPreview = {
 
 describe('DiagramPreviewRegistry', () => {
   it('permits structural controls only for the current representable flowchart source', () => {
-    expect(canUseFlowchartControls('', null)).toBe(true);
+    expect(canUseFlowchartControls('', null)).toBe(false);
     expect(canUseFlowchartControls(flowchartPreview.source, flowchartPreview)).toBe(true);
     expect(canUseFlowchartControls('flowchart TD\nA-->', flowchartPreview)).toBe(false);
     expect(canUseFlowchartControls('sequenceDiagram\nA->>B: request', flowchartPreview)).toBe(false);
     expect(canUseFlowchartControls(flowchartPreview.source, { ...flowchartPreview, flowchartSnapshot: null })).toBe(false);
+  });
+
+  it('permits sequence controls only for the current parser-confirmed source', () => {
+    const sequencePreview: DiagramPreview = {
+      capability: { diagramType: 'sequence', kind: 'sequence' },
+      diagramId: 'sequence',
+      flowchartSnapshot: null,
+      source: 'sequenceDiagram\nA->>B: request',
+      svg: '<svg />',
+    };
+    expect(canUseSequenceControls(sequencePreview.source, sequencePreview)).toBe(true);
+    expect(canUseSequenceControls('sequenceDiagram', sequencePreview)).toBe(false);
+    expect(canUseSequenceControls('', null)).toBe(false);
+
+    const headerOnlyPreview = { ...sequencePreview, source: 'sequenceDiagram' };
+    expect(canUseSequenceControls(headerOnlyPreview.source, headerOnlyPreview)).toBe(true);
+
+    const quotedParticipantPreview = {
+      ...sequencePreview,
+      source: 'sequenceDiagram\nparticipant "Web browser" as Browser\n"Web browser"->>API: request',
+    };
+    expect(canUseSequenceControls(quotedParticipantPreview.source, quotedParticipantPreview)).toBe(false);
   });
 
   it('isolates last-known-good previews by stable diagram id', () => {
@@ -28,7 +50,7 @@ describe('DiagramPreviewRegistry', () => {
       svg: '<svg id="flow" />',
     });
     previews.set({
-      capability: { diagramType: 'sequence', kind: 'generic' },
+      capability: { diagramType: 'sequence', kind: 'sequence' },
       diagramId: 'api',
       flowchartSnapshot: null,
       source: 'sequenceDiagram\nBrowser->>Gateway: request',
@@ -36,7 +58,7 @@ describe('DiagramPreviewRegistry', () => {
     });
 
     expect(previews.get('flow')?.svg).toContain('flow');
-    expect(previews.get('api')?.capability.kind).toBe('generic');
+    expect(previews.get('api')?.capability.kind).toBe('sequence');
     previews.clear('flow');
     expect(previews.get('flow')).toBeNull();
     expect(previews.get('api')?.svg).toContain('api');
@@ -45,7 +67,7 @@ describe('DiagramPreviewRegistry', () => {
   it('prunes deleted tabs and their failures so an ID can be safely recreated', () => {
     const previews = new DiagramPreviewRegistry();
     previews.set({
-      capability: { diagramType: 'sequence', kind: 'generic' },
+      capability: { diagramType: 'sequence', kind: 'sequence' },
       diagramId: 'deleted',
       flowchartSnapshot: null,
       source: 'sequenceDiagram',
@@ -73,7 +95,7 @@ describe('DiagramPreviewRegistry', () => {
   it('resets previews and errors between sessions', () => {
     const previews = new DiagramPreviewRegistry();
     previews.set({
-      capability: { diagramType: 'sequence', kind: 'generic' },
+      capability: { diagramType: 'sequence', kind: 'sequence' },
       diagramId: 'main',
       flowchartSnapshot: null,
       source: 'sequenceDiagram',

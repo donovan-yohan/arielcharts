@@ -62,17 +62,31 @@ async function closeSourceFlyout(page: Page): Promise<void> {
 async function replaceSource(page: Page, source: string): Promise<void> {
   const editor = await ensureSourceFlyoutOpen(page);
   await editor.click();
-  await page.keyboard.press('Control+A');
-  await page.keyboard.type(source, { delay: 1 });
+  await page.keyboard.press('ControlOrMeta+A');
+  const pasteHandled = await editor.evaluate((element, text) => {
+    const clipboard = new DataTransfer();
+    clipboard.setData('text/plain', text);
+    return !element.dispatchEvent(new ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: clipboard,
+    }));
+  }, source);
+  if (!pasteHandled) throw new Error('CodeMirror did not handle the source replacement paste event.');
 }
 
-async function waitForCanvas(page: Page, mode: 'flowchart' | 'generic'): Promise<void> {
+async function waitForCanvas(page: Page, mode: 'flowchart' | 'sequence' | 'generic'): Promise<void> {
   await page.waitForFunction((expectedMode) => {
     const modeLabel = document.querySelector('[data-testid="diagram-mode"]')?.textContent ?? '';
     const svg = document.querySelector('.diagram-canvas-svg svg');
     const structuralTools = document.querySelector('form[aria-label="Add Mermaid node"]');
+    const sequenceTools = document.querySelector('[data-testid="sequence-editor-controls"]');
     return !!svg?.getAttribute('viewBox')
-      && (expectedMode === 'flowchart' ? !!structuralTools && modeLabel.includes('editable') : !structuralTools && modeLabel.includes('source only'));
+      && (expectedMode === 'flowchart'
+        ? !!structuralTools && !sequenceTools && modeLabel.includes('Flowchart · editable')
+        : expectedMode === 'sequence'
+          ? !structuralTools && !!sequenceTools && modeLabel.includes('Sequence · editable')
+          : !structuralTools && !sequenceTools && modeLabel.includes('source only'));
   }, mode, { timeout: 15000 });
 }
 
@@ -139,6 +153,27 @@ async function observeButtonAbsentFor(page: Page, ariaLabel: string, durationMs:
       timer = window.setTimeout(() => { finish(true); }, ${JSON.stringify(durationMs)});
     });
   })()`);
+}
+
+async function assertNarrowSequenceControls(page: Page): Promise<void> {
+  await closeSourceFlyout(page);
+  await page.setViewportSize({ height: 720, width: 320 });
+  await page.getByTestId('sequence-editor-controls').waitFor({ state: 'visible', timeout: 15_000 });
+  const layout = await page.evaluate(() => {
+    const forms = [...document.querySelectorAll<HTMLElement>('[data-testid="sequence-editor-controls"] form')];
+    return {
+      documentFits: document.documentElement.scrollWidth <= window.innerWidth,
+      formCount: forms.length,
+      formsFit: forms.every((form) => {
+        const rect = form.getBoundingClientRect();
+        return rect.left >= -0.5 && rect.right <= window.innerWidth + 0.5;
+      }),
+    };
+  });
+  if (!layout.documentFits || !layout.formsFit || layout.formCount !== 2) {
+    throw new Error(`Sequence controls overflowed a 320px viewport: ${JSON.stringify(layout)}`);
+  }
+  await page.setViewportSize({ height: 900, width: 1400 });
 }
 
 interface GenericFitBounds {
@@ -268,10 +303,11 @@ async function assertSameTabKindTransition(page: Page): Promise<SameTabKindTrans
   await simplifyLayout.waitFor({ state: 'visible', timeout: 10000 });
 
   await replaceSource(page, API_SEQUENCE_FIXTURE);
-  await waitForCanvas(page, 'generic');
+  await waitForCanvas(page, 'sequence');
   const genericWithholdsStructure = await page.locator('form[aria-label="Add Mermaid node"]').count() === 0
     && await page.locator('button[aria-label="Simplify layout"]').count() === 0
-    && await page.locator('button[aria-label="Connect nodes"]').count() === 0;
+    && await page.locator('button[aria-label="Connect nodes"]').count() === 0
+    && await page.getByTestId('sequence-editor-controls').count() > 0;
 
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
@@ -300,6 +336,24 @@ async function validateSequenceCanvas() {
     const diagnostics = collectReactFlowDiagnostics(page);
     const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3003';
     const mcpUrl = process.env.E2E_MCP_URL ?? 'http://localhost:4000/mcp';
+    const declarationPage = await context.newPage();
+    try {
+      const declarationRoom = await createRoom(new URL(mcpUrl).origin, baseUrl);
+      await declarationPage.goto(roomShareUrl(baseUrl, declarationRoom), { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      const declarationOnlyFlowchart = `flowchart TD
+  classDef hot fill:red
+  subgraph Empty
+  end`;
+      await replaceSource(declarationPage, declarationOnlyFlowchart);
+      await waitForCanvas(declarationPage, 'flowchart');
+      const declarationSource = await canonicalSource(declarationPage);
+      const declarationChooserCount = await declarationPage.getByTestId('diagram-type-chooser').count();
+      if (declarationSource !== declarationOnlyFlowchart || declarationChooserCount !== 0) {
+        throw new Error(`Declaration-only flowchart source was mistaken for the header-only chooser state: source=${JSON.stringify(declarationSource)} chooser=${declarationChooserCount}`);
+      }
+    } finally {
+      await declarationPage.close();
+    }
     const room = await createRoom(new URL(mcpUrl).origin, baseUrl);
     await page.goto(roomShareUrl(baseUrl, room), { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await replaceSource(page, FLOWCHART_FIXTURE);
@@ -320,8 +374,103 @@ async function validateSequenceCanvas() {
     assertNoReactFlowError015(diagnostics.reactFlowError015, 'during a single-node drag');
 
     await createBlankDiagram(page);
-    await replaceSource(page, API_SEQUENCE_FIXTURE);
+    const chooser = page.getByTestId('diagram-type-chooser');
+    await chooser.waitFor({ state: 'visible', timeout: 15_000 });
+    await chooser.getByRole('button', { name: /Flowchart/ }).click();
+    await waitForCanvas(page, 'flowchart');
+    const onlyFlowchartNode = page.locator('.react-flow__node').first();
+    await onlyFlowchartNode.click();
+    await page.getByRole('button', { name: 'Delete selected nodes', exact: true }).click();
+    await chooser.waitFor({ state: 'visible', timeout: 15_000 });
+    const zeroNodeSource = await canonicalSource(page);
+    if (!/^flowchart\s+/i.test(zeroNodeSource) || await page.locator('.react-flow__node').count() !== 0) {
+      throw new Error(`Deleting the final flowchart node did not return to the source-derived chooser: ${zeroNodeSource}`);
+    }
+    await chooser.getByRole('button', { name: /Sequence/ }).click();
+    await page.getByTestId('sequence-editor-controls').waitFor({ state: 'visible', timeout: 15_000 });
+    await page.getByLabel('New sequence participant').fill('Browser');
+    await page.getByRole('button', { name: 'Add sequence participant', exact: true }).click();
+    await page.getByLabel('New sequence participant').fill('API');
+    await page.getByRole('button', { name: 'Add sequence participant', exact: true }).click();
+    await page.getByLabel('Message sender').selectOption('Browser');
+    await page.getByLabel('Message recipient').selectOption('API');
+    await page.getByRole('textbox', { name: 'Sequence message', exact: true }).fill('Request');
+    await page.getByRole('button', { name: 'Add sequence message', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('.diagram-canvas-svg')?.textContent?.includes('Request'), undefined, { timeout: 15_000 });
+    const editableSequenceSource = await canonicalSource(page);
+    if (!editableSequenceSource.includes('participant Browser as Browser')
+      || !editableSequenceSource.includes('Browser->>API: Request')) {
+      throw new Error(`Sequence controls did not write ordinary Mermaid source: ${editableSequenceSource}`);
+    }
+
+    const frontmatterSequence = `---
+title: Handshake
+---
+sequenceDiagram; A<<->>B: ping`;
+    await replaceSource(page, frontmatterSequence);
+    await waitForCanvas(page, 'sequence');
+    const senderOptions = await page.getByLabel('Message sender').locator('option').allTextContents();
+    if (senderOptions.join(',') !== 'A,B') {
+      throw new Error(`Bidirectional semicolon participants were not exposed: ${senderOptions.join(',')}`);
+    }
+    await page.getByLabel('New sequence participant').fill('Ops; #"<team>" & lead');
+    await page.getByRole('button', { name: 'Add sequence participant', exact: true }).click();
+    await page.getByLabel('Message sender').selectOption('A');
+    await page.getByLabel('Message recipient').selectOption('B');
+    await page.getByRole('textbox', { name: 'Sequence message', exact: true }).fill('pong; #"<ok>" & done');
+    await page.getByRole('button', { name: 'Add sequence message', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('.diagram-canvas-svg')?.textContent?.includes('pong'), undefined, { timeout: 15_000 });
+    const hardenedSequenceSource = await canonicalSource(page);
+    const expectedHardenedSequence = `${frontmatterSequence}
+  participant OpsTeamLead as Ops； ＃”‹team›” ＆ lead
+  A->>B: pong； ＃”‹ok›” ＆ done`;
+    if (hardenedSequenceSource !== expectedHardenedSequence) {
+      throw new Error(`Sequence append altered prior bytes or emitted unsafe statements: ${hardenedSequenceSource}`);
+    }
+    await assertNarrowSequenceControls(page);
+
+    const quotedParticipantSequence = `sequenceDiagram
+  participant "Web browser" as Browser
+  "Web browser"->>API: request`;
+    await replaceSource(page, quotedParticipantSequence);
     await waitForCanvas(page, 'generic');
+    if (await page.getByTestId('sequence-editor-controls').count() !== 0
+      || await page.getByTestId('diagram-type-chooser').count() !== 0
+      || await page.locator('[aria-label="Interactive diagram canvas"] .empty-state').count() !== 0) {
+      throw new Error('Nonrepresentable quoted sequence IDs exposed structural or empty-state controls.');
+    }
+
+    for (const delimiter of ['#', '%', '%{']) {
+      const quotedImplicitSequence = `sequenceDiagram
+  "Web${delimiter}browser"->>API: request`;
+      await replaceSource(page, quotedImplicitSequence);
+      await waitForCanvas(page, 'generic');
+      if (await page.getByTestId('sequence-editor-controls').count() !== 0
+        || await page.getByTestId('diagram-type-chooser').count() !== 0
+        || await page.locator('[aria-label="Interactive diagram canvas"] .empty-state').count() !== 0) {
+        throw new Error(`Quoted implicit sequence ID containing ${JSON.stringify(delimiter)} did not remain source-only.`);
+      }
+    }
+
+    const hashParticipantSequence = `sequenceDiagram
+  participant A#comment
+  A#comment->>B: hi`;
+    await replaceSource(page, hashParticipantSequence);
+    await waitForCanvas(page, 'generic');
+    if (await page.getByTestId('sequence-editor-controls').count() !== 0) {
+      throw new Error('A hash-bearing participant id did not remain source-only.');
+    }
+
+    const noteOnlySequence = `sequenceDiagram
+  Note over A,B: hello`;
+    await replaceSource(page, noteOnlySequence);
+    await waitForCanvas(page, 'generic');
+    if (await page.getByTestId('sequence-editor-controls').count() !== 0) {
+      throw new Error('A Note-only sequence did not remain source-only.');
+    }
+
+    await replaceSource(page, API_SEQUENCE_FIXTURE);
+    await waitForCanvas(page, 'sequence');
     await closeSourceFlyout(page);
     await page.waitForTimeout(300);
 
@@ -358,7 +507,7 @@ async function validateSequenceCanvas() {
     const flowchartRestored = (await page.locator('.diagram-canvas-svg svg').textContent())?.includes('Main') ?? false;
 
     await tabs.nth(1).click();
-    await waitForCanvas(page, 'generic');
+    await waitForCanvas(page, 'sequence');
     const invalidSource = 'not valid Mermaid';
     const lastValidSvg = await waitForStableSvgInnerHtml(page, 'Generic last-valid preview');
     await replaceSource(page, invalidSource);

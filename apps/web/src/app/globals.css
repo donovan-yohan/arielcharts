@@ -1186,6 +1186,15 @@ code {
   outline-offset: -2px;
 }
 
+.diagram-canvas[data-panning='true']:focus-visible {
+  outline: none;
+}
+
+.diagram-node-target:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
 .diagram-canvas .empty-state {
   color: var(--ink-muted);
 }
@@ -1525,7 +1534,7 @@ code {
   outline-offset: 3px;
 }
 
-.mermaid-flow-node.is-focused .mermaid-flow-node-surface {
+.mermaid-flow-node:focus-visible .mermaid-flow-node-surface {
   outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }

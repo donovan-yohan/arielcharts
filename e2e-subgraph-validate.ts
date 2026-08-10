@@ -123,7 +123,6 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
     const selectedNode = page.locator('.react-flow__node[data-id="A"] .mermaid-flow-node');
     const focusedNode = page.locator('.react-flow__node[data-id="B"] .mermaid-flow-node');
     await selectedNode.click();
-    await focusedNode.focus();
     await focusedNode.press('F2');
     const focusedNodeEditor = page.locator('input[placeholder="node label"]');
     await focusedNodeEditor.waitFor({ state: 'visible', timeout: 5_000 });
@@ -131,7 +130,6 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
       'F2 on the focused node renamed the selected node instead of the focused node.');
     await focusedNodeEditor.press('Escape');
 
-    await innerHeader.focus();
     await innerHeader.press('F2');
     const focusedSectionEditor = page.getByRole('textbox', { name: 'Section label', exact: true });
     await focusedSectionEditor.waitFor({ state: 'visible', timeout: 5_000 });
@@ -144,20 +142,12 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
       document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'true'
     ), undefined, { timeout: 5_000 });
     const boundsSelected = await innerSection.getAttribute('data-selected') === 'true';
-    await innerHeader.focus();
-    await page.waitForFunction(() => (
-      document.activeElement?.getAttribute('data-testid') === 'canvas-subgraph-header-inner'
-    ), undefined, { timeout: 5_000 });
-    await page.keyboard.press('Escape');
+    await innerHeader.press('Escape');
     await page.waitForFunction(() => (
       document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'false'
       && !document.querySelector('[data-testid="canvas-subgraph-toolbar"]')
     ), undefined, { timeout: 5_000 });
-    await innerHeader.focus();
-    await page.waitForFunction(() => (
-      document.activeElement?.getAttribute('data-testid') === 'canvas-subgraph-header-inner'
-    ), undefined, { timeout: 5_000 });
-    await page.keyboard.press('Enter');
+    await innerHeader.press('Enter');
     await page.waitForFunction(() => (
       document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'true'
       && document.querySelector('[data-testid="canvas-subgraph-toolbar"]')
@@ -165,16 +155,12 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
     ), undefined, { timeout: 5_000 });
     const enterSelected = await innerSection.getAttribute('data-selected') === 'true';
     const enterToolbarVisible = await page.getByTestId('canvas-subgraph-toolbar').isVisible();
-    await page.keyboard.press('Escape');
+    await innerHeader.press('Escape');
     await page.waitForFunction(() => (
       document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'false'
       && !document.querySelector('[data-testid="canvas-subgraph-toolbar"]')
     ), undefined, { timeout: 5_000 });
-    await innerHeader.focus();
-    await page.waitForFunction(() => (
-      document.activeElement?.getAttribute('data-testid') === 'canvas-subgraph-header-inner'
-    ), undefined, { timeout: 5_000 });
-    await page.keyboard.press('Space');
+    await innerHeader.press('Space');
     await page.waitForFunction(() => (
       document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'true'
       && document.querySelector('[data-testid="canvas-subgraph-toolbar"]')
@@ -185,11 +171,7 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
 
     const editButton = page.getByRole('button', { name: 'Edit section label', exact: true });
     await editButton.waitFor({ state: 'visible', timeout: 5_000 });
-    await editButton.focus();
-    await page.waitForFunction(() => (
-      document.activeElement?.getAttribute('data-testid') === 'canvas-action-edit-section-label'
-    ), undefined, { timeout: 5_000 });
-    await page.keyboard.press('Enter');
+    await editButton.press('Enter');
     const input = page.getByRole('textbox', { name: 'Section label', exact: true });
     await input.fill('Renamed inner');
     await input.press('Enter');

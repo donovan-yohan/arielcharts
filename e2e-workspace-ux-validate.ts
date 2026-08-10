@@ -425,6 +425,74 @@ async function closeWorkspaceSettings(page: Page): Promise<void> {
   await waitForFocusedLocator(page, trigger, 'Closing workspace settings');
 }
 
+async function beginWorkspaceSettingsTransitionTrace(page: Page): Promise<void> {
+  await page.evaluate(`(() => {
+    const trace = [];
+    const readTarget = (element) => element instanceof Element
+      ? element.getAttribute('data-testid') || element.id || element.getAttribute('value') || element.tagName.toLowerCase()
+      : null;
+    const snapshot = (label, event) => {
+      if (trace.length >= 32) return;
+      trace.push({
+        active: readTarget(document.activeElement),
+        defaultPrevented: event?.defaultPrevented ?? null,
+        dialogCount: document.querySelectorAll('[data-testid="workspace-settings-dialog"]').length,
+        event: event?.type ?? null,
+        expanded: document.querySelector('[data-testid="workspace-settings-trigger"]')?.getAttribute('aria-expanded') ?? null,
+        key: event instanceof KeyboardEvent ? event.key : null,
+        label,
+        overlays: document.querySelectorAll('.modal-backdrop, [role="dialog"]:not(#workspace-settings-dialog)').length,
+        target: readTarget(event?.target ?? null),
+      });
+    };
+    const listener = (event) => snapshot('event', event);
+    const eventTypes = ['keydown', 'keyup', 'pointerdown', 'pointerup', 'click'];
+    for (const type of eventTypes) document.addEventListener(type, listener, true);
+    const observer = new MutationObserver(() => snapshot('mutation', null));
+    const trigger = document.querySelector('[data-testid="workspace-settings-trigger"]');
+    if (trigger) observer.observe(trigger, { attributeFilter: ['aria-expanded'], attributes: true });
+    observer.observe(document.body, { childList: true, subtree: true });
+    snapshot('start', null);
+    window.__workspaceSettingsTransitionTrace = { eventTypes, listener, observer, trace };
+  })()`);
+}
+
+async function finishWorkspaceSettingsTransitionTrace(page: Page): Promise<unknown> {
+  return page.evaluate(`(() => {
+    const state = window.__workspaceSettingsTransitionTrace;
+    if (!state) return [];
+    state.observer.disconnect();
+    for (const type of state.eventTypes) document.removeEventListener(type, state.listener, true);
+    const trace = state.trace;
+    delete window.__workspaceSettingsTransitionTrace;
+    return trace;
+  })()`);
+}
+
+async function closeThemeSettingsWithEscape(
+  page: Page,
+  preference: 'system' | 'light' | 'dark',
+): Promise<void> {
+  const dialog = page.getByTestId(SETTINGS_DIALOG_TEST_ID);
+  const label = preference[0]?.toUpperCase() + preference.slice(1);
+  const radio = dialog.getByRole('radio', { name: new RegExp(`^${label}(?:\\s|$)`, 'u') });
+  await beginWorkspaceSettingsTransitionTrace(page);
+  try {
+    await radio.press('Escape');
+    await dialog.waitFor({ state: 'detached', timeout: 15_000 });
+    const trigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false', { timeout: 5_000 });
+    await waitForFocusedLocator(page, trigger, `Closing ${preference} theme settings with Escape`);
+  } catch (error) {
+    const trace = await finishWorkspaceSettingsTransitionTrace(page);
+    throw new Error(`Theme settings Escape did not complete: ${JSON.stringify(trace)}`, { cause: error });
+  }
+  const trace = await finishWorkspaceSettingsTransitionTrace(page);
+  if (process.env.ARIELCHARTS_E2E_TRACE_SETTINGS_CLOSE === '1') {
+    console.log(`THEME SETTINGS CLOSE TRACE ${JSON.stringify(trace)}`);
+  }
+}
+
 async function selectThemePreference(page: Page, preference: 'system' | 'light' | 'dark'): Promise<void> {
   await selectWorkspaceTheme(page, preference);
   const resolvedTheme = preference === 'system'
@@ -434,7 +502,7 @@ async function selectThemePreference(page: Page, preference: 'system' | 'light' 
     `[data-testid="${SETTINGS_TRIGGER_TEST_ID}"][data-theme-preference="${preference}"][data-resolved-theme="${resolvedTheme}"]`,
   ).waitFor({ state: 'attached', timeout: 5_000 });
   await page.locator(`html[data-theme="${resolvedTheme}"]`).waitFor({ state: 'attached', timeout: 5_000 });
-  await closeWorkspaceSettings(page);
+  await closeThemeSettingsWithEscape(page, preference);
 }
 
 async function connectAgentPresence(mcpUrl: string, sessionId: string, roomCookie: string, origin: string): Promise<AgentPresence> {

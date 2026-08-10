@@ -662,6 +662,12 @@ async function expectTemplateDiagramCreation(page: Page): Promise<void> {
   assert(flowchartName !== sequenceName, 'Flowchart and sequence templates reused the same created tab.');
 }
 
+async function scrollErControlIntoView(control: Locator): Promise<void> {
+  await control.evaluate((element) => {
+    element.scrollIntoView({ block: 'center', inline: 'nearest' });
+  });
+}
+
 async function expectErSemanticEditor(page: Page): Promise<void> {
   await replaceSource(page, ER_DIAGRAM_FIXTURE);
   await waitForSource(page, ER_DIAGRAM_FIXTURE);
@@ -672,8 +678,10 @@ async function expectErSemanticEditor(page: Page): Promise<void> {
   const beforeTransform = await canvasTransform(page);
 
   const customerName = controls.getByLabel('ER entity CUSTOMER');
+  await scrollErControlIntoView(customerName);
   await customerName.fill('ACCOUNT');
   const rename = customerName.locator('xpath=..').getByRole('button', { name: 'Rename', exact: true });
+  await scrollErControlIntoView(rename);
   await assertHitTarget(page, rename, 'ER entity rename control');
   await verifiedClick(page, rename, 'ER entity rename control');
   await ensureSourceFlyoutOpen(page);
@@ -681,31 +689,46 @@ async function expectErSemanticEditor(page: Page): Promise<void> {
   await closeFlyout(page, 'source');
 
   const attributeName = controls.getByLabel('New attribute for ACCOUNT');
+  await scrollErControlIntoView(attributeName);
   await attributeName.fill('created_at');
   const addAttribute = attributeName.locator('xpath=..').getByRole('button', { name: 'Add attribute', exact: true });
   await assertHitTarget(page, addAttribute, 'ER add-attribute control');
   await verifiedClick(page, addAttribute, 'ER add-attribute control');
   const attributeForm = controls.getByRole('form', { name: 'Attribute created_at on ACCOUNT', exact: true });
+  await scrollErControlIntoView(attributeForm);
   await attributeForm.getByLabel('Type for created_at').fill('timestamp');
   await attributeForm.getByLabel('Comment for created_at').fill('created');
-  await verifiedClick(page, attributeForm.getByRole('button', { name: 'Save', exact: true }), 'ER edit-attribute control');
+  const saveAttribute = attributeForm.getByRole('button', { name: 'Save', exact: true });
+  await scrollErControlIntoView(saveAttribute);
+  await verifiedClick(page, saveAttribute, 'ER edit-attribute control');
 
   const existingRelationship = controls.getByRole('form', { name: 'Relationship ACCOUNT ORDER', exact: true }).first();
+  await scrollErControlIntoView(existingRelationship);
   await existingRelationship.getByLabel('Relationship left entity').selectOption('ORDER');
   await existingRelationship.getByLabel('Relationship right entity').selectOption('ACCOUNT');
   await existingRelationship.getByLabel('Relationship label').fill('may place');
   await existingRelationship.getByLabel('Relationship left cardinality').selectOption('zero-or-one');
   await existingRelationship.getByLabel('Relationship right cardinality').selectOption('one-or-more');
-  await verifiedClick(page, existingRelationship.getByRole('button', { name: 'Save', exact: true }), 'ER edit-relationship control');
-  await verifiedClick(page, controls.getByRole('button', { name: 'Delete relationship may place', exact: true }), 'ER delete-relationship control');
+  const saveRelationship = existingRelationship.getByRole('button', { name: 'Save', exact: true });
+  await scrollErControlIntoView(saveRelationship);
+  await verifiedClick(page, saveRelationship, 'ER edit-relationship control');
+  const deleteRelationship = controls.getByRole('button', { name: 'Delete relationship may place', exact: true });
+  await scrollErControlIntoView(deleteRelationship);
+  await verifiedClick(page, deleteRelationship, 'ER delete-relationship control');
   const newRelationship = controls.getByRole('form', { name: 'Relationship ACCOUNT ORDER', exact: true }).last();
+  await scrollErControlIntoView(newRelationship);
   await newRelationship.getByLabel('Relationship label').fill('places again');
-  await verifiedClick(page, newRelationship.getByRole('button', { name: 'Add relationship', exact: true }), 'ER add-relationship control');
+  const addRelationship = newRelationship.getByRole('button', { name: 'Add relationship', exact: true });
+  await scrollErControlIntoView(addRelationship);
+  await verifiedClick(page, addRelationship, 'ER add-relationship control');
 
   const addEntity = controls.getByRole('button', { name: 'Add ER entity', exact: true });
+  await scrollErControlIntoView(addEntity);
   await assertHitTarget(page, addEntity, 'ER add-entity control');
   await verifiedClick(page, addEntity, 'ER add-entity control');
-  await verifiedClick(page, controls.getByRole('button', { name: 'Delete ORDER and dependent relationships', exact: true }), 'ER delete-entity control');
+  const deleteOrder = controls.getByRole('button', { name: 'Delete ORDER and dependent relationships', exact: true });
+  await scrollErControlIntoView(deleteOrder);
+  await verifiedClick(page, deleteOrder, 'ER delete-entity control');
   await ensureSourceFlyoutOpen(page);
   await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('ENTITY {');
   await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).not.toContain('ORDER {');

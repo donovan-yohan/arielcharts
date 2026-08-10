@@ -417,26 +417,12 @@ async function waitForStableCanvasTransform(page: Page, label: string): Promise<
 
 async function closeWorkspaceSettings(page: Page): Promise<void> {
   const dialog = page.getByTestId(SETTINGS_DIALOG_TEST_ID);
-  for (let attempt = 0; attempt < 3 && await dialog.count() > 0; attempt += 1) {
-    await page.evaluate(async () => {
-      await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
-    });
-    await page.keyboard.press('Escape');
-    try {
-      await dialog.waitFor({ state: 'detached', timeout: 1_000 });
-      return;
-    } catch {
-      // Theme and presence rerenders can briefly replace the document listener.
-    }
-  }
-  if (await dialog.count() > 0) {
-    await verifiedClick(
-      page,
-      dialog.getByRole('button', { name: 'Close', exact: true }),
-      'workspace settings Close fallback',
-    );
-  }
+  const closeButton = dialog.getByRole('button', { name: 'Close', exact: true });
+  await verifiedClick(page, closeButton, 'workspace settings Close');
   await dialog.waitFor({ state: 'detached', timeout: 15_000 });
+  const trigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false', { timeout: 5_000 });
+  await waitForFocusedLocator(page, trigger, 'Closing workspace settings');
 }
 
 async function selectThemePreference(page: Page, preference: 'system' | 'light' | 'dark'): Promise<void> {
@@ -444,6 +430,9 @@ async function selectThemePreference(page: Page, preference: 'system' | 'light' 
   const resolvedTheme = preference === 'system'
     ? await page.evaluate(() => window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     : preference;
+  await page.locator(
+    `[data-testid="${SETTINGS_TRIGGER_TEST_ID}"][data-theme-preference="${preference}"][data-resolved-theme="${resolvedTheme}"]`,
+  ).waitFor({ state: 'attached', timeout: 5_000 });
   await page.locator(`html[data-theme="${resolvedTheme}"]`).waitFor({ state: 'attached', timeout: 5_000 });
   await closeWorkspaceSettings(page);
 }

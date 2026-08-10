@@ -48,6 +48,7 @@ jobs:
       - run: pnpm --filter @arielcharts/shared build
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e-workspace-ux
+      - run: pnpm test:e2e-subgraphs
 
   protected-collaboration:
     runs-on: ubuntu-latest

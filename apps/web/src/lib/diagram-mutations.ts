@@ -9,6 +9,7 @@ import type {
   FlowchartSubgraph,
 } from 'mermaid-ast';
 import * as Y from 'yjs';
+import { renameFlowchartSubgraphDeclaration } from './diagram-subgraphs';
 
 export type DiagramNodeShape = FlowchartNodeShape;
 export type DiagramLinkType = FlowchartLinkType;
@@ -245,6 +246,17 @@ export class MutationQueue {
   async editNodeLabel(nodeId: string, newLabel: string): Promise<MutationResult> {
     return this.enqueueFlowchartMutation((chart) => {
       chart.setNodeText(nodeId, newLabel);
+    });
+  }
+
+  async editSubgraphLabel(subgraphId: string, newLabel: string): Promise<MutationResult> {
+    return this.enqueueResult((currentText) => {
+      const nextText = renameFlowchartSubgraphDeclaration(currentText, subgraphId, newLabel);
+      return {
+        nextText,
+        previousText: currentText,
+        snapshot: parseFlowchartSnapshot(nextText),
+      };
     });
   }
 

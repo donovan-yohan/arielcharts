@@ -82,6 +82,21 @@ describe('collaborative edge mutations', () => {
   });
 });
 
+describe('subgraph label mutations', () => {
+  it('keeps nested section identity and contents without rendering the Mermaid AST', async () => {
+    const doc = new Y.Doc();
+    const yText = doc.getText('mermaid');
+    const source = `flowchart TD\n  subgraph outer[Outer]\n    A[A]\n    subgraph inner[Inner]\n      B[B]\n    end\n    C[C]\n  end\n`;
+    setText(yText, source);
+
+    const result = await new MutationQueue(yText).editSubgraphLabel('inner', 'Renamed');
+
+    expect(result.nextText).toBe(source.replace('subgraph inner[Inner]', 'subgraph inner["Renamed"]'));
+    expect(result.snapshot.subgraphs.find((subgraph) => subgraph.id === 'outer')?.nodes).toEqual(['A', 'inner', 'C']);
+    expect(result.snapshot.subgraphs.find((subgraph) => subgraph.id === 'inner')?.nodes).toEqual(['B']);
+  });
+});
+
 describe('canvas clipboard mutations', () => {
   function createClipboard() {
     return createDiagramClipboardPayload(

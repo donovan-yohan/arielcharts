@@ -84,6 +84,7 @@ import { getErRelationshipIdentity, type ErAttribute, type ErDiagramSnapshot, ty
 import { CLASS_RELATION_OPTIONS, getClassMemberIdentity, getClassRelationshipIdentity, type ClassDiagramSnapshot, type ClassEntity, type ClassMember, type ClassMemberIdentity, type ClassRelationship, type ClassRelationshipIdentity } from '../lib/class-mutations';
 import { getStateTransitionIdentity, type StateDiagramSnapshot, type StateTransition, type StateTransitionIdentity } from '../lib/state-mutations';
 import { getRequirementRelationshipIdentity, type RequirementDiagramSnapshot, type RequirementEntity, type RequirementRelationship, type RequirementRelationshipIdentity } from '../lib/requirement-mutations';
+import { getArchitectureAlignmentIdentity, getArchitectureEdgeIdentity, type ArchitectureAlignment, type ArchitectureAlignmentIdentity, type ArchitectureDiagramSnapshot, type ArchitectureEdge, type ArchitectureEdgeIdentity, type ArchitectureGroup, type ArchitectureJunction, type ArchitecturePort, type ArchitectureService } from '../lib/architecture-mutations';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
@@ -100,6 +101,7 @@ export interface DiagramCanvasProps {
   isClass?: boolean;
   isState?: boolean;
   isRequirement?: boolean;
+  isArchitecture?: boolean;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
@@ -112,6 +114,7 @@ export interface DiagramCanvasProps {
   classDiagram?: ClassDiagramSnapshot | null;
   stateDiagram?: StateDiagramSnapshot | null;
   requirementDiagram?: RequirementDiagramSnapshot | null;
+  architectureDiagram?: ArchitectureDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
@@ -172,6 +175,21 @@ export interface DiagramCanvasProps {
   onAddRequirementRelationship?: (relationship: RequirementRelationship) => void;
   onEditRequirementRelationship?: (identity: RequirementRelationshipIdentity, relationship: RequirementRelationship) => void;
   onDeleteRequirementRelationship?: (identity: RequirementRelationshipIdentity) => void;
+  onAddArchitectureGroup?: (group: ArchitectureGroup) => void;
+  onEditArchitectureGroup?: (id: string, patch: Partial<ArchitectureGroup> & { id?: string }) => void;
+  onDeleteArchitectureGroup?: (id: string) => void;
+  onAddArchitectureService?: (service: ArchitectureService) => void;
+  onEditArchitectureService?: (id: string, patch: Partial<ArchitectureService> & { id?: string }) => void;
+  onDeleteArchitectureService?: (id: string) => void;
+  onAddArchitectureJunction?: (junction: ArchitectureJunction) => void;
+  onEditArchitectureJunction?: (id: string, patch: Partial<ArchitectureJunction> & { id?: string }) => void;
+  onDeleteArchitectureJunction?: (id: string) => void;
+  onAddArchitectureEdge?: (edge: ArchitectureEdge) => void;
+  onEditArchitectureEdge?: (identity: ArchitectureEdgeIdentity, edge: ArchitectureEdge) => void;
+  onDeleteArchitectureEdge?: (identity: ArchitectureEdgeIdentity) => void;
+  onAddArchitectureAlignment?: (alignment: ArchitectureAlignment) => void;
+  onEditArchitectureAlignment?: (identity: ArchitectureAlignmentIdentity, alignment: ArchitectureAlignment) => void;
+  onDeleteArchitectureAlignment?: (identity: ArchitectureAlignmentIdentity) => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
@@ -529,6 +547,21 @@ export function DiagramCanvas({
   onAddRequirementRelationship,
   onEditRequirementRelationship,
   onDeleteRequirementRelationship,
+  onAddArchitectureGroup,
+  onEditArchitectureGroup,
+  onDeleteArchitectureGroup,
+  onAddArchitectureService,
+  onEditArchitectureService,
+  onDeleteArchitectureService,
+  onAddArchitectureJunction,
+  onEditArchitectureJunction,
+  onDeleteArchitectureJunction,
+  onAddArchitectureEdge,
+  onEditArchitectureEdge,
+  onDeleteArchitectureEdge,
+  onAddArchitectureAlignment,
+  onEditArchitectureAlignment,
+  onDeleteArchitectureAlignment,
   onAddConnectedNode,
   onCanvasCursorChange,
   onChangeNodeShape,
@@ -562,6 +595,8 @@ export function DiagramCanvas({
   classDiagram = null,
   stateDiagram = null,
   requirementDiagram = null,
+  architectureDiagram = null,
+  isArchitecture = false,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -3132,6 +3167,27 @@ export function DiagramCanvas({
             onEditRelationship={onEditRequirementRelationship}
           />
         ) : null}
+        {isArchitecture && !readOnly && architectureDiagram ? (
+          <ArchitectureEditorControls
+            bottom={erEditorBottom}
+            diagram={architectureDiagram}
+            onAddAlignment={onAddArchitectureAlignment}
+            onAddEdge={onAddArchitectureEdge}
+            onAddGroup={onAddArchitectureGroup}
+            onAddJunction={onAddArchitectureJunction}
+            onAddService={onAddArchitectureService}
+            onDeleteAlignment={onDeleteArchitectureAlignment}
+            onDeleteEdge={onDeleteArchitectureEdge}
+            onDeleteGroup={onDeleteArchitectureGroup}
+            onDeleteJunction={onDeleteArchitectureJunction}
+            onDeleteService={onDeleteArchitectureService}
+            onEditAlignment={onEditArchitectureAlignment}
+            onEditEdge={onEditArchitectureEdge}
+            onEditGroup={onEditArchitectureGroup}
+            onEditJunction={onEditArchitectureJunction}
+            onEditService={onEditArchitectureService}
+          />
+        ) : null}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
@@ -4146,6 +4202,27 @@ function RequirementEntityForm({ entity, onDelete, onSave }: { entity: Requireme
 function RequirementRelationshipForm({ entities, onDelete, onSave, relationship }: { entities: string[]; onDelete?: () => void; onSave?: (relationship: RequirementRelationship) => void; relationship: RequirementRelationship }) {
   const [draft, setDraft] = useState(relationship);
   return <form aria-label={`Requirement relationship ${relationship.from} ${relationship.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label="Requirement relationship source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{entities.map((name) => <option key={name}>{name}</option>)}</select><select aria-label="Requirement relationship type" onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value as RequirementRelationship['kind'] }))} value={draft.kind}>{(['contains', 'copies', 'derives', 'satisfies', 'verifies', 'refines', 'traces'] as const).map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Requirement relationship target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{entities.map((name) => <option key={name}>{name}</option>)}</select><button type="submit">{onDelete ? 'Save' : 'Add relationship'}</button>{onDelete ? <button aria-label="Delete requirement relationship" onClick={onDelete} type="button">Delete</button> : null}</form>;
+}
+
+function ArchitectureEditorControls({ bottom, diagram, onAddAlignment, onAddEdge, onAddGroup, onAddJunction, onAddService, onDeleteAlignment, onDeleteEdge, onDeleteGroup, onDeleteJunction, onDeleteService, onEditAlignment, onEditEdge, onEditGroup, onEditJunction, onEditService }: {
+  bottom: number; diagram: ArchitectureDiagramSnapshot;
+  onAddAlignment?: (value: ArchitectureAlignment) => void; onAddEdge?: (value: ArchitectureEdge) => void; onAddGroup?: (value: ArchitectureGroup) => void; onAddJunction?: (value: ArchitectureJunction) => void; onAddService?: (value: ArchitectureService) => void;
+  onDeleteAlignment?: (value: ArchitectureAlignmentIdentity) => void; onDeleteEdge?: (value: ArchitectureEdgeIdentity) => void; onDeleteGroup?: (id: string) => void; onDeleteJunction?: (id: string) => void; onDeleteService?: (id: string) => void;
+  onEditAlignment?: (identity: ArchitectureAlignmentIdentity, value: ArchitectureAlignment) => void; onEditEdge?: (identity: ArchitectureEdgeIdentity, value: ArchitectureEdge) => void; onEditGroup?: (id: string, value: Partial<ArchitectureGroup> & { id?: string }) => void; onEditJunction?: (id: string, value: Partial<ArchitectureJunction> & { id?: string }) => void; onEditService?: (id: string, value: Partial<ArchitectureService> & { id?: string }) => void;
+}) {
+  const [kind, setKind] = useState('service'); const [id, setId] = useState('service');
+  const ids = [...diagram.groups, ...diagram.services, ...diagram.junctions].map((item) => item.id);
+  const [edge, setEdge] = useState<ArchitectureEdge>({ from: ids[0] ?? '', fromGroup: diagram.groups.some((item) => item.id === ids[0]), fromInto: false, fromPort: 'R', to: ids[1] ?? ids[0] ?? '', toGroup: diagram.groups.some((item) => item.id === (ids[1] ?? ids[0])), toInto: true, toPort: 'L' });
+  const [alignment, setAlignment] = useState<ArchitectureAlignment>({ direction: 'row', members: ids.slice(0, 2) });
+  const add = () => { if (kind === 'group') onAddGroup?.({ icon: 'cloud', id, title: id }); else if (kind === 'junction') onAddJunction?.({ id }); else onAddService?.({ icon: 'server', id, title: id }); };
+  return <aside className="canvas-semantic-editor canvas-architecture-editor" data-canvas-pan-exclusion="true" data-testid="architecture-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
+    <form onSubmit={(event) => { event.preventDefault(); add(); }}><strong>Architecture</strong><select aria-label="New architecture item type" onChange={(event) => setKind(event.target.value)} value={kind}><option>service</option><option>group</option><option>junction</option></select><input aria-label="New architecture item" onChange={(event) => setId(event.target.value)} value={id} /><button type="submit">Add</button></form>
+    {diagram.groups.map((item) => <div key={item.id}><span>group {item.id}</span><button onClick={() => onDeleteGroup?.(item.id)} type="button">Delete</button></div>)}
+    {diagram.services.map((item) => <div key={item.id}><span>service {item.id}</span><button onClick={() => onDeleteService?.(item.id)} type="button">Delete</button></div>)}
+    {diagram.junctions.map((item) => <div key={item.id}><span>junction {item.id}</span><button onClick={() => onDeleteJunction?.(item.id)} type="button">Delete</button></div>)}
+    <section aria-label="Architecture edges"><strong>Edges</strong>{diagram.edges.map((item) => <div key={[item.from, item.fromPort, item.to, item.toPort].join(':')}><span>{item.from} → {item.to}</span><button onClick={() => onDeleteEdge?.(getArchitectureEdgeIdentity(item, diagram.edges))} type="button">Delete</button></div>)}{ids.length > 1 ? <form onSubmit={(event) => { event.preventDefault(); onAddEdge?.(edge); }}><select aria-label="Architecture edge source" onChange={(event) => { const value = event.target.value; setEdge((current) => ({ ...current, from: value, fromGroup: diagram.groups.some((item) => item.id === value) })); }} value={edge.from}>{ids.map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Architecture edge target" onChange={(event) => { const value = event.target.value; setEdge((current) => ({ ...current, to: value, toGroup: diagram.groups.some((item) => item.id === value) })); }} value={edge.to}>{ids.map((value) => <option key={value}>{value}</option>)}</select><button type="submit">Add edge</button></form> : null}</section>
+    <section aria-label="Architecture alignments"><strong>Alignment</strong>{diagram.alignments.map((item) => <div key={[item.direction, ...item.members].join(':')}><span>{item.direction} {item.members.join(', ')}</span><button onClick={() => onDeleteAlignment?.(getArchitectureAlignmentIdentity(item, diagram.alignments))} type="button">Delete</button></div>)}{ids.length > 1 ? <form onSubmit={(event) => { event.preventDefault(); onAddAlignment?.(alignment); }}><select aria-label="Architecture alignment direction" onChange={(event) => setAlignment((current) => ({ ...current, direction: event.target.value as ArchitectureAlignment['direction'] }))} value={alignment.direction}><option value="row">row</option><option value="column">column</option></select><input aria-label="Architecture alignment members" onChange={(event) => setAlignment((current) => ({ ...current, members: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) }))} value={alignment.members.join(', ')} /><button type="submit">Add alignment</button></form> : null}</section>
+  </aside>;
 }
 
 function ToolbarButton({

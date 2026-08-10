@@ -1,6 +1,10 @@
 import { isHeaderOnlyFlowchartSource, parseFlowchartSnapshot } from './diagram-mutations';
 import { isErSourceRepresentable } from './er-mutations';
 import { isClassSourceRepresentable } from './class-mutations';
+import { isArchitectureSourceRepresentable } from './architecture-mutations';
+import { isBlockSourceRepresentable } from './block-mutations';
+import { isC4SourceRepresentable } from './c4-mutations';
+import { isSwimlaneSourceRepresentable } from './swimlane-mutations';
 import { isRequirementSourceRepresentable } from './requirement-mutations';
 import { isSequenceSourceRepresentable } from './sequence-mutations';
 import { isStateSourceRepresentable } from './state-mutations';
@@ -10,7 +14,7 @@ export const MERMAID_CAPABILITY_CATALOG_VERSION = '11.16.1';
 
 export type DiagramKind = 'flowchart' | 'sequence' | 'er' | 'generic';
 export type DiagramEditingMode = 'canvas' | 'semantic-form' | 'source-only' | 'unavailable-plugin';
-export type DiagramAdapterId = 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'source-only' | 'unavailable-plugin';
+export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'source-only' | 'unavailable-plugin';
 export type MermaidDiagramFamilyId = typeof MERMAID_DIAGRAM_FAMILIES[number]['id'];
 
 export interface MermaidDiagramFamily {
@@ -173,15 +177,34 @@ const REQUIREMENT_ADAPTER: DiagramSourceModelAdapter = {
     : { representable: false, reason: 'unsupported-syntax' },
 };
 
+const ARCHITECTURE_OPERATIONS = new Set([
+  'add-alignment', 'add-edge', 'add-group', 'add-junction', 'add-service', 'delete-alignment', 'delete-edge',
+  'delete-group', 'delete-junction', 'delete-service', 'edit-alignment', 'edit-edge', 'edit-group', 'edit-junction', 'edit-service',
+]);
+
+const ARCHITECTURE_ADAPTER: DiagramSourceModelAdapter = {
+  id: 'architecture',
+  getOperationResult(source, operation) {
+    if (!this.getRepresentability(source).representable) return { supported: false, reason: 'unrepresentable' };
+    return ARCHITECTURE_OPERATIONS.has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' };
+  },
+  getRepresentability: (source) => isArchitectureSourceRepresentable(source)
+    ? { representable: true }
+    : { representable: false, reason: 'unsupported-syntax' },
+};
+const BLOCK_ADAPTER: DiagramSourceModelAdapter = { id: 'block', getOperationResult(source, operation) { return !this.getRepresentability(source).representable ? { supported: false, reason: 'unrepresentable' } : new Set(['add-node', 'edit-node', 'delete-node', 'add-link', 'edit-link', 'delete-link', 'add-composite', 'edit-composite', 'delete-composite']).has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' }; }, getRepresentability: (source) => isBlockSourceRepresentable(source) ? { representable: true } : { representable: false, reason: 'unsupported-syntax' } };
+const C4_ADAPTER: DiagramSourceModelAdapter = { id: 'c4', getOperationResult(source, operation) { return !this.getRepresentability(source).representable ? { supported: false, reason: 'unrepresentable' } : new Set(['add-element', 'edit-element', 'delete-element', 'add-boundary', 'edit-boundary', 'delete-boundary', 'add-relationship', 'edit-relationship', 'delete-relationship']).has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' }; }, getRepresentability: (source) => isC4SourceRepresentable(source) ? { representable: true } : { representable: false, reason: 'unsupported-syntax' } };
+const SWIMLANE_ADAPTER: DiagramSourceModelAdapter = { id: 'swimlane', getOperationResult(source, operation) { return !this.getRepresentability(source).representable ? { supported: false, reason: 'unrepresentable' } : new Set(['add-lane', 'edit-lane', 'delete-lane', 'add-node', 'edit-node', 'delete-node', 'add-handoff', 'edit-handoff', 'delete-handoff']).has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' }; }, getRepresentability: (source) => isSwimlaneSourceRepresentable(source) ? { representable: true } : { representable: false, reason: 'unsupported-syntax' } };
+
 /**
  * Every built-in visual Mermaid family in 11.16.1. Aliases, renderer variants,
  * and Railroad's four grammar detector IDs deliberately collapse to one family.
  * `info` is a diagnostic rather than a visual family and is intentionally absent.
  */
 export const MERMAID_DIAGRAM_FAMILIES = [
-  { id: 'architecture', label: 'Architecture', parserTypes: ['architecture'] },
-  { id: 'block', label: 'Block', parserTypes: ['block'] },
-  { id: 'c4', label: 'C4', parserTypes: ['c4'] },
+  { id: 'architecture', label: 'Architecture', parserTypes: ['architecture'], editingMode: 'semantic-form', adapter: 'architecture' },
+  { id: 'block', label: 'Block', parserTypes: ['block'], editingMode: 'semantic-form', adapter: 'block' },
+  { id: 'c4', label: 'C4', parserTypes: ['c4'], editingMode: 'semantic-form', adapter: 'c4' },
   { id: 'class', label: 'Class', parserTypes: ['class', 'classDiagram'], editingMode: 'semantic-form', adapter: 'class' },
   { id: 'cynefin', label: 'Cynefin', parserTypes: ['cynefin'] },
   { id: 'entity-relationship', label: 'Entity relationship', parserTypes: ['er'], editingMode: 'semantic-form', adapter: 'er' },
@@ -202,7 +225,7 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'sankey', label: 'Sankey', parserTypes: ['sankey'] },
   { id: 'sequence', label: 'Sequence', parserTypes: ['sequence'], editingMode: 'semantic-form', adapter: 'sequence' },
   { id: 'state', label: 'State', parserTypes: ['state', 'stateDiagram'], editingMode: 'semantic-form', adapter: 'state' },
-  { id: 'swimlane', label: 'Swimlane', parserTypes: ['swimlane'] },
+  { id: 'swimlane', label: 'Swimlane', parserTypes: ['swimlane'], editingMode: 'semantic-form', adapter: 'swimlane' },
   { id: 'timeline', label: 'Timeline', parserTypes: ['timeline'] },
   { id: 'tree-view', label: 'Tree view', parserTypes: ['treeView'] },
   { id: 'treemap', label: 'Treemap', parserTypes: ['treemap'] },
@@ -262,6 +285,10 @@ export function getDiagramSourceModelAdapter(capability: DiagramCapability | nul
     case 'class': return CLASS_ADAPTER;
     case 'state': return STATE_ADAPTER;
     case 'requirement': return REQUIREMENT_ADAPTER;
+    case 'architecture': return ARCHITECTURE_ADAPTER;
+    case 'block': return BLOCK_ADAPTER;
+    case 'c4': return C4_ADAPTER;
+    case 'swimlane': return SWIMLANE_ADAPTER;
     case 'unavailable-plugin': return UNAVAILABLE_PLUGIN_ADAPTER;
     default: return SOURCE_ONLY_ADAPTER;
   }

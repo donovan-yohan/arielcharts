@@ -74,6 +74,9 @@ describe('relationship and architecture semantic editors', () => {
     expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addClass/u);
     expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addState/u);
     expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addRequirement/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'architecture'\)/u);
+    expect(workspaceSource).toMatch(/mutateCanvasSource\(\(source\) => addArchitectureService/u);
+    expect(canvasSource).toMatch(/data-testid="architecture-editor-controls"/u);
   });
 });
 

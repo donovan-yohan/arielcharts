@@ -94,6 +94,12 @@ import {
   addRequirement, addRequirementRelationship, deleteRequirement, deleteRequirementRelationship, editRequirement,
   editRequirementRelationship, getRequirementDiagramSnapshot,
 } from '../lib/requirement-mutations';
+import {
+  addArchitectureAlignment, addArchitectureEdge, addArchitectureGroup, addArchitectureJunction, addArchitectureService,
+  deleteArchitectureAlignment, deleteArchitectureEdge, deleteArchitectureGroup, deleteArchitectureJunction, deleteArchitectureService,
+  editArchitectureAlignment, editArchitectureEdge, editArchitectureGroup, editArchitectureJunction, editArchitectureService,
+  getArchitectureDiagramSnapshot,
+} from '../lib/architecture-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -1706,6 +1712,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isClass = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'class');
   const isState = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'state');
   const isRequirement = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'requirement');
+  const isArchitecture = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'architecture');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1728,6 +1735,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const classDiagram = useMemo(() => isClass ? getClassDiagramSnapshot(renderedMermaidText) : null, [isClass, renderedMermaidText]);
   const stateDiagram = useMemo(() => isState ? getStateDiagramSnapshot(renderedMermaidText) : null, [isState, renderedMermaidText]);
   const requirementDiagram = useMemo(() => isRequirement ? getRequirementDiagramSnapshot(renderedMermaidText) : null, [isRequirement, renderedMermaidText]);
+  const architectureDiagram = useMemo(() => isArchitecture ? getArchitectureDiagramSnapshot(renderedMermaidText) : null, [isArchitecture, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2176,6 +2184,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             isClass={isClass}
             isState={isState}
             isRequirement={isRequirement}
+            isArchitecture={isArchitecture}
+            architectureDiagram={architectureDiagram}
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
@@ -2313,6 +2323,21 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onAddRequirementRelationship={(relationship) => { mutateCanvasSource((source) => addRequirementRelationship(source, relationship), 'Added a requirement relationship'); }}
             onEditRequirementRelationship={(identity, relationship) => { mutateCanvasSource((source) => editRequirementRelationship(source, identity, relationship), 'Edited a requirement relationship'); }}
             onDeleteRequirementRelationship={(identity) => { mutateCanvasSource((source) => deleteRequirementRelationship(source, identity), 'Deleted a requirement relationship'); }}
+            onAddArchitectureGroup={(group) => { mutateCanvasSource((source) => addArchitectureGroup(source, group), 'Added an architecture group'); }}
+            onEditArchitectureGroup={(id, patch) => { mutateCanvasSource((source) => editArchitectureGroup(source, id, patch), 'Edited an architecture group'); }}
+            onDeleteArchitectureGroup={(id) => { mutateCanvasSource((source) => deleteArchitectureGroup(source, id), 'Deleted an architecture group'); }}
+            onAddArchitectureService={(service) => { mutateCanvasSource((source) => addArchitectureService(source, service), 'Added an architecture service'); }}
+            onEditArchitectureService={(id, patch) => { mutateCanvasSource((source) => editArchitectureService(source, id, patch), 'Edited an architecture service'); }}
+            onDeleteArchitectureService={(id) => { mutateCanvasSource((source) => deleteArchitectureService(source, id), 'Deleted an architecture service'); }}
+            onAddArchitectureJunction={(junction) => { mutateCanvasSource((source) => addArchitectureJunction(source, junction), 'Added an architecture junction'); }}
+            onEditArchitectureJunction={(id, patch) => { mutateCanvasSource((source) => editArchitectureJunction(source, id, patch), 'Edited an architecture junction'); }}
+            onDeleteArchitectureJunction={(id) => { mutateCanvasSource((source) => deleteArchitectureJunction(source, id), 'Deleted an architecture junction'); }}
+            onAddArchitectureEdge={(edge) => { mutateCanvasSource((source) => addArchitectureEdge(source, edge), 'Added an architecture edge'); }}
+            onEditArchitectureEdge={(identity, edge) => { mutateCanvasSource((source) => editArchitectureEdge(source, identity, edge), 'Edited an architecture edge'); }}
+            onDeleteArchitectureEdge={(identity) => { mutateCanvasSource((source) => deleteArchitectureEdge(source, identity), 'Deleted an architecture edge'); }}
+            onAddArchitectureAlignment={(alignment) => { mutateCanvasSource((source) => addArchitectureAlignment(source, alignment), 'Added an architecture alignment'); }}
+            onEditArchitectureAlignment={(identity, alignment) => { mutateCanvasSource((source) => editArchitectureAlignment(source, identity, alignment), 'Edited an architecture alignment'); }}
+            onDeleteArchitectureAlignment={(identity) => { mutateCanvasSource((source) => deleteArchitectureAlignment(source, identity), 'Deleted an architecture alignment'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onChangeNodeShape={(nodeId, shape) => {

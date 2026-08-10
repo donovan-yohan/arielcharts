@@ -88,6 +88,10 @@ describe('diagram capability catalog', () => {
     const classDiagram = classifyDiagramCapability('classDiagram');
     const state = classifyDiagramCapability('state');
     const requirement = classifyDiagramCapability('requirement');
+    const architecture = classifyDiagramCapability('architecture');
+    const c4 = classifyDiagramCapability('c4');
+    const block = classifyDiagramCapability('block');
+    const swimlane = classifyDiagramCapability('swimlane');
     const sourceOnly = classifyDiagramCapability('timeline');
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
@@ -99,6 +103,10 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(state).getOperationResult('stateDiagram-v2\n  [*] --> Ready', 'add-transition')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(state).getOperationResult('stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }', 'add-state')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(requirement).getOperationResult('requirementDiagram\n  requirement req {\n    id: 1\n    text: Example\n    risk: low\n    verifyMethod: test\n  }', 'add-requirement')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(architecture).getOperationResult('architecture-beta\n  service api(server)[API]', 'add-service')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(c4).getOperationResult('C4Context\n  Person(user, "User")', 'add-element')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(block).getOperationResult('block-beta\n  api', 'add-node')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(swimlane).getOperationResult('swimlane-beta\n  subgraph api [API]\n  end', 'add-lane')).toEqual({ supported: true });
     const noteOnlySequence = 'sequenceDiagram\n  Note over A: details';
     await expect(mermaid.parse(noteOnlySequence)).resolves.toMatchObject({ diagramType: 'sequence' });
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult(noteOnlySequence, 'add-message')).toEqual({ supported: true });

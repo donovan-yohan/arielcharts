@@ -3448,7 +3448,7 @@ function ErEditorControls({
   }), [diagram.entities]);
 
   return (
-    <aside className="canvas-er-editor" data-canvas-pan-exclusion="true" data-testid="er-editor-controls" style={{ background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8, bottom: 12, maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, position: 'absolute', right: 12, width: 'min(400px, calc(100% - 24px))', zIndex: 7 }}>
+    <aside className="canvas-er-editor" data-canvas-pan-exclusion="true" data-testid="er-editor-controls" style={{ background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8, bottom: 12, maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12, width: 'min(400px, calc(100% - 24px))', zIndex: 7 }}>
       <form onSubmit={(event) => { event.preventDefault(); onAddEntity?.(entityName); setEntityName('ENTITY'); }} style={{ display: 'flex', gap: 6 }}>
         <strong style={{ fontSize: 12, whiteSpace: 'nowrap' }}>ER entities</strong>
         <input aria-label="New ER entity" onChange={(event) => { setEntityName(event.target.value); }} value={entityName} />

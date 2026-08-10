@@ -35,6 +35,8 @@ describe('canvas pan exclusions', () => {
     expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('[data-canvas-pan-exclusion="true"]');
     expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('[data-subgraph-drag-target="true"]');
     expect(canvasSource).toMatch(/return !target\.closest\(CANVAS_PAN_EXCLUSION_SELECTOR\);/u);
+    expect(canvasSource).toMatch(/className="diagram-canvas-shell"[^]*?<div[^]*?data-testid="diagram-canvas"[^]*?touchAction: 'none'/u);
+    expect(canvasSource).toMatch(/<form className="canvas-sequence-participant-form" data-canvas-pan-exclusion="true"/u);
   });
 });
 
@@ -81,6 +83,7 @@ describe('canvas wheel ownership', () => {
     expect(canvasSource).toMatch(/container\.addEventListener\('gesturechange', handleSafariGestureChange, \{ passive: false \}\);/u);
     expect(canvasSource).toMatch(/event\.preventDefault\(\);[^]*?getCanvasWheelGesture\(event/u);
     expect(canvasSource).not.toMatch(/onWheel=\{handleWheel\}/u);
+    expect(canvasSource).toMatch(/function canHandleCanvasWheel[^]*?return !target\.closest\(CANVAS_PAN_EXCLUSION_SELECTOR\);/u);
   });
 
   it('keeps the focus ring available for keyboard navigation but hides it while a Space drag pans', () => {

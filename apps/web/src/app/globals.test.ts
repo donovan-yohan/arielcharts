@@ -54,9 +54,12 @@ describe('narrow sequence controls', () => {
   it('stacks the chooser, constrains both sequence forms, and keeps add actions touch-sized', () => {
     expect(narrowCanvasCss).toMatch(/\.canvas-empty-chooser-actions\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/u);
     expect(narrowCanvasCss).toMatch(/\.canvas-sequence-editor\s*\{[^}]*left:\s*8px;[^}]*right:\s*8px;[^}]*width:\s*auto;/u);
+    expect(narrowCanvasCss).toMatch(/\.canvas-sequence-editor\s*\{[^}]*max-height:\s*calc\(100% - 84px\);[^}]*overflow-y:\s*auto;[^}]*overscroll-behavior:\s*contain;/u);
     expect(narrowCanvasCss).toMatch(/\.canvas-sequence-editor form\s*\{[^}]*display:\s*grid;[^}]*width:\s*100%;/u);
     expect(narrowCanvasCss).toMatch(/\.canvas-sequence-participant-form\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 44px;/u);
     expect(narrowCanvasCss).toMatch(/\.canvas-sequence-message-form\s*\{[^}]*minmax\(0, 1fr\).*44px/u);
     expect(mobileCss).toMatch(/\.canvas-sequence-editor button\s*\{[^}]*min-height:\s*44px;[^}]*width:\s*44px;/u);
+    expect(mobileCss).toMatch(/\.canvas-sequence-editor:not\(\.is-centered\)\s*\{[^}]*max-height:\s*calc\(100% - 84px\);[^}]*overflow-y:\s*auto;[^}]*overscroll-behavior:\s*contain;[^}]*pointer-events:\s*none;[^}]*touch-action:\s*pan-y;/u);
+    expect(mobileCss).toMatch(/\.canvas-sequence-editor:not\(\.is-centered\) > form,[^}]*\{\s*pointer-events:\s*auto;/u);
   });
 });

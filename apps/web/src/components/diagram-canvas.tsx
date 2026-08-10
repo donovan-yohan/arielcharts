@@ -420,7 +420,7 @@ function canHandleCanvasWheel(target: EventTarget | null, root: HTMLDivElement):
     return false;
   }
 
-  return !target.closest('input, select, textarea, [contenteditable="true"]');
+  return !target.closest(CANVAS_PAN_EXCLUSION_SELECTOR);
 }
 
 export function DiagramCanvas({
@@ -2392,8 +2392,38 @@ export function DiagramCanvas({
 
   const canvasCursor = readOnly ? 'default' : isPanning ? 'grabbing' : mode === 'connect' ? 'crosshair' : spacePressed ? 'grab' : 'default';
   const hasGraphNodes = (graph?.nodes.length ?? 0) > 0;
+  const sequenceEditorControls = isSequence && !readOnly && emptyState === null ? (
+    <SequenceEditorControls
+      centered={emptyState === 'sequence'}
+      diagram={sequenceDiagram}
+      onAddActivation={onAddSequenceActivation}
+      onAddFragment={onAddSequenceFragment}
+      onAddMessage={onAddSequenceMessage}
+      onAddNote={onAddSequenceNote}
+      onAddParticipant={onAddSequenceParticipant}
+      onDeleteMessage={onDeleteSequenceMessage}
+      onDeleteNote={onDeleteSequenceNote}
+      onDeleteActivation={onDeleteSequenceActivation}
+      onDeleteFragment={onDeleteSequenceFragment}
+      onEditActivation={onEditSequenceActivation}
+      onEditFragment={onEditSequenceFragment}
+      onEditMessage={onEditSequenceMessage}
+      onEditNote={onEditSequenceNote}
+      onEditParticipant={onEditSequenceParticipant}
+      onDeleteParticipant={onDeleteSequenceParticipant}
+      onMoveMessage={onMoveSequenceMessage}
+      onMoveNote={onMoveSequenceNote}
+      onMoveActivation={onMoveSequenceActivation}
+      onMoveFragment={onMoveSequenceFragment}
+      onMoveParticipant={onMoveSequenceParticipant}
+      onRenameParticipantId={onRenameSequenceParticipantId}
+      onSetAutonumber={onSetSequenceAutonumber}
+      participants={sequenceParticipants}
+    />
+  ) : null;
 
   return (
+    <div className="diagram-canvas-shell" style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative' }}>
     <div
       aria-label="Interactive diagram canvas"
       className={className}
@@ -2935,35 +2965,35 @@ export function DiagramCanvas({
               Add your first flowchart node
             </button>
           </div>
-        ) : emptyState === 'sequence' && !readOnly ? (
-          <SequenceEditorControls
-            centered
-            diagram={sequenceDiagram}
-            onAddActivation={onAddSequenceActivation}
-            onAddFragment={onAddSequenceFragment}
-            onAddMessage={onAddSequenceMessage}
-            onAddNote={onAddSequenceNote}
-            onAddParticipant={onAddSequenceParticipant}
-            onDeleteMessage={onDeleteSequenceMessage}
-            onDeleteNote={onDeleteSequenceNote}
-            onDeleteActivation={onDeleteSequenceActivation}
-            onDeleteFragment={onDeleteSequenceFragment}
-            onEditActivation={onEditSequenceActivation}
-            onEditFragment={onEditSequenceFragment}
-            onEditMessage={onEditSequenceMessage}
-            onEditNote={onEditSequenceNote}
-            onEditParticipant={onEditSequenceParticipant}
-            onDeleteParticipant={onDeleteSequenceParticipant}
-            onMoveMessage={onMoveSequenceMessage}
-            onMoveNote={onMoveSequenceNote}
-            onMoveActivation={onMoveSequenceActivation}
-            onMoveFragment={onMoveSequenceFragment}
-            onMoveParticipant={onMoveSequenceParticipant}
-            onRenameParticipantId={onRenameSequenceParticipantId}
-            onSetAutonumber={onSetSequenceAutonumber}
-            participants={sequenceParticipants}
-          />
-        ) : (!svg ? (
+          ) : emptyState === 'sequence' && !readOnly ? (
+            <SequenceEditorControls
+              centered
+              diagram={sequenceDiagram}
+              onAddActivation={onAddSequenceActivation}
+              onAddFragment={onAddSequenceFragment}
+              onAddMessage={onAddSequenceMessage}
+              onAddNote={onAddSequenceNote}
+              onAddParticipant={onAddSequenceParticipant}
+              onDeleteMessage={onDeleteSequenceMessage}
+              onDeleteNote={onDeleteSequenceNote}
+              onDeleteActivation={onDeleteSequenceActivation}
+              onDeleteFragment={onDeleteSequenceFragment}
+              onEditActivation={onEditSequenceActivation}
+              onEditFragment={onEditSequenceFragment}
+              onEditMessage={onEditSequenceMessage}
+              onEditNote={onEditSequenceNote}
+              onEditParticipant={onEditSequenceParticipant}
+              onDeleteParticipant={onDeleteSequenceParticipant}
+              onMoveMessage={onMoveSequenceMessage}
+              onMoveNote={onMoveSequenceNote}
+              onMoveActivation={onMoveSequenceActivation}
+              onMoveFragment={onMoveSequenceFragment}
+              onMoveParticipant={onMoveSequenceParticipant}
+              onRenameParticipantId={onRenameSequenceParticipantId}
+              onSetAutonumber={onSetSequenceAutonumber}
+              participants={sequenceParticipants}
+            />
+          ) : (!svg ? (
           <div className="empty-state" style={{ alignItems: 'center', display: 'flex', height: '100%', justifyContent: 'center' }}>
             {emptyMessage}
           </div>
@@ -2975,35 +3005,6 @@ export function DiagramCanvas({
               <Pencil size={16} />
             </ToolbarButton>
           </div>
-        ) : null}
-
-        {isSequence && emptyState === null && !readOnly ? (
-          <SequenceEditorControls
-            diagram={sequenceDiagram}
-            onAddActivation={onAddSequenceActivation}
-            onAddFragment={onAddSequenceFragment}
-            onAddMessage={onAddSequenceMessage}
-            onAddNote={onAddSequenceNote}
-            onAddParticipant={onAddSequenceParticipant}
-            onDeleteMessage={onDeleteSequenceMessage}
-            onDeleteNote={onDeleteSequenceNote}
-            onDeleteActivation={onDeleteSequenceActivation}
-            onDeleteFragment={onDeleteSequenceFragment}
-            onEditActivation={onEditSequenceActivation}
-            onEditFragment={onEditSequenceFragment}
-            onEditMessage={onEditSequenceMessage}
-            onEditNote={onEditSequenceNote}
-            onEditParticipant={onEditSequenceParticipant}
-            onDeleteParticipant={onDeleteSequenceParticipant}
-            onMoveMessage={onMoveSequenceMessage}
-            onMoveNote={onMoveSequenceNote}
-            onMoveActivation={onMoveSequenceActivation}
-            onMoveFragment={onMoveSequenceFragment}
-            onMoveParticipant={onMoveSequenceParticipant}
-            onRenameParticipantId={onRenameSequenceParticipantId}
-            onSetAutonumber={onSetSequenceAutonumber}
-            participants={sequenceParticipants}
-          />
         ) : null}
 
         {isEr && !readOnly && erDiagram ? (
@@ -3482,6 +3483,8 @@ export function DiagramCanvas({
           </div>
         ) : null}
       </div>
+    </div>
+    {sequenceEditorControls}
     </div>
   );
 }

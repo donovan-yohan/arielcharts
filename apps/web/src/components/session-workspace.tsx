@@ -41,8 +41,22 @@ import {
   type NodePositionsSyncMode,
 } from '../lib/diagram-layout';
 import { classifyDiagramCapability, getDiagramCapabilityLabel } from '../lib/diagram-capabilities';
-import { canUseFlowchartControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
+import { canUseErControls, canUseFlowchartControls, canUseSequenceControls, DiagramPreviewRegistry, type DiagramPreview } from '../lib/diagram-preview';
 import { addSequenceMessage, addSequenceParticipant, getSequenceParticipants } from '../lib/sequence-mutations';
+import {
+  addErAttribute,
+  addErEntity,
+  addErRelationship,
+  deleteErAttribute,
+  deleteErEntity,
+  deleteErRelationship,
+  editErAttribute,
+  editErRelationship,
+  getErDiagramSnapshot,
+  moveErAttribute,
+  moveErEntity,
+  renameErEntity,
+} from '../lib/er-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -254,7 +268,7 @@ export const AGENT_WORKFLOW_REQUIREMENTS = [
 export function reconcileSelectionForAcceptedRender(
   current: string[],
   context: 'detached-preview' | 'live',
-  outcome: 'empty' | 'flowchart' | 'sequence' | 'generic' | 'invalid',
+  outcome: 'empty' | 'flowchart' | 'sequence' | 'er' | 'generic' | 'invalid',
 ): string[] {
   return context === 'live' && outcome !== 'flowchart' ? [] : current;
 }
@@ -1651,10 +1665,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       : 'Saving changes…';
   const isFlowchart = canUseFlowchartControls(renderedMermaidText, renderedPreview);
   const isSequence = canUseSequenceControls(renderedMermaidText, renderedPreview);
+  const isEr = canUseErControls(renderedMermaidText, renderedPreview);
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
   );
+  const erDiagram = useMemo(() => isEr ? getErDiagramSnapshot(renderedMermaidText) : null, [isEr, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2099,6 +2115,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             isFlowchart={isFlowchart}
             mermaidSource={renderedMermaidText}
             isSequence={isSequence}
+            isEr={isEr}
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
@@ -2116,6 +2133,39 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             }}
             onAddSequenceParticipant={(label) => {
               mutateCanvasSource((source) => addSequenceParticipant(source, label), 'Added a sequence participant');
+            }}
+            onAddErEntity={(name) => {
+              mutateCanvasSource((source) => addErEntity(source, name), 'Added an ER entity');
+            }}
+            onRenameErEntity={(currentName, nextName) => {
+              mutateCanvasSource((source) => renameErEntity(source, currentName, nextName), 'Renamed an ER entity');
+            }}
+            onDeleteErEntity={(name) => {
+              mutateCanvasSource((source) => deleteErEntity(source, name), 'Deleted an ER entity and dependent relationships');
+            }}
+            onMoveErEntity={(name, direction) => {
+              mutateCanvasSource((source) => moveErEntity(source, name, direction), 'Reordered ER entities');
+            }}
+            onAddErAttribute={(entityName, attribute) => {
+              mutateCanvasSource((source) => addErAttribute(source, entityName, attribute), 'Added an ER attribute');
+            }}
+            onEditErAttribute={(entityName, attributeName, attribute) => {
+              mutateCanvasSource((source) => editErAttribute(source, entityName, attributeName, attribute), 'Edited an ER attribute');
+            }}
+            onDeleteErAttribute={(entityName, attributeName) => {
+              mutateCanvasSource((source) => deleteErAttribute(source, entityName, attributeName), 'Deleted an ER attribute');
+            }}
+            onMoveErAttribute={(entityName, attributeName, direction) => {
+              mutateCanvasSource((source) => moveErAttribute(source, entityName, attributeName, direction), 'Reordered ER attributes');
+            }}
+            onAddErRelationship={(relationship) => {
+              mutateCanvasSource((source) => addErRelationship(source, relationship), 'Added an ER relationship');
+            }}
+            onEditErRelationship={(identity, relationship) => {
+              mutateCanvasSource((source) => editErRelationship(source, identity, relationship), 'Edited an ER relationship');
+            }}
+            onDeleteErRelationship={(identity) => {
+              mutateCanvasSource((source) => deleteErRelationship(source, identity), 'Deleted an ER relationship');
             }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
@@ -2178,6 +2228,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             }}
             selectedNodeIds={selectedNodeIds}
             sequenceParticipants={sequenceParticipants}
+            erDiagram={erDiagram}
             svg={renderedPreview?.svg ?? ''}
             theme={resolvedTheme}
             onUndo={handleCanvasUndo}

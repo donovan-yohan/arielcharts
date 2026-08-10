@@ -26,6 +26,12 @@ export function canUseSequenceControls(source: string, preview: DiagramPreview |
     && getDiagramSourceModelAdapter(preview.capability).getRepresentability(source).representable;
 }
 
+export function canUseErControls(source: string, preview: DiagramPreview | null): boolean {
+  return preview?.source === source
+    && preview.capability.kind === 'er'
+    && getDiagramSourceModelAdapter(preview.capability).getRepresentability(source).representable;
+}
+
 /** Last-known-good previews are intentionally local and isolated by stable tab id. */
 export class DiagramPreviewRegistry {
   private readonly previews = new Map<string, DiagramPreview>();

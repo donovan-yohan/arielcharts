@@ -1,12 +1,13 @@
 import { isHeaderOnlyFlowchartSource, parseFlowchartSnapshot } from './diagram-mutations';
+import { isErSourceRepresentable } from './er-mutations';
 import { isSequenceSourceRepresentable } from './sequence-mutations';
 
 /** The installed Mermaid detector registry this catalog was audited against. */
 export const MERMAID_CAPABILITY_CATALOG_VERSION = '11.16.1';
 
-export type DiagramKind = 'flowchart' | 'sequence' | 'generic';
+export type DiagramKind = 'flowchart' | 'sequence' | 'er' | 'generic';
 export type DiagramEditingMode = 'canvas' | 'semantic-form' | 'source-only' | 'unavailable-plugin';
-export type DiagramAdapterId = 'flowchart' | 'sequence' | 'source-only' | 'unavailable-plugin';
+export type DiagramAdapterId = 'flowchart' | 'sequence' | 'er' | 'source-only' | 'unavailable-plugin';
 export type MermaidDiagramFamilyId = typeof MERMAID_DIAGRAM_FAMILIES[number]['id'];
 
 export interface MermaidDiagramFamily {
@@ -102,6 +103,27 @@ const SEQUENCE_ADAPTER: DiagramSourceModelAdapter = {
     : { representable: false, reason: 'unsupported-syntax' },
 };
 
+const ER_OPERATIONS = new Set([
+  'add-attribute', 'add-entity', 'add-relationship', 'delete-attribute', 'delete-entity',
+  'delete-relationship', 'edit-attribute', 'edit-entity', 'edit-relationship',
+  'reorder-attributes', 'reorder-entities',
+]);
+
+const ER_ADAPTER: DiagramSourceModelAdapter = {
+  id: 'er',
+  getOperationResult(source, operation) {
+    if (!this.getRepresentability(source).representable) {
+      return { supported: false, reason: 'unrepresentable' };
+    }
+    return ER_OPERATIONS.has(operation)
+      ? { supported: true }
+      : { supported: false, reason: 'unsupported-operation' };
+  },
+  getRepresentability: (source) => isErSourceRepresentable(source)
+    ? { representable: true }
+    : { representable: false, reason: 'unsupported-syntax' },
+};
+
 /**
  * Every built-in visual Mermaid family in 11.16.1. Aliases, renderer variants,
  * and Railroad's four grammar detector IDs deliberately collapse to one family.
@@ -113,7 +135,7 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'c4', label: 'C4', parserTypes: ['c4'] },
   { id: 'class', label: 'Class', parserTypes: ['class', 'classDiagram'] },
   { id: 'cynefin', label: 'Cynefin', parserTypes: ['cynefin'] },
-  { id: 'entity-relationship', label: 'Entity relationship', parserTypes: ['er'] },
+  { id: 'entity-relationship', label: 'Entity relationship', parserTypes: ['er'], editingMode: 'semantic-form', adapter: 'er' },
   { id: 'event-modeling', label: 'Event modeling', parserTypes: ['eventmodeling'] },
   { id: 'flowchart', label: 'Flowchart', parserTypes: ['flowchart', 'flowchart-v2', 'flowchart-elk'], editingMode: 'canvas', adapter: 'flowchart' },
   { id: 'gantt', label: 'Gantt', parserTypes: ['gantt'] },
@@ -164,7 +186,7 @@ export function classifyDiagramCapability(diagramType: string): DiagramCapabilit
       diagramType,
       editingMode,
       family: family.id as MermaidDiagramFamilyId,
-      kind: family.id === 'flowchart' ? 'flowchart' : family.id === 'sequence' ? 'sequence' : 'generic',
+      kind: family.id === 'flowchart' ? 'flowchart' : family.id === 'sequence' ? 'sequence' : family.id === 'entity-relationship' ? 'er' : 'generic',
       label: family.label,
     };
   }
@@ -183,10 +205,11 @@ export function classifyDiagramCapability(diagramType: string): DiagramCapabilit
 
 export function getDiagramSourceModelAdapter(capability: DiagramCapability | null): DiagramSourceModelAdapter {
   const adapter = capability?.adapter
-    ?? (capability?.kind === 'flowchart' ? 'flowchart' : capability?.kind === 'sequence' ? 'sequence' : 'source-only');
+    ?? (capability?.kind === 'flowchart' ? 'flowchart' : capability?.kind === 'sequence' ? 'sequence' : capability?.kind === 'er' ? 'er' : 'source-only');
   switch (adapter) {
     case 'flowchart': return FLOWCHART_ADAPTER;
     case 'sequence': return SEQUENCE_ADAPTER;
+    case 'er': return ER_ADAPTER;
     case 'unavailable-plugin': return UNAVAILABLE_PLUGIN_ADAPTER;
     default: return SOURCE_ONLY_ADAPTER;
   }
@@ -194,8 +217,8 @@ export function getDiagramSourceModelAdapter(capability: DiagramCapability | nul
 
 export function getDiagramCapabilityLabel(capability: DiagramCapability | null, source?: string): string {
   if (!capability) return 'Mermaid · source only';
-  const label = capability.label ?? (capability.kind === 'flowchart' ? 'Flowchart' : capability.kind === 'sequence' ? 'Sequence' : 'Mermaid');
-  const editingMode = capability.editingMode ?? (capability.kind === 'flowchart' ? 'canvas' : capability.kind === 'sequence' ? 'semantic-form' : 'source-only');
+  const label = capability.label ?? (capability.kind === 'flowchart' ? 'Flowchart' : capability.kind === 'sequence' ? 'Sequence' : capability.kind === 'er' ? 'Entity relationship' : 'Mermaid');
+  const editingMode = capability.editingMode ?? (capability.kind === 'flowchart' ? 'canvas' : capability.kind === 'sequence' || capability.kind === 'er' ? 'semantic-form' : 'source-only');
   if ((editingMode === 'canvas' || editingMode === 'semantic-form')
     && source !== undefined
     && !getDiagramSourceModelAdapter(capability).getRepresentability(source).representable) {
@@ -213,5 +236,6 @@ export function isStructurallyEditableDiagram(capability: DiagramCapability | nu
   return capability?.editingMode === 'canvas'
     || capability?.editingMode === 'semantic-form'
     || capability?.kind === 'flowchart'
-    || capability?.kind === 'sequence';
+    || capability?.kind === 'sequence'
+    || capability?.kind === 'er';
 }

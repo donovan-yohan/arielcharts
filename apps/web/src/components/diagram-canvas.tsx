@@ -75,6 +75,7 @@ import {
 } from '../lib/svg-hit-map';
 import { getSafeToolbarPosition } from '../lib/toolbar-safe-area';
 import type { SequenceParticipant } from '../lib/sequence-mutations';
+import { getErRelationshipIdentity, type ErAttribute, type ErDiagramSnapshot, type ErRelationship, type ErRelationshipIdentity } from '../lib/er-mutations';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
@@ -87,17 +88,30 @@ export interface DiagramCanvasProps {
   isFlowchart?: boolean;
   mermaidSource?: string;
   isSequence?: boolean;
+  isEr?: boolean;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
   selectedNodeIds?: string[];
   svg: string;
   sequenceParticipants?: readonly SequenceParticipant[];
+  erDiagram?: ErDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
   onAddSequenceMessage?: (from: string, to: string, message: string) => void;
   onAddSequenceParticipant?: (label: string) => void;
+  onAddErEntity?: (name: string) => void;
+  onRenameErEntity?: (currentName: string, nextName: string) => void;
+  onDeleteErEntity?: (name: string) => void;
+  onMoveErEntity?: (name: string, direction: 'up' | 'down') => void;
+  onAddErAttribute?: (entityName: string, attribute: Partial<ErAttribute>) => void;
+  onEditErAttribute?: (entityName: string, attributeName: string, attribute: ErAttribute) => void;
+  onDeleteErAttribute?: (entityName: string, attributeName: string) => void;
+  onMoveErAttribute?: (entityName: string, attributeName: string, direction: 'up' | 'down') => void;
+  onAddErRelationship?: (relationship: ErRelationship) => void;
+  onEditErRelationship?: (identity: ErRelationshipIdentity, relationship: ErRelationship) => void;
+  onDeleteErRelationship?: (identity: ErRelationshipIdentity) => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
@@ -376,12 +390,24 @@ export function DiagramCanvas({
   isFlowchart = true,
   mermaidSource = '',
   isSequence = false,
+  isEr = false,
   nodePositions,
   preserveCamera = false,
   onAddEdge,
   onAddNode,
   onAddSequenceMessage,
   onAddSequenceParticipant,
+  onAddErEntity,
+  onRenameErEntity,
+  onDeleteErEntity,
+  onMoveErEntity,
+  onAddErAttribute,
+  onEditErAttribute,
+  onDeleteErAttribute,
+  onMoveErAttribute,
+  onAddErRelationship,
+  onEditErRelationship,
+  onDeleteErRelationship,
   onAddConnectedNode,
   onCanvasCursorChange,
   onChangeNodeShape,
@@ -409,6 +435,7 @@ export function DiagramCanvas({
   remoteCanvasPresence = [],
   selectedNodeIds,
   sequenceParticipants = [],
+  erDiagram = null,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -855,6 +882,7 @@ export function DiagramCanvas({
     BOTTOM_TOOLBAR_GAP,
     canvasViewportMeasured,
   );
+  const erEditorBottom = canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP;
   const selectedToolbarPosition = getSafeToolbarPosition({
     anchor: {
       x: displayedToolbarRect.x + (displayedToolbarRect.width / 2),
@@ -2742,6 +2770,24 @@ export function DiagramCanvas({
           />
         ) : null}
 
+        {isEr && !readOnly && erDiagram ? (
+          <ErEditorControls
+            bottom={erEditorBottom}
+            diagram={erDiagram}
+            onAddAttribute={onAddErAttribute}
+            onAddEntity={onAddErEntity}
+            onAddRelationship={onAddErRelationship}
+            onDeleteAttribute={onDeleteErAttribute}
+            onDeleteEntity={onDeleteErEntity}
+            onDeleteRelationship={onDeleteErRelationship}
+            onEditAttribute={onEditErAttribute}
+            onEditRelationship={onEditErRelationship}
+            onMoveAttribute={onMoveErAttribute}
+            onMoveEntity={onMoveErEntity}
+            onRenameEntity={onRenameErEntity}
+          />
+        ) : null}
+
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
             {selection.length === 1 ? (
@@ -3357,6 +3403,162 @@ function SequenceEditorControls({
       ) : <small>Add a participant to begin.</small>}
     </div>
   );
+}
+
+const ER_CARDINALITY_OPTIONS: Array<{ label: string; value: ErRelationship['leftCardinality'] }> = [
+  { label: 'exactly one', value: 'exactly-one' },
+  { label: 'zero or one', value: 'zero-or-one' },
+  { label: 'one or more', value: 'one-or-more' },
+  { label: 'zero or more', value: 'zero-or-more' },
+];
+
+function ErEditorControls({
+  bottom,
+  diagram,
+  onAddAttribute,
+  onAddEntity,
+  onAddRelationship,
+  onDeleteAttribute,
+  onDeleteEntity,
+  onDeleteRelationship,
+  onEditAttribute,
+  onEditRelationship,
+  onMoveAttribute,
+  onMoveEntity,
+  onRenameEntity,
+}: {
+  bottom: number;
+  diagram: ErDiagramSnapshot;
+  onAddAttribute?: (entityName: string, attribute: Partial<ErAttribute>) => void;
+  onAddEntity?: (name: string) => void;
+  onAddRelationship?: (relationship: ErRelationship) => void;
+  onDeleteAttribute?: (entityName: string, attributeName: string) => void;
+  onDeleteEntity?: (name: string) => void;
+  onDeleteRelationship?: (identity: ErRelationshipIdentity) => void;
+  onEditAttribute?: (entityName: string, attributeName: string, attribute: ErAttribute) => void;
+  onEditRelationship?: (identity: ErRelationshipIdentity, relationship: ErRelationship) => void;
+  onMoveAttribute?: (entityName: string, attributeName: string, direction: 'up' | 'down') => void;
+  onMoveEntity?: (name: string, direction: 'up' | 'down') => void;
+  onRenameEntity?: (currentName: string, nextName: string) => void;
+}) {
+  const [entityName, setEntityName] = useState('ENTITY');
+  const relationshipDefault = useMemo<ErRelationship>(() => ({
+    identifying: true,
+    label: 'relates to',
+    left: diagram.entities[0]?.name ?? '',
+    leftCardinality: 'exactly-one',
+    right: diagram.entities[1]?.name ?? diagram.entities[0]?.name ?? '',
+    rightCardinality: 'zero-or-more',
+  }), [diagram.entities]);
+
+  return (
+    <aside className="canvas-er-editor" data-canvas-pan-exclusion="true" data-testid="er-editor-controls" style={{ background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8, bottom, maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12, width: 'min(400px, calc(100% - 24px))', zIndex: 7 }}>
+      <form onSubmit={(event) => { event.preventDefault(); onAddEntity?.(entityName); setEntityName('ENTITY'); }} style={{ display: 'flex', gap: 6 }}>
+        <strong style={{ fontSize: 12, whiteSpace: 'nowrap' }}>ER entities</strong>
+        <input aria-label="New ER entity" onChange={(event) => { setEntityName(event.target.value); }} value={entityName} />
+        <button aria-label="Add ER entity" type="submit">Add</button>
+      </form>
+      <div style={{ display: 'grid', gap: 10, marginTop: 10 }}>
+        {diagram.entities.map((entity, index) => (
+          <ErEntityControls
+            entity={entity}
+            entityIndex={index}
+            key={entity.name}
+            onAddAttribute={onAddAttribute}
+            onDeleteAttribute={onDeleteAttribute}
+            onDeleteEntity={onDeleteEntity}
+            onEditAttribute={onEditAttribute}
+            onMoveAttribute={onMoveAttribute}
+            onMoveEntity={onMoveEntity}
+            onRenameEntity={onRenameEntity}
+          />
+        ))}
+      </div>
+      <section aria-label="ER relationships" style={{ borderTop: '1px solid var(--line-subtle)', marginTop: 10, paddingTop: 8 }}>
+        <strong style={{ fontSize: 12 }}>Relationships</strong>
+        {diagram.relationships.map((relationship, index) => (
+          <ErRelationshipForm
+            entities={diagram.entities.map((entity) => entity.name)}
+            key={`${index}:${relationship.left}:${relationship.right}:${relationship.label}`}
+            onDelete={() => { onDeleteRelationship?.(getErRelationshipIdentity(relationship, index)); }}
+            onSave={(next) => { onEditRelationship?.(getErRelationshipIdentity(relationship, index), next); }}
+            relationship={relationship}
+          />
+        ))}
+        {diagram.entities.length > 0 ? <ErRelationshipForm entities={diagram.entities.map((entity) => entity.name)} key={`new:${relationshipDefault.left}:${relationshipDefault.right}`} onSave={onAddRelationship} relationship={relationshipDefault} /> : <small>Add entities before creating a relationship.</small>}
+      </section>
+    </aside>
+  );
+}
+
+function ErEntityControls({
+  entity, entityIndex, onAddAttribute, onDeleteAttribute, onDeleteEntity, onEditAttribute, onMoveAttribute, onMoveEntity, onRenameEntity,
+}: {
+  entity: ErDiagramSnapshot['entities'][number];
+  entityIndex: number;
+  onAddAttribute?: (entityName: string, attribute: Partial<ErAttribute>) => void;
+  onDeleteAttribute?: (entityName: string, attributeName: string) => void;
+  onDeleteEntity?: (name: string) => void;
+  onEditAttribute?: (entityName: string, attributeName: string, attribute: ErAttribute) => void;
+  onMoveAttribute?: (entityName: string, attributeName: string, direction: 'up' | 'down') => void;
+  onMoveEntity?: (name: string, direction: 'up' | 'down') => void;
+  onRenameEntity?: (currentName: string, nextName: string) => void;
+}) {
+  const [name, setName] = useState(entity.name);
+  const [newAttributeName, setNewAttributeName] = useState('attribute');
+  return (
+    <section style={{ border: '1px solid var(--line-subtle)', borderRadius: 6, padding: 7 }}>
+      <form onSubmit={(event) => { event.preventDefault(); onRenameEntity?.(entity.name, name); }} style={{ display: 'flex', gap: 4 }}>
+        <input aria-label={`ER entity ${entity.name}`} onChange={(event) => { setName(event.target.value); }} value={name} />
+        <button type="submit">Rename</button>
+        <button aria-label={`Move ${entity.name} up`} disabled={entityIndex === 0} onClick={() => { onMoveEntity?.(entity.name, 'up'); }} type="button">↑</button>
+        <button aria-label={`Move ${entity.name} down`} onClick={() => { onMoveEntity?.(entity.name, 'down'); }} type="button">↓</button>
+        <button aria-label={`Delete ${entity.name} and dependent relationships`} onClick={() => { onDeleteEntity?.(entity.name); }} type="button">Delete</button>
+      </form>
+      {entity.attributes.map((attribute, index) => (
+        <ErAttributeForm
+          attribute={attribute}
+          entityName={entity.name}
+          key={`${attribute.name}:${attribute.type}`}
+          onDelete={() => { onDeleteAttribute?.(entity.name, attribute.name); }}
+          onMove={(direction) => { onMoveAttribute?.(entity.name, attribute.name, direction); }}
+          onSave={(next) => { onEditAttribute?.(entity.name, attribute.name, next); }}
+          showMoveUp={index > 0}
+        />
+      ))}
+      <form onSubmit={(event) => { event.preventDefault(); onAddAttribute?.(entity.name, { name: newAttributeName, type: 'string' }); setNewAttributeName('attribute'); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}>
+        <input aria-label={`New attribute for ${entity.name}`} onChange={(event) => { setNewAttributeName(event.target.value); }} value={newAttributeName} />
+        <button type="submit">Add attribute</button>
+      </form>
+    </section>
+  );
+}
+
+function ErAttributeForm({ attribute, entityName, onDelete, onMove, onSave, showMoveUp }: {
+  attribute: ErAttribute; entityName: string; onDelete: () => void; onMove: (direction: 'up' | 'down') => void; onSave: (attribute: ErAttribute) => void; showMoveUp: boolean;
+}) {
+  const [draft, setDraft] = useState(attribute);
+  const setKeys = (marker: ErAttribute['keys'][number], checked: boolean) => setDraft((current) => ({ ...current, keys: checked ? [...new Set([...current.keys, marker])] : current.keys.filter((key) => key !== marker) }));
+  return <form aria-label={`Attribute ${attribute.name} on ${entityName}`} onSubmit={(event) => { event.preventDefault(); onSave(draft); }} style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+    <input aria-label={`Type for ${attribute.name}`} onChange={(event) => { setDraft((current) => ({ ...current, type: event.target.value })); }} value={draft.type} />
+    <input aria-label={`Name for ${attribute.name}`} onChange={(event) => { setDraft((current) => ({ ...current, name: event.target.value })); }} value={draft.name} />
+    {(['PK', 'FK', 'UK'] as const).map((marker) => <label key={marker}><input checked={draft.keys.includes(marker)} onChange={(event) => { setKeys(marker, event.target.checked); }} type="checkbox" />{marker}</label>)}
+    <input aria-label={`Comment for ${attribute.name}`} onChange={(event) => { setDraft((current) => ({ ...current, comment: event.target.value })); }} placeholder="comment" value={draft.comment ?? ''} />
+    <button type="submit">Save</button><button aria-label={`Move ${attribute.name} up`} disabled={!showMoveUp} onClick={() => { onMove('up'); }} type="button">↑</button><button aria-label={`Move ${attribute.name} down`} onClick={() => { onMove('down'); }} type="button">↓</button><button aria-label={`Delete attribute ${attribute.name}`} onClick={onDelete} type="button">Delete</button>
+  </form>;
+}
+
+function ErRelationshipForm({ entities, onDelete, onSave, relationship }: { entities: string[]; onDelete?: () => void; onSave?: (relationship: ErRelationship) => void; relationship: ErRelationship }) {
+  const [draft, setDraft] = useState(relationship);
+  return <form aria-label={`Relationship ${relationship.left} ${relationship.right}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+    <select aria-label="Relationship left entity" onChange={(event) => { setDraft((current) => ({ ...current, left: event.target.value })); }} value={draft.left}>{entities.map((entity) => <option key={entity} value={entity}>{entity}</option>)}</select>
+    <select aria-label="Relationship left cardinality" onChange={(event) => { setDraft((current) => ({ ...current, leftCardinality: event.target.value as ErRelationship['leftCardinality'] })); }} value={draft.leftCardinality}>{ER_CARDINALITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+    <label><input checked={draft.identifying} onChange={(event) => { setDraft((current) => ({ ...current, identifying: event.target.checked })); }} type="checkbox" />identifying</label>
+    <select aria-label="Relationship right cardinality" onChange={(event) => { setDraft((current) => ({ ...current, rightCardinality: event.target.value as ErRelationship['rightCardinality'] })); }} value={draft.rightCardinality}>{ER_CARDINALITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+    <select aria-label="Relationship right entity" onChange={(event) => { setDraft((current) => ({ ...current, right: event.target.value })); }} value={draft.right}>{entities.map((entity) => <option key={entity} value={entity}>{entity}</option>)}</select>
+    <input aria-label="Relationship label" onChange={(event) => { setDraft((current) => ({ ...current, label: event.target.value })); }} value={draft.label} />
+    <button type="submit">{onDelete ? 'Save' : 'Add relationship'}</button>{onDelete ? <button aria-label={`Delete relationship ${relationship.label}`} onClick={onDelete} type="button">Delete</button> : null}
+  </form>;
 }
 
 function ToolbarButton({

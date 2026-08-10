@@ -41,6 +41,7 @@ import { getWebsocketServerUrl } from './apps/web/src/lib/session.ts';
 import { getCanvasDotGridGeometry } from './apps/web/src/lib/canvas-dot-grid.ts';
 import {
   API_SEQUENCE_FIXTURE,
+  ER_DIAGRAM_FIXTURE,
   FLOWCHART_FIXTURE,
   INVALID_MERMAID_FIXTURE,
   activeTabName,
@@ -659,6 +660,93 @@ async function expectTemplateDiagramCreation(page: Page): Promise<void> {
   await saveScreenshot(page, 'issue-15-api-sequence');
   await assertTemplateIdentityAbsent(page);
   assert(flowchartName !== sequenceName, 'Flowchart and sequence templates reused the same created tab.');
+}
+
+async function scrollErControlIntoView(control: Locator): Promise<void> {
+  await control.evaluate((element) => {
+    element.scrollIntoView({ block: 'center', inline: 'nearest' });
+  });
+}
+
+async function expectErSemanticEditor(page: Page): Promise<void> {
+  await replaceSource(page, ER_DIAGRAM_FIXTURE);
+  await waitForSource(page, ER_DIAGRAM_FIXTURE);
+  await waitForCanvas(page, 'er');
+  await closeFlyout(page, 'source');
+  const controls = page.getByTestId('er-editor-controls');
+  const before = await snapshotAnchors(page, ANCHORS);
+  const beforeTransform = await canvasTransform(page);
+
+  const customerName = controls.getByLabel('ER entity CUSTOMER');
+  await scrollErControlIntoView(customerName);
+  await customerName.fill('ACCOUNT');
+  const rename = customerName.locator('xpath=..').getByRole('button', { name: 'Rename', exact: true });
+  await scrollErControlIntoView(rename);
+  await assertHitTarget(page, rename, 'ER entity rename control');
+  await verifiedClick(page, rename, 'ER entity rename control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('ACCOUNT ||--o{ ORDER : places');
+  await closeFlyout(page, 'source');
+
+  const attributeName = controls.getByLabel('New attribute for ACCOUNT');
+  await scrollErControlIntoView(attributeName);
+  await attributeName.fill('created_at');
+  const addAttribute = attributeName.locator('xpath=..').getByRole('button', { name: 'Add attribute', exact: true });
+  await assertHitTarget(page, addAttribute, 'ER add-attribute control');
+  await verifiedClick(page, addAttribute, 'ER add-attribute control');
+  const attributeForm = controls.getByRole('form', { name: 'Attribute created_at on ACCOUNT', exact: true });
+  await scrollErControlIntoView(attributeForm);
+  await attributeForm.getByLabel('Type for created_at').fill('timestamp');
+  await attributeForm.getByLabel('Comment for created_at').fill('created');
+  const saveAttribute = attributeForm.getByRole('button', { name: 'Save', exact: true });
+  await scrollErControlIntoView(saveAttribute);
+  await verifiedClick(page, saveAttribute, 'ER edit-attribute control');
+
+  const existingRelationship = controls.getByRole('form', { name: 'Relationship ACCOUNT ORDER', exact: true }).first();
+  await scrollErControlIntoView(existingRelationship);
+  await existingRelationship.getByLabel('Relationship left entity').selectOption('ORDER');
+  await existingRelationship.getByLabel('Relationship right entity').selectOption('ACCOUNT');
+  await existingRelationship.getByLabel('Relationship label').fill('may place');
+  await existingRelationship.getByLabel('Relationship left cardinality').selectOption('zero-or-one');
+  await existingRelationship.getByLabel('Relationship right cardinality').selectOption('one-or-more');
+  const saveRelationship = existingRelationship.getByRole('button', { name: 'Save', exact: true });
+  await scrollErControlIntoView(saveRelationship);
+  await verifiedClick(page, saveRelationship, 'ER edit-relationship control');
+  const deleteRelationship = controls.getByRole('button', { name: 'Delete relationship may place', exact: true });
+  await scrollErControlIntoView(deleteRelationship);
+  await verifiedClick(page, deleteRelationship, 'ER delete-relationship control');
+  const newRelationship = controls.getByRole('form', { name: 'Relationship ACCOUNT ORDER', exact: true }).last();
+  await scrollErControlIntoView(newRelationship);
+  await newRelationship.getByLabel('Relationship label').fill('places again');
+  const addRelationship = newRelationship.getByRole('button', { name: 'Add relationship', exact: true });
+  await scrollErControlIntoView(addRelationship);
+  await verifiedClick(page, addRelationship, 'ER add-relationship control');
+
+  const addEntity = controls.getByRole('button', { name: 'Add ER entity', exact: true });
+  await scrollErControlIntoView(addEntity);
+  await assertHitTarget(page, addEntity, 'ER add-entity control');
+  await verifiedClick(page, addEntity, 'ER add-entity control');
+  const deleteOrder = controls.getByRole('button', { name: 'Delete ORDER and dependent relationships', exact: true });
+  await scrollErControlIntoView(deleteOrder);
+  await verifiedClick(page, deleteOrder, 'ER delete-entity control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('ENTITY {');
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).not.toContain('ORDER {');
+  await closeFlyout(page, 'source');
+  assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
+  assert(await canvasTransform(page) === beforeTransform, 'ER form operations changed the generic Mermaid camera transform.');
+  assert(await page.locator('.react-flow__node').count() === 0,
+    'ER semantic form incorrectly exposed the generic React Flow editor.');
+
+  const unsupported = 'erDiagram\n  ACCOUNT ||--o{ ORDER : places';
+  await replaceSource(page, unsupported);
+  await waitForSource(page, unsupported);
+  await waitForCanvas(page, 'generic');
+  const lastValidSvg = await page.locator('.diagram-canvas-svg svg').innerHTML();
+  await replaceSource(page, 'erDiagram\n  ACCOUNT ||--o{');
+  await waitForInvalidPreview(page);
+  assert(await page.locator('.diagram-canvas-svg svg').innerHTML() === lastValidSvg,
+    'Invalid ER source replaced the last valid SVG preview.');
 }
 
 async function expectStableFlyoutAnchors(page: Page, label: string): Promise<void> {
@@ -2958,6 +3046,8 @@ async function validateWorkspaceUx(): Promise<void> {
       await saveScreenshot(page, 'issue-14-blank');
       await expectTemplateDiagramCreation(page);
       record(results, 'flowchart and API sequence templates render, rename, edit, and remain ordinary diagrams');
+      await expectErSemanticEditor(page);
+      record(results, 'ER semantic form has hit-tested entity controls, source-safe writes, stable anchors, and no generic graph editor');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');

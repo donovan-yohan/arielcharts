@@ -38,6 +38,15 @@ describe('canvas pan exclusions', () => {
   });
 });
 
+describe('ER editor safe area', () => {
+  it('keeps the semantic form above the measured canvas controls toolbar', () => {
+    expect(canvasSource).toMatch(/const erEditorBottom = canvasToolbarStack\.bottom \+ controlsToolbarHeight \+ BOTTOM_TOOLBAR_GAP;/u);
+    expect(canvasSource).toMatch(/<ErEditorControls\s+bottom=\{erEditorBottom\}/u);
+    expect(canvasSource).toMatch(/function ErEditorControls\(\{\s+bottom,/u);
+    expect(canvasSource).toMatch(/canvas-er-editor[^]*?bottom,/u);
+  });
+});
+
 describe('getRendererInteractionMode', () => {
   it('leaves camera ownership separate while static previews clear connect mode', () => {
     expect(getRendererInteractionMode('connect', false)).toBe('select');

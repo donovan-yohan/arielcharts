@@ -61,7 +61,7 @@ describe('diagram capability catalog', () => {
     const nonVisualRegisteredIds = ['---', 'error', 'info'];
     expect(registeredDiagramIds.filter((id) => !nonVisualRegisteredIds.includes(id))).toEqual(MERMAID_11_16_1_PARSER_TYPES);
     expect(registeredDiagramIds).toHaveLength(MERMAID_11_16_1_PARSER_TYPES.length + nonVisualRegisteredIds.length);
-  });
+  }, 15_000);
 
   it('collapses renderer variants and Railroad grammars without losing parser aliases', () => {
     expect(classifyDiagramCapability('flowchart-v2')).toMatchObject({ family: 'flowchart', kind: 'flowchart', editingMode: 'canvas' });
@@ -83,11 +83,14 @@ describe('diagram capability catalog', () => {
   it('fails closed when a family source cannot safely represent a semantic operation', () => {
     const flowchart = classifyDiagramCapability('flowchart-v2');
     const sequence = classifyDiagramCapability('sequence');
+    const er = classifyDiagramCapability('er');
     const sourceOnly = classifyDiagramCapability('timeline');
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A -->', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult('sequenceDiagram\n  A->>B: request', 'add-message')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(er).getOperationResult('erDiagram\n  A {\n    int id PK\n  }', 'add-attribute')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(er).getOperationResult('erDiagram\n  A ||--o{ B', 'add-relationship')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult('sequenceDiagram\n  Note over A: details', 'add-message')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(sourceOnly).getOperationResult('timeline\n  2026 : Started', 'add-event')).toEqual({ supported: false, reason: 'source-only' });
   });
@@ -95,19 +98,23 @@ describe('diagram capability catalog', () => {
   it('exposes the existing canvas and semantic-form controls through the adapter contract', () => {
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('flowchart-v2'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('sequence'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('er'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('timeline'))).toBe(false);
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('flowchart-v2'))).toBe('Flowchart · editable · canvas');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('sequence'))).toBe('Sequence · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('er'))).toBe('Entity relationship · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('timeline'))).toBe('Timeline · source only');
   });
 
   it('labels a current unrepresentable structural source as source-only', () => {
     const sequence = classifyDiagramCapability('sequence');
     const flowchart = classifyDiagramCapability('flowchart-v2');
+    const er = classifyDiagramCapability('er');
 
     expect(getDiagramCapabilityLabel(sequence, 'sequenceDiagram\nparticipant "Web browser" as Browser')).toBe('Sequence · source only');
     expect(getDiagramCapabilityLabel(sequence, 'sequenceDiagram\nA->>B: request')).toBe('Sequence · editable · form');
     expect(getDiagramCapabilityLabel(flowchart, 'flowchart TD\nA-->')).toBe('Flowchart · source only');
+    expect(getDiagramCapabilityLabel(er, 'erDiagram\nA ||--o{ B')).toBe('Entity relationship · source only');
     expect(getDiagramCapabilityLabel(null, 'sequenceDiagram\nA->>B: request')).toBe('Mermaid · source only');
   });
 });

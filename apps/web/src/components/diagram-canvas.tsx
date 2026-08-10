@@ -1,5 +1,6 @@
 'use client';
 
+import type { CanvasPresenceEntry, CanvasWorldPoint } from '@arielcharts/shared';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   ConnectionLineType,
@@ -42,6 +43,7 @@ import { getCanvasToolbarStackGeometry, getCanvasToolbarVisibility } from '../li
 import { applyCanvasTouchGesture, CanvasTouchGestureController, type CanvasTouchGesture } from '../lib/canvas-touch-gesture';
 import { getConnectNodeActivation } from '../lib/diagram-connect-state';
 import { getCanvasDotGridGeometry } from '../lib/canvas-dot-grid';
+import { beginCanvasMousePan, CanvasMousePanController } from '../lib/canvas-mouse-pan';
 import { getDiagramEdgeIdentityForFlowEdge, getFlowEdgeId, getVisibleDiagramLinks } from '../lib/diagram-flow-identity';
 import type { DiagramNodePositions, NodePositionsSyncMode } from '../lib/diagram-layout';
 import {
@@ -87,6 +89,7 @@ export interface DiagramCanvasProps {
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
+  onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
   onDeleteEdge?: (edge: DiagramEdgeIdentity) => void;
   onDeleteNodes?: (nodeIds: string[]) => void;
@@ -99,10 +102,13 @@ export interface DiagramCanvasProps {
   onNodeDragStop?: (positions: DiagramNodePositions) => void;
   onNodePositionsChange?: (positions: DiagramNodePositions, mode?: NodePositionsSyncMode) => void;
   onPasteClipboard?: (clipboard: DiagramClipboardPayload, offset: DiagramClipboardPoint) => void;
+  onRedo?: () => void;
   onResetSharedLayout?: () => void;
   onRenderSettled?: () => void;
   onSelectedNodeIdsChange?: (nodeIds: string[]) => void;
   onUngroupNodes?: (subgraphId: string) => void;
+  onUndo?: () => void;
+  remoteCanvasPresence?: readonly CanvasPresenceEntry[];
 }
 
 interface ViewportState {
@@ -124,6 +130,7 @@ interface MermaidFlowNodeData extends Record<string, unknown> {
   label: string;
   presentation: MermaidItemPresentation;
   shape: DiagramNodeShape;
+  remoteSelections: readonly CanvasPresenceEntry[];
 }
 
 type MermaidFlowNode = Node<MermaidFlowNodeData, 'mermaidFlowNode'>;
@@ -249,6 +256,18 @@ export function shouldHandleCanvasSingleKeyShortcut(
   return targetIsCanvas && activeElementIsCanvas;
 }
 
+export function getCanvasHistoryShortcut(
+  key: string,
+  hasModifier: boolean,
+  hasShift: boolean,
+): 'undo' | 'redo' | null {
+  if (!hasModifier || key.toLowerCase() !== 'z') {
+    return null;
+  }
+
+  return hasShift ? 'redo' : 'undo';
+}
+
 export function shouldRestoreCanvasFocusAfterPaste(activeElementIsInCanvas: boolean, activeElementIsBody: boolean): boolean {
   return activeElementIsInCanvas || activeElementIsBody;
 }
@@ -300,6 +319,14 @@ function canStartTouchCanvasGesture(target: EventTarget | null, root: HTMLDivEle
   return root.contains(target);
 }
 
+function canStartMouseCanvasPan(target: EventTarget | null, root: HTMLDivElement): boolean {
+  if (!(target instanceof Element) || !root.contains(target)) {
+    return false;
+  }
+
+  return !target.closest('a, button, input, select, textarea, [contenteditable="true"], [role="button"], [data-testid*="toolbar"]');
+}
+
 export function DiagramCanvas({
   className,
   emptyMessage = 'start typing mermaid syntax',
@@ -311,6 +338,7 @@ export function DiagramCanvas({
   onAddEdge,
   onAddNode,
   onAddConnectedNode,
+  onCanvasCursorChange,
   onChangeNodeShape,
   onDeleteEdge,
   onDeleteNodes,
@@ -323,11 +351,14 @@ export function DiagramCanvas({
   onNodeDragStop,
   onNodePositionsChange,
   onPasteClipboard,
+  onRedo,
   onResetSharedLayout,
   onRenderSettled,
   onSelectedNodeIdsChange,
   onUngroupNodes,
+  onUndo,
   readOnly = false,
+  remoteCanvasPresence = [],
   selectedNodeIds,
   svg,
   theme = 'dark',
@@ -354,11 +385,13 @@ export function DiagramCanvas({
   const persistedNodePositions = nodePositions ?? uncontrolledNodePositions;
   const persistedNodePositionsRef = useRef<DiagramNodePositions>(persistedNodePositions);
   const hasAutoFitInitialRenderRef = useRef(false);
+  const suppressCanvasClickRef = useRef(false);
+  const suppressCanvasClickResetRef = useRef<number | null>(null);
   const visibleNodePositions = useMemo(
     () => ({ ...persistedNodePositions, ...liveNodePositions }),
     [liveNodePositions, persistedNodePositions],
   );
-  const dragStateRef = useRef<{ originX: number; originY: number; startPanX: number; startPanY: number } | null>(null);
+  const mousePanRef = useRef(new CanvasMousePanController());
   const connectionStartNodeIdRef = useRef<string | null>(null);
   const isControlledSelection = selectedNodeIds !== undefined;
   const [internalSelection, setInternalSelection] = useState<string[]>(selectedNodeIds ?? []);
@@ -396,7 +429,13 @@ export function DiagramCanvas({
   const pasteCountRef = useRef(0);
   const pendingPasteFocusRef = useRef(0);
   const [hasCanvasClipboard, setHasCanvasClipboard] = useState(false);
+  const onCanvasCursorChangeRef = useRef(onCanvasCursorChange);
   onRenderSettledRef.current = onRenderSettled;
+  onCanvasCursorChangeRef.current = onCanvasCursorChange;
+
+  useEffect(() => () => {
+    onCanvasCursorChangeRef.current?.(null);
+  }, []);
 
   const setNodePositions = useCallback((
     update: (current: DiagramNodePositions) => DiagramNodePositions,
@@ -513,6 +552,18 @@ export function DiagramCanvas({
     return getBoundsUnion(allBounds) ?? hitMap.viewBox;
   }, [hitMap, interactiveNodeBounds, isFlowchart]);
 
+  const remoteSelectionsByNodeId = useMemo(() => {
+    const selections = new Map<string, CanvasPresenceEntry[]>();
+    for (const presence of remoteCanvasPresence) {
+      for (const nodeId of presence.canvas.selected_node_ids ?? []) {
+        const current = selections.get(nodeId) ?? [];
+        current.push(presence);
+        selections.set(nodeId, current);
+      }
+    }
+    return selections;
+  }, [remoteCanvasPresence]);
+
   const flowNodes = useMemo<MermaidFlowNode[]>(() => {
     if (!graph || !interactiveNodeBounds) {
       return [];
@@ -533,6 +584,7 @@ export function DiagramCanvas({
           ariaLabel,
           label: nodeLabel,
           presentation: mermaidPresentation.nodes.get(node.id) ?? {},
+          remoteSelections: remoteSelectionsByNodeId.get(node.id) ?? [],
           shape: node.shape,
         },
         draggable: isFlowchart && !readOnly,
@@ -550,7 +602,7 @@ export function DiagramCanvas({
     });
 
     return nextNodes;
-  }, [graph, interactiveNodeBounds, isFlowchart, mermaidPresentation.nodes, readOnly, selection]);
+  }, [graph, interactiveNodeBounds, isFlowchart, mermaidPresentation.nodes, readOnly, remoteSelectionsByNodeId, selection]);
   const flowNodeIdsRef = useRef<string[]>([]);
   flowNodeIdsRef.current = flowNodes.map((node) => node.id);
 
@@ -773,6 +825,20 @@ export function DiagramCanvas({
     return true;
   }, [canEditStructure, onPasteClipboard]);
 
+  const simplifyLayout = useCallback(() => {
+    if (!canEditStructure || !hasPersistedLayout) {
+      return false;
+    }
+
+    if (onResetSharedLayout) {
+      onResetSharedLayout();
+      return true;
+    }
+
+    setNodePositions(() => ({}), 'replace');
+    return true;
+  }, [canEditStructure, hasPersistedLayout, onResetSharedLayout, setNodePositions]);
+
   const zoomCanvas = useCallback((factor: number) => {
     setAnimateTransform(false);
     setViewport((current) => ({ ...current, zoom: clamp(current.zoom * factor, MIN_ZOOM, MAX_ZOOM) }));
@@ -977,8 +1043,7 @@ export function DiagramCanvas({
     observeFlyouts();
     const mutationObserver = new MutationObserver(() => {
       observeFlyouts();
-      window.cancelAnimationFrame(frameId);
-      updateViewport();
+      scheduleViewportUpdate();
     });
     mutationObserver.observe(scope, { childList: true });
     return () => {
@@ -1175,6 +1240,17 @@ export function DiagramCanvas({
         event.target === canvas,
         document.activeElement === canvas,
       );
+      const historyShortcut = getCanvasHistoryShortcut(event.key, isModifierShortcut, event.shiftKey);
+      if (historyShortcut && !readOnly) {
+        event.preventDefault();
+        if (historyShortcut === 'undo') {
+          onUndo?.();
+        } else {
+          onRedo?.();
+        }
+        return;
+      }
+
       if (isModifierShortcut && key === 'c' && canEditStructure) {
         event.preventDefault();
         copySelectedNodes();
@@ -1220,6 +1296,12 @@ export function DiagramCanvas({
         setPendingEdgeLabel('');
         setConnectSourceId(null);
         setMode(mode === 'connect' ? 'select' : 'connect');
+        return;
+      }
+
+      if (!isModifierShortcut && canvasContainerOwnsFocus && canEditStructure && hasPersistedLayout && key === 's') {
+        event.preventDefault();
+        simplifyLayout();
         return;
       }
 
@@ -1287,7 +1369,7 @@ export function DiagramCanvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [canEditStructure, copySelectedNodes, fitToDiagram, graph, mode, nodeById, onAddNode, onDeleteEdge, onDeleteNodes, onUngroupNodes, pasteClipboard, selectedCurrentEdgeIdentity, selection, setMode, setSelection, zoomCanvas]);
+  }, [canEditStructure, copySelectedNodes, fitToDiagram, graph, hasPersistedLayout, mode, nodeById, onAddNode, onDeleteEdge, onDeleteNodes, onRedo, onUndo, onUngroupNodes, pasteClipboard, readOnly, selectedCurrentEdgeIdentity, selection, setMode, setSelection, simplifyLayout, zoomCanvas]);
 
   useEffect(() => {
     if (viewport.zoom >= EDITOR_MIN_ZOOM) {
@@ -1372,22 +1454,45 @@ export function DiagramCanvas({
   }, []);
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if ((event.button !== 1 && !spacePressed) || !containerRef.current) {
-      return;
+    const isMiddleMouse = event.button === 1;
+    const isSpacePrimaryPointer = spacePressed && event.button === 0;
+    const canvas = containerRef.current;
+    if (
+      event.pointerType === 'touch'
+      || (!isMiddleMouse && !isSpacePrimaryPointer)
+      || !canvas
+      || !canStartMouseCanvasPan(event.target, canvas)
+    ) {
+      return false;
+    }
+
+    if (!beginCanvasMousePan(
+      mousePanRef.current,
+      event.currentTarget,
+      event.pointerId,
+      { x: event.clientX, y: event.clientY },
+      viewport,
+    )) {
+      return false;
     }
 
     event.preventDefault();
-    dragStateRef.current = {
-      originX: event.clientX,
-      originY: event.clientY,
-      startPanX: viewport.panX,
-      startPanY: viewport.panY,
-    };
+    event.stopPropagation();
     setIsPanning(true);
-  }, [spacePressed, viewport.panX, viewport.panY]);
+    return true;
+  }, [spacePressed, viewport]);
+
+  const handlePointerDownCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch') {
+      handleTouchPointerDown(event);
+      return;
+    }
+
+    handlePointerDown(event);
+  }, [handlePointerDown, handleTouchPointerDown]);
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!containerRef.current || !hitMap) {
+    if (!containerRef.current) {
       return;
     }
 
@@ -1397,35 +1502,98 @@ export function DiagramCanvas({
       y: (event.clientY - rect.top - viewport.panY) / viewport.zoom,
     };
 
-    setCursorPoint(point);
+    if (event.pointerType !== 'touch') {
+      onCanvasCursorChange?.(point);
+    }
 
-    if (!dragStateRef.current) {
+    if (!hitMap) {
       return;
     }
 
-    const dx = event.clientX - dragStateRef.current.originX;
-    const dy = event.clientY - dragStateRef.current.originY;
+    setCursorPoint(point);
+
+    const nextPan = mousePanRef.current.move(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (!nextPan) {
+      return;
+    }
+
     setAnimateTransform(false);
     setViewport((current) => ({
       ...current,
-      panX: (dragStateRef.current?.startPanX ?? current.panX) + dx,
-      panY: (dragStateRef.current?.startPanY ?? current.panY) + dy,
+      ...nextPan,
     }));
-  }, [hitMap, viewport.panX, viewport.panY, viewport.zoom]);
+  }, [hitMap, onCanvasCursorChange, viewport.panX, viewport.panY, viewport.zoom]);
 
-  const stopPanning = useCallback(() => {
-    dragStateRef.current = null;
-    setIsPanning(false);
+  const suppressCanvasClick = useCallback(() => {
+    suppressCanvasClickRef.current = true;
+    if (suppressCanvasClickResetRef.current !== null) {
+      window.clearTimeout(suppressCanvasClickResetRef.current);
+    }
+    suppressCanvasClickResetRef.current = window.setTimeout(() => {
+      suppressCanvasClickRef.current = false;
+      suppressCanvasClickResetRef.current = null;
+    }, 0);
+  }, []);
+
+  const stopPanning = useCallback((pointerId?: number): boolean => {
+    const stopped = pointerId === undefined
+      ? mousePanRef.current.isActive
+      : mousePanRef.current.end(pointerId);
+    if (pointerId === undefined) {
+      mousePanRef.current.cancel();
+    }
+    if (stopped) {
+      setIsPanning(false);
+    }
+    return stopped;
   }, []);
 
   const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!handleTouchPointerEnd(event)) {
-      stopPanning();
+      if (stopPanning(event.pointerId)) {
+        suppressCanvasClick();
+      }
     }
-  }, [handleTouchPointerEnd, stopPanning]);
+  }, [handleTouchPointerEnd, stopPanning, suppressCanvasClick]);
+
+  const handleLostPointerCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!handleTouchPointerEnd(event)) {
+      if (stopPanning(event.pointerId)) {
+        suppressCanvasClick();
+      }
+    }
+  }, [handleTouchPointerEnd, stopPanning, suppressCanvasClick]);
+
+  useEffect(() => {
+    const cancelPanning = () => {
+      touchGestureRef.current.reset();
+      stopPanning();
+      setIsPanning(false);
+      setSpacePressed(false);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        cancelPanning();
+      }
+    };
+
+    window.addEventListener('blur', cancelPanning);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('blur', cancelPanning);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [stopPanning]);
+
+  useEffect(() => () => {
+    if (suppressCanvasClickResetRef.current !== null) {
+      window.clearTimeout(suppressCanvasClickResetRef.current);
+    }
+  }, []);
 
   const handleCanvasClick = useCallback(() => {
-    if (isPanning) {
+    if (isPanning || suppressCanvasClickRef.current) {
+      suppressCanvasClickRef.current = false;
       return;
     }
 
@@ -1756,12 +1924,15 @@ export function DiagramCanvas({
           fitToDiagram(true);
         }
       }}
-      onPointerDown={handlePointerDown}
-      onPointerDownCapture={handleTouchPointerDown}
-      onPointerLeave={() => { setCursorPoint(null); }}
+      onPointerDownCapture={handlePointerDownCapture}
+      onPointerLeave={() => {
+        setCursorPoint(null);
+        onCanvasCursorChange?.(null);
+      }}
       onPointerMove={handlePointerMove}
       onPointerMoveCapture={handleTouchPointerMove}
       onPointerCancel={handlePointerUp}
+      onLostPointerCapture={handleLostPointerCapture}
       onPointerUp={handlePointerUp}
       onWheel={handleWheel}
       onFocus={(event) => {
@@ -1961,6 +2132,45 @@ export function DiagramCanvas({
       ) : null}
 
       <div aria-hidden="true" style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 10 }}>
+        {remoteCanvasPresence.flatMap((presence) => {
+          const cursor = presence.canvas.cursor;
+          if (!cursor) return [];
+          return [
+            <div
+              data-participant-name={presence.participant.name}
+              data-testid={`remote-canvas-cursor-${presence.client_id}`}
+              key={`remote-canvas-cursor-${presence.client_id}`}
+              style={{
+                color: presence.participant.color,
+                left: (cursor.x * viewport.zoom) + viewport.panX,
+                position: 'absolute',
+                top: (cursor.y * viewport.zoom) + viewport.panY,
+                transform: 'translate(-1px, -1px)',
+              }}
+            >
+              <svg height="14" viewBox="0 0 14 18" width="11">
+                <path d="M1 1 12 11 7 12.5 5 17Z" fill="currentColor" stroke="var(--surface-canvas)" strokeWidth="1.4" />
+              </svg>
+              <span
+                style={{
+                  background: 'var(--surface-raised)',
+                  border: '1px solid currentColor',
+                  borderRadius: 3,
+                  color: 'var(--ink)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  left: 9,
+                  lineHeight: 1.2,
+                  padding: '2px 4px',
+                  position: 'absolute',
+                  top: 10,
+                  whiteSpace: 'nowrap',
+                }}
+              >{getCanvasPresenceLabel(presence.participant.name)}</span>
+            </div>,
+          ];
+        })}
         {rubberBandPoints ? (
           <svg style={{ height: '100%', width: '100%' }}>
             <line
@@ -2149,14 +2359,14 @@ export function DiagramCanvas({
               <ArrowRightFromLine size={16} />
             </ToolbarButton>
             {selection.length > 0 ? (
-              <ToolbarButton label="Delete selected nodes" onClick={() => { onDeleteNodes?.(selection); }} shortcut="Delete">
+              <ToolbarButton label="Delete selected nodes" onClick={() => { onDeleteNodes?.(selection); }} shortcut="Delete or Backspace" hint="⌫">
                 <Trash2 size={16} />
               </ToolbarButton>
             ) : null}
             <ToolbarButton label="Add node" onClick={addDefaultNode} shortcut="N">
               <Plus size={16} />
             </ToolbarButton>
-            <ToolbarButton label="Copy selected nodes" onClick={copySelectedNodes} shortcut="Ctrl/Cmd+C">
+            <ToolbarButton label="Copy selected nodes" onClick={copySelectedNodes} shortcut="Ctrl/Cmd+C" hint="C">
               <ClipboardCopy size={16} />
             </ToolbarButton>
 
@@ -2265,21 +2475,16 @@ export function DiagramCanvas({
               position: 'absolute',
               right: canvasToolbarStack.right,
               visibility: canvasToolbarVisibility.controls ? 'visible' : 'hidden',
+              zIndex: 30,
             }}
           >
             {isFlowchart && hasPersistedLayout ? (
-              <ToolbarButton label="Reset shared layout to Mermaid" onClick={() => {
-                if (onResetSharedLayout) {
-                  onResetSharedLayout();
-                  return;
-                }
-                setNodePositions(() => ({}), 'replace');
-              }}>
+              <ToolbarButton label="Simplify layout" onClick={() => { simplifyLayout(); }} shortcut="S">
                 <RotateCcw size={16} />
               </ToolbarButton>
             ) : null}
             {isFlowchart && hasCanvasClipboard ? (
-              <ToolbarButton label="Paste copied nodes" onClick={pasteClipboard} shortcut="Ctrl/Cmd+V">
+              <ToolbarButton label="Paste copied nodes" onClick={pasteClipboard} shortcut="Ctrl/Cmd+V" hint="V">
                 <ClipboardPaste size={16} />
               </ToolbarButton>
             ) : null}
@@ -2550,34 +2755,57 @@ function MermaidReactFlowNode({ data, id, selected }: NodeProps<MermaidFlowNode>
   const focused = interaction?.focusedNodeId === id;
   const label = data.ariaLabel;
   const handleColor = getCanvasHandlePaint(Boolean(selected || focused || interaction?.connectMode));
+  const remoteSelection = data.remoteSelections[0];
+  const remoteSelectionLabel = remoteSelection
+    ? `${getCanvasPresenceLabel(remoteSelection.participant.name)}${data.remoteSelections.length > 1 ? ` +${data.remoteSelections.length - 1}` : ''}`
+    : null;
 
   return (
     <div
       aria-label={label}
       aria-pressed={selected}
-      className={`mermaid-flow-node mermaid-flow-node--${getShapeClassName(data.shape)}${selected ? ' is-selected' : ''}${focused ? ' is-focused' : ''}`}
+      className={`mermaid-flow-node${selected ? ' is-selected' : ''}${focused ? ' is-focused' : ''}`}
       onFocus={() => { interaction?.onFocus(id); }}
       onKeyDown={(event) => { interaction?.onKeyDown(id, event); }}
       ref={(element) => { interaction?.registerNodeElement(id, element); }}
       role="button"
-      style={getCanvasNodePaint(data.presentation)}
       tabIndex={focused ? 0 : -1}
     >
       {FLOW_HANDLE_POSITIONS.map((position) => (
         <Handle
           className={`mermaid-flow-handle mermaid-flow-handle--${position} mermaid-flow-handle--target`}
           id={getFlowHandleId('target', position)}
+          isConnectableStart={false}
           key={`target-${position}`}
           position={position}
           style={{ background: handleColor, borderColor: 'var(--surface-canvas)' }}
           type="target"
         />
       ))}
-      <span>{data.label}</span>
+      <div
+        className={`mermaid-flow-node-surface mermaid-flow-node-surface--${getShapeClassName(data.shape)}`}
+        style={getCanvasNodePaint(data.presentation)}
+      >
+        {remoteSelection ? (
+          <span
+            className={`mermaid-flow-node-remote-outline mermaid-flow-node-remote-outline--${getShapeClassName(data.shape)}`}
+            style={{ '--remote-selection-color': remoteSelection.participant.color } as CSSProperties}
+          />
+        ) : null}
+        <span>{data.label}</span>
+      </div>
+      {remoteSelection && remoteSelectionLabel ? (
+        <span
+          className="mermaid-flow-node-remote-label"
+          data-testid={`remote-node-selection-${id}`}
+          style={{ backgroundColor: remoteSelection.participant.color }}
+        >{remoteSelectionLabel}</span>
+      ) : null}
       {FLOW_HANDLE_POSITIONS.map((position) => (
         <Handle
           className={`mermaid-flow-handle mermaid-flow-handle--${position} mermaid-flow-handle--source`}
           id={getFlowHandleId('source', position)}
+          isConnectableEnd={false}
           key={`source-${position}`}
           position={position}
           style={{ background: handleColor, borderColor: 'var(--surface-canvas)' }}
@@ -2593,19 +2821,21 @@ function ToolbarButton({
   disabled = false,
   label,
   onClick,
+  hint,
   shortcut,
 }: {
   children: ReactNode;
   disabled?: boolean;
   label: string;
   onClick: () => void;
+  hint?: string;
   shortcut?: string;
 }) {
   const title = shortcut ? `${label} (${shortcut})` : label;
   return (
     <button aria-label={label} className="canvas-toolbar-button" data-testid={`canvas-action-${toTestId(label)}`} disabled={disabled} onClick={onClick} style={{ ...TOOLBAR_BUTTON_STYLE, opacity: disabled ? 0.45 : 1, position: 'relative' }} title={title} type="button">
       {children}
-      {shortcut ? <kbd aria-hidden="true" className="canvas-toolbar-shortcut">{shortcut}</kbd> : null}
+      {shortcut ? <span aria-hidden="true" className="canvas-toolbar-shortcut">{hint ?? shortcut}</span> : null}
     </button>
   );
 }
@@ -2643,6 +2873,10 @@ export function getFlowEdgePresentation(link: DiagramLink, presentation: Mermaid
     default:
       return { markerEnd: { color: markerColor, type: MarkerType.ArrowClosed }, style };
   }
+}
+
+function getCanvasPresenceLabel(name: string): string {
+  return name.replace(/-[a-z0-9]{2}$/i, '');
 }
 
 function getNodeAriaLabel(shape: string | undefined, label: string): string {

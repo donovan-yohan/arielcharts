@@ -116,6 +116,30 @@ async function waitForMainTabActive(page: Page): Promise<void> {
   }, undefined, { timeout: 15_000 });
 }
 
+async function getInternalParticipantName(page: Page): Promise<string> {
+  const name = await page.evaluate(() => {
+    const identityJson = window.localStorage.getItem('arielcharts.identity.v1');
+    const tabId = window.sessionStorage.getItem('arielcharts.tab.v1');
+    if (!identityJson || !tabId) return null;
+    try {
+      const identity = JSON.parse(identityJson) as { name?: unknown };
+      return typeof identity.name === 'string' && identity.name.length > 0
+        ? `${identity.name}-${tabId}`
+        : null;
+    } catch {
+      return null;
+    }
+  });
+  assert(name, 'Browser did not expose its internal awareness participant identity.');
+  return name;
+}
+
+function remoteCursorForParticipant(page: Page, participantName: string): Locator {
+  return page.locator(
+    `[data-testid^="remote-canvas-cursor-"][data-participant-name=${JSON.stringify(participantName)}]`,
+  );
+}
+
 function transformedLayer(page: Page): Locator {
   return page.locator('.diagram-canvas-svg').locator('..');
 }
@@ -489,6 +513,67 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await closeSourceFlyout(pageB);
     await closeSourceFlyout(pageA);
     await Promise.all([waitForFlowchart(pageA), waitForFlowchart(pageB)]);
+
+    const pageAParticipantName = await getInternalParticipantName(pageA);
+    const pageARemoteCursor = remoteCursorForParticipant(pageB, pageAParticipantName);
+    const presenceNodeId = await nodeIdAt(pageA, 0);
+    const presenceNode = nodeById(pageA, presenceNodeId);
+    const presenceNodeBox = await boxOf(presenceNode, 'Presence fixture node was missing.');
+    await pageA.mouse.move(presenceNodeBox.x + (presenceNodeBox.width / 2), presenceNodeBox.y + (presenceNodeBox.height / 2));
+    await presenceNode.click();
+    await pageARemoteCursor.waitFor({ state: 'visible', timeout: 15_000 });
+    await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
+    const remoteSelectionDoesNotTakeLocalSelection = !((await nodeById(pageB, presenceNodeId).getAttribute('class'))?.includes('selected'));
+    assert(remoteSelectionDoesNotTakeLocalSelection, 'Remote canvas selection took over the receiving browser selection state.');
+    await pageB.screenshot({ path: '/tmp/arielcharts-canvas-presence.png' });
+    await pageA.getByTestId('activity-flyout-toggle').click();
+    await pageA.getByTestId('activity-flyout').waitFor({ state: 'visible', timeout: 15_000 });
+    await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
+
+    const history = await mcp.listDiagramHistory(sessionId, main.id);
+    const previewRevision = history.revisions.find((revision) => revision.resultRevision !== history.currentRevision) ?? history.revisions[0];
+    assert(previewRevision, 'Collaboration presence fixture did not retain a history revision to preview.');
+    const previewButton = pageA.getByTestId(`history-revision-${previewRevision.id}`).getByRole('button', { name: 'Preview', exact: true });
+    await previewButton.waitFor({ state: 'visible', timeout: 15_000 });
+
+    const refreshedPresenceNodeBox = await boxOf(presenceNode, 'Presence fixture node was obscured before detached preview.');
+    await pageA.mouse.move(refreshedPresenceNodeBox.x + (refreshedPresenceNodeBox.width / 2), refreshedPresenceNodeBox.y + (refreshedPresenceNodeBox.height / 2));
+    await presenceNode.click();
+    await pageARemoteCursor.waitFor({ state: 'visible', timeout: 15_000 });
+    await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
+
+    await previewButton.evaluate((button) => { (button as HTMLButtonElement).focus(); });
+    await pageA.keyboard.press('Enter');
+    await pageA.getByTestId('history-preview-notice').waitFor({ state: 'visible', timeout: 15_000 });
+    await pageARemoteCursor.waitFor({ state: 'detached', timeout: 15_000 });
+    await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
+
+    const cancelPreview = pageA.getByRole('button', { name: 'Cancel preview', exact: true });
+    await cancelPreview.evaluate((button) => { (button as HTMLButtonElement).focus(); });
+    await pageA.keyboard.press('Enter');
+    await pageA.getByTestId('history-preview-notice').waitFor({ state: 'detached', timeout: 15_000 });
+    await pageARemoteCursor.waitFor({ state: 'visible', timeout: 15_000 });
+    await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
+
+    await presenceNode.click();
+    await pageA.getByTestId('canvas-node-toolbar').waitFor({ state: 'visible', timeout: 15_000 });
+    await pageA.getByRole('button', { name: 'Copy selected nodes', exact: true }).click();
+    await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
+
+    await previewButton.click();
+    await pageA.getByTestId('history-preview-notice').waitFor({ state: 'visible', timeout: 15_000 });
+    await pageARemoteCursor.waitFor({ state: 'detached', timeout: 15_000 });
+    await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
+    await pageA.getByRole('button', { name: 'Cancel preview', exact: true }).click();
+    await pageA.getByTestId('history-preview-notice').waitFor({ state: 'detached', timeout: 15_000 });
+    await pageA.waitForTimeout(200);
+    assert(await pageARemoteCursor.count() === 0,
+      'Pointer-entered history preview leaked a stale cursor timer after cancellation.');
+    assert(await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).count() === 0,
+      'Pointer-entered history preview republished a selection cleared by workspace click-away.');
+
+    await pageA.getByRole('button', { name: 'Close activity and history', exact: true }).click();
+    await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
 
     const dragNodeId = await nodeIdAt(pageA, 0);
     const remoteNodeId = await nodeIdAt(pageA, 1);

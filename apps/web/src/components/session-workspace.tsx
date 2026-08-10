@@ -1,6 +1,6 @@
 'use client';
 
-import type { ActivityEvent, AwarenessState, DiagramRevision, DiagramRevisionSummary, ListDiagramHistoryOutput, Participant, StarterTemplateId } from '@arielcharts/shared';
+import type { ActivityEvent, AwarenessState, CanvasAwarenessState, CanvasPresenceEntry, CanvasWorldPoint, DiagramRevision, DiagramRevisionSummary, ListDiagramHistoryOutput, Participant, StarterTemplateId } from '@arielcharts/shared';
 import { APP_NAME, STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
@@ -45,12 +45,21 @@ import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodeP
 import { getServerHttpUrl, getWebsocketServerUrl } from '../lib/session';
 import { listDiagramHistory, readCurrentDiagram, readDiagramRevision, restoreDiagramRevision } from '../lib/history-api';
 import { getMermaidRenderId } from '../lib/mermaid-render-id';
+import { formatMermaidForGitHub } from '../lib/github-mermaid';
 import { getNextPreviewCameraLock } from '../lib/renderer-camera-policy';
 import type { ConnectionState } from '../lib/connection-state';
 import { FOCUSABLE_SELECTOR } from '../lib/focusable';
 import { getMermaidThemeVariables } from '../lib/theme';
 import { getActivityFlyoutViewOnOpen, getNextWorkspaceFlyout, type ActivityFlyoutView, type WorkspaceFlyout } from '../lib/workspace-flyout-state';
+import { SOURCE_FLYOUT_DEFAULT_WIDTH } from '../lib/source-flyout-resize';
 import { getMcpRoomBearer, getRoomShareUrl, rotateRoomKey } from '../lib/room-access-api';
+import {
+  CANVAS_CURSOR_INTERVAL_MS,
+  areCanvasAwarenessStatesEqual,
+  getRemoteCanvasPresence,
+  hasCanvasCursorMovedEnough,
+  quantizeCanvasCursor,
+} from '../lib/canvas-presence';
 
 const DIAGRAMS_KEY = 'diagrams';
 const DIAGRAM_ORDER_KEY = 'diagramOrder';
@@ -58,6 +67,7 @@ const DIAGRAM_NAME_KEY = 'name';
 const DIAGRAM_MERMAID_TEXT_KEY = 'mermaid';
 const DIAGRAM_NODE_POSITIONS_KEY = 'nodePositions';
 const ACTIVITY_KEY = 'activity';
+const PRESENCE_KEY = 'presence';
 const MAX_ACTIVITY_EVENTS = 100;
 const EDIT_ACTIVITY_DEBOUNCE_MS = 900;
 const NAME_STORAGE_KEY = 'arielcharts.identity.v1';
@@ -78,6 +88,7 @@ type CollaborationState = {
   diagramsMap: Y.Map<Y.Map<unknown>>;
   diagramOrder: Y.Array<string>;
   doc: Y.Doc;
+  presenceMap: Y.Map<Participant>;
   provider: WebsocketProvider;
 };
 
@@ -93,6 +104,7 @@ type ActiveDiagramState = {
 type NodePosition = DiagramNodePosition;
 
 type AwarenessLike = {
+  clientID: number;
   getStates: () => Map<number, unknown>;
   off: (eventName: string, handler: (...args: unknown[]) => void) => void;
   on: (eventName: string, handler: (...args: unknown[]) => void) => void;
@@ -170,11 +182,33 @@ function getParticipantFromAwarenessState(value: unknown): Participant | null {
   return isParticipant(awarenessState.user) ? awarenessState.user : null;
 }
 
-function getParticipantsFromAwareness(awareness: AwarenessLike): Participant[] {
-  return [...awareness.getStates().values()]
+export function getParticipantsFromCollaborationSources(
+  awarenessStates: ReadonlyMap<number, unknown>,
+  durableParticipants: readonly Participant[],
+): Participant[] {
+  const liveParticipants = [...awarenessStates.values()]
     .map((value) => getParticipantFromAwarenessState(value))
-    .filter((participant): participant is Participant => participant !== null)
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .filter((participant): participant is Participant => participant !== null);
+  const byName = new Map<string, Participant>();
+  for (const participant of durableParticipants) {
+    if (participant.type === 'agent' && isParticipant(participant)) {
+      byName.set(participant.name, participant);
+    }
+  }
+  for (const participant of liveParticipants) {
+    if (!byName.has(participant.name)) byName.set(participant.name, participant);
+  }
+  return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function areParticipantListsEqual(left: readonly Participant[], right: readonly Participant[]): boolean {
+  return left.length === right.length && left.every((participant, index) => {
+    const candidate = right[index];
+    return candidate !== undefined
+      && participant.name === candidate.name
+      && participant.color === candidate.color
+      && participant.type === candidate.type;
+  });
 }
 
 function formatTimestamp(timestamp: number): string {
@@ -360,11 +394,12 @@ export function commitLayoutActivityCheckpoint(
   positions: DiagramNodePositions,
   mode: NodePositionsSyncMode,
   event: ActivityEvent,
+  origin: unknown = event.actor.name,
 ): void {
   doc.transact(() => {
     writeNodePositions(nodePositionsMap, positions, mode);
     upsertActivity(activityArray, event);
-  }, event.actor.name);
+  }, origin);
 }
 
 function readDiagramTabs(diagrams: Y.Map<Y.Map<unknown>>, order: Y.Array<string>): DiagramTab[] {
@@ -462,17 +497,27 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const connectModalReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const historyRequestSequenceRef = useRef(0);
   const historyPreviewRequestSequenceRef = useRef(0);
+  const historyPreviewRef = useRef<DiagramRevision | null>(null);
   const historyRefreshCheckpointRef = useRef<string | null>(null);
   const restoreOriginRef = useRef<HTMLButtonElement | null>(null);
   const restoreConfirmRef = useRef<HTMLButtonElement | null>(null);
   const activeDiagramIdRef = useRef<string | null>(null);
   const activeTouchLabelRef = useRef<HTMLElement | null>(null);
   const touchLabelTimeoutRef = useRef<number | null>(null);
+  const selectedNodeIdsRef = useRef<string[]>([]);
+  const localCanvasCursorRef = useRef<CanvasWorldPoint | null>(null);
+  const localCanvasPresenceRef = useRef<CanvasAwarenessState | null>(null);
+  const pendingCanvasCursorRef = useRef<CanvasWorldPoint | null>(null);
+  const lastPublishedCanvasCursorRef = useRef<CanvasWorldPoint | null>(null);
+  const lastCanvasCursorPublishedAtRef = useRef(0);
+  const canvasCursorTimerRef = useRef<number | null>(null);
+  const canvasPresenceReadyDiagramIdRef = useRef<string | null>(null);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [displayName, setDisplayName] = useState('Human');
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [remoteCanvasPresence, setRemoteCanvasPresence] = useState<CanvasPresenceEntry[]>([]);
   const [diagrams, setDiagrams] = useState<DiagramTab[]>([]);
   const [activeDiagramId, setActiveDiagramId] = useState<string | null>(null);
   const [mermaidText, setMermaidText] = useState('');
@@ -482,6 +527,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [shareCopyState, setShareCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [promptCopyState, setPromptCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [sourceGitHubCopyState, setSourceGitHubCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [roomKey, setRoomKey] = useState<string | null>(initialRoomKey);
   const [roomKeyAnnouncement, setRoomKeyAnnouncement] = useState('');
   const [showConnectModal, setShowConnectModal] = useState(false);
@@ -491,6 +537,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const [renamingDiagramId, setRenamingDiagramId] = useState<string | null>(null);
   const [diagramNameDraft, setDiagramNameDraft] = useState('');
   const [openFlyout, setOpenFlyout] = useState<WorkspaceFlyout>(null);
+  const [sourceFlyoutWidth, setSourceFlyoutWidth] = useState(SOURCE_FLYOUT_DEFAULT_WIDTH);
   const [activityFlyoutView, setActivityFlyoutView] = useState<ActivityFlyoutView>('history');
   const [diagramHistory, setDiagramHistory] = useState<ListDiagramHistoryOutput | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -514,9 +561,32 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     activeDiagramIdRef.current = activeDiagramId;
   }, [activeDiagramId]);
 
+  useEffect(() => {
+    historyPreviewRef.current = historyPreview;
+  }, [historyPreview]);
+
+  useEffect(() => {
+    if (!collaboration) {
+      setRemoteCanvasPresence([]);
+      return;
+    }
+    setRemoteCanvasPresence(getRemoteCanvasPresence(
+      collaboration.awareness.getStates(),
+      collaboration.awareness.clientID,
+      activeDiagramId,
+    ));
+  }, [activeDiagramId, collaboration]);
+
+  useEffect(() => {
+    selectedNodeIdsRef.current = selectedNodeIds;
+  }, [selectedNodeIds]);
+
   useEffect(() => () => {
     if (touchLabelTimeoutRef.current !== null) {
       window.clearTimeout(touchLabelTimeoutRef.current);
+    }
+    if (canvasCursorTimerRef.current !== null) {
+      window.clearTimeout(canvasCursorTimerRef.current);
     }
   }, []);
 
@@ -536,6 +606,165 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       setMutationError(error instanceof Error ? error.message : 'The diagram update could not be applied.');
     });
   }, []);
+
+  const publishCanvasPresence = useCallback((cursor: CanvasWorldPoint | null, selectedNodeIds: readonly string[]) => {
+    const diagramId = activeDiagramIdRef.current;
+    if (!collaboration || !diagramId || historyPreviewRef.current !== null) {
+      return;
+    }
+
+    const next: CanvasAwarenessState | null = cursor || selectedNodeIds.length > 0
+      ? {
+        diagram_id: diagramId,
+        ...(cursor ? { cursor } : {}),
+        ...(selectedNodeIds.length > 0 ? { selected_node_ids: [...selectedNodeIds] } : {}),
+      }
+      : null;
+    if (areCanvasAwarenessStatesEqual(localCanvasPresenceRef.current, next)) {
+      return;
+    }
+    localCanvasPresenceRef.current = next;
+    collaboration.awareness.setLocalStateField('canvas', next);
+  }, [collaboration]);
+
+  const flushCanvasCursor = useCallback(() => {
+    if (canvasCursorTimerRef.current !== null) {
+      window.clearTimeout(canvasCursorTimerRef.current);
+      canvasCursorTimerRef.current = null;
+    }
+    const cursor = pendingCanvasCursorRef.current;
+    if (!cursor) {
+      return;
+    }
+    pendingCanvasCursorRef.current = null;
+    localCanvasCursorRef.current = cursor;
+    lastPublishedCanvasCursorRef.current = cursor;
+    lastCanvasCursorPublishedAtRef.current = Date.now();
+    publishCanvasPresence(cursor, selectedNodeIdsRef.current);
+  }, [publishCanvasPresence]);
+
+  const handleCanvasCursorChange = useCallback((point: CanvasWorldPoint | null) => {
+    if (point === null) {
+      if (canvasCursorTimerRef.current !== null) {
+        window.clearTimeout(canvasCursorTimerRef.current);
+        canvasCursorTimerRef.current = null;
+      }
+      pendingCanvasCursorRef.current = null;
+      localCanvasCursorRef.current = null;
+      lastPublishedCanvasCursorRef.current = null;
+      publishCanvasPresence(null, selectedNodeIdsRef.current);
+      return;
+    }
+
+    const cursor = quantizeCanvasCursor(point);
+    const previous = pendingCanvasCursorRef.current ?? lastPublishedCanvasCursorRef.current;
+    if (!hasCanvasCursorMovedEnough(previous, cursor)) {
+      return;
+    }
+
+    pendingCanvasCursorRef.current = cursor;
+    const remainingDelay = CANVAS_CURSOR_INTERVAL_MS - (Date.now() - lastCanvasCursorPublishedAtRef.current);
+    if (remainingDelay <= 0 || canvasCursorTimerRef.current === null) {
+      if (remainingDelay <= 0) {
+        flushCanvasCursor();
+      } else {
+        canvasCursorTimerRef.current = window.setTimeout(flushCanvasCursor, remainingDelay);
+      }
+    }
+  }, [flushCanvasCursor, publishCanvasPresence]);
+
+  const clearCanvasPresence = useCallback(() => {
+    if (canvasCursorTimerRef.current !== null) {
+      window.clearTimeout(canvasCursorTimerRef.current);
+      canvasCursorTimerRef.current = null;
+    }
+    pendingCanvasCursorRef.current = null;
+    localCanvasCursorRef.current = null;
+    lastPublishedCanvasCursorRef.current = null;
+    localCanvasPresenceRef.current = null;
+    if (collaboration) {
+      collaboration.awareness.setLocalStateField('canvas', null);
+    }
+  }, [collaboration]);
+
+  const suspendCanvasPresence = useCallback(() => {
+    if (canvasCursorTimerRef.current !== null) {
+      window.clearTimeout(canvasCursorTimerRef.current);
+      canvasCursorTimerRef.current = null;
+    }
+    pendingCanvasCursorRef.current = null;
+    localCanvasPresenceRef.current = null;
+    if (collaboration) {
+      collaboration.awareness.setLocalStateField('canvas', null);
+    }
+  }, [collaboration]);
+
+  useEffect(() => {
+    clearCanvasPresence();
+    canvasPresenceReadyDiagramIdRef.current = null;
+  }, [activeDiagramId, clearCanvasPresence]);
+
+  useEffect(() => {
+    if (historyPreview !== null) {
+      // A detached revision is a local inspection surface. It must not leave
+      // the live canvas cursor or selection visible to collaborators. Preserve
+      // the last live point so a keyboard-only preview can resume afterward.
+      suspendCanvasPresence();
+    }
+  }, [historyPreview, suspendCanvasPresence]);
+
+  useEffect(() => {
+    const clearSelectionOutsideCanvas = (event: PointerEvent) => {
+      if (selectedNodeIdsRef.current.length === 0 || !(event.target instanceof Node)) {
+        return;
+      }
+      const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+      if (canvas?.contains(event.target)) {
+        return;
+      }
+      setSelectedNodeIds([]);
+      publishCanvasPresence(localCanvasCursorRef.current, []);
+    };
+    document.addEventListener('pointerdown', clearSelectionOutsideCanvas, true);
+    return () => { document.removeEventListener('pointerdown', clearSelectionOutsideCanvas, true); };
+  }, [publishCanvasPresence]);
+
+  useEffect(() => {
+    if (!collaboration || !activeDiagramId || historyPreview !== null) {
+      return;
+    }
+    if (canvasPresenceReadyDiagramIdRef.current !== activeDiagramId) {
+      // The active-tab effect clears local selection immediately after a tab
+      // switch. Do not briefly publish the previous tab's selection under the
+      // new diagram id while that reset is pending.
+      if (selectedNodeIds.length > 0) {
+        return;
+      }
+      canvasPresenceReadyDiagramIdRef.current = activeDiagramId;
+    }
+    publishCanvasPresence(localCanvasCursorRef.current, selectedNodeIds);
+  }, [activeDiagramId, collaboration, historyPreview, publishCanvasPresence, selectedNodeIds]);
+
+  useEffect(() => {
+    const clearInactiveCanvasPresence = () => { clearCanvasPresence(); };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        clearInactiveCanvasPresence();
+      }
+    };
+    window.addEventListener('blur', clearInactiveCanvasPresence);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('blur', clearInactiveCanvasPresence);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [clearCanvasPresence]);
+
+  useEffect(() => {
+    if (connectionState === 'disconnected') {
+      clearCanvasPresence();
+    }
+  }, [clearCanvasPresence, connectionState]);
 
   const runVisualSourceMutation = useCallback((mutation: Promise<MutationResult>, detail = 'Updated the diagram on canvas') => {
     const diagramId = activeDiagramId;
@@ -663,6 +892,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     const diagramsMap = doc.getMap<Y.Map<unknown>>(DIAGRAMS_KEY);
     const diagramOrder = doc.getArray<string>(DIAGRAM_ORDER_KEY);
     const activityArray = doc.getArray<ActivityEvent>(ACTIVITY_KEY);
+    const presenceMap = doc.getMap<Participant>(PRESENCE_KEY);
     const localIdentity = getOrCreateIdentity();
     currentIdentityRef.current = localIdentity;
     setDisplayName(stripParticipantTabSuffix(localIdentity.name));
@@ -684,7 +914,16 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     };
 
     const syncParticipants = () => {
-      setParticipants(getParticipantsFromAwareness(awareness));
+      const nextParticipants = getParticipantsFromCollaborationSources(
+        awareness.getStates(),
+        [...presenceMap.values()],
+      );
+      setParticipants((current) => areParticipantListsEqual(current, nextParticipants) ? current : nextParticipants);
+    };
+
+    const syncRemoteCanvasPresence = () => {
+      const nextPresence = getRemoteCanvasPresence(awareness.getStates(), awareness.clientID, activeDiagramIdRef.current);
+      setRemoteCanvasPresence(nextPresence);
     };
 
     let hadConnected = false;
@@ -724,11 +963,14 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     syncActivity();
     syncDiagrams();
     syncParticipants();
+    syncRemoteCanvasPresence();
 
     activityArray.observe(syncActivity);
     diagramsMap.observeDeep(syncDiagrams);
     diagramOrder.observe(syncDiagrams);
+    presenceMap.observe(syncParticipants);
     awareness.on('change', syncParticipants);
+    awareness.on('change', syncRemoteCanvasPresence);
     provider.on('status', handleStatus);
     provider.on('connection-close', handleReconnectSignal);
     provider.on('connection-error', handleReconnectSignal);
@@ -739,7 +981,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       }
     });
 
-    setCollaboration({ activityArray, awareness, diagramsMap, diagramOrder, doc, provider });
+    setCollaboration({ activityArray, awareness, diagramsMap, diagramOrder, doc, presenceMap, provider });
 
     return () => {
       if (editDebounceRef.current !== null) {
@@ -753,12 +995,14 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         addActivityRef.current?.('left', 'Closed the session');
       }
       awareness.off('change', syncParticipants);
+      awareness.off('change', syncRemoteCanvasPresence);
       provider.off('status', handleStatus);
       provider.off('connection-close', handleReconnectSignal);
       provider.off('connection-error', handleReconnectSignal);
       activityArray.unobserve(syncActivity);
       diagramsMap.unobserveDeep(syncDiagrams);
       diagramOrder.unobserve(syncDiagrams);
+      presenceMap.unobserve(syncParticipants);
       awareness.setLocalState(null);
       provider.destroy();
       doc.destroy();
@@ -769,6 +1013,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       setCollaboration(null);
       setDiagrams([]);
       setActiveDiagramId(null);
+      setRemoteCanvasPresence([]);
     };
   }, [sessionId]);
 
@@ -899,7 +1144,6 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       extensions: [
         basicSetup,
         markdown(),
-        EditorView.lineWrapping,
         keymap.of(yUndoManagerKeymap),
         editorThemeRef.current.of(editorTheme),
         yCollab(activeDiagram.yText, collaboration.awareness, { undoManager }),
@@ -1073,6 +1317,20 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     };
   }, [promptCopyState]);
 
+  useEffect(() => {
+    if (sourceGitHubCopyState === 'idle') {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setSourceGitHubCopyState('idle');
+    }, 1_500);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [sourceGitHubCopyState]);
+
   const handleCopyShareUrl = async () => {
     if (!roomKey) {
       return;
@@ -1084,6 +1342,18 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       setShareCopyState('error');
     }
   };
+
+  const handleCopyGitHubMermaid = useCallback(async () => {
+    if (!activeDiagram) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(formatMermaidForGitHub(activeDiagram.yText.toString()));
+      setSourceGitHubCopyState('copied');
+    } catch {
+      setSourceGitHubCopyState('error');
+    }
+  }, [activeDiagram]);
 
   const cancelHistoryPreview = useCallback(() => {
     if (historyPreview !== null) {
@@ -1418,6 +1688,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
           { [result.nodeId]: position },
           'merge',
           createActivityEvent(actor, 'edited', 'Updated the diagram on canvas', diagram.id),
+          collaborationOrigins.visualLayout,
         );
         setSelectedNodeIds([result.nodeId]);
       }
@@ -1443,6 +1714,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
           getPastedClipboardPositions(clipboard, result.idMap, offset),
           'merge',
           createActivityEvent(actor, 'edited', 'Pasted diagram nodes on canvas', diagram.id),
+          collaborationOrigins.visualLayout,
         );
       },
     });
@@ -1467,8 +1739,23 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       {},
       'replace',
       createActivityEvent(actor, 'edited', 'Reset shared layout to Mermaid', diagram.id),
+      collaborationOrigins.visualLayout,
     );
   }, [activeDiagram, collaboration]);
+
+  const handleCanvasUndo = useCallback(() => {
+    if (historyPreview !== null) {
+      return;
+    }
+    undoManagerRef.current?.undo();
+  }, [historyPreview]);
+
+  const handleCanvasRedo = useCallback(() => {
+    if (historyPreview !== null) {
+      return;
+    }
+    undoManagerRef.current?.redo();
+  }, [historyPreview]);
 
   useEffect(() => {
     if (!activeDiagramId) {
@@ -1744,6 +2031,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
+            remoteCanvasPresence={historyPreview === null ? remoteCanvasPresence : []}
             onAddEdge={(source, target, label, type) => {
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.addEdge(source, target, { label, type }));
@@ -1753,6 +2041,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
               if (queue) runVisualSourceMutation(queue.addNode(label, { shape }));
             }}
             onAddConnectedNode={handleAddConnectedNode}
+            onCanvasCursorChange={handleCanvasCursorChange}
             onChangeNodeShape={(nodeId, shape) => {
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.changeNodeShape(nodeId, shape));
@@ -1789,6 +2078,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onNodeDragStop={handleNodeDragStop}
             onNodePositionsChange={handleNodePositionsChange}
             onPasteClipboard={handlePasteClipboard}
+            onRedo={handleCanvasRedo}
             onResetSharedLayout={handleResetSharedLayout}
             onRenderSettled={handleCanvasRenderSettled}
             onSelectedNodeIdsChange={setSelectedNodeIds}
@@ -1799,6 +2089,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             selectedNodeIds={selectedNodeIds}
             svg={renderedPreview?.svg ?? ''}
             theme={resolvedTheme}
+            onUndo={handleCanvasUndo}
           />
         </article>
 
@@ -1817,6 +2108,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
           historyLoading={historyLoading}
           historyView={activityFlyoutView}
           onCancelPreview={cancelHistoryPreview}
+          onCopyGitHubMermaid={handleCopyGitHubMermaid}
           onHistoryViewChange={setActivityFlyoutView}
           onPreviewRevision={previewHistoryRevision}
           onRestoreCancel={cancelHistoryRestore}
@@ -1831,6 +2123,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
           restorePending={restorePending}
           restoreConfirmRef={restoreConfirmRef}
           sourceError={historyPreviewError ?? renderError}
+          sourceFlyoutWidth={sourceFlyoutWidth}
+          sourceGitHubCopyState={sourceGitHubCopyState}
+          onSourceFlyoutWidthChange={setSourceFlyoutWidth}
         />
       </section>
 

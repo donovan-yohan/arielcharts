@@ -13,9 +13,35 @@ export interface AwarenessCursor {
   head: number;
 }
 
+/**
+ * Ephemeral diagram-space position. This is intentionally separate from the
+ * editor's `AwarenessCursor`, whose coordinates are CodeMirror offsets.
+ */
+export interface CanvasWorldPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Live canvas presence. Awareness transports this field only; it is never a
+ * Yjs document value, activity entry, revision, or persisted session field.
+ */
+export interface CanvasAwarenessState {
+  diagram_id: string;
+  cursor?: CanvasWorldPoint;
+  selected_node_ids?: string[];
+}
+
+export interface CanvasPresenceEntry {
+  client_id: number;
+  participant: Participant;
+  canvas: CanvasAwarenessState;
+}
+
 export interface AwarenessState {
   user: Participant;
   cursor?: AwarenessCursor;
+  canvas?: CanvasAwarenessState;
 }
 
 export interface ActivityEvent {

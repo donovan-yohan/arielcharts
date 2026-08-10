@@ -8,6 +8,7 @@ import {
   getAgentCountLabel,
   getAgentWorkflowPrompt,
   getLatestDiagramCheckpointId,
+  getParticipantsFromCollaborationSources,
   getModalWrappedFocusIndex,
   getTemplateDiagramCreation,
   getTemplateDiagramName,
@@ -61,6 +62,38 @@ describe('session helpers', () => {
     expect(prompt).toContain('Immediately before restoreDiagramRevision, call readDiagram again');
     expect(prompt).toContain('never blindly retry');
     expect(prompt).not.toContain('get_session');
+  });
+
+  it('keeps durable MCP agents visible after reload without reviving disconnected humans', () => {
+    const awarenessStates = new Map<number, unknown>([
+      [1, { user: { name: 'Live human-aa', color: '#111111', type: 'human' } }],
+      [2, { user: { name: 'Live agent', color: '#222222', type: 'agent' } }],
+    ]);
+
+    expect(getParticipantsFromCollaborationSources(awarenessStates, [
+      { name: 'Disconnected human-zz', color: '#333333', type: 'human' },
+      { name: 'Offline MCP agent', color: '#444444', type: 'agent' },
+      { name: 'Live agent', color: '#999999', type: 'agent' },
+    ])).toEqual([
+      { name: 'Live agent', color: '#999999', type: 'agent' },
+      { name: 'Live human-aa', color: '#111111', type: 'human' },
+      { name: 'Offline MCP agent', color: '#444444', type: 'agent' },
+    ]);
+
+    expect(getParticipantsFromCollaborationSources(new Map(), [
+      { name: 'Disconnected human-zz', color: '#333333', type: 'human' },
+      { name: 'Offline MCP agent', color: '#444444', type: 'agent' },
+    ])).toEqual([
+      { name: 'Offline MCP agent', color: '#444444', type: 'agent' },
+    ]);
+
+    expect(getParticipantsFromCollaborationSources(new Map([
+      [3, { user: { name: 'Offline MCP agent', color: '#eeeeee', type: 'human' } }],
+    ]), [
+      { name: 'Offline MCP agent', color: '#444444', type: 'agent' },
+    ])).toEqual([
+      { name: 'Offline MCP agent', color: '#444444', type: 'agent' },
+    ]);
   });
 
   it('commits visual layout before its single activity checkpoint becomes observable', () => {

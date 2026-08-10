@@ -1,15 +1,39 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { DiagramLink } from '../lib/diagram-mutations';
 import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
-import { areMermaidPresentationsEqual, areSvgHitMapsEqual, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getRendererInteractionMode, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
+import { areMermaidPresentationsEqual, areSvgHitMapsEqual, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getRendererInteractionMode, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
+
+const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
+const workspaceSource = readFileSync(new URL('./session-workspace.tsx', import.meta.url), 'utf8');
+
+describe('canvas cursor callback lifecycle', () => {
+  it('withdraws presence only on true canvas unmount and keeps preview gating behind a stable publisher ref', () => {
+    expect(canvasSource).toMatch(/onCanvasCursorChangeRef\.current = onCanvasCursorChange;[^]*?useEffect\(\(\) => \(\) => \{\s*onCanvasCursorChangeRef\.current\?\.\(null\);\s*\}, \[\]\);/u);
+    expect(workspaceSource).toMatch(/historyPreviewRef\.current = historyPreview;[^]*?if \(!collaboration \|\| !diagramId \|\| historyPreviewRef\.current !== null\)[^]*?\}, \[collaboration\]\);/u);
+  });
+});
 
 describe('getRendererInteractionMode', () => {
   it('leaves camera ownership separate while static previews clear connect mode', () => {
     expect(getRendererInteractionMode('connect', false)).toBe('select');
     expect(getRendererInteractionMode('connect', true)).toBe('connect');
     expect(getRendererInteractionMode('select', false)).toBe('select');
+  });
+});
+
+describe('React Flow handle directionality', () => {
+  it('leaves sources as connection starts and targets as connection ends', () => {
+    expect(canvasSource).toMatch(/mermaid-flow-handle--\$\{position\} mermaid-flow-handle--target[^]*?isConnectableStart=\{false\}/u);
+    expect(canvasSource).toMatch(/mermaid-flow-handle--\$\{position\} mermaid-flow-handle--source[^]*?isConnectableEnd=\{false\}/u);
+  });
+});
+
+describe('flyout viewport measurement', () => {
+  it('defers mutation-triggered measurements until the flyout layout frame settles', () => {
+    expect(canvasSource).toMatch(/const mutationObserver = new MutationObserver\(\(\) => \{\s*observeFlyouts\(\);\s*scheduleViewportUpdate\(\);\s*\}\);/u);
   });
 });
 
@@ -98,6 +122,15 @@ describe('shouldHandleCanvasSingleKeyShortcut', () => {
     expect(shouldHandleCanvasSingleKeyShortcut(true, true)).toBe(true);
     expect(shouldHandleCanvasSingleKeyShortcut(false, true)).toBe(false);
     expect(shouldHandleCanvasSingleKeyShortcut(true, false)).toBe(false);
+  });
+});
+
+describe('getCanvasHistoryShortcut', () => {
+  it('maps Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z without taking non-modifier Z', () => {
+    expect(getCanvasHistoryShortcut('z', true, false)).toBe('undo');
+    expect(getCanvasHistoryShortcut('Z', true, true)).toBe('redo');
+    expect(getCanvasHistoryShortcut('z', false, false)).toBeNull();
+    expect(getCanvasHistoryShortcut('y', true, false)).toBeNull();
   });
 });
 

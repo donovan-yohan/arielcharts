@@ -39,19 +39,27 @@ function encodeSyncMessage(writePayload: (encoder: encoding.Encoder) => void): U
   return encoding.toUint8Array(encoderInstance);
 }
 
-function encodeAwarenessMessage(entries: TestAwarenessEntry[]): Uint8Array {
+function encodeRawAwarenessMessage(entries: Array<Pick<TestAwarenessEntry, 'clientId' | 'clock'> & { stateJson: string }>): Uint8Array {
   const updateEncoder = encoding.createEncoder();
   encoding.writeVarUint(updateEncoder, entries.length);
   for (const entry of entries) {
     encoding.writeVarUint(updateEncoder, entry.clientId);
     encoding.writeVarUint(updateEncoder, entry.clock);
-    encoding.writeVarString(updateEncoder, JSON.stringify(entry.state));
+    encoding.writeVarString(updateEncoder, entry.stateJson);
   }
 
   const messageEncoder = encoding.createEncoder();
   encoding.writeVarUint(messageEncoder, MESSAGE_TYPE_AWARENESS);
   encoding.writeVarUint8Array(messageEncoder, encoding.toUint8Array(updateEncoder));
   return encoding.toUint8Array(messageEncoder);
+}
+
+function encodeAwarenessMessage(entries: TestAwarenessEntry[]): Uint8Array {
+  return encodeRawAwarenessMessage(entries.map((entry) => ({
+    clientId: entry.clientId,
+    clock: entry.clock,
+    stateJson: JSON.stringify(entry.state),
+  })));
 }
 
 function mainDiagram(doc: Y.Doc): Y.Map<unknown> {
@@ -89,6 +97,7 @@ async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 5_000)
 
 async function openClient(port: number, sessionId: string, cookie: string) {
   const doc = new Y.Doc();
+  let awarenessMessageCount = 0;
   const socket = new WebSocket(`ws://127.0.0.1:${port}/ws/${sessionId}`, {
     headers: {
       origin: 'http://allowed.test',
@@ -112,6 +121,7 @@ async function openClient(port: number, sessionId: string, cookie: string) {
     }
 
     if (messageType === MESSAGE_TYPE_AWARENESS) {
+      awarenessMessageCount += 1;
       decoding.readVarUint8Array(decoderInstance);
     }
   });
@@ -125,6 +135,9 @@ async function openClient(port: number, sessionId: string, cookie: string) {
   })));
 
   return {
+    get awarenessMessageCount() {
+      return awarenessMessageCount;
+    },
     doc,
     socket,
     close: async () => {
@@ -145,6 +158,9 @@ async function openClient(port: number, sessionId: string, cookie: string) {
     },
     sendAwareness(entries: TestAwarenessEntry[]) {
       socket.send(Buffer.from(encodeAwarenessMessage(entries)));
+    },
+    sendRawAwareness(entries: Array<Pick<TestAwarenessEntry, 'clientId' | 'clock'> & { stateJson: string }>) {
+      socket.send(Buffer.from(encodeRawAwarenessMessage(entries)));
     },
   };
 }
@@ -317,6 +333,210 @@ describe('SessionWebSocketServer', () => {
     expect(session.awareness.meta.get(101)?.clock).toBe(2);
 
     await clientA.close();
+  });
+
+  it('does not mirror cursor-only awareness changes into the durable participant map', async () => {
+    const sessionId = 'abc123de';
+    const client = await openClient(port, sessionId, roomCookie);
+    const participant = { name: 'Cursor user', color: '#1188cc', type: 'human' };
+    client.sendAwareness([{ clientId: 404, clock: 1, state: { user: participant } }]);
+
+    const session = await app.manager.getOrCreateSession(sessionId);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(404)).toEqual({ user: participant });
+      expect(session.doc.getMap('presence').get(participant.name)).toEqual(participant);
+    });
+
+    let documentUpdates = 0;
+    const countDocumentUpdate = () => { documentUpdates += 1; };
+    session.doc.on('update', countDocumentUpdate);
+    client.sendAwareness([{
+      clientId: 404,
+      clock: 2,
+      state: {
+        user: participant,
+        canvas: { diagram_id: 'main', cursor: { x: 120, y: 80 }, selected_node_ids: ['Gateway'] },
+      },
+    }]);
+
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(404)).toEqual({
+        user: participant,
+        canvas: { diagram_id: 'main', cursor: { x: 120, y: 80 }, selected_node_ids: ['Gateway'] },
+      });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    session.doc.off('update', countDocumentUpdate);
+
+    expect(documentUpdates).toBe(0);
+    await client.close();
+  });
+
+  it('keeps awareness-only agents live-only and removes them on disconnect', async () => {
+    const sessionId = 'abc123de';
+    const client = await openClient(port, sessionId, roomCookie);
+    const participant = { name: 'Transient agent', color: '#7c3aed', type: 'agent' };
+    client.sendAwareness([{ clientId: 408, clock: 1, state: { user: participant } }]);
+
+    const session = await app.manager.getOrCreateSession(sessionId);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(408)).toEqual({ user: participant });
+    });
+    expect(session.doc.getMap('presence').has(participant.name)).toBe(false);
+
+    await client.close();
+    await waitFor(() => {
+      expect(session.awareness.getStates().has(408)).toBe(false);
+    });
+    expect(session.doc.getMap('presence').has(participant.name)).toBe(false);
+  });
+
+  it('preserves a durable agent when a live human claims the same name', async () => {
+    const sessionId = 'abc123de';
+    const client = await openClient(port, sessionId, roomCookie);
+    const durableAgent = { name: 'Shared name', color: '#7c3aed', type: 'agent' } as const;
+    const liveHuman = { name: 'Shared name', color: '#0284c7', type: 'human' } as const;
+    const session = await app.manager.getOrCreateSession(sessionId);
+    session.doc.getMap('presence').set(durableAgent.name, durableAgent);
+
+    client.sendAwareness([{ clientId: 409, clock: 1, state: { user: liveHuman } }]);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(409)).toEqual({ user: liveHuman });
+    });
+    expect(session.doc.getMap('presence').get(durableAgent.name)).toEqual(durableAgent);
+    expect((await app.manager.getSession(sessionId)).participants).toEqual([durableAgent]);
+
+    await client.close();
+    await waitFor(() => {
+      expect(session.awareness.getStates().has(409)).toBe(false);
+    });
+    expect(session.doc.getMap('presence').get(durableAgent.name)).toEqual(durableAgent);
+    expect((await app.manager.getSession(sessionId)).participants).toEqual([durableAgent]);
+  });
+
+  it('strips over-limit canvas awareness while preserving the owned participant state', async () => {
+    const sessionId = 'abc123de';
+    const client = await openClient(port, sessionId, roomCookie);
+    const participant = { name: 'Bounded user', color: '#1188cc', type: 'human' };
+    client.sendAwareness([{
+      clientId: 405,
+      clock: 1,
+      state: {
+        user: participant,
+        cursor: { anchor: 4, head: 4 },
+        canvas: {
+          diagram_id: 'main'.repeat(50),
+          cursor: { x: 1_000_001, y: 20 },
+          selected_node_ids: Array.from({ length: 101 }, (_, index) => `node-${index}`),
+        },
+      },
+    }]);
+
+    const session = await app.manager.getOrCreateSession(sessionId);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(405)).toEqual({
+        user: participant,
+        cursor: { anchor: 4, head: 4 },
+      });
+      expect(session.doc.getMap('presence').get(participant.name)).toEqual(participant);
+    });
+
+    expect(client.socket.readyState).toBe(WebSocket.OPEN);
+    await client.close();
+  });
+
+  it('drops over-state-byte-limit awareness before parsing, ownership, or peer fan-out', async () => {
+    const sessionId = 'abc123de';
+    const sender = await openClient(port, sessionId, roomCookie);
+    const observer = await openClient(port, sessionId, roomCookie);
+    const session = await app.manager.getOrCreateSession(sessionId);
+    const observerAwarenessBaseline = observer.awarenessMessageCount;
+    let documentUpdates = 0;
+    const countDocumentUpdate = () => { documentUpdates += 1; };
+    session.doc.on('update', countDocumentUpdate);
+
+    sender.sendAwareness([{
+      clientId: 406,
+      clock: 1,
+      state: {
+        user: { name: 'Oversized', color: '#1188cc', type: 'human' },
+        unknown: 'x'.repeat(40 * 1024),
+      },
+    }]);
+    await new Promise((resolve) => setTimeout(resolve, 75));
+
+    expect(sender.socket.readyState).toBe(WebSocket.OPEN);
+    expect(session.awareness.getStates().has(406)).toBe(false);
+    expect([...session.socketClientIds.values()].some((clientIds) => clientIds.has(406))).toBe(false);
+    expect(observer.awarenessMessageCount).toBe(observerAwarenessBaseline);
+    expect(documentUpdates).toBe(0);
+
+    const participant = { name: 'Bounded after drop', color: '#1188cc', type: 'human' };
+    sender.sendAwareness([{
+      clientId: 406,
+      clock: 2,
+      state: {
+        user: participant,
+        cursor: { anchor: 2, head: 2 },
+        canvas: { diagram_id: 'main', cursor: { x: 40, y: 60 }, selected_node_ids: ['A'] },
+      },
+    }]);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(406)).toEqual({
+        user: participant,
+        cursor: { anchor: 2, head: 2 },
+        canvas: { diagram_id: 'main', cursor: { x: 40, y: 60 }, selected_node_ids: ['A'] },
+      });
+      expect(observer.awarenessMessageCount).toBe(observerAwarenessBaseline + 1);
+    });
+
+    session.doc.off('update', countDocumentUpdate);
+    await sender.close();
+    await observer.close();
+  });
+
+  it('drops an oversized raw awareness update before decoding its state string', async () => {
+    const sessionId = 'abc123de';
+    const sender = await openClient(port, sessionId, roomCookie);
+    const observer = await openClient(port, sessionId, roomCookie);
+    const session = await app.manager.getOrCreateSession(sessionId);
+    const observerAwarenessBaseline = observer.awarenessMessageCount;
+    let documentUpdates = 0;
+    const countDocumentUpdate = () => { documentUpdates += 1; };
+    session.doc.on('update', countDocumentUpdate);
+
+    sender.sendRawAwareness([{
+      clientId: 407,
+      clock: 1,
+      // Deliberately invalid JSON: if the raw update cap runs too late this
+      // closes the socket during JSON.parse instead of safely dropping it.
+      stateJson: `{${'x'.repeat(300 * 1024)}`,
+    }]);
+    await new Promise((resolve) => setTimeout(resolve, 75));
+
+    expect(sender.socket.readyState).toBe(WebSocket.OPEN);
+    expect(session.awareness.getStates().has(407)).toBe(false);
+    expect([...session.socketClientIds.values()].some((clientIds) => clientIds.has(407))).toBe(false);
+    expect(observer.awarenessMessageCount).toBe(observerAwarenessBaseline);
+    expect(documentUpdates).toBe(0);
+    session.doc.off('update', countDocumentUpdate);
+
+    const participant = { name: 'Usable after raw drop', color: '#1188cc', type: 'human' };
+    sender.sendAwareness([{
+      clientId: 407,
+      clock: 2,
+      state: { user: participant, cursor: { anchor: 1, head: 1 } },
+    }]);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(407)).toEqual({
+        user: participant,
+        cursor: { anchor: 1, head: 1 },
+      });
+      expect(observer.awarenessMessageCount).toBe(observerAwarenessBaseline + 1);
+    });
+
+    await sender.close();
+    await observer.close();
   });
 
   it('hands awareness ownership to a reconnect without stale-close cleanup removing it', async () => {

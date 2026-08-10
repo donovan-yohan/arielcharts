@@ -264,13 +264,13 @@ async function assertSameTabKindTransition(page: Page): Promise<SameTabKindTrans
   await page.mouse.down();
   await page.mouse.move(nodeBounds.x + (nodeBounds.width / 2) + 120, nodeBounds.y + (nodeBounds.height / 2) + 32, { steps: 8 });
   await page.mouse.up();
-  const resetLayout = page.locator('button[aria-label="Reset shared layout to Mermaid"]');
-  await resetLayout.waitFor({ state: 'visible', timeout: 10000 });
+  const simplifyLayout = page.locator('button[aria-label="Simplify layout"]');
+  await simplifyLayout.waitFor({ state: 'visible', timeout: 10000 });
 
   await replaceSource(page, API_SEQUENCE_FIXTURE);
   await waitForCanvas(page, 'generic');
   const genericWithholdsStructure = await page.locator('form[aria-label="Add Mermaid node"]').count() === 0
-    && await page.locator('button[aria-label="Reset shared layout to Mermaid"]').count() === 0
+    && await page.locator('button[aria-label="Simplify layout"]').count() === 0
     && await page.locator('button[aria-label="Connect nodes"]').count() === 0;
 
   await replaceSource(page, FLOWCHART_FIXTURE);
@@ -279,7 +279,7 @@ async function assertSameTabKindTransition(page: Page): Promise<SameTabKindTrans
     && await page.getByRole('button', { name: 'Add node to Mermaid text', exact: true }).count() > 0;
   const genericClearsPersistedLayout = await observeButtonAbsentFor(
     page,
-    'Reset shared layout to Mermaid',
+    'Simplify layout',
     NEGATIVE_DOM_OBSERVATION_WINDOW_MS,
   );
   return {

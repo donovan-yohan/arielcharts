@@ -34,9 +34,14 @@ export async function assertHitTarget(page: Page, target: Locator, label: string
   const point = { x: box.x + (box.width / 2), y: box.y + (box.height / 2) };
   const hit = await target.evaluate((targetElement, { x, y }) => {
     const hitElement = document.elementFromPoint(x, y);
-    return !!hitElement && (targetElement === hitElement || targetElement.contains(hitElement));
+    return {
+      className: hitElement instanceof HTMLElement || hitElement instanceof SVGElement ? hitElement.getAttribute('class') : null,
+      matches: !!hitElement && (targetElement === hitElement || targetElement.contains(hitElement)),
+      tagName: hitElement?.tagName ?? null,
+      testId: hitElement instanceof Element ? hitElement.getAttribute('data-testid') : null,
+    };
   }, point);
-  assert(hit, `${label} is obscured at its center point.`);
+  assert(hit.matches, `${label} is obscured at its center point by ${JSON.stringify(hit)}.`);
 }
 
 /**

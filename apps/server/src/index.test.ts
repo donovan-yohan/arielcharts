@@ -257,6 +257,31 @@ describe('server integration', () => {
     await expect(crossRoom.json()).resolves.toMatchObject({ result: { isError: true } });
   });
 
+  it('does not materialize an MCP participant for an invalid bearer mutation', async () => {
+    const initial = await app.manager.readDiagram('abc123de', 'main');
+    const rejected = await mcpRequest({
+      id: 923,
+      method: 'tools/call',
+      toolName: 'writeDiagram',
+      authorization: 'Bearer abc123de.invalid',
+      params: {
+        name: 'writeDiagram',
+        arguments: {
+          sessionId: 'abc123de',
+          diagramId: 'main',
+          mermaidText: 'flowchart LR\n  Rejected --> Write',
+          expectedRevision: initial.diagram.revision,
+          actorName: 'Rejected Agent',
+        },
+      },
+    });
+
+    expect(rejected.status).toBe(401);
+    const session = await app.manager.getOrCreateSession('abc123de');
+    expect([...session.doc.getMap('presence').entries()]).toEqual([]);
+    expect((await app.manager.readSession('abc123de'))?.activity).toEqual([]);
+  });
+
   it('binds each modern MCP request to its current bearer', async () => {
     const otherRoom = await app.createRoom('other123');
     const getSession = (id: number, sessionId: string, authorization?: string) => mcpRequest({

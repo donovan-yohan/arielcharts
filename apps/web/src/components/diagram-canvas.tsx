@@ -882,6 +882,7 @@ export function DiagramCanvas({
     BOTTOM_TOOLBAR_GAP,
     canvasViewportMeasured,
   );
+  const erEditorBottom = canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP;
   const selectedToolbarPosition = getSafeToolbarPosition({
     anchor: {
       x: displayedToolbarRect.x + (displayedToolbarRect.width / 2),
@@ -2771,6 +2772,7 @@ export function DiagramCanvas({
 
         {isEr && !readOnly && erDiagram ? (
           <ErEditorControls
+            bottom={erEditorBottom}
             diagram={erDiagram}
             onAddAttribute={onAddErAttribute}
             onAddEntity={onAddErEntity}
@@ -3411,6 +3413,7 @@ const ER_CARDINALITY_OPTIONS: Array<{ label: string; value: ErRelationship['left
 ];
 
 function ErEditorControls({
+  bottom,
   diagram,
   onAddAttribute,
   onAddEntity,
@@ -3424,6 +3427,7 @@ function ErEditorControls({
   onMoveEntity,
   onRenameEntity,
 }: {
+  bottom: number;
   diagram: ErDiagramSnapshot;
   onAddAttribute?: (entityName: string, attribute: Partial<ErAttribute>) => void;
   onAddEntity?: (name: string) => void;
@@ -3448,7 +3452,7 @@ function ErEditorControls({
   }), [diagram.entities]);
 
   return (
-    <aside className="canvas-er-editor" data-canvas-pan-exclusion="true" data-testid="er-editor-controls" style={{ background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8, bottom: 12, maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12, width: 'min(400px, calc(100% - 24px))', zIndex: 7 }}>
+    <aside className="canvas-er-editor" data-canvas-pan-exclusion="true" data-testid="er-editor-controls" style={{ background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8, bottom, maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12, width: 'min(400px, calc(100% - 24px))', zIndex: 7 }}>
       <form onSubmit={(event) => { event.preventDefault(); onAddEntity?.(entityName); setEntityName('ENTITY'); }} style={{ display: 'flex', gap: 6 }}>
         <strong style={{ fontSize: 12, whiteSpace: 'nowrap' }}>ER entities</strong>
         <input aria-label="New ER entity" onChange={(event) => { setEntityName(event.target.value); }} value={entityName} />

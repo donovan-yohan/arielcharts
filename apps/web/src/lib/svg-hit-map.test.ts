@@ -1,9 +1,12 @@
+// @vitest-environment happy-dom
+
 import { describe, expect, it } from 'vitest';
 import {
   buildSequenceSvgTextHitMap,
   extractMermaidEntityId,
   getMermaidEdgeKey,
   isMermaidFlowchartEntityDomId,
+  resolveSequenceSvgTextTarget,
   resolveMermaidNodeId,
   resolveMermaidSubgraphId,
 } from './svg-hit-map';
@@ -70,5 +73,25 @@ describe('sequence SVG text hit map', () => {
     expect(buildSequenceSvgTextHitMap(svg, [{ id: 'statement:4', text: 'first', type: 'message' }, { id: 'statement:4', text: 'second', type: 'message' }])).toBeNull();
     expect(buildSequenceSvgTextHitMap(rendererWithExtraMessage, [{ id: 'statement:4', text: 'first', type: 'message' }])).toBeNull();
     expect(buildSequenceSvgTextHitMap(svg, [])).toBeNull();
+  });
+
+  it('rebuilds only a stale map against the live SVG and keeps mismatched live output fail-closed', () => {
+    const item = { id: 'statement:4', text: 'Alpha', type: 'participant' as const };
+    const staleSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const staleParticipant = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    staleParticipant.dataset.et = 'participant';
+    staleParticipant.append(document.createElementNS('http://www.w3.org/2000/svg', 'text'));
+    staleSvg.append(staleParticipant);
+    const staleMap = buildSequenceSvgTextHitMap(staleSvg, [item]);
+
+    const liveSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const liveParticipant = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    liveParticipant.dataset.et = 'participant';
+    const liveText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    liveParticipant.append(liveText);
+    liveSvg.append(liveParticipant);
+
+    expect(resolveSequenceSvgTextTarget(staleMap, liveSvg, [item], liveText)).toEqual(item);
+    expect(resolveSequenceSvgTextTarget(staleMap, liveSvg, [], liveText)).toBeNull();
   });
 });

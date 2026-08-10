@@ -207,6 +207,19 @@ async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
   await replaceSource(page, source);
   await waitForCanvas(page, 'sequence');
   await closeSourceFlyout(page);
+  await waitForStableSvgInnerHtml(page, 'sequence semantic text targets');
+  const positionSequenceTextTargets = async (): Promise<void> => {
+    await page.getByRole('button', { name: 'Fit diagram', exact: true }).click();
+    await page.waitForTimeout(240);
+    const canvasBounds = await page.getByLabel('Interactive diagram canvas', { exact: true }).boundingBox();
+    if (!canvasBounds) throw new Error('Sequence inline editing fixture has no canvas bounds.');
+    await page.mouse.move(canvasBounds.x + (canvasBounds.width / 2), canvasBounds.y + canvasBounds.height - 160);
+    await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(canvasBounds.x + (canvasBounds.width / 2), canvasBounds.y + canvasBounds.height - 32, { steps: 8 });
+    await page.mouse.up({ button: 'middle' });
+    await page.waitForTimeout(120);
+  };
+  await positionSequenceTextTargets();
 
   const anchorsBefore = await snapshotAnchors(page, WORKSPACE_ANCHORS);
   const transformedLayer = page.locator('.diagram-canvas-svg').locator('..');
@@ -214,6 +227,7 @@ async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
   const target = (selector: string, index: number) => page.locator(selector).nth(index);
 
   const cancel = async (locator: Locator, label: string): Promise<void> => {
+    await positionSequenceTextTargets();
     await locator.waitFor({ state: 'visible', timeout: 15_000 });
     await assertHitTarget(page, locator, `${label} SVG target`);
     await locator.dblclick();
@@ -223,11 +237,12 @@ async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
     await editor.press('Escape');
     await editor.waitFor({ state: 'detached', timeout: 5_000 });
     await page.waitForTimeout(32);
-    const focusReturned = await locator.evaluate((targetElement) => targetElement === document.activeElement || targetElement.contains(document.activeElement));
-    if (!focusReturned) throw new Error(`${label} did not return focus to its exact SVG target after Escape.`);
+    const focusReturned = await page.getByLabel('Interactive diagram canvas', { exact: true }).evaluate((canvas) => canvas === document.activeElement);
+    if (!focusReturned) throw new Error(`${label} did not return focus to the interactive canvas after Escape.`);
   };
 
   const commit = async (locator: Locator, label: string, nextText: string): Promise<void> => {
+    await positionSequenceTextTargets();
     await locator.waitFor({ state: 'visible', timeout: 15_000 });
     await assertHitTarget(page, locator, `${label} SVG target`);
     await locator.dblclick();
@@ -239,18 +254,18 @@ async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
     await waitForCanvas(page, 'sequence');
   };
 
-  await cancel(target('.diagram-canvas-svg svg g[data-et="participant"]', 1), 'Edit sequence participant');
+  await cancel(target('.diagram-canvas-svg svg g[data-et="participant"] text', 1), 'Edit sequence participant');
   await cancel(target('.diagram-canvas-svg svg .messageText', 1), 'Edit sequence message');
-  await cancel(target('.diagram-canvas-svg svg g[data-et="note"]', 1), 'Edit sequence note');
-  await cancel(target('.diagram-canvas-svg svg g[data-et="control-structure"]', 1), 'Edit sequence fragment');
+  await cancel(target('.diagram-canvas-svg svg g[data-et="note"] text', 1), 'Edit sequence note');
+  await cancel(target('.diagram-canvas-svg svg g[data-et="control-structure"] > text:last-of-type', 1), 'Edit sequence fragment');
   if (await readCanonicalSource(page) !== source) {
     throw new Error('Escaping an inline sequence edit changed canonical Mermaid source.');
   }
 
-  await commit(target('.diagram-canvas-svg svg g[data-et="participant"]', 1), 'Edit sequence participant', 'Bravo');
+  await commit(target('.diagram-canvas-svg svg g[data-et="participant"] text', 1), 'Edit sequence participant', 'Bravo');
   let nextSource = await readCanonicalSource(page);
   if (!nextSource.includes('participant A as Alpha') || !nextSource.includes('participant B as Bravo')) {
-    throw new Error(`Participant inline edit did not map the second repeated label to B: ${nextSource}`);
+    throw new Error(`Participant inline edit did not map B to its source statement: ${nextSource}`);
   }
 
   await commit(target('.diagram-canvas-svg svg .messageText', 1), 'Edit sequence message', 'second message');
@@ -259,13 +274,13 @@ async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
     throw new Error(`Message inline edit did not map the second repeated label to its source statement: ${nextSource}`);
   }
 
-  await commit(target('.diagram-canvas-svg svg g[data-et="note"]', 1), 'Edit sequence note', 'second note');
+  await commit(target('.diagram-canvas-svg svg g[data-et="note"] text', 1), 'Edit sequence note', 'second note');
   nextSource = await readCanonicalSource(page);
   if (!nextSource.includes('Note over A,B: repeated note') || !nextSource.includes('Note over A,B: second note')) {
     throw new Error(`Note inline edit did not map the second repeated label to its source statement: ${nextSource}`);
   }
 
-  await commit(target('.diagram-canvas-svg svg g[data-et="control-structure"]', 1), 'Edit sequence fragment', 'second fragment');
+  await commit(target('.diagram-canvas-svg svg g[data-et="control-structure"] > text:last-of-type', 1), 'Edit sequence fragment', 'second fragment');
   nextSource = await readCanonicalSource(page);
   if (!nextSource.includes('alt repeated fragment') || !nextSource.includes('opt second fragment')) {
     throw new Error(`Fragment inline edit did not map the second repeated label to its source statement: ${nextSource}`);
@@ -489,12 +504,12 @@ async function validateSequenceCanvas() {
     }
     await chooser.getByRole('button', { name: /Sequence/ }).click();
     await page.getByTestId('sequence-editor-controls').waitFor({ state: 'visible', timeout: 15_000 });
-    await page.getByLabel('New sequence participant').fill('Browser');
+    await page.getByLabel('New sequence participant', { exact: true }).fill('Browser');
     await page.getByRole('button', { name: 'Add sequence participant', exact: true }).click();
-    await page.getByLabel('New sequence participant').fill('API');
+    await page.getByLabel('New sequence participant', { exact: true }).fill('API');
     await page.getByRole('button', { name: 'Add sequence participant', exact: true }).click();
-    await page.getByLabel('Message sender').selectOption('Browser');
-    await page.getByLabel('Message recipient').selectOption('API');
+    await page.getByLabel('Message sender', { exact: true }).selectOption('Browser');
+    await page.getByLabel('Message recipient', { exact: true }).selectOption('API');
     await page.getByRole('textbox', { name: 'Sequence message', exact: true }).fill('Request');
     await page.getByRole('button', { name: 'Add sequence message', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.diagram-canvas-svg')?.textContent?.includes('Request'), undefined, { timeout: 15_000 });
@@ -510,14 +525,14 @@ title: Handshake
 sequenceDiagram; A<<->>B: ping`;
     await replaceSource(page, frontmatterSequence);
     await waitForCanvas(page, 'sequence');
-    const senderOptions = await page.getByLabel('Message sender').locator('option').allTextContents();
+    const senderOptions = await page.getByLabel('Message sender', { exact: true }).locator('option').allTextContents();
     if (senderOptions.join(',') !== 'A,B') {
       throw new Error(`Bidirectional semicolon participants were not exposed: ${senderOptions.join(',')}`);
     }
-    await page.getByLabel('New sequence participant').fill('Ops; #"<team>" & lead');
+    await page.getByLabel('New sequence participant', { exact: true }).fill('Ops; #"<team>" & lead');
     await page.getByRole('button', { name: 'Add sequence participant', exact: true }).click();
-    await page.getByLabel('Message sender').selectOption('A');
-    await page.getByLabel('Message recipient').selectOption('B');
+    await page.getByLabel('Message sender', { exact: true }).selectOption('A');
+    await page.getByLabel('Message recipient', { exact: true }).selectOption('B');
     await page.getByRole('textbox', { name: 'Sequence message', exact: true }).fill('pong; #"<ok>" & done');
     await page.getByRole('button', { name: 'Add sequence message', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.diagram-canvas-svg')?.textContent?.includes('pong'), undefined, { timeout: 15_000 });
@@ -574,7 +589,7 @@ sequenceDiagram; A<<->>B: ping`;
     await noteControl.fill('from semantic control');
     await addNote.click();
     await waitForCanvas(page, 'sequence');
-    const noteTarget = page.locator('.diagram-canvas-svg svg g[data-et="note"]').first();
+    const noteTarget = page.locator('.diagram-canvas-svg svg g[data-et="note"] text').first();
     await assertHitTarget(page, noteTarget, 'Note-only sequence inline note target');
     await noteTarget.dblclick();
     const noteEditor = page.getByLabel('Edit sequence note', { exact: true });

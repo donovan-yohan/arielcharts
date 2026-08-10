@@ -71,7 +71,7 @@ import {
   getBoundsCenter,
   getBoundsUnion,
   getNodePortPosition,
-  getSequenceSvgTextTarget,
+  resolveSequenceSvgTextTarget,
   type SvgBounds,
   type SvgHitMap,
   type SvgPoint,
@@ -556,7 +556,7 @@ export function DiagramCanvas({
   const [editingSequenceTarget, setEditingSequenceTarget] = useState<SequenceSvgTextTarget | null>(null);
   const [editingSequenceText, setEditingSequenceText] = useState('');
   const [editingSequenceAnchor, setEditingSequenceAnchor] = useState<{ x: number; y: number; width: number } | null>(null);
-  const sequenceEditorOriginRef = useRef<HTMLElement | null>(null);
+  const sequenceEditorOriginRef = useRef<HTMLElement | SVGElement | null>(null);
   const [selectedEdgeIdentity, setSelectedEdgeIdentity] = useState<DiagramEdgeIdentity | null>(null);
   const [editingEdgeIdentity, setEditingEdgeIdentity] = useState<DiagramEdgeIdentity | null>(null);
   const [editingEdgeLabel, setEditingEdgeLabel] = useState('');
@@ -1975,7 +1975,11 @@ export function DiagramCanvas({
     window.requestAnimationFrame(() => {
       if (origin?.isConnected) {
         origin.focus({ preventScroll: true });
+        if (document.activeElement === origin) {
+          return;
+        }
       }
+      containerRef.current?.focus({ preventScroll: true });
     });
   }, []);
 
@@ -1994,12 +1998,22 @@ export function DiagramCanvas({
     if (!isSequence || readOnly || !containerRef.current) {
       return;
     }
-    const target = getSequenceSvgTextTarget(sequenceTextHitMap, event.target);
+    const target = resolveSequenceSvgTextTarget(
+      sequenceTextHitMap,
+      svgContainerRef.current?.querySelector('svg') ?? null,
+      sequenceTextItems,
+      event.target,
+    );
     if (!target || !(event.target instanceof HTMLElement || event.target instanceof SVGElement)) {
       return;
     }
-    const origin = event.target instanceof HTMLElement ? event.target : event.target as unknown as HTMLElement;
-    origin.tabIndex = 0;
+    const svgTextOrigin = event.target instanceof SVGElement ? event.target.closest('text') : null;
+    const origin = svgTextOrigin instanceof SVGElement ? svgTextOrigin : event.target;
+    if (origin instanceof HTMLElement) {
+      origin.tabIndex = 0;
+    } else {
+      origin.setAttribute('tabindex', '0');
+    }
     const canvasRect = containerRef.current.getBoundingClientRect();
     const rect = event.target.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) {
@@ -2015,7 +2029,7 @@ export function DiagramCanvas({
       x: Math.max(8, rect.left - canvasRect.left),
       y: Math.max(8, rect.top - canvasRect.top),
     });
-  }, [isSequence, readOnly, sequenceTextHitMap]);
+  }, [isSequence, readOnly, sequenceTextHitMap, sequenceTextItems]);
 
   const selectSubgraph = useCallback((subgraphId: string) => {
     if (!canEditStructure || !subgraphById.has(subgraphId)) return;

@@ -143,6 +143,20 @@ export function getSequenceSvgTextTarget(hitMap: ReadonlyMap<Element, SequenceSv
   return null;
 }
 
+/**
+ * Resolve a sequence label from the cached render map, rebuilding against the
+ * live SVG only when Mermaid has replaced the mapped DOM subtree.
+ */
+export function resolveSequenceSvgTextTarget(
+  cachedHitMap: ReadonlyMap<Element, SequenceSvgTextTarget> | null,
+  svg: SVGSVGElement | null,
+  items: readonly SequenceSvgTextItem[],
+  start: EventTarget | null,
+): SequenceSvgTextTarget | null {
+  return getSequenceSvgTextTarget(cachedHitMap, start)
+    ?? getSequenceSvgTextTarget(svg ? buildSequenceSvgTextHitMap(svg, items) : null, start);
+}
+
 export function extractMermaidEntityId(rawId: string | null | undefined): string | null {
   if (!rawId) {
     return null;

@@ -121,6 +121,10 @@ export function buildSequenceSvgTextHitMap(svg: SVGSVGElement, items: readonly S
   ];
   for (const [type, elements] of mappings) {
     const sourceItems = items.filter((item) => item.type === type);
+    // Mermaid synthesizes participant groups for note-only diagrams even though
+    // no participant declaration exists to edit. Ignore only those uneditable
+    // renderer artifacts; every represented statement category stays exact.
+    if (type === 'participant' && sourceItems.length === 0) continue;
     if (sourceItems.length !== elements.length) return null;
     for (const [index, element] of elements.entries()) {
       const target = sourceItems[index];

@@ -75,6 +75,22 @@ describe('sequence SVG text hit map', () => {
     expect(buildSequenceSvgTextHitMap(svg, [])).toBeNull();
   });
 
+  it('maps note-only statements while withholding Mermaid implicit participants with no source declaration', () => {
+    const implicitA = { querySelectorAll: () => [] } as unknown as Element;
+    const implicitB = { querySelectorAll: () => [] } as unknown as Element;
+    const firstNote = { querySelectorAll: () => [] } as unknown as Element;
+    const secondNote = { querySelectorAll: () => [] } as unknown as Element;
+    const hitMap = buildSequenceSvgTextHitMap(createSequenceSvgCandidates({
+      '.messageText': [], 'g[data-et="control-structure"]': [], 'g[data-et="note"]': [firstNote, secondNote], 'g[data-et="participant"]': [implicitA, implicitB],
+    }), [
+      { id: 'statement:2', text: 'hello', type: 'note' },
+      { id: 'statement:3', text: 'from semantic control', type: 'note' },
+    ]);
+    expect(hitMap?.get(firstNote)).toEqual({ id: 'statement:2', text: 'hello', type: 'note' });
+    expect(hitMap?.get(secondNote)).toEqual({ id: 'statement:3', text: 'from semantic control', type: 'note' });
+    expect(hitMap?.has(implicitA)).toBe(false);
+  });
+
   it('rebuilds only a stale map against the live SVG and keeps mismatched live output fail-closed', () => {
     const item = { id: 'statement:4', text: 'Alpha', type: 'participant' as const };
     const staleSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

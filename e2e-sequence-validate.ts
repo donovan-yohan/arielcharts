@@ -208,28 +208,48 @@ async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
   await waitForCanvas(page, 'sequence');
   await closeSourceFlyout(page);
   await waitForStableSvgInnerHtml(page, 'sequence semantic text targets');
+  const transformedLayer = page.locator('.diagram-canvas-svg').locator('..');
+  const readCamera = async (): Promise<string | null> => transformedLayer.getAttribute('style');
+  const getBlankCanvasPanPoint = async (): Promise<{ x: number; y: number }> => page.evaluate(() => {
+    const canvas = document.querySelector<HTMLElement>('[aria-label="Interactive diagram canvas"]');
+    if (!canvas) throw new Error('Sequence inline editing fixture has no interactive canvas.');
+    const bounds = canvas.getBoundingClientRect();
+    for (const y of [bounds.bottom - 160, bounds.bottom - 224, bounds.bottom - 288]) {
+      for (const x of [bounds.left + (bounds.width / 2), bounds.left + 32, bounds.right - 32]) {
+        const target = document.elementFromPoint(x, y);
+        if (target && canvas.contains(target) && !target.closest('[data-canvas-pan-exclusion="true"], button, input, select, textarea, form, [role="button"], svg')) {
+          return { x, y };
+        }
+      }
+    }
+    throw new Error('Sequence inline editing fixture has no blank non-excluded canvas pan point.');
+  });
   const positionSequenceTextTargets = async (): Promise<void> => {
     await page.getByRole('button', { name: 'Fit diagram', exact: true }).click();
     await page.waitForTimeout(240);
-    const canvasBounds = await page.getByLabel('Interactive diagram canvas', { exact: true }).boundingBox();
-    if (!canvasBounds) throw new Error('Sequence inline editing fixture has no canvas bounds.');
-    await page.mouse.move(canvasBounds.x + (canvasBounds.width / 2), canvasBounds.y + canvasBounds.height - 160);
+    const fittedCamera = await readCamera();
+    const panPoint = await getBlankCanvasPanPoint();
+    await page.mouse.move(panPoint.x, panPoint.y);
     await page.mouse.down({ button: 'middle' });
-    await page.mouse.move(canvasBounds.x + (canvasBounds.width / 2), canvasBounds.y + canvasBounds.height - 32, { steps: 8 });
+    await page.mouse.move(panPoint.x, panPoint.y + 128, { steps: 8 });
     await page.mouse.up({ button: 'middle' });
     await page.waitForTimeout(120);
+    const pannedCamera = await readCamera();
+    if (pannedCamera === fittedCamera) {
+      throw new Error('Sequence inline editing fixture middle-pan did not change the fitted camera.');
+    }
   };
   await positionSequenceTextTargets();
 
   const anchorsBefore = await snapshotAnchors(page, WORKSPACE_ANCHORS);
-  const transformedLayer = page.locator('.diagram-canvas-svg').locator('..');
-  const transformBefore = await transformedLayer.getAttribute('style');
+  const transformBefore = await readCamera();
   const target = (selector: string, index: number) => page.locator(selector).nth(index);
 
   const cancel = async (locator: Locator, label: string): Promise<void> => {
     await positionSequenceTextTargets();
     await locator.waitFor({ state: 'visible', timeout: 15_000 });
     await assertHitTarget(page, locator, `${label} SVG target`);
+    const cameraBeforeEdit = await readCamera();
     await locator.dblclick();
     const editor = page.getByLabel(label, { exact: true });
     await editor.waitFor({ state: 'visible', timeout: 5_000 });
@@ -237,6 +257,9 @@ async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
     await editor.press('Escape');
     await editor.waitFor({ state: 'detached', timeout: 5_000 });
     await page.waitForTimeout(32);
+    if (await readCamera() !== cameraBeforeEdit) {
+      throw new Error(`${label} cancel changed the sequence camera.`);
+    }
     const focusReturned = await page.getByLabel('Interactive diagram canvas', { exact: true }).evaluate((canvas) => canvas === document.activeElement);
     if (!focusReturned) throw new Error(`${label} did not return focus to the interactive canvas after Escape.`);
   };
@@ -245,6 +268,7 @@ async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
     await positionSequenceTextTargets();
     await locator.waitFor({ state: 'visible', timeout: 15_000 });
     await assertHitTarget(page, locator, `${label} SVG target`);
+    const cameraBeforeEdit = await readCamera();
     await locator.dblclick();
     const editor = page.getByLabel(label, { exact: true });
     await editor.waitFor({ state: 'visible', timeout: 5_000 });
@@ -252,6 +276,10 @@ async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
     await editor.press('Enter');
     await editor.waitFor({ state: 'detached', timeout: 5_000 });
     await waitForCanvas(page, 'sequence');
+    await waitForStableSvgInnerHtml(page, `${label} committed sequence target`);
+    if (await readCamera() !== cameraBeforeEdit) {
+      throw new Error(`${label} commit changed the sequence camera.`);
+    }
   };
 
   await cancel(target('.diagram-canvas-svg svg g[data-et="participant"] text', 1), 'Edit sequence participant');
@@ -589,6 +617,7 @@ sequenceDiagram; A<<->>B: ping`;
     await noteControl.fill('from semantic control');
     await addNote.click();
     await waitForCanvas(page, 'sequence');
+    await waitForStableSvgInnerHtml(page, 'note-only sequence inline target');
     const noteTarget = page.locator('.diagram-canvas-svg svg g[data-et="note"] text').first();
     await assertHitTarget(page, noteTarget, 'Note-only sequence inline note target');
     await noteTarget.dblclick();

@@ -47,7 +47,10 @@ const activationPattern = new RegExp(`^(\\s*)(activate|deactivate)\\s+(${ID})\\s
 const fragmentPattern = /^(\s*)(alt|opt|loop|par|critical|break)(?:\s+(.*?))?\s*$/i;
 const branchPattern = /^(\s*)(else|and|option)(?:\s+(.*?))?\s*$/i;
 const endPattern = /^\s*end\s*$/i;
-const autonumberPattern = /^(\s*)autonumber(?:\s+(.*?))?\s*$/i;
+const AUTONUMBER_NUMBER = '(?:\\d+(?:\\.\\d+)?|\\.\\d+)';
+const AUTONUMBER_VALUE = `(?:off|${AUTONUMBER_NUMBER}(?:[ \\t]+${AUTONUMBER_NUMBER})?)`;
+const autonumberPattern = new RegExp(`^(\\s*)autonumber(?:\\s+(${AUTONUMBER_VALUE}))?\\s*$`, 'i');
+const autonumberValuePattern = new RegExp(`^${AUTONUMBER_VALUE}$`, 'i');
 const FRONTMATTER = /^\uFEFF?---[ \t]*(?:\r\n|\n|\r)[\s\S]*?(?:\r\n|\n|\r)---[ \t]*(?:(?:\r\n|\n|\r)|$)/;
 const ENDING = /\r\n|\n|\r/;
 const TRAILING_ENDING = /(?:\r\n|\n|\r)$/;
@@ -168,7 +171,7 @@ export function moveSequenceActivation(source: string, statementId: string, dire
 
 export function setSequenceAutonumber(source: string, value: string | null = ''): string {
   const parsed = requireSequence(source); const normalized = normalizeAutonumber(value);
-  if (!normalized) return parsed.autonumber ? deleteStatements(source, [parsed.autonumber]) : source;
+  if (value === null) return parsed.autonumber ? deleteStatements(source, [parsed.autonumber]) : source;
   const statement = `  autonumber${normalized ? ` ${normalized}` : ''}`;
   return parsed.autonumber ? replace(source, parsed.autonumber.range, `${statementIndent(parsed, parsed.autonumber.id)}${statement.trimStart()}`) : appendStatement(source, statement);
 }
@@ -347,7 +350,14 @@ function assertActivation(parsed: Parsed, action: SequenceActivationAction, part
 function assertFragmentKind(kind: SequenceFragmentKind): void { if (!SAFE_FRAGMENT_KINDS.has(kind)) throw new Error('Choose a supported sequence fragment.'); }
 function isAllowedBranch(fragment: SequenceFragmentKind, branch: SequenceFragmentBranch['kind']): boolean { return (fragment === 'alt' && branch === 'else') || (fragment === 'par' && branch === 'and') || (fragment === 'critical' && branch === 'option'); }
 function normalizeText(value: string): string { return value.replace(/[\r\n\u2028\u2029]+/g, ' ').replace(/["#&',:;<>@`]/g, (character) => ESCAPES[character] ?? '').trim(); }
-function normalizeAutonumber(value: string | null): string { return value?.replace(/[\r\n\u2028\u2029]+/g, ' ').replace(/[;`]/g, '').trim() ?? ''; }
+function normalizeAutonumber(value: string | null): string {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) return '';
+  if (!autonumberValuePattern.test(normalized)) {
+    throw new Error('Autonumber accepts "off", a numeric start, or a numeric start and increment.');
+  }
+  return normalized;
+}
 function appendStatement(source: string, statement: string): string { if (!source) return `${HEADER}\n${statement}`; const ending = lineEnding(source); if (!source.trim()) return `${source}${TRAILING_ENDING.test(source) ? '' : ending}${HEADER}${ending}${statement}`; return `${source}${TRAILING_ENDING.test(source) ? '' : ending}${statement}`; }
 function lineEnding(source: string): string { return source.match(ENDING)?.[0] ?? '\n'; }
 function indentOf(text: string): string { return text.match(/^\s*/)?.[0] ?? ''; }

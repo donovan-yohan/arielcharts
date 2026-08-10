@@ -1,3 +1,6 @@
+// @vitest-environment happy-dom
+
+import mermaid from 'mermaid';
 import { describe, expect, it } from 'vitest';
 import {
   addSequenceMessage,
@@ -30,6 +33,35 @@ import {
 } from './sequence-mutations';
 
 describe('sequence source mutations', () => {
+  it('accepts only Mermaid 11.16.1 autonumber forms and never emits arbitrary source', async () => {
+    mermaid.initialize({ startOnLoad: false });
+    const validValues = ['', 'off', '1', '1 2', '.5 1.5'];
+    for (const value of validValues) {
+      const source = `sequenceDiagram\n  autonumber${value ? ` ${value}` : ''}`;
+      expect(isSequenceSourceRepresentable(source), value || 'bare').toBe(true);
+      await expect(mermaid.parse(source), value || 'bare').resolves.toMatchObject({ diagramType: 'sequence' });
+    }
+
+    for (const value of ['start', '1 next', '1 2 3', '-1', 'off 1']) {
+      const source = `sequenceDiagram\n  autonumber ${value}`;
+      expect(isSequenceSourceRepresentable(source), value).toBe(false);
+      await expect(mermaid.parse(source), value).rejects.toThrow();
+    }
+
+    const source = 'sequenceDiagram\n  A->>B: request';
+    for (const value of ['', 'off', '1', '1 2', '.5 1.5']) {
+      const mutated = setSequenceAutonumber(source, value);
+      expect(mutated).toContain(`autonumber${value ? ` ${value}` : ''}`);
+      await expect(mermaid.parse(mutated), value).resolves.toMatchObject({ diagramType: 'sequence' });
+    }
+    const bareSource = 'sequenceDiagram\n  autonumber';
+    expect(setSequenceAutonumber(bareSource, '')).toBe(bareSource);
+    expect(setSequenceAutonumber(bareSource, null)).toBe('sequenceDiagram\n');
+    for (const value of ['start', '1 next', '1 2 3', '-1', 'off 1', '1\n2']) {
+      expect(() => setSequenceAutonumber(source, value), value).toThrow('Autonumber accepts');
+    }
+  });
+
   it('recognizes only sequence source and derives declared and implicit participants', () => {
     const source = `sequenceDiagram
   participant Browser as Web browser

@@ -35,26 +35,40 @@ describe('Mermaid SVG entity compatibility', () => {
 });
 
 describe('sequence SVG text hit map', () => {
-  it('projects renderer category and source order without inspecting rendered labels', () => {
+  it('projects renderer category and source order without inspecting repeated rendered labels', () => {
     const participant = { querySelectorAll: () => [] } as unknown as Element;
+    const duplicateParticipant = { querySelectorAll: () => [] } as unknown as Element;
     const message = { querySelectorAll: () => [] } as unknown as Element;
+    const duplicateMessage = { querySelectorAll: () => [] } as unknown as Element;
     const note = { querySelectorAll: () => [] } as unknown as Element;
+    const duplicateNote = { querySelectorAll: () => [] } as unknown as Element;
     const fragment = { querySelectorAll: () => [] } as unknown as Element;
+    const duplicateFragment = { querySelectorAll: () => [] } as unknown as Element;
     const hitMap = buildSequenceSvgTextHitMap(createSequenceSvgCandidates({
-      '.messageText': [message], 'g[data-et="control-structure"]': [fragment], 'g[data-et="note"]': [note], 'g[data-et="participant"]': [participant],
+      '.messageText': [message, duplicateMessage], 'g[data-et="control-structure"]': [fragment, duplicateFragment], 'g[data-et="note"]': [note, duplicateNote], 'g[data-et="participant"]': [participant, duplicateParticipant],
     }), [
-      { id: 'statement:4', text: 'Alpha', type: 'participant' }, { id: 'statement:9', text: 'request', type: 'message' }, { id: 'statement:12', text: 'details', type: 'note' }, { id: 'statement:18', text: 'succeeds', type: 'fragment' },
+      { id: 'statement:4', text: 'repeated', type: 'participant' }, { id: 'statement:5', text: 'repeated', type: 'participant' },
+      { id: 'statement:9', text: 'repeated', type: 'message' }, { id: 'statement:10', text: 'repeated', type: 'message' },
+      { id: 'statement:12', text: 'repeated', type: 'note' }, { id: 'statement:13', text: 'repeated', type: 'note' },
+      { id: 'statement:18', text: 'repeated', type: 'fragment' }, { id: 'statement:19', text: 'repeated', type: 'fragment' },
     ]);
-    expect(hitMap?.get(participant)).toEqual({ id: 'statement:4', text: 'Alpha', type: 'participant' });
-    expect(hitMap?.get(message)).toEqual({ id: 'statement:9', text: 'request', type: 'message' });
-    expect(hitMap?.get(note)).toEqual({ id: 'statement:12', text: 'details', type: 'note' });
-    expect(hitMap?.get(fragment)).toEqual({ id: 'statement:18', text: 'succeeds', type: 'fragment' });
+    expect(hitMap?.get(participant)).toEqual({ id: 'statement:4', text: 'repeated', type: 'participant' });
+    expect(hitMap?.get(duplicateParticipant)).toEqual({ id: 'statement:5', text: 'repeated', type: 'participant' });
+    expect(hitMap?.get(message)).toEqual({ id: 'statement:9', text: 'repeated', type: 'message' });
+    expect(hitMap?.get(duplicateMessage)).toEqual({ id: 'statement:10', text: 'repeated', type: 'message' });
+    expect(hitMap?.get(note)).toEqual({ id: 'statement:12', text: 'repeated', type: 'note' });
+    expect(hitMap?.get(duplicateNote)).toEqual({ id: 'statement:13', text: 'repeated', type: 'note' });
+    expect(hitMap?.get(fragment)).toEqual({ id: 'statement:18', text: 'repeated', type: 'fragment' });
+    expect(hitMap?.get(duplicateFragment)).toEqual({ id: 'statement:19', text: 'repeated', type: 'fragment' });
   });
 
-  it('withholds editing for duplicate source identities or missing renderer candidates', () => {
+  it('withholds editing for duplicate source identities or any renderer/source cardinality mismatch', () => {
     const candidate = { querySelectorAll: () => [] } as unknown as Element;
+    const extraCandidate = { querySelectorAll: () => [] } as unknown as Element;
     const svg = createSequenceSvgCandidates({ '.messageText': [candidate], 'g[data-et="control-structure"]': [], 'g[data-et="note"]': [], 'g[data-et="participant"]': [] });
+    const rendererWithExtraMessage = createSequenceSvgCandidates({ '.messageText': [candidate, extraCandidate], 'g[data-et="control-structure"]': [], 'g[data-et="note"]': [], 'g[data-et="participant"]': [] });
     expect(buildSequenceSvgTextHitMap(svg, [{ id: 'statement:4', text: 'first', type: 'message' }, { id: 'statement:4', text: 'second', type: 'message' }])).toBeNull();
+    expect(buildSequenceSvgTextHitMap(rendererWithExtraMessage, [{ id: 'statement:4', text: 'first', type: 'message' }])).toBeNull();
     expect(buildSequenceSvgTextHitMap(svg, [])).toBeNull();
   });
 });

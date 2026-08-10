@@ -511,6 +511,10 @@ async function expectWheelGestureCameraControls(page: Page, label: string, rende
     devicePixelRatio: window.devicePixelRatio,
   }));
   const pinch = await dispatchTrustedCanvasWheel(page, label, renderer, { ctrlKey: true, deltaX: 0, deltaY: -20 });
+  await expect.poll(async () => (await readCanvasCameraSnapshot(page, `${label} ctrl-wheel settle`)).zoom, {
+    message: `${label} ctrl-wheel zoom did not settle after trusted input.`,
+    timeout: 5_000,
+  }).not.toBe(beforeZoom.zoom);
   const afterZoom = await readCanvasCameraSnapshot(page, `${label} ctrl-wheel result`);
   const canvasBounds = await canvas.boundingBox();
   assert(canvasBounds, `${label} lost its canvas bounds during ctrl-wheel zoom.`);

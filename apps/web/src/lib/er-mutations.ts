@@ -26,6 +26,8 @@ export interface ErRelationship {
 /** A relationship stays addressable if a collaborator inserts lines before it. */
 export interface ErRelationshipIdentity extends ErRelationship {
   index: number;
+  /** Duplicate signatures are never editable; this protects a stale legacy identity too. */
+  occurrenceCount: number;
 }
 
 export interface ErDiagramSnapshot {
@@ -90,14 +92,17 @@ export function getErDiagramSnapshot(source: string): ErDiagramSnapshot {
   };
 }
 
-export function getErRelationshipIdentity(relationship: ErRelationship, index: number): ErRelationshipIdentity {
-  return { ...relationship, index };
+export function getErRelationshipIdentity(relationship: ErRelationship, index: number, occurrenceCount = 1): ErRelationshipIdentity {
+  return { ...relationship, index, occurrenceCount };
 }
 
 export function resolveErRelationshipIndex(
   relationships: readonly ErRelationship[],
   identity: ErRelationshipIdentity,
 ): number {
+  if (identity.occurrenceCount !== 1) {
+    throw new Error('Relationship changed remotely and can no longer be resolved safely.');
+  }
   const atIndex = relationships[identity.index];
   if (atIndex && isSameErRelationship(atIndex, identity)) return identity.index;
   const matches = relationships
@@ -116,6 +121,17 @@ function isSameErRelationship(left: ErRelationship, right: ErRelationship): bool
     && left.rightCardinality === right.rightCardinality
     && left.right === right.right
     && left.label === right.label;
+}
+
+function getRelationshipSignature(relationship: ErRelationship): string {
+  return [
+    relationship.left,
+    relationship.leftCardinality,
+    relationship.identifying ? 'identifying' : 'non-identifying',
+    relationship.rightCardinality,
+    relationship.right,
+    relationship.label,
+  ].join('\u0000');
 }
 
 export function addErEntity(source: string, name = 'ENTITY'): string {
@@ -185,7 +201,7 @@ export function editErAttribute(source: string, entityName: string, attributeNam
   if (next.name !== attributeName && entity.attributes.some((candidate) => candidate.name === next.name)) {
     throw new Error(`Entity ${entityName} already has an attribute named ${next.name}.`);
   }
-  return replaceRanges(source, [{ range: attribute.semantic, value: `${leadingWhitespace(source.slice(attribute.line.start, attribute.semantic.start))}${formatAttribute(next)}` }]);
+  return replaceRanges(source, [{ range: attribute.semantic, value: formatAttribute(next) }]);
 }
 
 export function deleteErAttribute(source: string, entityName: string, attributeName: string): string {
@@ -220,8 +236,8 @@ export function editErRelationship(source: string, identity: ErRelationshipIdent
   const index = resolveErRelationshipIndex(parsed.relationships, identity);
   const current = parsed.relationships[index];
   if (!current) throw new Error('Relationship no longer exists.');
-  assertRelationshipEndpoints(parsed, relationship);
-  return replaceRanges(source, [{ range: current.semantic, value: `${leadingWhitespace(source.slice(current.line.start, current.semantic.start))}${formatRelationship(normalizeRelationship(relationship))}` }]);
+  assertRelationshipEndpoints(parsed, relationship, current);
+  return replaceRanges(source, [{ range: current.semantic, value: formatRelationship(normalizeRelationship(relationship)) }]);
 }
 
 export function deleteErRelationship(source: string, identity: ErRelationshipIdentity): string {
@@ -281,6 +297,12 @@ function parseErDiagram(source: string): ParsedErDiagram | null {
   const entityNames = new Set(entities.map((entity) => entity.name));
   if (relationships.some((relationship) => !entityNames.has(relationship.left) || !entityNames.has(relationship.right))) {
     return null;
+  }
+  const signatures = new Set<string>();
+  for (const relationship of relationships) {
+    const signature = getRelationshipSignature(relationship);
+    if (signatures.has(signature)) return null;
+    signatures.add(signature);
   }
   return { entities, relationships };
 }
@@ -410,10 +432,13 @@ function normalizeRelationship(relationship: ErRelationship): ErRelationship {
   return normalized;
 }
 
-function assertRelationshipEndpoints(parsed: ParsedErDiagram, relationship: ErRelationship): void {
+function assertRelationshipEndpoints(parsed: ParsedErDiagram, relationship: ErRelationship, excluded?: ErRelationship): void {
   const normalized = normalizeRelationship(relationship);
   const entities = new Set(parsed.entities.map((entity) => entity.name));
   if (!entities.has(normalized.left) || !entities.has(normalized.right)) throw new Error('Relationships require two existing entities.');
+  if (parsed.relationships.some((current) => current !== excluded && isSameErRelationship(current, normalized))) {
+    throw new Error('An identical relationship already exists.');
+  }
 }
 
 function formatAttribute(attribute: ErAttribute): string {
@@ -436,8 +461,6 @@ function getIndentForEntity(source: string, entity: ErEntityRecord): string {
   const declaration = source.slice(entity.block.start, entity.declaration.start);
   return `${declaration}${declaration ? '  ' : '  '}`;
 }
-function leadingWhitespace(value: string): string { return value.match(/^\s*/)?.[0] ?? ''; }
-
 function replaceRanges(source: string, changes: Array<{ range: SourceRange; value: string }>): string {
   return [...changes].sort((left, right) => right.range.start - left.range.start).reduce((next, { range, value }) => (
     `${next.slice(0, range.start)}${value}${next.slice(range.end)}`

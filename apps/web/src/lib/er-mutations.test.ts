@@ -67,13 +67,34 @@ describe('ER source mutations', () => {
       '',
     ].join('\r\n');
     const attributeEdited = editErAttribute(source, 'CUSTOMER', 'path', { type: 'string', name: 'location', keys: ['UK'], comment: 'D:\\archive' });
-    expect(attributeEdited).toContain('    string location UK "D:\\\\archive"   %% attribute note  \r\n');
+    expect(attributeEdited).toBe([
+      "%%{init: {'theme':'neutral'}}%%",
+      'erDiagram',
+      '  CUSTOMER {',
+      '    string location UK "D:\\\\archive"   %% attribute note  ',
+      '  }',
+      '  ORDER {',
+      '    int id PK',
+      '  }',
+      '  CUSTOMER ||--o{ ORDER : places   %% relationship note  ',
+      '',
+    ].join('\r\n'));
     const identity = getErRelationshipIdentity(getErDiagramSnapshot(attributeEdited).relationships[0]!, 0);
     const relationshipEdited = editErRelationship(attributeEdited, identity, {
       left: 'CUSTOMER', leftCardinality: 'zero-or-one', identifying: false, rightCardinality: 'one-or-more', right: 'ORDER', label: 'may place',
     });
-    expect(relationshipEdited).toContain('  CUSTOMER |o..|{ ORDER : may place   %% relationship note  \r\n');
-    expect(relationshipEdited).toContain("%%{init: {'theme':'neutral'}}%%\r\n");
+    expect(relationshipEdited).toBe([
+      "%%{init: {'theme':'neutral'}}%%",
+      'erDiagram',
+      '  CUSTOMER {',
+      '    string location UK "D:\\\\archive"   %% attribute note  ',
+      '  }',
+      '  ORDER {',
+      '    int id PK',
+      '  }',
+      '  CUSTOMER |o..|{ ORDER : may place   %% relationship note  ',
+      '',
+    ].join('\r\n'));
   });
 
   it('generates only Mermaid-valid and representable source for every mutation', async () => {
@@ -116,7 +137,15 @@ describe('ER source mutations', () => {
     expect(deleteErRelationship(afterRemoteDeletion, movedIdentity)).not.toContain('may place');
 
     const duplicate = `${SOURCE}  CUSTOMER ||--o{ ORDER : places\n`;
-    expect(() => editErRelationship(duplicate, { ...target, index: 4 }, { ...target, label: 'changed' })).toThrow('can no longer be resolved safely');
+    expect(isErSourceRepresentable(duplicate)).toBe(false);
+    expect(() => addErRelationship(SOURCE, target)).toThrow('identical relationship');
+
+    const changedDuplicate = duplicate.replace(/CUSTOMER \|\|--o\{ ORDER : places\n$/u, 'CUSTOMER ||--o{ ORDER : changed\n');
+    const staleDuplicateIdentity = getErRelationshipIdentity(target, 1, 2);
+    expect(isErSourceRepresentable(changedDuplicate)).toBe(true);
+    expect(() => editErRelationship(changedDuplicate, staleDuplicateIdentity, { ...target, label: 'wrong target' }))
+      .toThrow('can no longer be resolved safely');
+    expect(changedDuplicate).toContain('CUSTOMER ||--o{ ORDER : places');
   });
 
   it('fails closed for unmodeled endpoint declarations and unsupported valid syntax', () => {

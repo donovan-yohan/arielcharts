@@ -105,6 +105,11 @@ describe('C4 source mutations', () => {
     expect(() => moveC4Boundary(source, 'zone', 'team')).toThrow('cannot contain itself');
   });
 
+  it('moves CR-only boundary ranges without normalizing line endings or adding a blank line', () => {
+    const source = 'C4Context\r  Boundary(zone, "Zone") {\r  }\r  Boundary(team, "Team") {\r    Person(user, "User")\r  }\r';
+    expect(moveC4Boundary(source, 'team', 'zone')).toBe('C4Context\r  Boundary(zone, "Zone") {\r    Boundary(team, "Team") {\r      Person(user, "User")\r    }\r  }\r');
+  });
+
   it('re-resolves a unique semantic fingerprint after a remote insertion and rejects stale ambiguity', () => {
     const identity = getC4RelationshipIdentity(getC4DiagramSnapshot(SOURCE).relationships[1]!, 1, getC4DiagramSnapshot(SOURCE).relationships);
     const inserted = SOURCE.replace('  Rel(web, db, "Reads")', '  Rel(db, web, "Returns")\n  Rel(web, db, "Reads")');

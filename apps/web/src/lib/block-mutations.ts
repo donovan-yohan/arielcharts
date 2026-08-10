@@ -45,7 +45,8 @@ export function moveBlockComposite(source: string, id: string, parentId: string 
   if (!parentId) return append(without, reindent(fragment, indent(composite.line), '  '));
   const parent = findComposite(requireBlock(without), parentId);
   const targetIndent = `${indent(parent.line)}  `;
-  return `${without.slice(0, parent.close.start)}${reindent(fragment, indent(composite.line), targetIndent)}${lineEnding(without)}${without.slice(parent.close.start)}`;
+  const separator = endsWithLineEnding(fragment) ? '' : lineEnding(without);
+  return `${without.slice(0, parent.close.start)}${reindent(fragment, indent(composite.line), targetIndent)}${separator}${without.slice(parent.close.start)}`;
 }
 /** Root grid columns are a source declaration rather than view state. */
 export function setBlockColumns(source: string, columns: number): string { requireBlock(source); const next = normalizeColumns(columns); const lines = splitLines(source); const headerIndex = statementIndex(lines); let depth = 0; for (let index = headerIndex + 1; index < lines.length; index += 1) { const line = lines[index]!; if (!line.text.trim() || ignorable(line.text)) continue; if (BLOCK.test(line.text)) { depth += 1; continue; } if (/^\s*end\s*$/i.test(line.text)) { depth -= 1; continue; } if (depth === 0 && COLUMNS.test(line.text)) return replace(source, line, `${indent(line)}columns ${next}`); } const header = lines[headerIndex]; if (!header) throw new Error('Block header no longer exists.'); const needsEnding = !/(?:\r\n|\n|\r)$/.test(header.raw); return `${source.slice(0, header.end)}${needsEnding ? lineEnding(source) : ''}  columns ${next}${lineEnding(source)}${source.slice(header.end)}`; }
@@ -96,7 +97,8 @@ function ignorable(value: string): boolean { return /^\s*%%/.test(value); }
 function indent(line: Line): string { return line.text.match(/^\s*/)?.[0] ?? ''; }
 function append(source: string, value: string): string { const ending = source.includes('\r\n') ? '\r\n' : source.includes('\r') ? '\r' : '\n'; return `${source}${source && !/(?:\r\n|\n|\r)$/.test(source) ? ending : ''}${value}`; }
 function lineEnding(source: string): string { return source.includes('\r\n') ? '\r\n' : source.includes('\r') ? '\r' : '\n'; }
-function reindent(source: string, from: string, to: string): string { return source.split(/(?<=\n)/u).map((line) => line.startsWith(from) ? `${to}${line.slice(from.length)}` : line).join(''); }
+function endsWithLineEnding(source: string): boolean { return /(?:\r\n|\r|\n)$/.test(source); }
+function reindent(source: string, from: string, to: string): string { return source.replace(/(^|\r\n|\r|\n)([^\r\n]*)/gu, (line, ending: string, content: string) => content && content.startsWith(from) ? `${ending}${to}${content.slice(from.length)}` : line); }
 function replace(source: string, line: Line, value: string): string { return `${source.slice(0, line.start)}${value}${line.raw.slice(line.text.length)}${source.slice(line.end)}`; }
 function replaceValues(source: string, values: readonly { line: Line; value: string }[]): string { return [...values].sort((left, right) => right.line.start - left.line.start).reduce((next, value) => replace(next, value.line, value.value), source); }
 function deleteLines(source: string, lines: readonly Line[]): string { return [...lines].sort((left, right) => right.start - left.start).reduce((next, line) => `${next.slice(0, line.start)}${next.slice(line.end)}`, source); }

@@ -115,6 +115,11 @@ describe('block source mutations', () => {
     expect(() => moveBlockComposite(source, 'outer', 'inner')).toThrow('cannot contain itself');
   });
 
+  it('moves CR-only composite ranges without normalizing line endings or adding a blank line', () => {
+    const source = 'block-beta\r  block:outer\r  end\r  block:inner\r    item["Item"]\r  end\r';
+    expect(moveBlockComposite(source, 'inner', 'outer')).toBe('block-beta\r  block:outer\r    block:inner\r      item["Item"]\r    end\r  end\r');
+  });
+
   it('re-resolves a unique link after remote movement and rejects duplicate fingerprints', () => {
     const links = getBlockDiagramSnapshot(SOURCE).links;
     const identity = getBlockLinkIdentity(links[1]!, 1, links);

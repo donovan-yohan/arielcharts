@@ -65,7 +65,8 @@ export function moveC4Boundary(source: string, id: string, parentId: string | nu
   if (!parentId) return append(without, reindent(fragment, indent(boundary.line), '  '));
   const parent = findBoundary(requireC4(without), parentId);
   const targetIndent = `${indent(parent.line)}  `;
-  return `${without.slice(0, parent.close.start)}${reindent(fragment, indent(boundary.line), targetIndent)}${lineEnding(without)}${without.slice(parent.close.start)}`;
+  const separator = endsWithLineEnding(fragment) ? '' : lineEnding(without);
+  return `${without.slice(0, parent.close.start)}${reindent(fragment, indent(boundary.line), targetIndent)}${separator}${without.slice(parent.close.start)}`;
 }
 export function addC4Boundary(source: string, boundary: C4Boundary): string { const parsed = requireC4(source); const next = normalizeBoundary(boundary); const id = uniqueId(next.id, parsed.elements.map((entry) => entry.id).concat(parsed.boundaries.map((entry) => entry.id))); const statement = `${next.kind}(${id}, ${quote(next.label)}) {\n  }`; if (!boundary.parentId) return append(source, `  ${statement}`); const parent = findBoundary(parsed, boundary.parentId); return `${source.slice(0, parent.close.start)}${indent(parent.line)}  ${statement.replace(/\n/g, `\n${indent(parent.line)}  `)}${lineEnding(source)}${source.slice(parent.close.start)}`; }
 export function editC4Boundary(source: string, id: string, patch: Partial<C4Boundary>): string { const parsed = requireC4(source); const current = findBoundary(parsed, id); const next = normalizeBoundary({ ...current, ...patch }); if (next.id !== id && hasId(parsed, next.id)) throw new Error(`A C4 item named ${next.id} already exists.`); return replace(source, current.line, `${indent(current.line)}${next.kind}(${next.id}, ${quote(next.label)}) {`); }
@@ -139,7 +140,8 @@ function ignorable(value: string): boolean { return /^\s*%%/.test(value); }
 function indent(line: SourceLine): string { return line.text.match(/^\s*/)?.[0] ?? ''; }
 function append(source: string, statement: string): string { const ending = source.includes('\r\n') ? '\r\n' : source.includes('\r') ? '\r' : '\n'; return `${source}${source && !/(?:\r\n|\n|\r)$/.test(source) ? ending : ''}${statement}`; }
 function lineEnding(source: string): string { return source.includes('\r\n') ? '\r\n' : source.includes('\r') ? '\r' : '\n'; }
-function reindent(source: string, from: string, to: string): string { return source.split(/(?<=\n)/u).map((line) => line.startsWith(from) ? `${to}${line.slice(from.length)}` : line).join(''); }
+function endsWithLineEnding(source: string): boolean { return /(?:\r\n|\r|\n)$/.test(source); }
+function reindent(source: string, from: string, to: string): string { return source.replace(/(^|\r\n|\r|\n)([^\r\n]*)/gu, (line, ending: string, content: string) => content && content.startsWith(from) ? `${ending}${to}${content.slice(from.length)}` : line); }
 function replace(source: string, line: SourceLine, value: string): string { return `${source.slice(0, line.start)}${value}${line.raw.slice(line.text.length)}${source.slice(line.end)}`; }
 function replaceValues(source: string, values: readonly { line: SourceLine; value: string }[]): string { return [...values].sort((left, right) => right.line.start - left.line.start).reduce((next, value) => replace(next, value.line, value.value), source); }
 function deleteLines(source: string, lines: readonly SourceLine[]): string { return [...lines].sort((left, right) => right.start - left.start).reduce((next, line) => `${next.slice(0, line.start)}${next.slice(line.end)}`, source); }

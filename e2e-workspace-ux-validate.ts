@@ -247,6 +247,23 @@ const PACKET_DIAGRAM_FIXTURE = `packet-beta
   0-3: "Header"
   4-7: "Flags"
   8-15: "Payload"`;
+const CYNEFIN_DIAGRAM_FIXTURE = `cynefin-beta
+  complex
+    "Probe"
+    "Emergent"
+  complicated
+    "Analyze"
+  clear
+    "Checklist"
+  chaotic
+    "Stabilize"
+  confusion
+    "Observe"
+    "Sense"
+    "Frame"
+    "Decide"
+  complex --> complicated : "Investigate"
+  chaotic --> clear`;
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
@@ -420,6 +437,31 @@ async function waitForFocusedLocator(page: Page, target: Locator, label: string)
       text: document.activeElement?.textContent?.trim().slice(0, 80),
     }));
     throw new Error(`${label} did not receive focus: active=${JSON.stringify(active)}.`);
+  }
+}
+
+async function focusCurrentDiagramCanvas(page: Page, label: string): Promise<Locator> {
+  try {
+    await page.waitForFunction(() => {
+      const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+      if (!canvas) return false;
+      if (document.activeElement !== canvas) canvas.focus();
+      return document.activeElement === canvas;
+    }, undefined, { timeout: 5_000 });
+    return page.getByTestId('diagram-canvas');
+  } catch {
+    const focusState = await page.evaluate(() => {
+      const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+      const active = document.activeElement;
+      return {
+        activeRole: active?.getAttribute('role'),
+        activeTag: active?.tagName,
+        activeTestId: active?.getAttribute('data-testid'),
+        canvasPresent: canvas !== null,
+        canvasTabIndex: canvas?.tabIndex ?? null,
+      };
+    });
+    throw new Error(`${label} could not focus the current diagram canvas: ${JSON.stringify(focusState)}.`);
   }
 }
 
@@ -1778,6 +1820,200 @@ Target,"Archive, ""deep""",4.25`;
   assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS));
   assert(await canvasTransform(page) === transformBefore, 'Sankey/Packet semantic forms changed the generic Mermaid camera transform.');
   assert(await page.locator('.react-flow__node').count() === 0, 'Sankey/Packet semantic forms exposed the generic React Flow editor.');
+}
+
+async function cynefinBoundaryPaths(page: Page): Promise<string[]> {
+  const root = page.locator('.diagram-canvas-svg > svg');
+  await root.waitFor({ state: 'visible', timeout: 15_000 });
+  const paths = await root.locator('path.cynefinBoundary, path.cynefinCliff, path.cynefinConfusion').evaluateAll((elements) => (
+    elements.map((element) => element.getAttribute('d') ?? '')
+  ));
+  assert(paths.length === 4 && paths.every(Boolean), `Cynefin boundary paths were incomplete: ${JSON.stringify(paths)}.`);
+  return paths;
+}
+
+async function expectCynefinSemanticEditor(page: Page): Promise<void> {
+  const anchorsBefore = await snapshotAnchors(page, ANCHORS);
+  const transformBefore = await canvasTransform(page);
+  await replaceSource(page, CYNEFIN_DIAGRAM_FIXTURE);
+  await waitForSource(page, CYNEFIN_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Cynefin · editable · form');
+  await closeFlyout(page, 'source');
+  const panel = page.getByTestId('cynefin-editor-controls');
+  await expect(page.getByRole('complementary', { name: 'Cynefin editor', exact: true })).toBeVisible();
+  const addItem = panel.getByRole('button', { name: 'Add item', exact: true });
+  await scrollErControlIntoView(addItem);
+  await assertTouchTarget(page, addItem, 'Cynefin add-item control');
+  for (const domain of ['Complex', 'Complicated', 'Clear', 'Chaotic', 'Confusion']) {
+    await expect(panel.getByRole('heading', { name: domain, exact: true })).toHaveCount(1);
+  }
+  const initialBoundaryPaths = await cynefinBoundaryPaths(page);
+
+  const probe = panel.getByRole('form', { name: 'Cynefin item Complex Probe', exact: true });
+  await probe.getByLabel('Cynefin item Complex Probe label').fill('Dirty probe');
+  const remoteItemSource = CYNEFIN_DIAGRAM_FIXTURE
+    .replace('    "Probe"\n', '')
+    .replace('  clear\n', '  clear\n    "Discovery"\n');
+  await replaceSource(page, remoteItemSource);
+  await waitForSource(page, remoteItemSource);
+  await waitForSemanticMode(page, 'Cynefin · editable · form');
+  await closeFlyout(page, 'source');
+  const discovery = panel.getByRole('form', { name: 'Cynefin item Clear Discovery', exact: true });
+  await expect(discovery.getByLabel('Cynefin item Clear Discovery label')).toHaveValue('Dirty probe');
+  await expect(discovery.getByLabel('Cynefin item Clear Discovery domain')).toHaveValue('clear');
+  await replaceSource(page, CYNEFIN_DIAGRAM_FIXTURE);
+  await waitForSource(page, CYNEFIN_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Cynefin · editable · form');
+  await closeFlyout(page, 'source');
+  await probe.getByLabel('Cynefin item Complex Probe label').fill('Probe');
+  await assertAndClickBoardControl(page, probe.getByRole('button', { name: 'Save', exact: true }), 'Cynefin reconciled item no-op control');
+
+  const canonicalTransition = panel.getByRole('form', { name: 'Cynefin transition Complex to Complicated Investigate', exact: true });
+  await canonicalTransition.getByLabel('Cynefin transition Complex to Complicated Investigate source').selectOption('confusion');
+  const remoteTransitionSource = CYNEFIN_DIAGRAM_FIXTURE.replace(
+    '  complex --> complicated : "Investigate"',
+    '  complex --> clear : "Explore"',
+  );
+  await replaceSource(page, remoteTransitionSource);
+  await waitForSource(page, remoteTransitionSource);
+  await waitForSemanticMode(page, 'Cynefin · editable · form');
+  await closeFlyout(page, 'source');
+  const explored = panel.getByRole('form', { name: 'Cynefin transition Complex to Clear Explore', exact: true });
+  await expect(explored.getByLabel('Cynefin transition Complex to Clear Explore source')).toHaveValue('confusion');
+  await expect(explored.getByLabel('Cynefin transition Complex to Clear Explore target')).toHaveValue('clear');
+  await expect(explored.getByLabel('Cynefin transition Complex to Clear Explore label')).toHaveValue('Explore');
+  await replaceSource(page, CYNEFIN_DIAGRAM_FIXTURE);
+  await waitForSource(page, CYNEFIN_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Cynefin · editable · form');
+  await closeFlyout(page, 'source');
+  await canonicalTransition.getByLabel('Cynefin transition Complex to Complicated Investigate source').selectOption('complex');
+  await assertAndClickBoardControl(page, canonicalTransition.getByRole('button', { name: 'Save', exact: true }), 'Cynefin reconciled transition no-op control');
+
+  await probe.getByLabel('Cynefin item Complex Probe label').fill('Unsafe dirty');
+  const ambiguousSource = 'cynefin-beta\n  complex\n    "Same"\n  complex\n    "Same"';
+  await replaceSource(page, ambiguousSource);
+  await waitForSource(page, ambiguousSource);
+  await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('Cynefin · source only');
+  await closeFlyout(page, 'source');
+  await replaceSource(page, CYNEFIN_DIAGRAM_FIXTURE);
+  await waitForSource(page, CYNEFIN_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Cynefin · editable · form');
+  await closeFlyout(page, 'source');
+  await expect(probe.getByLabel('Cynefin item Complex Probe label')).toHaveValue('Probe');
+
+  const addTransition = panel.getByRole('button', { name: 'Add transition', exact: true });
+  const investigate = panel.getByRole('form', { name: 'Cynefin transition Complex to Complicated Investigate', exact: true });
+  await investigate.getByLabel('Cynefin transition Complex to Complicated Investigate target').selectOption('complex');
+  await investigate.getByLabel('Cynefin transition Complex to Complicated Investigate label').fill('Dirty investigate');
+  await assertAndClickBoardControl(page, investigate.getByRole('button', { name: 'Save', exact: true }), 'Cynefin invalid edit-transition control');
+  const mutationBanner = page.getByTestId('mutation-error-banner');
+  await expect(mutationBanner).toContainText('different domains');
+  await expect(investigate.getByLabel('Cynefin transition Complex to Complicated Investigate label')).toHaveValue('Dirty investigate');
+  await investigate.getByLabel('Cynefin transition Complex to Complicated Investigate target').selectOption('complicated');
+  await investigate.getByLabel('Cynefin transition Complex to Complicated Investigate label').fill('Investigate');
+  await assertAndClickBoardControl(page, investigate.getByRole('button', { name: 'Save', exact: true }), 'Cynefin exact no-op recovery control');
+  await mutationBanner.waitFor({ state: 'detached', timeout: 15_000 });
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(CYNEFIN_DIAGRAM_FIXTURE);
+  await closeFlyout(page, 'source');
+  await panel.getByLabel('New Cynefin transition target').selectOption('complex');
+  await panel.getByLabel('New Cynefin transition label').fill('Loop dirty');
+  await assertAndClickBoardControl(page, addTransition, 'Cynefin rejected self-loop control');
+  await expect(mutationBanner).toContainText('different domains');
+  await expect(panel.getByLabel('New Cynefin transition label')).toHaveValue('Loop dirty');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(CYNEFIN_DIAGRAM_FIXTURE);
+  await closeFlyout(page, 'source');
+  await panel.getByLabel('New Cynefin transition target').selectOption('clear');
+  await assertAndClickBoardControl(page, addTransition, 'Cynefin self-loop recovery control');
+  await mutationBanner.waitFor({ state: 'detached', timeout: 15_000 });
+  const recoveredTransition = panel.getByRole('form', { name: 'Cynefin transition Complex to Clear Loop dirty', exact: true });
+  await assertAndClickBoardControl(page, recoveredTransition.getByLabel('Delete Cynefin transition Complex to Clear Loop dirty'), 'Cynefin recovered transition delete control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(CYNEFIN_DIAGRAM_FIXTURE);
+  await closeFlyout(page, 'source');
+
+  await panel.getByLabel('New Cynefin item label').fill('Experiment');
+  await assertAndClickBoardControl(page, addItem, 'Cynefin add-item control');
+  const experiment = panel.getByRole('form', { name: 'Cynefin item Complex Experiment', exact: true });
+  await experiment.getByLabel('Cynefin item Complex Experiment label').fill('Prototype');
+  await experiment.getByLabel('Cynefin item Complex Experiment domain').selectOption('complicated');
+  await assertAndClickBoardControl(page, experiment.getByRole('button', { name: 'Save', exact: true }), 'Cynefin edit and cross-domain move control');
+  const prototype = panel.getByRole('form', { name: 'Cynefin item Complicated Prototype', exact: true });
+  await assertAndClickBoardControl(page, prototype.getByLabel('Move Cynefin item Complicated Prototype up'), 'Cynefin item reorder control');
+  await assertAndClickBoardControl(page, panel.getByLabel('Delete Cynefin item Complicated Analyze'), 'Cynefin item delete control');
+
+  await panel.getByLabel('New Cynefin transition source').selectOption('clear');
+  await panel.getByLabel('New Cynefin transition target').selectOption('complicated');
+  await panel.getByLabel('New Cynefin transition label').fill('Govern');
+  await assertAndClickBoardControl(page, addTransition, 'Cynefin add-transition control');
+  const govern = panel.getByRole('form', { name: 'Cynefin transition Clear to Complicated Govern', exact: true });
+  await govern.getByLabel('Cynefin transition Clear to Complicated Govern source').selectOption('complex');
+  await govern.getByLabel('Cynefin transition Clear to Complicated Govern target').selectOption('clear');
+  await govern.getByLabel('Cynefin transition Clear to Complicated Govern label').fill('Simplify');
+  await assertAndClickBoardControl(page, govern.getByRole('button', { name: 'Save', exact: true }), 'Cynefin edit-transition control');
+  const simplify = panel.getByRole('form', { name: 'Cynefin transition Complex to Clear Simplify', exact: true });
+  await assertAndClickBoardControl(page, simplify.getByLabel('Move Cynefin transition Complex to Clear Simplify up'), 'Cynefin transition reorder control');
+  const beforeDelete = `${CYNEFIN_DIAGRAM_FIXTURE.replace('    "Analyze"\n', '').replace('    "Emergent"\n', '    "Emergent"\n').replace('  complicated\n', '  complicated\n    "Prototype"\n').replace('  chaotic --> clear', '  complex --> clear : "Simplify"\n  chaotic --> clear')}`;
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(beforeDelete);
+  await closeFlyout(page, 'source');
+  await assertAndClickBoardControl(page, panel.getByLabel('Delete Cynefin transition Chaotic to Clear'), 'Cynefin transition delete control');
+  const expected = `cynefin-beta
+  complex
+    "Probe"
+    "Emergent"
+  complicated
+    "Prototype"
+  clear
+    "Checklist"
+  chaotic
+    "Stabilize"
+  confusion
+    "Observe"
+    "Sense"
+    "Frame"
+    "Decide"
+  complex --> complicated : "Investigate"
+  complex --> clear : "Simplify"`;
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expected);
+  await closeFlyout(page, 'source');
+
+  const undoCanvas = await focusCurrentDiagramCanvas(page, 'Cynefin undo');
+  await undoCanvas.press('ControlOrMeta+z');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(beforeDelete);
+  await closeFlyout(page, 'source');
+  const redoCanvas = await focusCurrentDiagramCanvas(page, 'Cynefin redo');
+  await redoCanvas.press('ControlOrMeta+Shift+z');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expected);
+  await closeFlyout(page, 'source');
+
+  expect(await cynefinBoundaryPaths(page)).toEqual(initialBoundaryPaths);
+  await selectThemePreference(page, 'dark');
+  expect(await cynefinBoundaryPaths(page)).toEqual(initialBoundaryPaths);
+  await selectThemePreference(page, 'light');
+  expect(await cynefinBoundaryPaths(page)).toEqual(initialBoundaryPaths);
+
+  for (const advanced of [
+    'cynefin-beta:\n  complex\n    "Colon header"',
+    'cynefin-beta\n  title Advanced\n  complex\n    "Titled"',
+    '%%{init: {"cynefin": {"seed": 2}}}%%\ncynefin-beta\n  complex\n    "Configured"',
+    '---\nconfig:\n  cynefin:\n    seed: 0\n---\ncynefin-beta\n  complex\n    "Configured in frontmatter"',
+    'cynefin-beta\n  complex\n    "One"\n  complex\n    "Two"',
+    'cynefin-beta\n  complex --> complex : "Ignored by Mermaid"',
+  ]) {
+    await replaceSource(page, advanced);
+    await waitForSource(page, advanced);
+    await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('Cynefin · source only');
+    await closeFlyout(page, 'source');
+    await expect(panel).toHaveCount(0);
+  }
+  assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS));
+  assert(await canvasTransform(page) === transformBefore, 'Cynefin semantic forms changed the generic Mermaid camera transform.');
+  assert(await page.locator('.react-flow__node').count() === 0, 'Cynefin semantic forms exposed the generic React Flow editor.');
 }
 
 async function assertAndClickBoardControl(page: Page, target: Locator, label: string): Promise<void> {
@@ -3151,6 +3387,10 @@ H,I,1`;
   await replaceSource(page, responsivePacket); await waitForSource(page, responsivePacket); await waitForSemanticMode(page, 'Packet · editable · form'); await closeFlyout(page, 'source');
   const packetPanel = page.getByTestId('packet-editor-controls'); await assertContainedInViewport(page, packetPanel, `${label} Packet semantic panel`); const packetGeometry = await packetPanel.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight })); assert(packetGeometry.scrollHeight > packetGeometry.clientHeight, `${label} Packet panel did not provide internal scrolling: ${JSON.stringify(packetGeometry)}.`);
   const addPacket = packetPanel.getByRole('button', { name: 'Add field', exact: true }); await scrollErControlIntoView(addPacket); await assertTouchTarget(page, addPacket, `${label} Packet add-field control`); const firstPacket = packetPanel.getByRole('form', { name: 'Packet field Bit 0 bits 0-0', exact: true }); const firstWidth = firstPacket.getByLabel('Packet field Bit 0 bits 0-0 width'); await scrollErControlIntoView(firstWidth); await assertTouchTarget(page, firstWidth, `${label} Packet width control`); await firstWidth.fill('2'); await assertAndClickBoardControl(page, firstPacket.getByRole('button', { name: 'Save', exact: true }), `${label} Packet overlap rejection`); const packetBanner = page.getByTestId('mutation-error-banner'); await packetBanner.waitFor({ state: 'visible', timeout: 15_000 }); await assertClosedOverlayToggleBesideError(page, packetBanner, `${label} Packet mutation-error coexistence`); await expect(firstWidth).toHaveValue('2'); await firstWidth.fill('1'); await firstPacket.getByLabel('Packet field Bit 0 bits 0-0 label').fill('Version'); await assertAndClickBoardControl(page, firstPacket.getByRole('button', { name: 'Save', exact: true }), `${label} Packet valid recovery`); await packetBanner.waitFor({ state: 'detached', timeout: 15_000 }); const lastPacketDelete = packetPanel.getByLabel('Delete Packet field Bit 7 bits 7-7'); await scrollErControlIntoView(lastPacketDelete); await assertTouchTarget(page, lastPacketDelete, `${label} Packet scrolled delete control`);
+  await replaceSource(page, CYNEFIN_DIAGRAM_FIXTURE); await waitForSource(page, CYNEFIN_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Cynefin · editable · form'); await closeFlyout(page, 'source');
+  const cynefinPanel = page.getByTestId('cynefin-editor-controls'); await assertContainedInViewport(page, cynefinPanel, `${label} Cynefin semantic panel`); const cynefinGeometry = await cynefinPanel.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight })); assert(cynefinGeometry.scrollHeight > cynefinGeometry.clientHeight, `${label} Cynefin panel did not provide internal scrolling: ${JSON.stringify(cynefinGeometry)}.`);
+  const cynefinItemLabel = cynefinPanel.getByLabel('New Cynefin item label'); await scrollErControlIntoView(cynefinItemLabel); await assertTouchTarget(page, cynefinItemLabel, `${label} Cynefin item input`); await cynefinItemLabel.focus(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('Backspace'); await page.keyboard.type('Mobile item'); await expect(cynefinItemLabel).toHaveValue('Mobile item');
+  const addCynefinTransition = cynefinPanel.getByRole('button', { name: 'Add transition', exact: true }); await scrollErControlIntoView(addCynefinTransition); await assertTouchTarget(page, addCynefinTransition, `${label} Cynefin add-transition control`); const cynefinTransitionLabel = cynefinPanel.getByLabel('New Cynefin transition label'); await cynefinTransitionLabel.focus(); await page.keyboard.type('Mobile transition'); await cynefinPanel.getByLabel('New Cynefin transition target').selectOption('complex'); await assertAndClickBoardControl(page, addCynefinTransition, `${label} Cynefin self-loop rejection`); const cynefinBanner = page.getByTestId('mutation-error-banner'); await cynefinBanner.waitFor({ state: 'visible', timeout: 15_000 }); await assertClosedOverlayToggleBesideError(page, cynefinBanner, `${label} Cynefin mutation-error coexistence`); await expect(cynefinTransitionLabel).toHaveValue('Mobile transition'); await cynefinPanel.getByLabel('New Cynefin transition target').selectOption('clear'); await assertAndClickBoardControl(page, addCynefinTransition, `${label} Cynefin valid recovery`); await cynefinBanner.waitFor({ state: 'detached', timeout: 15_000 }); const mobileTransitionDelete = cynefinPanel.getByLabel('Delete Cynefin transition Complex to Clear Mobile transition'); await scrollErControlIntoView(mobileTransitionDelete); await assertTouchTarget(page, mobileTransitionDelete, `${label} Cynefin scrolled delete control`); await assertTouchTarget(page, overlayToggle, `${label} closed overlay toggle after Cynefin panel scroll`);
   await replaceSource(page, FLOWCHART_FIXTURE); await waitForSource(page, FLOWCHART_FIXTURE); await closeFlyout(page, 'source'); await waitForCanvas(page, 'flowchart');
 }
 
@@ -4370,7 +4610,7 @@ async function validateWorkspaceUx(): Promise<void> {
         return;
       }
 
-        const { page } = await browser.newPage(DESKTOP_VIEWPORT);
+      const { page } = await browser.newPage(DESKTOP_VIEWPORT);
       await visitWorkspace(page, baseUrl, sessionId, room.roomKey);
         await expectAgentConnectionModal(page, mcpUrl, sessionId, roomAccess.cookie, 'in-memory');
         record(results, 'fragment-derived room key exposes a copyable MCP bearer prompt');
@@ -4429,6 +4669,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'Pie, Quadrant, XY, and Radar forms expose validated source-backed numeric controls and fail closed for advanced syntax');
       await expectFlowSemanticEditors(page);
       record(results, 'Sankey and Packet forms expose CSV-safe weighted links, atomic node renames, contiguous reflow, recovery, and advanced-source fallback');
+      await expectCynefinSemanticEditor(page);
+      record(results, 'Cynefin form exposes fixed-domain item and transition lifecycles, deterministic boundaries, recovery, undo/redo, and advanced-source fallback');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');

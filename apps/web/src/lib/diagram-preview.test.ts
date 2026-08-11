@@ -85,11 +85,12 @@ describe('DiagramPreviewRegistry', () => {
       { capability: { adapter: 'radar', diagramType: 'radar', kind: 'generic' }, diagramId: 'radar', flowchartSnapshot: null, source: 'radar-beta\n  axis a\n  axis b\n  axis c\n  curve one { 1, 2, 3 }', svg: '<svg />' },
       { capability: { adapter: 'sankey', diagramType: 'sankey', kind: 'generic' }, diagramId: 'sankey', flowchartSnapshot: null, source: 'sankey-beta\nSource,Target,2.5', svg: '<svg />' },
       { capability: { adapter: 'packet', diagramType: 'packet', kind: 'generic' }, diagramId: 'packet', flowchartSnapshot: null, source: 'packet-beta\n  0-7: "Header"\n  8-15: "Body"', svg: '<svg />' },
+      { capability: { adapter: 'cynefin', diagramType: 'cynefin', kind: 'generic' }, diagramId: 'cynefin', flowchartSnapshot: null, source: 'cynefin-beta\n  complex\n    "Emergent"', svg: '<svg />' },
     ];
     for (const preview of numericPreviews) {
-      expect(canUseSemanticFamilyControls(preview.source, preview, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet')).toBe(true);
-      expect(canUseSemanticFamilyControls(`${preview.source}\n  unsupported syntax`, { ...preview, source: `${preview.source}\n  unsupported syntax` }, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet')).toBe(false);
-      expect(canUseSemanticFamilyControls(`${preview.source}\n`, preview, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet')).toBe(false);
+      expect(canUseSemanticFamilyControls(preview.source, preview, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin')).toBe(true);
+      expect(canUseSemanticFamilyControls(`${preview.source}\n  unsupported syntax`, { ...preview, source: `${preview.source}\n  unsupported syntax` }, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin')).toBe(false);
+      expect(canUseSemanticFamilyControls(`${preview.source}\n`, preview, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin')).toBe(false);
     }
   });
 

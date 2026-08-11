@@ -145,6 +145,38 @@ describe('new semantic families', () => {
     expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Sankey panel did not provide internal scrolling[^]*?invalid Sankey weight[^]*?Sankey mutation-error coexistence[^]*?Packet panel did not provide internal scrolling[^]*?Packet mutation-error coexistence/u);
   });
 
+  it('keeps Cynefin source-backed with fixed domains, safe identities, canonical drafts, and deterministic rendering', () => {
+    expect(canvasSource).toContain('data-testid="cynefin-editor-controls"');
+    expect(canvasSource).toMatch(/aria-label="Cynefin editor"/u);
+    expect(canvasSource).toMatch(/CynefinEditorControls[^]*?data-canvas-pan-exclusion="true"[^]*?maxHeight/u);
+    expect(canvasSource).toMatch(/diagram\.domains\.map[^]*?<h3>\{formatCynefinDomain\(domain\.name\)\}<\/h3>/u);
+    expect(canvasSource).toMatch(/CYNEFIN_DOMAIN_NAMES\.map[^]*?HIERARCHY_CONTROL_STYLE/u);
+    expect(canvasSource).toMatch(/CynefinItemForm[^]*?getCynefinItemIdentity\(item, allItems\)[^]*?const safe = identity\.occurrenceCount === 1[^]*?disabled=\{!safe\}/u);
+    expect(canvasSource).toMatch(/CynefinTransitionForm[^]*?getCynefinTransitionIdentity\(transition, transitions\)[^]*?const safe = identity\.occurrenceCount === 1[^]*?disabled=\{!safe\}/u);
+    expect(canvasSource).toMatch(/useCanonicalDraft<CynefinItem>[^]*?useCanonicalDraft<CynefinTransition>/u);
+    expect(canvasSource).toMatch(/cynefinRenderIdentityKeys = useCynefinRenderIdentityKeys\(\s*cynefinDiagram,\s*isCynefinSourceRepresentable/u);
+    expect(canvasSource).toMatch(/key=\{itemKeys\.get\(item\)\}/u);
+    expect(canvasSource).toMatch(/key=\{transitionKeys\.get\(transition\)\}/u);
+    expect(canvasSource).toMatch(/CynefinItemForm[^]*?usePersistentCanonicalDraft\(item, renderKey, draftCache\)/u);
+    expect(canvasSource).toMatch(/CynefinTransitionForm[^]*?usePersistentCanonicalDraft\(transition, renderKey, draftCache\)/u);
+    expect(canvasSource).toMatch(/itemDraftCacheRef = useRef[^]*?if \(!diagram\)[^]*?itemDraftCache: itemDraftCacheRef\.current/u);
+    expect(canvasSource).toMatch(/if \(!sourceRepresentable\)[^]*?itemDraftCacheRef\.current\.clear\(\)[^]*?transitionDraftCacheRef\.current\.clear\(\)/u);
+    expect(canvasSource).toMatch(/isCynefin && !readOnly && cynefinDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
+    expect(workspaceSource).toMatch(/cynefin: \{ seed: 55 \}/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'cynefin'\)/u);
+    expect(workspaceSource).toMatch(/if \(nextText === previousText\) return true;\s*undoManagerRef\.current\?\.stopCapturing\(\);\s*collaboration\.doc\.transact[^]*?collaborationOrigins\.visual\);\s*undoManagerRef\.current\?\.stopCapturing\(\);/u);
+    for (const action of ['AddCynefinItem', 'EditCynefinItem', 'DeleteCynefinItem', 'MoveCynefinItem', 'AddCynefinTransition', 'EditCynefinTransition', 'DeleteCynefinTransition', 'MoveCynefinTransition']) {
+      expect(workspaceSource).toMatch(new RegExp(`on${action}[^]*?mutateCanvasSource`, 'u'));
+    }
+    expect(canvasSource).not.toMatch(/on(Add|Delete|Move|Edit)CynefinDomain/u);
+    const cynefinForms = canvasSource.slice(canvasSource.indexOf('function CynefinEditorControls'), canvasSource.indexOf('function PieEditorControls'));
+    expect(cynefinForms).not.toMatch(/ReactFlow|svgContainer|mermaidPresentation/u);
+    expect(workspaceE2eSource).toMatch(/function expectCynefinSemanticEditor[^]*?Cynefin item Complicated Prototype[^]*?Cynefin transition Complex to Clear Simplify[^]*?ControlOrMeta\+z[^]*?cynefinBoundaryPaths[^]*?cynefin-beta:[^]*?complex --> complex/u);
+    expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Cynefin panel did not provide internal scrolling[^]*?Mobile transition[^]*?Cynefin mutation-error coexistence[^]*?closed overlay toggle after Cynefin panel scroll/u);
+    expect(workspaceE2eSource).toContain(".diagram-canvas-svg > svg");
+
+  });
+
   it('keeps unique Packet rows mounted across preceding-width shifts and withholds ambiguous repeated controls', () => {
     const before = [
       { end: 3, label: 'Header', start: 0 },

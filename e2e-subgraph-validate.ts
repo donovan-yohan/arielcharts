@@ -147,9 +147,32 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
       document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'false'
       && !document.querySelector('[data-testid="canvas-subgraph-toolbar"]')
     ), undefined, { timeout: 5_000 });
-    await innerHeader.focus();
-    const enterHeaderFocused = await innerHeader.evaluate((element) => document.activeElement === element);
-    assert(enterHeaderFocused, 'Inner section header did not receive focus before Enter selection.');
+    try {
+      await page.waitForFunction(() => {
+        const header = document.querySelector('[data-testid="canvas-subgraph-header-inner"]');
+        if (!(header instanceof HTMLElement)) return false;
+        header.focus();
+        return document.activeElement === header;
+      }, undefined, { timeout: 5_000 });
+    } catch (error) {
+      const diagnostics = await page.evaluate(() => {
+        const header = document.querySelector('[data-testid="canvas-subgraph-header-inner"]');
+        const activeElement = document.activeElement;
+        return {
+          headerPresent: header !== null,
+          headerTagName: header?.tagName ?? null,
+          activeElement: activeElement ? {
+            tagName: activeElement.tagName,
+            testId: activeElement.getAttribute('data-testid'),
+            role: activeElement.getAttribute('role'),
+            ariaLabel: activeElement.getAttribute('aria-label'),
+          } : null,
+        };
+      });
+      throw new Error(`Inner section header did not receive focus before Enter selection: ${JSON.stringify(diagnostics)}`, {
+        cause: error,
+      });
+    }
     await page.keyboard.press('Enter');
     try {
       await page.waitForFunction(() => {

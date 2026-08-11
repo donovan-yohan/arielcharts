@@ -120,6 +120,7 @@ import { addXySeries, deleteXySeries, editXyAxis, editXySeries, editXyTitle, get
 import { addRadarAxis, addRadarCurve, deleteRadarAxis, deleteRadarCurve, editRadarAxis, editRadarCurve, editRadarOptions, editRadarTitle, getRadarDiagramSnapshot, moveRadarAxis, moveRadarCurve } from '../lib/radar-mutations';
 import { addSankeyLink, deleteSankeyLink, editSankeyLink, getSankeyDiagramSnapshot, moveSankeyLink, renameSankeyNode } from '../lib/sankey-mutations';
 import { addPacketField, deletePacketField, editPacketField, getPacketDiagramSnapshot, movePacketField } from '../lib/packet-mutations';
+import { addCynefinItem, addCynefinTransition, deleteCynefinItem, deleteCynefinTransition, editCynefinItem, editCynefinTransition, getCynefinDiagramSnapshot, moveCynefinItem, moveCynefinTransition } from '../lib/cynefin-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -946,9 +947,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       const nextText = mutate(previousText);
       setMutationError(null);
       if (nextText === previousText) return true;
+      undoManagerRef.current?.stopCapturing();
       collaboration.doc.transact(() => {
         applyDiff(activeDiagram.yText, nextText, previousText);
       }, collaborationOrigins.visual);
+      undoManagerRef.current?.stopCapturing();
       addActivityRef.current?.('edited', detail, activeDiagram.id);
       return true;
     } catch (error) {
@@ -1060,6 +1063,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       theme: 'base',
       themeVariables: getMermaidThemeVariables(resolvedTheme),
       securityLevel: 'strict',
+      cynefin: { seed: 55 },
     });
   }, [resolvedTheme]);
 
@@ -1809,6 +1813,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isRadar = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'radar');
   const isSankey = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'sankey');
   const isPacket = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'packet');
+  const isCynefin = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'cynefin');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1851,6 +1856,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const radarDiagram = useMemo(() => isRadar ? getRadarDiagramSnapshot(renderedMermaidText) : null, [isRadar, renderedMermaidText]);
   const sankeyDiagram = useMemo(() => isSankey ? getSankeyDiagramSnapshot(renderedMermaidText) : null, [isSankey, renderedMermaidText]);
   const packetDiagram = useMemo(() => isPacket ? getPacketDiagramSnapshot(renderedMermaidText) : null, [isPacket, renderedMermaidText]);
+  const cynefinDiagram = useMemo(() => isCynefin ? getCynefinDiagramSnapshot(renderedMermaidText) : null, [isCynefin, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2354,6 +2360,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             sankeyDiagram={sankeyDiagram}
             isPacket={isPacket}
             packetDiagram={packetDiagram}
+            isCynefin={isCynefin}
+            cynefinDiagram={cynefinDiagram}
             nodePositions={renderedNodePositions}
             overlay={overlayController && activeDiagramId ? {
               diagramId: activeDiagramId,
@@ -2682,6 +2690,14 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onEditPacketField={(identity, patch) => mutateCanvasSource((source) => editPacketField(source, identity, patch), 'Edited a Packet field')}
             onDeletePacketField={(identity) => { mutateCanvasSource((source) => deletePacketField(source, identity), 'Deleted a Packet field'); }}
             onMovePacketField={(identity, direction) => { mutateCanvasSource((source) => movePacketField(source, identity, direction), 'Reordered Packet fields'); }}
+            onAddCynefinItem={(item) => mutateCanvasSource((source) => addCynefinItem(source, item), `Added an item to the ${item.domain} Cynefin domain`)}
+            onEditCynefinItem={(identity, patch) => mutateCanvasSource((source) => editCynefinItem(source, identity, patch), 'Edited a Cynefin item')}
+            onDeleteCynefinItem={(identity) => { mutateCanvasSource((source) => deleteCynefinItem(source, identity), 'Deleted a Cynefin item'); }}
+            onMoveCynefinItem={(identity, domain, targetIndex) => { mutateCanvasSource((source) => moveCynefinItem(source, identity, domain, targetIndex), `Moved a Cynefin item to the ${domain} domain`); }}
+            onAddCynefinTransition={(transition) => mutateCanvasSource((source) => addCynefinTransition(source, transition), 'Added a Cynefin transition')}
+            onEditCynefinTransition={(identity, patch) => mutateCanvasSource((source) => editCynefinTransition(source, identity, patch), 'Edited a Cynefin transition')}
+            onDeleteCynefinTransition={(identity) => { mutateCanvasSource((source) => deleteCynefinTransition(source, identity), 'Deleted a Cynefin transition'); }}
+            onMoveCynefinTransition={(identity, direction) => { mutateCanvasSource((source) => moveCynefinTransition(source, identity, direction), 'Reordered Cynefin transitions'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onLaserChange={handleLaserChange}

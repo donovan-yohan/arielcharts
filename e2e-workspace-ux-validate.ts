@@ -442,12 +442,15 @@ async function waitForFocusedLocator(page: Page, target: Locator, label: string)
 
 async function focusCurrentDiagramCanvas(page: Page, label: string): Promise<Locator> {
   try {
+    await page.evaluate('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     await page.waitForFunction(() => {
       const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
       if (!canvas) return false;
       if (document.activeElement !== canvas) canvas.focus();
       return document.activeElement === canvas;
     }, undefined, { timeout: 5_000 });
+    await page.evaluate('new Promise((resolve) => requestAnimationFrame(resolve))');
+    await page.waitForFunction(() => document.activeElement === document.querySelector('[data-testid="diagram-canvas"]'), undefined, { timeout: 5_000 });
     return page.getByTestId('diagram-canvas');
   } catch {
     const focusState = await page.evaluate(() => {
@@ -463,6 +466,89 @@ async function focusCurrentDiagramCanvas(page: Page, label: string): Promise<Loc
     });
     throw new Error(`${label} could not focus the current diagram canvas: ${JSON.stringify(focusState)}.`);
   }
+}
+
+const CANVAS_HISTORY_SHORTCUT_PROBE = '__arielchartsCanvasHistoryShortcutProbe';
+
+type CanvasHistoryShortcutProbe = {
+  claimed: boolean | null;
+  event: {
+    activeTestId: string | null;
+    canvasIsActive: boolean;
+    canvasIsConnected: boolean;
+    isTrusted: boolean;
+    targetRole: string | null;
+    targetTestId: string | null;
+  } | null;
+  listener: EventListenerObject;
+};
+
+async function pressCanvasHistoryShortcut(page: Page, canvas: Locator, shortcut: string, label: string): Promise<void> {
+  await page.evaluate((probeKey) => {
+    const host = window as typeof window & Record<string, CanvasHistoryShortcutProbe>;
+    if (host[probeKey]) {
+      throw new Error(`A canvas history shortcut probe was already armed for ${probeKey}.`);
+    }
+    const state: CanvasHistoryShortcutProbe = {
+      claimed: null,
+      event: null,
+      listener: {
+        handleEvent(event) {
+          if (!(event instanceof KeyboardEvent)) return;
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+            const target = event.target instanceof Element ? event.target : null;
+            const currentCanvas = document.querySelector('[data-testid="diagram-canvas"]');
+            state.event = {
+              activeTestId: document.activeElement?.getAttribute('data-testid') ?? null,
+              canvasIsActive: document.activeElement === currentCanvas,
+              canvasIsConnected: currentCanvas?.isConnected ?? false,
+              isTrusted: event.isTrusted,
+              targetRole: target?.getAttribute('role') ?? null,
+              targetTestId: target?.getAttribute('data-testid') ?? null,
+            };
+            queueMicrotask(() => { state.claimed = event.defaultPrevented; });
+          }
+        },
+      },
+    };
+    host[probeKey] = state;
+    window.addEventListener('keydown', state.listener);
+  }, CANVAS_HISTORY_SHORTCUT_PROBE);
+
+  try {
+    await canvas.press(shortcut);
+    await page.evaluate('new Promise((resolve) => queueMicrotask(resolve))');
+    const probe = await page.evaluate((probeKey) => {
+      const host = window as typeof window & Record<string, CanvasHistoryShortcutProbe | undefined>;
+      const state = host[probeKey];
+      if (!state) return null;
+      window.removeEventListener('keydown', state.listener);
+      delete host[probeKey];
+      return { claimed: state.claimed, event: state.event };
+    }, CANVAS_HISTORY_SHORTCUT_PROBE);
+    assert(
+      probe?.claimed === true
+      && probe.event?.isTrusted === true
+      && probe.event.canvasIsConnected
+      && probe.event.canvasIsActive
+      && probe.event.targetTestId === 'diagram-canvas',
+      `${label} history shortcut was not claimed by the current canvas handler: ${JSON.stringify(probe)}.`);
+  } finally {
+    await page.evaluate((probeKey) => {
+      const host = window as typeof window & Record<string, CanvasHistoryShortcutProbe | undefined>;
+      const state = host[probeKey];
+      if (!state) return;
+      window.removeEventListener('keydown', state.listener);
+      delete host[probeKey];
+    }, CANVAS_HISTORY_SHORTCUT_PROBE);
+  }
+}
+
+async function expectCynefinHistorySource(page: Page, expected: string, stage: string): Promise<void> {
+  await expect.poll(() => canonicalSource(page), {
+    message: `Cynefin history ${stage} did not settle to the exact expected source.`,
+    timeout: 15_000,
+  }).toBe(expected);
 }
 
 async function canvasTransform(page: Page): Promise<string | null> {
@@ -1977,18 +2063,16 @@ async function expectCynefinSemanticEditor(page: Page): Promise<void> {
   complex --> complicated : "Investigate"
   complex --> clear : "Simplify"`;
   await ensureSourceFlyoutOpen(page);
-  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expected);
+  await expectCynefinHistorySource(page, expected, 'post-delete');
   await closeFlyout(page, 'source');
 
   const undoCanvas = await focusCurrentDiagramCanvas(page, 'Cynefin undo');
-  await undoCanvas.press('ControlOrMeta+z');
+  await pressCanvasHistoryShortcut(page, undoCanvas, 'ControlOrMeta+z', 'Cynefin undo');
   await ensureSourceFlyoutOpen(page);
-  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(beforeDelete);
-  await closeFlyout(page, 'source');
+  await expectCynefinHistorySource(page, beforeDelete, 'post-undo');
   const redoCanvas = await focusCurrentDiagramCanvas(page, 'Cynefin redo');
-  await redoCanvas.press('ControlOrMeta+Shift+z');
-  await ensureSourceFlyoutOpen(page);
-  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expected);
+  await pressCanvasHistoryShortcut(page, redoCanvas, 'ControlOrMeta+Shift+z', 'Cynefin redo');
+  await expectCynefinHistorySource(page, expected, 'post-redo');
   await closeFlyout(page, 'source');
 
   expect(await cynefinBoundaryPaths(page)).toEqual(initialBoundaryPaths);
@@ -4592,8 +4676,8 @@ async function validateWorkspaceUx(): Promise<void> {
   const results: string[] = [];
   const mobilePinchResiduals: string[] = [];
   const slice = process.env.ARIELCHARTS_E2E_SLICE;
-  if (slice !== undefined && slice !== 'history') {
-    throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history" or no slice.`);
+  if (slice !== undefined && slice !== 'history' && slice !== 'cynefin-history') {
+    throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history", "cynefin-history", or no slice.`);
   }
   await withOwnedServices(async ({ baseUrl, mcpUrl, serverUrl }) => {
     const browser = await launchBrowserHarness();
@@ -4607,6 +4691,18 @@ async function validateWorkspaceUx(): Promise<void> {
         await visitWorkspace(seedPage, baseUrl, sessionId, room.roomKey);
         await expectRevisionHistoryCollaboration(browser, baseUrl, mcpUrl, sessionId, mcp, roomAccess);
         record(results, 'immutable active-tab history preview, restore, stale layout guard, invalid-source persistence, and responsive history controls');
+        return;
+      }
+
+      if (slice === 'cynefin-history') {
+        const { page: cynefinPage } = await browser.newPage(DESKTOP_VIEWPORT);
+        await visitWorkspace(cynefinPage, baseUrl, sessionId, room.roomKey);
+        await replaceSource(cynefinPage, FLOWCHART_FIXTURE);
+        await waitForSource(cynefinPage, FLOWCHART_FIXTURE);
+        await waitForCanvas(cynefinPage, 'flowchart');
+        await closeFlyout(cynefinPage, 'source');
+        await expectCynefinSemanticEditor(cynefinPage);
+        record(results, 'Cynefin form exposes fixed-domain item and transition lifecycles, deterministic boundaries, recovery, undo/redo, and advanced-source fallback');
         return;
       }
 

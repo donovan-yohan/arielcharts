@@ -1247,7 +1247,7 @@ async function expectTemporalSemanticEditors(page: Page): Promise<void> {
   await assertHitTarget(page, saveInlinePeriod, 'Timeline inline period rename and move control');
   await verifiedClick(page, saveInlinePeriod, 'Timeline inline period rename and move control');
   await ensureSourceFlyoutOpen(page);
-  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toMatch(/timeline LR\n  2025 : Launched\n  section Delivery/);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toMatch(/timeline LR\n  2025 : Launched\n    : Event\n  section Delivery/);
   await closeFlyout(page, 'source');
   await verifiedClick(page, timeline.getByLabel('Move timeline event Event up'), 'Timeline reorder event control');
   await verifiedClick(page, timeline.getByLabel('Delete timeline event Event'), 'Timeline delete event control');

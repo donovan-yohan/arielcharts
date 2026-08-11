@@ -118,6 +118,8 @@ import { addPieSlice, deletePieSlice, editPieSlice, editPieTitle, getPieDiagramS
 import { addQuadrantPoint, deleteQuadrantPoint, editQuadrantPoint, editQuadrantTitle, getQuadrantDiagramSnapshot, moveQuadrantPoint, setQuadrantAxis, setQuadrantLabel } from '../lib/quadrant-mutations';
 import { addXySeries, deleteXySeries, editXyAxis, editXySeries, editXyTitle, getXyChartDiagramSnapshot, moveXySeries, setXyOrientation } from '../lib/xychart-mutations';
 import { addRadarAxis, addRadarCurve, deleteRadarAxis, deleteRadarCurve, editRadarAxis, editRadarCurve, editRadarOptions, editRadarTitle, getRadarDiagramSnapshot, moveRadarAxis, moveRadarCurve } from '../lib/radar-mutations';
+import { addSankeyLink, deleteSankeyLink, editSankeyLink, getSankeyDiagramSnapshot, moveSankeyLink, renameSankeyNode } from '../lib/sankey-mutations';
+import { addPacketField, deletePacketField, editPacketField, getPacketDiagramSnapshot, movePacketField } from '../lib/packet-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -942,8 +944,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     try {
       const previousText = activeDiagram.yText.toString();
       const nextText = mutate(previousText);
-      if (nextText === previousText) return true;
       setMutationError(null);
+      if (nextText === previousText) return true;
       collaboration.doc.transact(() => {
         applyDiff(activeDiagram.yText, nextText, previousText);
       }, collaborationOrigins.visual);
@@ -1805,6 +1807,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isQuadrant = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'quadrant');
   const isXyChart = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'xy-chart');
   const isRadar = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'radar');
+  const isSankey = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'sankey');
+  const isPacket = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'packet');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1845,6 +1849,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const quadrantDiagram = useMemo(() => isQuadrant ? getQuadrantDiagramSnapshot(renderedMermaidText) : null, [isQuadrant, renderedMermaidText]);
   const xyChartDiagram = useMemo(() => isXyChart ? getXyChartDiagramSnapshot(renderedMermaidText) : null, [isXyChart, renderedMermaidText]);
   const radarDiagram = useMemo(() => isRadar ? getRadarDiagramSnapshot(renderedMermaidText) : null, [isRadar, renderedMermaidText]);
+  const sankeyDiagram = useMemo(() => isSankey ? getSankeyDiagramSnapshot(renderedMermaidText) : null, [isSankey, renderedMermaidText]);
+  const packetDiagram = useMemo(() => isPacket ? getPacketDiagramSnapshot(renderedMermaidText) : null, [isPacket, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2344,6 +2350,10 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             xyChartDiagram={xyChartDiagram}
             isRadar={isRadar}
             radarDiagram={radarDiagram}
+            isSankey={isSankey}
+            sankeyDiagram={sankeyDiagram}
+            isPacket={isPacket}
+            packetDiagram={packetDiagram}
             nodePositions={renderedNodePositions}
             overlay={overlayController && activeDiagramId ? {
               diagramId: activeDiagramId,
@@ -2658,6 +2668,15 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onEditRadarCurve={(identity, patch) => mutateCanvasSource((source) => editRadarCurve(source, identity, patch), 'Edited a Radar curve')}
             onDeleteRadarCurve={(identity) => { mutateCanvasSource((source) => deleteRadarCurve(source, identity), 'Deleted a Radar curve'); }}
             onMoveRadarCurve={(identity, direction) => { mutateCanvasSource((source) => moveRadarCurve(source, identity, direction), 'Reordered Radar curves'); }}
+            onAddSankeyLink={(link) => mutateCanvasSource((source) => addSankeyLink(source, link), 'Added a Sankey link')}
+            onEditSankeyLink={(identity, patch) => mutateCanvasSource((source) => editSankeyLink(source, identity, patch), 'Edited a Sankey link')}
+            onDeleteSankeyLink={(identity) => { mutateCanvasSource((source) => deleteSankeyLink(source, identity), 'Deleted a Sankey link'); }}
+            onMoveSankeyLink={(identity, direction) => { mutateCanvasSource((source) => moveSankeyLink(source, identity, direction), 'Reordered Sankey links'); }}
+            onRenameSankeyNode={(identity, label) => mutateCanvasSource((source) => renameSankeyNode(source, identity, label), 'Renamed a Sankey node')}
+            onAddPacketField={(field) => mutateCanvasSource((source) => addPacketField(source, field), 'Added a Packet field')}
+            onEditPacketField={(identity, patch) => mutateCanvasSource((source) => editPacketField(source, identity, patch), 'Edited a Packet field')}
+            onDeletePacketField={(identity) => { mutateCanvasSource((source) => deletePacketField(source, identity), 'Deleted a Packet field'); }}
+            onMovePacketField={(identity, direction) => { mutateCanvasSource((source) => movePacketField(source, identity, direction), 'Reordered Packet fields'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onLaserChange={handleLaserChange}

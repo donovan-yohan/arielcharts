@@ -5,7 +5,8 @@ import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
 import { getConnectModeSourceId } from '../lib/diagram-connect-state';
-import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getRendererInteractionMode, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
+import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRendererInteractionMode, getSankeyLinkControlLabel, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
+import { getDirtyDraftFields, reconcileCanonicalDraft } from '../lib/canonical-draft';
 
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
 const workspaceSource = readFileSync(new URL('./session-workspace.tsx', import.meta.url), 'utf8');
@@ -109,7 +110,66 @@ describe('new semantic families', () => {
     expect(e2eWorkspaceSupportSource).toMatch(/codeMirrorContent\.cmView\?\.rootView\?\.view\?\.state\?\.doc/u);
     expect(e2eWorkspaceSupportSource).toMatch(/return documentState\.toString\(\);/u);
     expect(e2eWorkspaceSupportSource).not.toMatch(/locator\('\.cm-line'\)\.evaluateAll/u);
+    expect(e2eWorkspaceSupportSource).toContain('.diagram-canvas-svg > svg');
+    expect(e2eWorkspaceSupportSource).not.toContain('.diagram-canvas-svg svg');
+    expect(workspaceE2eSource).toContain('.diagram-canvas-svg > svg');
+    expect(workspaceE2eSource).not.toContain('.diagram-canvas-svg svg');
     expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Pie show data[^]*?keyboard\.press\('Backspace'\);[^]*?keyboard\.type\('pie'\);[^]*?keyboard\.press\('Enter'\);[^]*?keyboard\.type\('\s\stitle Keyboard source'\);[^]*?Radar show legend/u);
+  });
+
+  it('keeps Sankey and Packet source-backed with stable identities, dirty-draft recovery, and 44px bounded controls', () => {
+    for (const id of ['sankey', 'packet']) expect(canvasSource).toContain(`data-testid="${id}-editor-controls"`);
+    expect(canvasSource).toMatch(/SankeyEditorControls[^]*?useCanonicalDraft\(canonicalLink\)/u);
+    expect(canvasSource).toMatch(/SankeyLinkForm[^]*?getSankeyLinkIdentity\(item, items\)[^]*?if \(runNumericForm[^]*?resetDraft\(\)/u);
+    expect(canvasSource).toMatch(/SankeyNodeForm[^]*?getSankeyNodeIdentity\(node, links\)[^]*?if \(runNumericForm[^]*?resetDraft\(\)/u);
+    expect(canvasSource).toMatch(/New Sankey link source[^]*?New Sankey link target[^]*?New Sankey link weight/u);
+    expect(canvasSource).toMatch(/PacketEditorControls[^]*?useCanonicalDraft\(canonicalField\)/u);
+    expect(canvasSource).toMatch(/PacketFieldForm[^]*?getPacketFieldIdentity\(field, fields\)[^]*?start \+ width - 1[^]*?if \(runNumericForm[^]*?resetDraft\(\)/u);
+    expect(canvasSource).toMatch(/const safe = identity\.occurrenceCount === 1;[^]*?disabled=\{!safe\}[^]*?Delete/u);
+    expect(canvasSource).toMatch(/key=\{getPacketFieldFormKey\(field, diagram\.fields\)\}/u);
+    expect(canvasSource).toMatch(/New Packet field label[^]*?New Packet field start[^]*?New Packet field width/u);
+    expect(canvasSource).toMatch(/isSankey && !readOnly && sankeyDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
+    expect(canvasSource).toMatch(/isPacket && !readOnly && packetDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
+    expect(canvasSource).toMatch(/SankeyEditorControls[^]*?data-canvas-pan-exclusion="true"[^]*?HIERARCHY_CONTROL_STYLE/u);
+    expect(canvasSource).toMatch(/PacketEditorControls[^]*?data-canvas-pan-exclusion="true"[^]*?HIERARCHY_CONTROL_STYLE/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'sankey'\)/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'packet'\)/u);
+    expect(workspaceSource).toMatch(/onAddSankeyLink[^]*?mutateCanvasSource/u);
+    expect(workspaceSource).toMatch(/onRenameSankeyNode[^]*?mutateCanvasSource/u);
+    expect(workspaceSource).toMatch(/onAddPacketField[^]*?mutateCanvasSource/u);
+    expect(workspaceSource).toMatch(/onEditPacketField[^]*?mutateCanvasSource/u);
+    expect(workspaceSource).toMatch(/const nextText = mutate\(previousText\);\s*setMutationError\(null\);\s*if \(nextText === previousText\) return true;/u);
+    const sourceBackedForms = canvasSource.slice(canvasSource.indexOf('function SankeyEditorControls'), canvasSource.indexOf('function PieEditorControls'));
+    expect(sourceBackedForms).not.toMatch(/ReactFlow|svgContainer|mermaidPresentation/u);
+    expect(workspaceE2eSource).toMatch(/function expectFlowSemanticEditors[^]*?Archive, "cold"[^]*?Hub, "central"[^]*?expectedSankey[^]*?Sankey link A to B weight 1 \(1 of 2\)[^]*?Packet overlap rejection[^]*?Packet exact no-op recovery control[^]*?expectedPacket[^]*?Packet field Reserved bits 0-3 \(1 of 2\)[^]*?toBeDisabled[^]*?react-flow__node/u);
+    expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Sankey panel did not provide internal scrolling[^]*?invalid Sankey weight[^]*?Sankey mutation-error coexistence[^]*?Packet panel did not provide internal scrolling[^]*?Packet mutation-error coexistence/u);
+  });
+
+  it('keeps unique Packet rows mounted across preceding-width shifts and withholds ambiguous repeated controls', () => {
+    const before = [
+      { end: 3, label: 'Header', start: 0 },
+      { end: 7, label: 'Payload', start: 4 },
+    ];
+    const shifted = [
+      { end: 5, label: 'Header', start: 0 },
+      { end: 9, label: 'Payload', start: 6 },
+    ];
+    expect(getPacketFieldFormKey(before[1]!, before)).toBe(getPacketFieldFormKey(shifted[1]!, shifted));
+    const canonical = { label: 'Payload', start: '4', width: '4' };
+    const draft = { ...canonical, label: 'Dirty payload' };
+    expect(reconcileCanonicalDraft({ label: 'Payload', start: '6', width: '4' }, draft, getDirtyDraftFields(draft, canonical))).toEqual({
+      label: 'Dirty payload', start: '6', width: '4',
+    });
+    const repeated = [
+      { end: 3, label: 'Reserved', start: 0 },
+      { end: 7, label: 'Reserved', start: 4 },
+    ];
+    expect(getPacketFieldFormKey(repeated[0]!, repeated)).not.toBe(getPacketFieldFormKey(repeated[1]!, repeated));
+    expect(getPacketFieldControlLabel(repeated[0]!, 0, repeated)).toBe('Packet field Reserved bits 0-3 (1 of 2)');
+    expect(getPacketFieldControlLabel(repeated[1]!, 1, repeated)).toBe('Packet field Reserved bits 4-7 (2 of 2)');
+    const parallel = [{ source: 'A', target: 'B', value: 1 }, { source: 'A', target: 'B', value: 2 }];
+    expect(getSankeyLinkControlLabel(parallel[0]!, 0, parallel)).toBe('Sankey link A to B weight 1 (1 of 2)');
+    expect(getSankeyLinkControlLabel(parallel[1]!, 1, parallel)).toBe('Sankey link A to B weight 2 (2 of 2)');
   });
 });
 

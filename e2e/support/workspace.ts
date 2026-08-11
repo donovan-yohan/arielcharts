@@ -184,7 +184,7 @@ export async function renameActiveDiagram(page: Page, name: string): Promise<voi
 export async function waitForCanvas(page: Page, mode: 'flowchart' | 'sequence' | 'sequence-readonly' | 'er' | 'generic'): Promise<void> {
   await page.waitForFunction((expectedMode) => {
     const label = document.querySelector('[data-testid="diagram-mode"]')?.textContent ?? '';
-    const svg = document.querySelector('.diagram-canvas-svg svg');
+    const svg = document.querySelector('.diagram-canvas-svg > svg');
     const structureToolbar = document.querySelector('form[aria-label="Add Mermaid node"]');
     const sequenceControls = document.querySelector('[data-testid="sequence-editor-controls"]');
     const erControls = document.querySelector('[data-testid="er-editor-controls"]');
@@ -211,7 +211,7 @@ export async function waitForInvalidPreview(page: Page): Promise<void> {
   await expectedStatus.waitFor({ state: 'visible', timeout: 15_000 });
   await expect(expectedStatus).toContainText(/preview kept on last valid diagram/iu);
   await expect(unexpectedStatus).toHaveCount(0);
-  assert(await page.locator('.diagram-canvas-svg svg').count() > 0, 'Invalid Mermaid removed the last valid visual preview.');
+  assert(await page.locator('.diagram-canvas-svg > svg').count() > 0, 'Invalid Mermaid removed the last valid visual preview.');
 }
 
 export async function waitForSyncedSource(page: Page): Promise<void> {

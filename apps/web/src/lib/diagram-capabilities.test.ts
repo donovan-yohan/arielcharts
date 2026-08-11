@@ -106,6 +106,8 @@ describe('diagram capability catalog', () => {
     const quadrant = classifyDiagramCapability('quadrantChart');
     const xyChart = classifyDiagramCapability('xychart');
     const radar = classifyDiagramCapability('radar');
+    const sankey = classifyDiagramCapability('sankey');
+    const packet = classifyDiagramCapability('packet');
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A -->', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
@@ -135,8 +137,13 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(quadrant).getOperationResult('quadrantChart\n  A: [0.5, 0.5]', 'edit-point')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(xyChart).getOperationResult('xychart-beta\n  x-axis ["A", "B"]\n  y-axis 0 --> 3\n  line [1, 2]', 'edit-axis')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(radar).getOperationResult('radar-beta\n  axis a\n  axis b\n  axis c\n  curve one { 1, 2, 3 }', 'edit-options')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(sankey).getOperationResult('sankey-beta\nSource,Target,2.5', 'rename-node')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(packet).getOperationResult('packet-beta\n  0-7: "Header"\n  8-15: "Body"', 'move-field')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(quadrant).getOperationResult('quadrantChart\n  A: [1.2, 0.5]', 'edit-point')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(radar).getOperationResult('radar-beta\n  axis a\n  axis b', 'add-axis')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(sankey).getOperationResult('sankey-beta\nSource,Target,0', 'add-link')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(packet).getOperationResult('packet-beta\n  0-7: "Header"\n  9-15: "Gap"', 'add-field')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(sankey).getOperationResult('sankey-beta\nSource,Target,2.5', 'unsupported')).toEqual({ supported: false, reason: 'unsupported-operation' });
     const noteOnlySequence = 'sequenceDiagram\n  Note over A: details';
     await expect(mermaid.parse(noteOnlySequence)).resolves.toMatchObject({ diagramType: 'sequence' });
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult(noteOnlySequence, 'add-message')).toEqual({ supported: true });
@@ -175,6 +182,8 @@ describe('diagram capability catalog', () => {
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('quadrantChart'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('xychart'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('radar'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('sankey'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('packet'))).toBe(true);
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('flowchart-v2'))).toBe('Flowchart · editable · canvas');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('sequence'))).toBe('Sequence · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('er'))).toBe('Entity relationship · editable · form');
@@ -198,6 +207,8 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('quadrantChart'))).toBe('Quadrant chart · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('xychart'))).toBe('XY chart · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('radar'))).toBe('Radar · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('sankey'))).toBe('Sankey · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('packet'))).toBe('Packet · editable · form');
   });
 
   it('labels a current unrepresentable structural source as source-only', () => {
@@ -221,6 +232,8 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('quadrantChart'), 'quadrantChart\n  A: [2, 0.5]')).toBe('Quadrant chart · source only');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('xychart'), 'xychart-beta\n  x-axis [A, B]\n  bar [1, 2]')).toBe('XY chart · source only');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('radar'), 'radar-beta\n  axis A, B\n  curve one{1, 2}')).toBe('Radar · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('sankey'), 'sankey-beta\nSource,Target,0')).toBe('Sankey · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('packet'), 'packet-beta\n  0-7: "Header"\n  9-15: "Gap"')).toBe('Packet · source only');
     expect(getDiagramCapabilityLabel(null, 'sequenceDiagram\nA->>B: request')).toBe('Mermaid · source only');
   });
 });

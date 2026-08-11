@@ -147,12 +147,36 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
       document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'false'
       && !document.querySelector('[data-testid="canvas-subgraph-toolbar"]')
     ), undefined, { timeout: 5_000 });
-    await innerHeader.press('Enter');
-    await page.waitForFunction(() => (
-      document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'true'
-      && document.querySelector('[data-testid="canvas-subgraph-toolbar"]')
-      && document.querySelector('[data-testid="canvas-action-edit-section-label"]')
-    ), undefined, { timeout: 5_000 });
+    await innerHeader.focus();
+    const enterHeaderFocused = await innerHeader.evaluate((element) => document.activeElement === element);
+    assert(enterHeaderFocused, 'Inner section header did not receive focus before Enter selection.');
+    await page.keyboard.press('Enter');
+    try {
+      await page.waitForFunction(() => {
+        const selected = document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected');
+        const toolbarCount = document.querySelectorAll('[data-testid="canvas-subgraph-toolbar"]').length;
+        const editCount = document.querySelectorAll('[data-testid="canvas-action-edit-section-label"]').length;
+        return selected === 'true' && toolbarCount === 1 && editCount === 1;
+      }, undefined, { timeout: 5_000 });
+    } catch (error) {
+      const diagnostics = await page.evaluate(() => {
+        const activeElement = document.activeElement;
+        return {
+          activeElement: activeElement ? {
+            tagName: activeElement.tagName,
+            testId: activeElement.getAttribute('data-testid'),
+            role: activeElement.getAttribute('role'),
+            ariaLabel: activeElement.getAttribute('aria-label'),
+          } : null,
+          selected: document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected'),
+          toolbarCount: document.querySelectorAll('[data-testid="canvas-subgraph-toolbar"]').length,
+          editCount: document.querySelectorAll('[data-testid="canvas-action-edit-section-label"]').length,
+        };
+      });
+      throw new Error(`Enter did not select the inner section with its edit toolbar: ${JSON.stringify(diagnostics)}`, {
+        cause: error,
+      });
+    }
     const enterSelected = await innerSection.getAttribute('data-selected') === 'true';
     const enterToolbarVisible = await page.getByTestId('canvas-subgraph-toolbar').isVisible();
     await innerHeader.press('Escape');

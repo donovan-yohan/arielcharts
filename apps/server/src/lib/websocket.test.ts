@@ -511,6 +511,17 @@ describe('SessionWebSocketServer', () => {
     client.sendAwareness([{ clientId: 704, clock: 4, state: { user, presenter: { ...valid, sequence: 5, viewport: { pan_x: 0, pan_y: 0, zoom: 99 } } } }]);
     await waitFor(() => expect(session.awareness.getStates().get(704)).toEqual({ user }));
     await client.close();
+    await waitFor(() => expect(session.awareness.getStates().has(704)).toBe(false));
+
+    const replacement = await openClient(port, sessionId, roomCookie);
+    // Awareness clocks remain monotonic across a reclaimed client id, while
+    // the presenter-specific sequence watermark resets with socket ownership.
+    replacement.sendAwareness([{ clientId: 704, clock: 6, state: { user, presenter: { ...valid, sequence: 1 } } }]);
+    await waitFor(() => expect(session.awareness.getStates().get(704)).toEqual({
+      user,
+      presenter: { active: true, sequence: 1, diagram_id: 'main', viewport: { pan_x: 12, pan_y: 24, zoom: 1.25 } },
+    }));
+    await replacement.close();
   });
 
   it('keeps awareness-only agents live-only and removes them on disconnect', async () => {

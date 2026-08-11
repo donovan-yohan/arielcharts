@@ -706,6 +706,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await selectTabByName(pageB, 'Main');
 
     await followPresenter.click();
+    await pageB.getByRole('button', { name: 'Leave', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
     await pageA.reload({ waitUntil: 'domcontentloaded' });
     await pageB.getByRole('button', { name: 'Leave', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
 

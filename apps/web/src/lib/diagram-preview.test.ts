@@ -62,6 +62,12 @@ describe('DiagramPreviewRegistry', () => {
     const timelinePreview: DiagramPreview = { capability: { adapter: 'timeline', diagramType: 'timeline', kind: 'generic' }, diagramId: 'timeline', flowchartSnapshot: null, source: 'timeline\n  2026 : Started', svg: '<svg />' };
     expect(canUseSemanticFamilyControls(timelinePreview.source, timelinePreview, 'timeline')).toBe(true);
     expect(canUseSemanticFamilyControls('timeline\n  accTitle: advanced', { ...timelinePreview, source: 'timeline\n  accTitle: advanced' }, 'timeline')).toBe(false);
+    const gitGraphPreview: DiagramPreview = { capability: { adapter: 'gitgraph', diagramType: 'gitGraph', kind: 'generic' }, diagramId: 'git', flowchartSnapshot: null, source: 'gitGraph\n  commit id: "base"', svg: '<svg />' };
+    const eventPreview: DiagramPreview = { capability: { adapter: 'event-modeling', diagramType: 'eventmodeling', kind: 'generic' }, diagramId: 'event', flowchartSnapshot: null, source: 'eventmodeling\n  entity Order', svg: '<svg />' };
+    const kanbanPreview: DiagramPreview = { capability: { adapter: 'kanban', diagramType: 'kanban', kind: 'generic' }, diagramId: 'kanban', flowchartSnapshot: null, source: 'kanban\n  todo[Todo]', svg: '<svg />' };
+    expect(canUseSemanticFamilyControls(gitGraphPreview.source, gitGraphPreview, 'gitgraph')).toBe(true);
+    expect(canUseSemanticFamilyControls(eventPreview.source, eventPreview, 'event-modeling')).toBe(true);
+    expect(canUseSemanticFamilyControls(kanbanPreview.source, kanbanPreview, 'kanban')).toBe(true);
   });
 
   it('isolates last-known-good previews by stable diagram id', () => {

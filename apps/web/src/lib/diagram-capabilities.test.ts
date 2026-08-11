@@ -95,6 +95,9 @@ describe('diagram capability catalog', () => {
     const journey = classifyDiagramCapability('journey');
     const gantt = classifyDiagramCapability('gantt');
     const timeline = classifyDiagramCapability('timeline');
+    const gitgraph = classifyDiagramCapability('gitGraph');
+    const eventModeling = classifyDiagramCapability('eventmodeling');
+    const kanban = classifyDiagramCapability('kanban');
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A -->', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
@@ -113,10 +116,18 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(journey).getOperationResult('journey\n  Task: 5: Alice', 'add-task')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(gantt).getOperationResult('gantt\n  dateFormat YYYY-MM-DD\n  Task : task, 2026-01-01, 1d', 'add-task')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(timeline).getOperationResult('timeline\n  2026 : Started', 'add-event')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(gitgraph).getOperationResult('gitGraph\n  commit id: "base"', 'add-branch')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(eventModeling).getOperationResult('eventmodeling\n  entity Order', 'add-timeframe')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(kanban).getOperationResult('kanban\n  todo[Todo]', 'add-card')).toEqual({ supported: true });
     const noteOnlySequence = 'sequenceDiagram\n  Note over A: details';
     await expect(mermaid.parse(noteOnlySequence)).resolves.toMatchObject({ diagramType: 'sequence' });
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult(noteOnlySequence, 'add-message')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(timeline).getOperationResult('timeline\n  accTitle: advanced', 'add-event')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(gitgraph).getOperationResult('gitGraph\n  checkout missing', 'add-branch')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(eventModeling).getOperationResult('eventmodeling\n  tf nope evt Order', 'add-timeframe')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(eventModeling).getOperationResult('eventmodeling\n  entity Order', 'unsupported')).toEqual({ supported: false, reason: 'unsupported-operation' });
+    expect(getDiagramSourceModelAdapter(kanban).getOperationResult('kanban\n  todo[', 'add-card')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(kanban).getOperationResult('kanban\n  todo[Todo]', 'unsupported')).toEqual({ supported: false, reason: 'unsupported-operation' });
   });
 
   it('exposes the existing canvas and semantic-form controls through the adapter contract', () => {
@@ -133,6 +144,9 @@ describe('diagram capability catalog', () => {
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('journey'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('gantt'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('timeline'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('gitGraph'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('eventmodeling'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('kanban'))).toBe(true);
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('flowchart-v2'))).toBe('Flowchart · editable · canvas');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('sequence'))).toBe('Sequence · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('er'))).toBe('Entity relationship · editable · form');
@@ -145,6 +159,9 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('journey'))).toBe('User journey · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('gantt'))).toBe('Gantt · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('timeline'))).toBe('Timeline · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('gitGraph'))).toBe('Gitgraph · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('eventmodeling'))).toBe('Event modeling · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('kanban'))).toBe('Kanban · editable · form');
   });
 
   it('labels a current unrepresentable structural source as source-only', () => {
@@ -162,6 +179,7 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('block'), 'block-beta\n  space:2')).toBe('Block · source only');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('swimlane'), 'swimlane-beta\n  subgraph Sales\n    a(A)\n  end')).toBe('Swimlane · source only');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('journey'), 'journey\n  Task: 6: Alice')).toBe('User journey · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('gitGraph'), 'gitGraph\n  checkout missing')).toBe('Gitgraph · source only');
     expect(getDiagramCapabilityLabel(null, 'sequenceDiagram\nA->>B: request')).toBe('Mermaid · source only');
   });
 });

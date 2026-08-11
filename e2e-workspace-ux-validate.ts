@@ -169,6 +169,20 @@ const GANTT_DIAGRAM_FIXTURE = `gantt
 const TIMELINE_DIAGRAM_FIXTURE = `timeline LR
   section Delivery
   2026 : Started`;
+const GITGRAPH_DIAGRAM_FIXTURE = `gitGraph
+  commit id: "base"
+  branch feature
+  commit id: "feature"
+  checkout main
+  commit
+  merge feature`;
+const EVENT_MODELING_DIAGRAM_FIXTURE = `eventmodeling
+  entity Order
+  tf 01 cmd Order`;
+const KANBAN_DIAGRAM_FIXTURE = `kanban
+  todo[Todo]
+    design[Design]@{ assigned: "Ava" }
+  done[Done]`;
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
@@ -1257,6 +1271,123 @@ async function expectTemporalSemanticEditors(page: Page): Promise<void> {
   await replaceSource(page, 'timeline\n  accTitle: advanced');
   await waitForSource(page, 'timeline\n  accTitle: advanced');
   await expect(page.getByTestId('timeline-editor-controls')).toHaveCount(0);
+}
+
+async function expectBoardSemanticEditors(page: Page): Promise<void> {
+  await replaceSource(page, GITGRAPH_DIAGRAM_FIXTURE);
+  await waitForSource(page, GITGRAPH_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Gitgraph · editable · form');
+  await closeFlyout(page, 'source');
+  const gitGraph = page.getByTestId('gitgraph-editor-controls');
+  const addCommit = gitGraph.getByRole('button', { name: 'Add commit', exact: true });
+  await assertBoardControl(page, addCommit, 'GitGraph add commit control');
+  const anonymousCommit = gitGraph.getByRole('form', { name: 'GitGraph commit 5', exact: true });
+  await anonymousCommit.getByLabel('GitGraph commit 5 id', { exact: true }).fill('main');
+  await anonymousCommit.getByLabel('GitGraph commit 5 type', { exact: true }).selectOption('HIGHLIGHT');
+  await assertAndClickBoardControl(page, anonymousCommit.getByRole('button', { name: 'Save', exact: true }), 'GitGraph anonymous commit optional fields control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('commit id: "main" type: HIGHLIGHT');
+  await closeFlyout(page, 'source');
+  const bareMerge = gitGraph.getByRole('form', { name: 'GitGraph merge 6', exact: true });
+  await bareMerge.getByLabel('GitGraph merge 6 id', { exact: true }).fill('merge-feature');
+  await bareMerge.getByLabel('GitGraph merge 6 type', { exact: true }).selectOption('REVERSE');
+  await assertAndClickBoardControl(page, bareMerge.getByRole('button', { name: 'Save', exact: true }), 'GitGraph bare merge optional fields control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('merge feature id: "merge-feature" type: REVERSE');
+  await closeFlyout(page, 'source');
+  await assertAndClickBoardControl(page, addCommit, 'GitGraph add commit control');
+  await gitGraph.getByLabel('New GitGraph branch', { exact: true }).fill('release');
+  await assertAndClickBoardControl(page, gitGraph.getByRole('button', { name: 'Add branch', exact: true }), 'GitGraph add branch control');
+  const releaseBranch = gitGraph.getByRole('form', { name: 'GitGraph branch 8', exact: true });
+  await releaseBranch.getByLabel('GitGraph branch 8 order', { exact: true }).fill('3');
+  await assertAndClickBoardControl(page, releaseBranch.getByRole('button', { name: 'Save', exact: true }), 'GitGraph branch optional order control');
+  await gitGraph.getByLabel('GitGraph checkout branch', { exact: true }).selectOption('release');
+  await assertAndClickBoardControl(page, gitGraph.getByRole('button', { name: 'Add checkout', exact: true }), 'GitGraph checkout release control');
+  await gitGraph.getByLabel('New GitGraph commit id', { exact: true }).fill('releasework');
+  await assertAndClickBoardControl(page, addCommit, 'GitGraph release commit control');
+  await gitGraph.getByLabel('GitGraph checkout branch', { exact: true }).selectOption('main');
+  await assertAndClickBoardControl(page, gitGraph.getByRole('button', { name: 'Add checkout', exact: true }), 'GitGraph checkout main control');
+  await gitGraph.getByLabel('GitGraph merge branch', { exact: true }).selectOption('release');
+  await gitGraph.getByLabel('GitGraph merge id', { exact: true }).fill('merge-release');
+  await assertAndClickBoardControl(page, gitGraph.getByRole('button', { name: 'Add merge', exact: true }), 'GitGraph merge control');
+  await gitGraph.getByLabel('GitGraph cherry-pick commit id', { exact: true }).fill('releasework');
+  await assertAndClickBoardControl(page, gitGraph.getByRole('button', { name: 'Add cherry-pick', exact: true }), 'GitGraph cherry-pick control');
+  const cherryPick = gitGraph.getByRole('form', { name: 'GitGraph cherry-pick 13', exact: true });
+  await cherryPick.getByLabel('GitGraph cherry-pick 13 parent', { exact: true }).fill('commit');
+  await assertAndClickBoardControl(page, cherryPick.getByRole('button', { name: 'Save', exact: true }), 'GitGraph cherry-pick optional parent control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toMatch(/branch release order: 3[\s\S]*checkout release[\s\S]*merge release id: "merge-release"[\s\S]*cherry-pick id: "releasework" parent: "commit"/);
+  await closeFlyout(page, 'source');
+  const deleteCommit = gitGraph.getByLabel('Delete GitGraph commit 7', { exact: true });
+  await assertAndClickBoardControl(page, deleteCommit, 'GitGraph delete operation control');
+  await replaceSource(page, 'gitGraph\n  checkout missing');
+  await waitForSource(page, 'gitGraph\n  checkout missing');
+  await expect(page.getByTestId('gitgraph-editor-controls')).toHaveCount(0);
+
+  await replaceSource(page, EVENT_MODELING_DIAGRAM_FIXTURE);
+  await waitForSource(page, EVENT_MODELING_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Event modeling · editable · form');
+  await closeFlyout(page, 'source');
+  const eventModeling = page.getByTestId('event-modeling-editor-controls');
+  const addEntity = eventModeling.getByRole('button', { name: 'Add entity', exact: true });
+  await assertBoardControl(page, addEntity, 'Event Modeling add entity control');
+  await eventModeling.getByLabel('New Event Modeling entity', { exact: true }).fill('Stock');
+  await assertAndClickBoardControl(page, addEntity, 'Event Modeling add entity control');
+  await assertAndClickBoardControl(page, eventModeling.getByRole('button', { name: 'Add data', exact: true }), 'Event Modeling add data control');
+  await eventModeling.getByLabel('New Event Modeling timeframe index', { exact: true }).fill('02');
+  await eventModeling.getByLabel('New Event Modeling timeframe type', { exact: true }).selectOption('evt');
+  await eventModeling.getByLabel('New Event Modeling timeframe links', { exact: true }).fill('01');
+  await eventModeling.getByLabel('New Event Modeling timeframe data', { exact: true }).selectOption('OrderData');
+  await assertAndClickBoardControl(page, eventModeling.getByRole('button', { name: 'Add timeframe', exact: true }), 'Event Modeling add timeframe control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('data OrderData `json`{');
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('tf 02 evt Order ->> 01 [[OrderData]]');
+  await closeFlyout(page, 'source');
+  const order = eventModeling.getByRole('form', { name: 'Event Modeling entity Order', exact: true });
+  await order.getByLabel('Event Modeling entity Order name', { exact: true }).fill('Sales.Order');
+  await assertAndClickBoardControl(page, order.getByRole('button', { name: 'Save', exact: true }), 'Event Modeling rename entity control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('entity Sales.Order');
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('tf 01 cmd Sales.Order');
+  await closeFlyout(page, 'source');
+  await replaceSource(page, 'eventmodeling\n  tf nope evt Start');
+  await waitForSource(page, 'eventmodeling\n  tf nope evt Start');
+  await expect(page.getByTestId('event-modeling-editor-controls')).toHaveCount(0);
+
+  await replaceSource(page, KANBAN_DIAGRAM_FIXTURE);
+  await waitForSource(page, KANBAN_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Kanban · editable · form');
+  await closeFlyout(page, 'source');
+  const kanban = page.getByTestId('kanban-editor-controls');
+  const addCard = kanban.getByRole('button', { name: 'Add card', exact: true });
+  await assertAndClickBoardControl(page, addCard, 'Kanban add card control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('task[Task]');
+  await closeFlyout(page, 'source');
+  const task = kanban.getByRole('form', { name: 'Kanban card task', exact: true });
+  await task.getByLabel('Kanban card task title', { exact: true }).fill('Ship');
+  await task.getByLabel('Kanban card task new metadata key', { exact: true }).fill('assigned');
+  await task.getByLabel('Kanban card task new metadata value', { exact: true }).fill('Ava, Bea: owner');
+  await assertAndClickBoardControl(page, task.getByLabel('Add Kanban card task metadata', { exact: true }), 'Kanban structured metadata add control');
+  await assertAndClickBoardControl(page, task.getByRole('button', { name: 'Save', exact: true }), 'Kanban edit card control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('task[Ship]@{ assigned: "Ava, Bea: owner" }');
+  await closeFlyout(page, 'source');
+  await assertAndClickBoardControl(page, task.getByLabel('Delete Kanban card task', { exact: true }), 'Kanban delete card control');
+  await replaceSource(page, 'kanban\n  todo[');
+  await waitForSource(page, 'kanban\n  todo[');
+  await expect(page.getByTestId('kanban-editor-controls')).toHaveCount(0);
+}
+
+async function assertAndClickBoardControl(page: Page, target: Locator, label: string): Promise<void> {
+  await scrollErControlIntoView(target);
+  await assertHitTarget(page, target, label);
+  await verifiedClick(page, target, label);
+}
+
+async function assertBoardControl(page: Page, target: Locator, label: string): Promise<void> {
+  await scrollErControlIntoView(target);
+  await assertHitTarget(page, target, label);
 }
 
 async function waitForSemanticMode(page: Page, mode: string): Promise<void> {
@@ -3634,6 +3765,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'Class, State, and Requirement semantic forms expose hit-tested source-safe controls, preserve anchors/camera, and fail closed for nested state');
       await expectTemporalSemanticEditors(page);
       record(results, 'Journey, Gantt, and Timeline semantic forms expose hit-tested source-backed controls and fail closed for advanced source');
+      await expectBoardSemanticEditors(page);
+      record(results, 'GitGraph, Event Modeling, and Kanban semantic forms expose hit-tested source-backed controls and fail closed for invalid history/source');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');

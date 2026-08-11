@@ -113,6 +113,7 @@ import { CYNEFIN_DOMAIN_NAMES, getCynefinItemIdentity, getCynefinTransitionIdent
 import { reconcileCynefinItemRenderIdentities, reconcileCynefinTransitionRenderIdentities, type CynefinRenderIdentityState } from '../lib/cynefin-render-identities';
 import { getTreemapNodeIdentity, isTreemapSourceRepresentable, type TreemapDiagramSnapshot, type TreemapNode, type TreemapNodeIdentity } from '../lib/treemap-mutations';
 import { getVennStyleIdentity, getVennSubsetIdentity, isVennSourceRepresentable, type VennDiagramSnapshot, type VennStyle, type VennStyleIdentity, type VennSubset, type VennSubsetIdentity } from '../lib/venn-mutations';
+import { getWardleyEvolutionIdentity, getWardleyLinkIdentity, getWardleyNodeIdentity, getWardleyNoteIdentity, getWardleyPipelineIdentity, isWardleySourceRepresentable, WARDLEY_LINK_KINDS, WARDLEY_STRATEGIES, type WardleyDiagramSnapshot, type WardleyEvolution, type WardleyEvolutionIdentity, type WardleyLink, type WardleyLinkIdentity, type WardleyNode, type WardleyNodeIdentity, type WardleyNote, type WardleyNoteIdentity, type WardleyPipeline, type WardleyPipelineIdentity } from '../lib/wardley-mutations';
 import { reconcileHierarchicalSemanticRenderIdentities, reconcileSemanticRenderIdentities, type SemanticRenderIdentityState } from '../lib/semantic-render-identities';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
@@ -160,6 +161,7 @@ export interface DiagramCanvasProps {
   isCynefin?: boolean;
   isTreemap?: boolean;
   isVenn?: boolean;
+  isWardley?: boolean;
   initialCamera?: CanvasCameraState;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
@@ -197,6 +199,7 @@ export interface DiagramCanvasProps {
   cynefinDiagram?: CynefinDiagramSnapshot | null;
   treemapDiagram?: TreemapDiagramSnapshot | null;
   vennDiagram?: VennDiagramSnapshot | null;
+  wardleyDiagram?: WardleyDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
@@ -446,6 +449,24 @@ export interface DiagramCanvasProps {
   onEditVennStyle?: (identity: VennStyleIdentity, value: Partial<VennStyle>) => SemanticFormActionResult;
   onDeleteVennStyle?: (identity: VennStyleIdentity) => SemanticFormActionResult;
   onMoveVennStyle?: (identity: VennStyleIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onAddWardleyNode?: (value: WardleyNode) => SemanticFormActionResult;
+  onEditWardleyNode?: (identity: WardleyNodeIdentity, value: Partial<WardleyNode>) => SemanticFormActionResult;
+  onRenameWardleyNode?: (identity: WardleyNodeIdentity, name: string) => SemanticFormActionResult;
+  onDeleteWardleyNode?: (identity: WardleyNodeIdentity) => SemanticFormActionResult;
+  onMoveWardleyNode?: (identity: WardleyNodeIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onAddWardleyLink?: (value: WardleyLink) => SemanticFormActionResult;
+  onEditWardleyLink?: (identity: WardleyLinkIdentity, value: Partial<WardleyLink>) => SemanticFormActionResult;
+  onDeleteWardleyLink?: (identity: WardleyLinkIdentity) => SemanticFormActionResult;
+  onMoveWardleyLink?: (identity: WardleyLinkIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onAddWardleyEvolution?: (value: WardleyEvolution) => SemanticFormActionResult;
+  onEditWardleyEvolution?: (identity: WardleyEvolutionIdentity, value: Partial<WardleyEvolution>) => SemanticFormActionResult;
+  onDeleteWardleyEvolution?: (identity: WardleyEvolutionIdentity) => SemanticFormActionResult;
+  onAddWardleyNote?: (value: WardleyNote) => SemanticFormActionResult;
+  onEditWardleyNote?: (identity: WardleyNoteIdentity, value: Partial<WardleyNote>) => SemanticFormActionResult;
+  onDeleteWardleyNote?: (identity: WardleyNoteIdentity) => SemanticFormActionResult;
+  onMoveWardleyNote?: (identity: WardleyNoteIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onAddWardleyPipeline?: (value: WardleyPipeline) => SemanticFormActionResult;
+  onDeleteWardleyPipeline?: (identity: WardleyPipelineIdentity) => SemanticFormActionResult;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onCameraChange?: (camera: CanvasCameraState) => void;
@@ -1001,6 +1022,24 @@ export function DiagramCanvas({
   onEditVennStyle,
   onDeleteVennStyle,
   onMoveVennStyle,
+  onAddWardleyNode,
+  onEditWardleyNode,
+  onRenameWardleyNode,
+  onDeleteWardleyNode,
+  onMoveWardleyNode,
+  onAddWardleyLink,
+  onEditWardleyLink,
+  onDeleteWardleyLink,
+  onMoveWardleyLink,
+  onAddWardleyEvolution,
+  onEditWardleyEvolution,
+  onDeleteWardleyEvolution,
+  onAddWardleyNote,
+  onEditWardleyNote,
+  onDeleteWardleyNote,
+  onMoveWardleyNote,
+  onAddWardleyPipeline,
+  onDeleteWardleyPipeline,
   onAddConnectedNode,
   onCanvasCursorChange,
   onCameraChange,
@@ -1067,6 +1106,7 @@ export function DiagramCanvas({
   isCynefin = false,
   isTreemap = false,
   isVenn = false,
+  isWardley = false,
   journeyDiagram = null,
   ganttDiagram = null,
   timelineDiagram = null,
@@ -1087,6 +1127,7 @@ export function DiagramCanvas({
   cynefinDiagram = null,
   treemapDiagram = null,
   vennDiagram = null,
+  wardleyDiagram = null,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -1195,6 +1236,53 @@ export function DiagramCanvas({
   );
   const vennRenameDraftCacheRef = useRef<PersistentCanonicalDraftCache<{ value: string }>>(new Map());
   if (!isVennSourceRepresentable(mermaidSource ?? '')) vennRenameDraftCacheRef.current.clear();
+  const wardleyNodeRenderKeys = useSemanticRenderIdentityKeys(
+    wardleyDiagram?.nodes ?? null,
+    isWardleySourceRepresentable(mermaidSource ?? ''),
+    'wardley-node-render',
+    (node) => JSON.stringify(node),
+  );
+  const wardleyLinkRenderKeys = useSemanticRenderIdentityKeys(
+    wardleyDiagram?.links ?? null,
+    isWardleySourceRepresentable(mermaidSource ?? ''),
+    'wardley-link-render',
+    (link) => JSON.stringify(link),
+  );
+  const wardleyEvolutionRenderKeys = useSemanticRenderIdentityKeys(
+    wardleyDiagram?.evolutions ?? null,
+    isWardleySourceRepresentable(mermaidSource ?? ''),
+    'wardley-evolution-render',
+    (evolution) => JSON.stringify(evolution),
+  );
+  const wardleyNoteRenderKeys = useSemanticRenderIdentityKeys(
+    wardleyDiagram?.notes ?? null,
+    isWardleySourceRepresentable(mermaidSource ?? ''),
+    'wardley-note-render',
+    (note) => JSON.stringify(note),
+  );
+  const wardleyNodeDraftCacheRef = useRef<PersistentCanonicalDraftCache<WardleyNodeDraft>>(new Map());
+  const wardleyEvolutionDraftCacheRef = useRef<PersistentCanonicalDraftCache<WardleyEvolutionDraft>>(new Map());
+  const wardleyNoteDraftCacheRef = useRef<PersistentCanonicalDraftCache<WardleyNoteDraft>>(new Map());
+  if (!isWardleySourceRepresentable(mermaidSource ?? '')) {
+    wardleyNodeDraftCacheRef.current.clear();
+    wardleyEvolutionDraftCacheRef.current.clear();
+    wardleyNoteDraftCacheRef.current.clear();
+  }
+  pruneInactivePersistentDrafts(
+    wardleyNodeDraftCacheRef.current,
+    wardleyNodeRenderKeys.keys.values(),
+    wardleyDiagram !== null,
+  );
+  pruneInactivePersistentDrafts(
+    wardleyEvolutionDraftCacheRef.current,
+    wardleyEvolutionRenderKeys.keys.values(),
+    wardleyDiagram !== null,
+  );
+  pruneInactivePersistentDrafts(
+    wardleyNoteDraftCacheRef.current,
+    wardleyNoteRenderKeys.keys.values(),
+    wardleyDiagram !== null,
+  );
   onRenderSettledRef.current = onRenderSettled;
   onCanvasCursorChangeRef.current = onCanvasCursorChange;
   onNodeEditingChangeRef.current = onNodeEditingChange;
@@ -3809,6 +3897,7 @@ export function DiagramCanvas({
         {isCynefin && !readOnly && cynefinDiagram ? <CynefinEditorControls bottom={semanticPanelPlacement.bottom} diagram={cynefinDiagram} itemDraftCache={cynefinRenderIdentityKeys.itemDraftCache} itemKeys={cynefinRenderIdentityKeys.itemKeys} maxHeight={semanticPanelPlacement.maxHeight} onAddItem={onAddCynefinItem} onAddTransition={onAddCynefinTransition} onDeleteItem={onDeleteCynefinItem} onDeleteTransition={onDeleteCynefinTransition} onEditItem={onEditCynefinItem} onEditTransition={onEditCynefinTransition} onMoveItem={onMoveCynefinItem} onMoveTransition={onMoveCynefinTransition} transitionDraftCache={cynefinRenderIdentityKeys.transitionDraftCache} transitionKeys={cynefinRenderIdentityKeys.transitionKeys} /> : null}
         {isTreemap && !readOnly && treemapDiagram ? <TreemapEditorControls bottom={semanticPanelPlacement.bottom} diagram={treemapDiagram} draftCache={treemapRenderIdentityKeys.draftCache} keys={treemapRenderIdentityKeys.keys} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddTreemapNode} onDelete={onDeleteTreemapNode} onEdit={onEditTreemapNode} onMove={onMoveTreemapNode} onReparent={onReparentTreemapNode} /> : null}
         {isVenn && !readOnly && vennDiagram ? <VennEditorControls bottom={semanticPanelPlacement.bottom} diagram={vennDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAddStyle={onAddVennStyle} onAddSubset={onAddVennSubset} onDeleteStyle={onDeleteVennStyle} onDeleteSubset={onDeleteVennSubset} onEditStyle={onEditVennStyle} onEditSubset={onEditVennSubset} onMoveStyle={onMoveVennStyle} onMoveSubset={onMoveVennSubset} onRenameSet={onRenameVennSet} renameDraftCache={vennRenameDraftCacheRef.current} styleDraftCache={vennStyleRenderIdentityKeys.draftCache} styleKeys={vennStyleRenderIdentityKeys.keys} subsetDraftCache={vennSubsetRenderIdentityKeys.draftCache} subsetKeys={vennSubsetRenderIdentityKeys.keys} /> : null}
+        {isWardley && !readOnly && wardleyDiagram ? <WardleyEditorControls bottom={semanticPanelPlacement.bottom} diagram={wardleyDiagram} evolutionDraftCache={wardleyEvolutionDraftCacheRef.current} evolutionKeys={wardleyEvolutionRenderKeys.keys} linkDraftCache={wardleyLinkRenderKeys.draftCache} linkKeys={wardleyLinkRenderKeys.keys} maxHeight={semanticPanelPlacement.maxHeight} nodeDraftCache={wardleyNodeDraftCacheRef.current} nodeKeys={wardleyNodeRenderKeys.keys} noteDraftCache={wardleyNoteDraftCacheRef.current} noteKeys={wardleyNoteRenderKeys.keys} onAddEvolution={onAddWardleyEvolution} onAddLink={onAddWardleyLink} onAddNode={onAddWardleyNode} onAddNote={onAddWardleyNote} onAddPipeline={onAddWardleyPipeline} onDeleteEvolution={onDeleteWardleyEvolution} onDeleteLink={onDeleteWardleyLink} onDeleteNode={onDeleteWardleyNode} onDeleteNote={onDeleteWardleyNote} onDeletePipeline={onDeleteWardleyPipeline} onEditEvolution={onEditWardleyEvolution} onEditLink={onEditWardleyLink} onEditNode={onEditWardleyNode} onEditNote={onEditWardleyNote} onMoveLink={onMoveWardleyLink} onMoveNode={onMoveWardleyNode} onMoveNote={onMoveWardleyNote} onRenameNode={onRenameWardleyNode} /> : null}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
@@ -5265,6 +5354,16 @@ function formatCynefinDomain(domain: CynefinDomainName): string {
 
 type PersistentCanonicalDraftCache<T extends object> = Map<string, { canonical: T; draft: T }>;
 
+export function pruneInactivePersistentDrafts<T>(
+  cache: Map<string, T>,
+  activeKeys: Iterable<string>,
+  hasCurrentSnapshot: boolean,
+): void {
+  if (!hasCurrentSnapshot) return;
+  const active = new Set(activeKeys);
+  for (const key of cache.keys()) if (!active.has(key)) cache.delete(key);
+}
+
 function useSemanticRenderIdentityKeys<T extends object>(
   records: readonly T[] | null, sourceRepresentable: boolean, prefix: string, fingerprint: (record: T) => string,
   path?: (record: T) => readonly string[],
@@ -5907,6 +6006,105 @@ function usePersistentCanonicalDraft<T extends object>(
     setDraft(next);
   }, [cache, renderKey]);
   return { draft, resetDraft, updateDraft };
+}
+
+type WardleyNodeDraft = Omit<WardleyNode, 'evolution' | 'visibility'> & { evolution: string; visibility: string };
+type WardleyEvolutionDraft = Omit<WardleyEvolution, 'target'> & { target: string };
+type WardleyNoteDraft = Omit<WardleyNote, 'evolution' | 'visibility'> & { evolution: string; visibility: string };
+
+function WardleyEditorControls({
+  bottom, diagram, evolutionDraftCache, evolutionKeys, linkDraftCache, linkKeys, maxHeight,
+  nodeDraftCache, nodeKeys, noteDraftCache, noteKeys, onAddEvolution, onAddLink, onAddNode,
+  onAddNote, onAddPipeline, onDeleteEvolution, onDeleteLink, onDeleteNode, onDeleteNote,
+  onDeletePipeline, onEditEvolution, onEditLink, onEditNode, onEditNote, onMoveLink,
+  onMoveNode, onMoveNote, onRenameNode,
+}: {
+  bottom: number; diagram: WardleyDiagramSnapshot; maxHeight: number;
+  evolutionDraftCache: PersistentCanonicalDraftCache<WardleyEvolutionDraft>;
+  evolutionKeys: Map<WardleyEvolution, string>;
+  linkDraftCache: PersistentCanonicalDraftCache<WardleyLink>; linkKeys: Map<WardleyLink, string>;
+  nodeDraftCache: PersistentCanonicalDraftCache<WardleyNodeDraft>; nodeKeys: Map<WardleyNode, string>;
+  noteDraftCache: PersistentCanonicalDraftCache<WardleyNoteDraft>; noteKeys: Map<WardleyNote, string>;
+  onAddEvolution?: (value: WardleyEvolution) => SemanticFormActionResult;
+  onAddLink?: (value: WardleyLink) => SemanticFormActionResult;
+  onAddNode?: (value: WardleyNode) => SemanticFormActionResult;
+  onAddNote?: (value: WardleyNote) => SemanticFormActionResult;
+  onAddPipeline?: (value: WardleyPipeline) => SemanticFormActionResult;
+  onDeleteEvolution?: (identity: WardleyEvolutionIdentity) => SemanticFormActionResult;
+  onDeleteLink?: (identity: WardleyLinkIdentity) => SemanticFormActionResult;
+  onDeleteNode?: (identity: WardleyNodeIdentity) => SemanticFormActionResult;
+  onDeleteNote?: (identity: WardleyNoteIdentity) => SemanticFormActionResult;
+  onDeletePipeline?: (identity: WardleyPipelineIdentity) => SemanticFormActionResult;
+  onEditEvolution?: (identity: WardleyEvolutionIdentity, value: Partial<WardleyEvolution>) => SemanticFormActionResult;
+  onEditLink?: (identity: WardleyLinkIdentity, value: Partial<WardleyLink>) => SemanticFormActionResult;
+  onEditNode?: (identity: WardleyNodeIdentity, value: Partial<WardleyNode>) => SemanticFormActionResult;
+  onEditNote?: (identity: WardleyNoteIdentity, value: Partial<WardleyNote>) => SemanticFormActionResult;
+  onMoveLink?: (identity: WardleyLinkIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onMoveNode?: (identity: WardleyNodeIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onMoveNote?: (identity: WardleyNoteIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onRenameNode?: (identity: WardleyNodeIdentity, name: string) => SemanticFormActionResult;
+}) {
+  const topNodes = diagram.nodes.filter((node) => node.kind !== 'pipeline-component');
+  const components = diagram.nodes.filter((node) => node.kind === 'component');
+  const availablePipelineParents = components.filter((node) => !diagram.pipelines.some((pipeline) => pipeline.parent === node.name));
+  const { draft: newNode, resetDraft: resetNewNode, updateDraft: updateNewNode } = useCanonicalDraft({
+    evolution: '0.5', inertia: false, kind: 'component' as WardleyNode['kind'], name: 'Component',
+    pipelineParent: diagram.pipelines[0]?.parent ?? '', strategy: '' as '' | NonNullable<WardleyNode['strategy']>, visibility: '0.5',
+  });
+  const { draft: newLink, resetDraft: resetNewLink, updateDraft: updateNewLink } = useCanonicalDraft({
+    from: topNodes[0]?.name ?? '', kind: '->' as WardleyLink['kind'], to: topNodes[1]?.name ?? topNodes[0]?.name ?? '',
+  });
+  const { draft: newEvolution, resetDraft: resetNewEvolution, updateDraft: updateNewEvolution } = useCanonicalDraft({
+    component: components.find((node) => !diagram.evolutions.some((item) => item.component === node.name))?.name ?? '', target: '0.8',
+  });
+  const { draft: newNote, resetDraft: resetNewNote, updateDraft: updateNewNote } = useCanonicalDraft({ evolution: '0.5', text: 'Note', visibility: '0.5' });
+  const { draft: newPipeline, resetDraft: resetNewPipeline, updateDraft: updateNewPipeline } = useCanonicalDraft({ componentEvolution: '0.5', componentName: 'Pipeline component', parent: availablePipelineParents[0]?.name ?? '' });
+  const [error, setError] = useState<string | null>(null);
+  return <aside aria-label="Wardley editor" className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="wardley-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+    <strong>Wardley</strong>
+    <form aria-label="New Wardley node" onSubmit={(event) => {
+      event.preventDefault();
+      if (runSemanticForm(setError, () => onAddNode?.({
+        evolution: parseSemanticNumber(newNode.evolution, 'Wardley evolution'), inertia: newNode.inertia,
+        kind: newNode.kind, name: newNode.name, pipelineParent: newNode.kind === 'pipeline-component' ? newNode.pipelineParent : null,
+        strategy: newNode.kind === 'component' ? newNode.strategy || null : null,
+        visibility: newNode.kind === 'pipeline-component' ? null : parseSemanticNumber(newNode.visibility, 'Wardley visibility'),
+      }))) resetNewNode();
+    }}>
+      <input aria-label="New Wardley node name" onChange={(event) => updateNewNode((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.name} />
+      <select aria-label="New Wardley node kind" onChange={(event) => updateNewNode((current) => ({ ...current, kind: event.target.value as WardleyNode['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.kind}><option value="component">Component</option><option value="anchor">Anchor</option><option value="pipeline-component">Pipeline component</option></select>
+      {newNode.kind === 'pipeline-component' ? <select aria-label="New Wardley node pipeline" onChange={(event) => updateNewNode((current) => ({ ...current, pipelineParent: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.pipelineParent}>{diagram.pipelines.map((pipeline) => <option key={pipeline.parent}>{pipeline.parent}</option>)}</select> : <input aria-label="New Wardley node visibility" inputMode="decimal" onChange={(event) => updateNewNode((current) => ({ ...current, visibility: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.visibility} />}
+      <input aria-label="New Wardley node evolution" inputMode="decimal" onChange={(event) => updateNewNode((current) => ({ ...current, evolution: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.evolution} />
+      {newNode.kind === 'component' ? <><select aria-label="New Wardley node strategy" onChange={(event) => updateNewNode((current) => ({ ...current, strategy: event.target.value as typeof current.strategy }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.strategy}><option value="">No strategy</option>{WARDLEY_STRATEGIES.map((strategy) => <option key={strategy}>{strategy}</option>)}</select><label><input aria-label="New Wardley node inertia" checked={newNode.inertia} onChange={(event) => updateNewNode((current) => ({ ...current, inertia: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Inertia</label></> : null}
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add node</button>
+    </form>
+    {diagram.nodes.map((node, index) => <WardleyNodeForm cache={nodeDraftCache} diagram={diagram} item={node} key={nodeKeys.get(node)} onDelete={onDeleteNode} onEdit={onEditNode} onError={setError} onMove={onMoveNode} onRename={onRenameNode} renderKey={nodeKeys.get(node) ?? `wardley-node:${index}`} />)}
+    <section aria-label="Wardley pipelines"><strong>Pipelines</strong><form aria-label="New Wardley pipeline" onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onAddPipeline?.({ componentEvolution: parseSemanticNumber(newPipeline.componentEvolution, 'Wardley pipeline component evolution'), componentName: newPipeline.componentName, parent: newPipeline.parent }))) resetNewPipeline(); }}><select aria-label="New Wardley pipeline parent" onChange={(event) => updateNewPipeline((current) => ({ ...current, parent: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newPipeline.parent}>{availablePipelineParents.map((node) => <option key={node.name}>{node.name}</option>)}</select><input aria-label="New Wardley pipeline component" onChange={(event) => updateNewPipeline((current) => ({ ...current, componentName: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newPipeline.componentName} /><input aria-label="New Wardley pipeline component evolution" inputMode="decimal" onChange={(event) => updateNewPipeline((current) => ({ ...current, componentEvolution: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newPipeline.componentEvolution} /><button disabled={!availablePipelineParents.length} style={HIERARCHY_CONTROL_STYLE} type="submit">Add pipeline</button></form>{diagram.pipelines.map((pipeline) => <button aria-label={`Delete Wardley pipeline ${pipeline.parent}`} key={pipeline.parent} onClick={() => runSemanticForm(setError, () => onDeletePipeline?.(getWardleyPipelineIdentity(pipeline, diagram.pipelines)))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete pipeline {pipeline.parent}</button>)}</section>
+    <section aria-label="Wardley links"><strong>Links and flows</strong><form aria-label="New Wardley link" onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onAddLink?.(newLink))) resetNewLink(); }}><select aria-label="New Wardley link source" onChange={(event) => updateNewLink((current) => ({ ...current, from: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newLink.from}>{topNodes.map((node) => <option key={node.name}>{node.name}</option>)}</select><select aria-label="New Wardley link kind" onChange={(event) => updateNewLink((current) => ({ ...current, kind: event.target.value as WardleyLink['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={newLink.kind}>{WARDLEY_LINK_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select><select aria-label="New Wardley link target" onChange={(event) => updateNewLink((current) => ({ ...current, to: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newLink.to}>{topNodes.map((node) => <option key={node.name}>{node.name}</option>)}</select><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add link</button></form>{diagram.links.map((link, index) => <WardleyLinkForm cache={linkDraftCache} diagram={diagram} item={link} key={linkKeys.get(link)} onDelete={onDeleteLink} onEdit={onEditLink} onError={setError} onMove={onMoveLink} renderKey={linkKeys.get(link) ?? `wardley-link:${index}`} />)}</section>
+    <section aria-label="Wardley evolutions"><strong>Evolutions</strong><form aria-label="New Wardley evolution" onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onAddEvolution?.({ component: newEvolution.component, target: parseSemanticNumber(newEvolution.target, 'Wardley evolution target') }))) resetNewEvolution(); }}><select aria-label="New Wardley evolution component" onChange={(event) => updateNewEvolution((current) => ({ ...current, component: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newEvolution.component}>{components.filter((node) => !diagram.evolutions.some((item) => item.component === node.name)).map((node) => <option key={node.name}>{node.name}</option>)}</select><input aria-label="New Wardley evolution target" inputMode="decimal" onChange={(event) => updateNewEvolution((current) => ({ ...current, target: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newEvolution.target} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add evolution</button></form>{diagram.evolutions.map((item, index) => <WardleyEvolutionForm cache={evolutionDraftCache} diagram={diagram} item={item} key={evolutionKeys.get(item)} onDelete={onDeleteEvolution} onEdit={onEditEvolution} onError={setError} renderKey={evolutionKeys.get(item) ?? `wardley-evolution:${index}`} />)}</section>
+    <section aria-label="Wardley notes"><strong>Notes</strong><form aria-label="New Wardley note" onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onAddNote?.({ evolution: parseSemanticNumber(newNote.evolution, 'Wardley note evolution'), text: newNote.text, visibility: parseSemanticNumber(newNote.visibility, 'Wardley note visibility') }))) resetNewNote(); }}><input aria-label="New Wardley note text" onChange={(event) => updateNewNote((current) => ({ ...current, text: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNote.text} /><input aria-label="New Wardley note visibility" inputMode="decimal" onChange={(event) => updateNewNote((current) => ({ ...current, visibility: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNote.visibility} /><input aria-label="New Wardley note evolution" inputMode="decimal" onChange={(event) => updateNewNote((current) => ({ ...current, evolution: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNote.evolution} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add note</button></form>{diagram.notes.map((item, index) => <WardleyNoteForm cache={noteDraftCache} diagram={diagram} item={item} key={noteKeys.get(item)} onDelete={onDeleteNote} onEdit={onEditNote} onError={setError} onMove={onMoveNote} renderKey={noteKeys.get(item) ?? `wardley-note:${index}`} />)}</section>
+    <NumericEditorError error={error} />
+  </aside>;
+}
+
+function WardleyNodeForm({ cache, diagram, item, onDelete, onEdit, onError, onMove, onRename, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyNodeDraft>; diagram: WardleyDiagramSnapshot; item: WardleyNode; onDelete?: (identity: WardleyNodeIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyNodeIdentity, value: Partial<WardleyNode>) => SemanticFormActionResult; onError: (value: string | null) => void; onMove?: (identity: WardleyNodeIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onRename?: (identity: WardleyNodeIdentity, name: string) => SemanticFormActionResult; renderKey: string }) {
+  const canonical: WardleyNodeDraft = { ...item, evolution: String(item.evolution), visibility: item.visibility === null ? '' : String(item.visibility) }; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(canonical, renderKey, cache); const identity = getWardleyNodeIdentity(item, diagram.nodes); const label = `Wardley ${item.kind} ${item.name}`; const peers = diagram.nodes.filter((node) => node.kind === item.kind && node.pipelineParent === item.pipelineParent); const peerIndex = peers.indexOf(item);
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, { evolution: parseSemanticNumber(draft.evolution, 'Wardley evolution'), inertia: draft.inertia, strategy: draft.strategy, visibility: item.visibility === null ? null : parseSemanticNumber(draft.visibility, 'Wardley visibility') }))) resetDraft(); }}><input aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.name} />{item.visibility !== null ? <input aria-label={`${label} visibility`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, visibility: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.visibility} /> : null}<input aria-label={`${label} evolution`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, evolution: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.evolution} />{item.kind === 'component' ? <><select aria-label={`${label} strategy`} onChange={(event) => updateDraft((current) => ({ ...current, strategy: event.target.value ? event.target.value as WardleyNode['strategy'] : null }))} style={HIERARCHY_CONTROL_STYLE} value={draft.strategy ?? ''}><option value="">No strategy</option>{WARDLEY_STRATEGIES.map((strategy) => <option key={strategy}>{strategy}</option>)}</select><label><input aria-label={`${label} inertia`} checked={draft.inertia} onChange={(event) => updateDraft((current) => ({ ...current, inertia: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Inertia</label></> : null}<button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Rename ${label}`} onClick={() => { if (runSemanticForm(onError, () => onRename?.(identity, draft.name))) resetDraft(); }} style={HIERARCHY_CONTROL_STYLE} type="button">Rename</button><button aria-label={`Move ${label} up`} disabled={peerIndex === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={peerIndex === peers.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+}
+
+function WardleyLinkForm({ cache, diagram, item, onDelete, onEdit, onError, onMove, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyLink>; diagram: WardleyDiagramSnapshot; item: WardleyLink; onDelete?: (identity: WardleyLinkIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyLinkIdentity, value: Partial<WardleyLink>) => SemanticFormActionResult; onError: (value: string | null) => void; onMove?: (identity: WardleyLinkIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string }) {
+  const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(item, renderKey, cache); const identity = getWardleyLinkIdentity(item, diagram.links); const label = `Wardley link ${item.from} ${item.kind} ${item.to}`; const nodes = diagram.nodes.filter((node) => node.kind !== 'pipeline-component'); const index = diagram.links.indexOf(item);
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, draft))) resetDraft(); }}><select aria-label={`${label} source`} onChange={(event) => updateDraft((current) => ({ ...current, from: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.from}>{nodes.map((node) => <option key={node.name}>{node.name}</option>)}</select><select aria-label={`${label} kind`} onChange={(event) => updateDraft((current) => ({ ...current, kind: event.target.value as WardleyLink['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={draft.kind}>{WARDLEY_LINK_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select><select aria-label={`${label} target`} onChange={(event) => updateDraft((current) => ({ ...current, to: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.to}>{nodes.map((node) => <option key={node.name}>{node.name}</option>)}</select><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={index === diagram.links.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+}
+
+function WardleyEvolutionForm({ cache, diagram, item, onDelete, onEdit, onError, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyEvolutionDraft>; diagram: WardleyDiagramSnapshot; item: WardleyEvolution; onDelete?: (identity: WardleyEvolutionIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyEvolutionIdentity, value: Partial<WardleyEvolution>) => SemanticFormActionResult; onError: (value: string | null) => void; renderKey: string }) {
+  const canonical = { ...item, target: String(item.target) }; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(canonical, renderKey, cache); const identity = getWardleyEvolutionIdentity(item, diagram.evolutions); const label = `Wardley evolution ${item.component}`;
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, { component: draft.component, target: parseSemanticNumber(draft.target, 'Wardley evolution target') }))) resetDraft(); }}><select aria-label={`${label} component`} onChange={(event) => updateDraft((current) => ({ ...current, component: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.component}>{diagram.nodes.filter((node) => node.kind === 'component').map((node) => <option key={node.name}>{node.name}</option>)}</select><input aria-label={`${label} target`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, target: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.target} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+}
+
+function WardleyNoteForm({ cache, diagram, item, onDelete, onEdit, onError, onMove, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyNoteDraft>; diagram: WardleyDiagramSnapshot; item: WardleyNote; onDelete?: (identity: WardleyNoteIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyNoteIdentity, value: Partial<WardleyNote>) => SemanticFormActionResult; onError: (value: string | null) => void; onMove?: (identity: WardleyNoteIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string }) {
+  const canonical = { ...item, evolution: String(item.evolution), visibility: String(item.visibility) }; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(canonical, renderKey, cache); const identity = getWardleyNoteIdentity(item, diagram.notes); const label = `Wardley note ${item.text}`; const index = diagram.notes.indexOf(item);
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, { evolution: parseSemanticNumber(draft.evolution, 'Wardley note evolution'), text: draft.text, visibility: parseSemanticNumber(draft.visibility, 'Wardley note visibility') }))) resetDraft(); }}><input aria-label={`${label} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.text} /><input aria-label={`${label} visibility`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, visibility: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.visibility} /><input aria-label={`${label} evolution`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, evolution: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.evolution} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={index === diagram.notes.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
 }
 
 function C4EditorControls({

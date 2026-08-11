@@ -88,11 +88,12 @@ describe('DiagramPreviewRegistry', () => {
       { capability: { adapter: 'cynefin', diagramType: 'cynefin', kind: 'generic' }, diagramId: 'cynefin', flowchartSnapshot: null, source: 'cynefin-beta\n  complex\n    "Emergent"', svg: '<svg />' },
       { capability: { adapter: 'treemap', diagramType: 'treemap', kind: 'generic' }, diagramId: 'treemap', flowchartSnapshot: null, source: 'treemap-beta\n  "Root"\n    "Leaf": 1', svg: '<svg />' },
       { capability: { adapter: 'venn', diagramType: 'venn', kind: 'generic' }, diagramId: 'venn', flowchartSnapshot: null, source: 'venn-beta\n  set A: 1\n  set B: 1\n  union A, B: 0.5', svg: '<svg />' },
+      { capability: { adapter: 'wardley', diagramType: 'wardley', kind: 'generic' }, diagramId: 'wardley', flowchartSnapshot: null, source: 'wardley-beta\n  component A [0.5, 0.5]', svg: '<svg />' },
     ];
     for (const preview of numericPreviews) {
-      expect(canUseSemanticFamilyControls(preview.source, preview, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'treemap' | 'venn')).toBe(true);
-      expect(canUseSemanticFamilyControls(`${preview.source}\n  unsupported syntax`, { ...preview, source: `${preview.source}\n  unsupported syntax` }, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'treemap' | 'venn')).toBe(false);
-      expect(canUseSemanticFamilyControls(`${preview.source}\n`, preview, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'treemap' | 'venn')).toBe(false);
+      expect(canUseSemanticFamilyControls(preview.source, preview, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'treemap' | 'venn' | 'wardley')).toBe(true);
+      expect(canUseSemanticFamilyControls(`${preview.source}\n  unsupported syntax`, { ...preview, source: `${preview.source}\n  unsupported syntax` }, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'treemap' | 'venn' | 'wardley')).toBe(false);
+      expect(canUseSemanticFamilyControls(`${preview.source}\n`, preview, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'treemap' | 'venn' | 'wardley')).toBe(false);
     }
     const omittedVennValue: DiagramPreview = { capability: { adapter: 'venn', diagramType: 'venn', kind: 'generic' }, diagramId: 'venn-defaults', flowchartSnapshot: null, source: 'venn-beta\n  set A\n  set B\n  union A, B', svg: '<svg />' };
     expect(canUseSemanticFamilyControls(omittedVennValue.source, omittedVennValue, 'venn')).toBe(true);

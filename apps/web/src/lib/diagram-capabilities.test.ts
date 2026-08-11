@@ -111,9 +111,11 @@ describe('diagram capability catalog', () => {
     const cynefin = classifyDiagramCapability('cynefin');
     const treemap = classifyDiagramCapability('treemap');
     const venn = classifyDiagramCapability('venn');
+    const wardley = classifyDiagramCapability('wardley');
 
     expect(treemap).toMatchObject({ adapter: 'treemap', diagramType: 'treemap', editingMode: 'semantic-form', kind: 'generic' });
     expect(venn).toMatchObject({ adapter: 'venn', diagramType: 'venn', editingMode: 'semantic-form', kind: 'generic' });
+    expect(wardley).toMatchObject({ adapter: 'wardley', diagramType: 'wardley', editingMode: 'semantic-form', kind: 'generic' });
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A -->', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
@@ -150,6 +152,12 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(cynefin).getOperationResult('cynefin-beta\n  complex\n    "Emergent"', 'add-domain')).toEqual({ supported: false, reason: 'unsupported-operation' });
     expect(getDiagramSourceModelAdapter(treemap).getOperationResult('treemap-beta\n  "Root"\n    "Leaf": 1', 'reparent-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(venn).getOperationResult('venn-beta\n  set A: 1\n  set B: 1\n  union A, B: 0.5', 'add-style')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(wardley).getOperationResult('wardley-beta\n  component A [0.5, 0.5]', 'add-node')).toEqual({ supported: true });
+    for (const operation of ['add-node', 'edit-node', 'delete-node', 'move-node', 'rename-node', 'add-link', 'edit-link', 'delete-link', 'move-link', 'add-evolution', 'edit-evolution', 'delete-evolution', 'add-note', 'edit-note', 'delete-note', 'move-note', 'add-pipeline', 'delete-pipeline']) {
+      expect(getDiagramSourceModelAdapter(wardley).getOperationResult('wardley-beta\n  component A [0.5, 0.5]', operation)).toEqual({ supported: true });
+    }
+    expect(getDiagramSourceModelAdapter(wardley).getOperationResult('wardley-beta\n  title Advanced\n  component A [0.5, 0.5]', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(wardley).getOperationResult('wardley-beta\n  component A [0.5, 0.5]\n  pipeline A {\n  }', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
     for (const operation of ['add-node', 'edit-node', 'delete-node', 'move-node', 'reparent-node']) {
       expect(getDiagramSourceModelAdapter(treemap).getOperationResult('treemap-beta\n  "Root"\n    "Leaf": 1', operation)).toEqual({ supported: true });
     }

@@ -113,6 +113,10 @@ import { addMindmapNode, deleteMindmapNode, editMindmapNode, getMindmapDiagramSn
 import { addTreeViewNode, deleteTreeViewNode, editTreeViewNode, getTreeViewDiagramSnapshot, moveTreeViewNode, reparentTreeViewNode } from '../lib/treeview-mutations';
 import { addIshikawaCause, deleteIshikawaCause, editIshikawaCause, editIshikawaEffect, getIshikawaDiagramSnapshot, moveIshikawaCause, reparentIshikawaCause, setIshikawaEffect } from '../lib/ishikawa-mutations';
 import { addRailroadRule, deleteRailroadRule, editRailroadRule, getRailroadDiagramSnapshot, moveRailroadRule, renameRailroadRule } from '../lib/railroad-mutations';
+import { addPieSlice, deletePieSlice, editPieSlice, editPieTitle, getPieDiagramSnapshot, movePieSlice, setPieShowData } from '../lib/pie-mutations';
+import { addQuadrantPoint, deleteQuadrantPoint, editQuadrantPoint, editQuadrantTitle, getQuadrantDiagramSnapshot, moveQuadrantPoint, setQuadrantAxis, setQuadrantLabel } from '../lib/quadrant-mutations';
+import { addXySeries, deleteXySeries, editXyAxis, editXySeries, editXyTitle, getXyChartDiagramSnapshot, moveXySeries, setXyOrientation } from '../lib/xychart-mutations';
+import { addRadarAxis, addRadarCurve, deleteRadarAxis, deleteRadarCurve, editRadarAxis, editRadarCurve, editRadarOptions, editRadarTitle, getRadarDiagramSnapshot, moveRadarAxis, moveRadarCurve } from '../lib/radar-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -914,18 +918,20 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   }, [activeDiagramId, runMutation]);
 
   const mutateCanvasSource = useCallback((mutate: (source: string) => string, detail: string) => {
-    if (!activeDiagram || !collaboration || historyPreview !== null) return;
+    if (!activeDiagram || !collaboration || historyPreview !== null) return false;
     try {
       const previousText = activeDiagram.yText.toString();
       const nextText = mutate(previousText);
-      if (nextText === previousText) return;
+      if (nextText === previousText) return true;
       setMutationError(null);
       collaboration.doc.transact(() => {
         applyDiff(activeDiagram.yText, nextText, previousText);
       }, collaborationOrigins.visual);
       addActivityRef.current?.('edited', detail, activeDiagram.id);
+      return true;
     } catch (error) {
       setMutationError(error instanceof Error ? error.message : 'The diagram update could not be applied.');
+      return false;
     }
   }, [activeDiagram, collaboration, historyPreview]);
 
@@ -1775,6 +1781,10 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isTreeView = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'tree-view');
   const isIshikawa = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'ishikawa');
   const isRailroad = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'railroad');
+  const isPie = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'pie');
+  const isQuadrant = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'quadrant');
+  const isXyChart = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'xy-chart');
+  const isRadar = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'radar');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1811,6 +1821,10 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const treeViewDiagram = useMemo(() => isTreeView ? getTreeViewDiagramSnapshot(renderedMermaidText) : null, [isTreeView, renderedMermaidText]);
   const ishikawaDiagram = useMemo(() => isIshikawa ? getIshikawaDiagramSnapshot(renderedMermaidText) : null, [isIshikawa, renderedMermaidText]);
   const railroadDiagram = useMemo(() => isRailroad ? getRailroadDiagramSnapshot(renderedMermaidText) : null, [isRailroad, renderedMermaidText]);
+  const pieDiagram = useMemo(() => isPie ? getPieDiagramSnapshot(renderedMermaidText) : null, [isPie, renderedMermaidText]);
+  const quadrantDiagram = useMemo(() => isQuadrant ? getQuadrantDiagramSnapshot(renderedMermaidText) : null, [isQuadrant, renderedMermaidText]);
+  const xyChartDiagram = useMemo(() => isXyChart ? getXyChartDiagramSnapshot(renderedMermaidText) : null, [isXyChart, renderedMermaidText]);
+  const radarDiagram = useMemo(() => isRadar ? getRadarDiagramSnapshot(renderedMermaidText) : null, [isRadar, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2287,6 +2301,14 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             ishikawaDiagram={ishikawaDiagram}
             isRailroad={isRailroad}
             railroadDiagram={railroadDiagram}
+            isPie={isPie}
+            pieDiagram={pieDiagram}
+            isQuadrant={isQuadrant}
+            quadrantDiagram={quadrantDiagram}
+            isXyChart={isXyChart}
+            xyChartDiagram={xyChartDiagram}
+            isRadar={isRadar}
+            radarDiagram={radarDiagram}
             nodePositions={renderedNodePositions}
             overlay={overlayController && activeDiagramId ? {
               diagramId: activeDiagramId,
@@ -2568,6 +2590,36 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onRenameRailroadRule={(identity, name) => { mutateCanvasSource((source) => renameRailroadRule(source, identity, name), 'Renamed a Railroad rule'); }}
             onDeleteRailroadRule={(identity) => { mutateCanvasSource((source) => deleteRailroadRule(source, identity), 'Deleted a Railroad rule'); }}
             onMoveRailroadRule={(identity, direction) => { mutateCanvasSource((source) => moveRailroadRule(source, identity, direction), 'Reordered Railroad rules'); }}
+            onEditPieTitle={(title) => { mutateCanvasSource((source) => editPieTitle(source, title), 'Updated the Pie title'); }}
+            onSetPieShowData={(showData) => { mutateCanvasSource((source) => setPieShowData(source, showData), 'Updated Pie value labels'); }}
+            onAddPieSlice={(slice) => mutateCanvasSource((source) => addPieSlice(source, slice), 'Added a Pie slice')}
+            onEditPieSlice={(identity, patch) => mutateCanvasSource((source) => editPieSlice(source, identity, patch), 'Edited a Pie slice')}
+            onDeletePieSlice={(identity) => { mutateCanvasSource((source) => deletePieSlice(source, identity), 'Deleted a Pie slice'); }}
+            onMovePieSlice={(identity, direction) => { mutateCanvasSource((source) => movePieSlice(source, identity, direction), 'Reordered Pie slices'); }}
+            onEditQuadrantTitle={(title) => { mutateCanvasSource((source) => editQuadrantTitle(source, title), 'Updated the Quadrant title'); }}
+            onSetQuadrantAxis={(axis, value) => { mutateCanvasSource((source) => setQuadrantAxis(source, axis, value), 'Updated a Quadrant axis'); }}
+            onSetQuadrantLabel={(quadrant, label) => { mutateCanvasSource((source) => setQuadrantLabel(source, quadrant, label), 'Updated a Quadrant label'); }}
+            onAddQuadrantPoint={(point) => mutateCanvasSource((source) => addQuadrantPoint(source, point), 'Added a Quadrant point')}
+            onEditQuadrantPoint={(identity, patch) => mutateCanvasSource((source) => editQuadrantPoint(source, identity, patch), 'Edited a Quadrant point')}
+            onDeleteQuadrantPoint={(identity) => { mutateCanvasSource((source) => deleteQuadrantPoint(source, identity), 'Deleted a Quadrant point'); }}
+            onMoveQuadrantPoint={(identity, direction) => { mutateCanvasSource((source) => moveQuadrantPoint(source, identity, direction), 'Reordered Quadrant points'); }}
+            onEditXyTitle={(title) => { mutateCanvasSource((source) => editXyTitle(source, title), 'Updated the XY chart title'); }}
+            onSetXyOrientation={(orientation) => { mutateCanvasSource((source) => setXyOrientation(source, orientation), 'Updated the XY chart orientation'); }}
+            onEditXyAxis={(axis, value) => mutateCanvasSource((source) => editXyAxis(source, axis, value), 'Updated an XY chart axis')}
+            onAddXySeries={(series) => mutateCanvasSource((source) => addXySeries(source, series), 'Added an XY chart series')}
+            onEditXySeries={(identity, patch) => mutateCanvasSource((source) => editXySeries(source, identity, patch), 'Edited an XY chart series')}
+            onDeleteXySeries={(identity) => { mutateCanvasSource((source) => deleteXySeries(source, identity), 'Deleted an XY chart series'); }}
+            onMoveXySeries={(identity, direction) => { mutateCanvasSource((source) => moveXySeries(source, identity, direction), 'Reordered XY chart series'); }}
+            onEditRadarTitle={(title) => { mutateCanvasSource((source) => editRadarTitle(source, title), 'Updated the Radar title'); }}
+            onEditRadarOptions={(patch) => mutateCanvasSource((source) => editRadarOptions(source, patch), 'Updated Radar options')}
+            onAddRadarAxis={(axis, values) => mutateCanvasSource((source) => addRadarAxis(source, axis, values), 'Added a Radar axis')}
+            onEditRadarAxis={(identity, patch) => { mutateCanvasSource((source) => editRadarAxis(source, identity, patch), 'Edited a Radar axis'); }}
+            onDeleteRadarAxis={(identity) => { mutateCanvasSource((source) => deleteRadarAxis(source, identity), 'Deleted a Radar axis'); }}
+            onMoveRadarAxis={(identity, direction) => { mutateCanvasSource((source) => moveRadarAxis(source, identity, direction), 'Reordered Radar axes'); }}
+            onAddRadarCurve={(curve) => mutateCanvasSource((source) => addRadarCurve(source, curve), 'Added a Radar curve')}
+            onEditRadarCurve={(identity, patch) => mutateCanvasSource((source) => editRadarCurve(source, identity, patch), 'Edited a Radar curve')}
+            onDeleteRadarCurve={(identity) => { mutateCanvasSource((source) => deleteRadarCurve(source, identity), 'Deleted a Radar curve'); }}
+            onMoveRadarCurve={(identity, direction) => { mutateCanvasSource((source) => moveRadarCurve(source, identity, direction), 'Reordered Radar curves'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onLaserChange={handleLaserChange}

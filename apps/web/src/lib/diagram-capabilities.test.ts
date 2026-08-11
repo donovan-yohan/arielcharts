@@ -102,6 +102,10 @@ describe('diagram capability catalog', () => {
     const treeView = classifyDiagramCapability('treeView');
     const ishikawa = classifyDiagramCapability('ishikawa');
     const railroad = classifyDiagramCapability('railroad');
+    const pie = classifyDiagramCapability('pie');
+    const quadrant = classifyDiagramCapability('quadrantChart');
+    const xyChart = classifyDiagramCapability('xychart');
+    const radar = classifyDiagramCapability('radar');
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A -->', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
@@ -127,6 +131,12 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(treeView).getOperationResult('treeView-beta\n  Root\n    child.txt', 'move-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(ishikawa).getOperationResult('ishikawa-beta\n  Effect\n  Cause', 'set-effect')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(railroad).getOperationResult('railroad-ebnf-beta\n  start = "x" ;', 'add-rule')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(pie).getOperationResult('pie showData\n  "A" : 1', 'add-slice')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(quadrant).getOperationResult('quadrantChart\n  A: [0.5, 0.5]', 'edit-point')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(xyChart).getOperationResult('xychart-beta\n  x-axis ["A", "B"]\n  y-axis 0 --> 3\n  line [1, 2]', 'edit-axis')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(radar).getOperationResult('radar-beta\n  axis a\n  axis b\n  axis c\n  curve one { 1, 2, 3 }', 'edit-options')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(quadrant).getOperationResult('quadrantChart\n  A: [1.2, 0.5]', 'edit-point')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(radar).getOperationResult('radar-beta\n  axis a\n  axis b', 'add-axis')).toEqual({ supported: false, reason: 'unrepresentable' });
     const noteOnlySequence = 'sequenceDiagram\n  Note over A: details';
     await expect(mermaid.parse(noteOnlySequence)).resolves.toMatchObject({ diagramType: 'sequence' });
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult(noteOnlySequence, 'add-message')).toEqual({ supported: true });
@@ -161,6 +171,10 @@ describe('diagram capability catalog', () => {
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('treeView'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('ishikawa'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('railroad'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('pie'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('quadrantChart'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('xychart'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('radar'))).toBe(true);
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('flowchart-v2'))).toBe('Flowchart · editable · canvas');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('sequence'))).toBe('Sequence · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('er'))).toBe('Entity relationship · editable · form');
@@ -180,6 +194,10 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('treeView'))).toBe('Tree view · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('ishikawa'))).toBe('Ishikawa · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('railroad'))).toBe('Railroad · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('pie'))).toBe('Pie · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('quadrantChart'))).toBe('Quadrant chart · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('xychart'))).toBe('XY chart · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('radar'))).toBe('Radar · editable · form');
   });
 
   it('labels a current unrepresentable structural source as source-only', () => {
@@ -199,6 +217,10 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('journey'), 'journey\n  Task: 6: Alice')).toBe('User journey · source only');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('gitGraph'), 'gitGraph\n  checkout missing')).toBe('Gitgraph · source only');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('railroad'), 'railroad-beta\n  start = optional(terminal("x"));')).toBe('Railroad · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('pie'), 'pie\n  "A" : -1')).toBe('Pie · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('quadrantChart'), 'quadrantChart\n  A: [2, 0.5]')).toBe('Quadrant chart · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('xychart'), 'xychart-beta\n  x-axis [A, B]\n  bar [1, 2]')).toBe('XY chart · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('radar'), 'radar-beta\n  axis A, B\n  curve one{1, 2}')).toBe('Radar · source only');
     expect(getDiagramCapabilityLabel(null, 'sequenceDiagram\nA->>B: request')).toBe('Mermaid · source only');
   });
 });

@@ -206,6 +206,39 @@ const RAILROAD_DIAGRAM_FIXTURES = [
   { addExpression: '"tail"', editedExpression: '"end"', header: 'railroad-peg-beta', notation: 'PEG', operator: '<-', source: `railroad-peg-beta
   start <- "x" ;` },
 ] as const;
+const PIE_DIAGRAM_FIXTURE = `pie
+  title Allocation
+  "Build" : 3
+  "Test" : 2`;
+const QUADRANT_DIAGRAM_FIXTURE = `quadrantChart
+  title Portfolio
+  x-axis Low impact --> High impact
+  y-axis Low effort --> High effort
+  quadrant-1 Invest
+  quadrant-2 Explore
+  quadrant-3 Avoid
+  quadrant-4 Improve
+  Alpha: [0.2, 0.8]
+  Beta: [0.7, 0.3]`;
+const XY_CHART_DIAGRAM_FIXTURE = `xychart-beta horizontal
+  title Revenue
+  x-axis "Month" ["Jan", "Feb", "Mar"]
+  y-axis "Sales" 0 --> 10
+  line "Recurring" [2, 4, 6]
+  bar "One time" [1, 3, 5]`;
+const RADAR_DIAGRAM_FIXTURE = `radar-beta
+  title Team skills
+  axis speed ["Speed"]
+  axis quality ["Quality"]
+  axis safety ["Safety"]
+  axis cost ["Cost"]
+  curve current ["Current"] { 4, 5, 3, 2 }
+  curve target ["Target"] { 5, 5, 4, 3 }
+  ticks 5
+  min 0
+  max 5
+  showLegend true
+  graticule polygon`;
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
@@ -787,6 +820,9 @@ async function closeThemeSettingsWithEscape(
   const label = preference[0]?.toUpperCase() + preference.slice(1);
   const radio = dialog.getByRole('radio', { checked: true, name: new RegExp(`^${label}(?:\\s|$)`, 'u') });
   await expect(radio).toBeChecked();
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
+  });
   await radio.focus();
   await expect(radio).toBeFocused();
   await beginWorkspaceSettingsTransitionTrace(page);
@@ -1539,6 +1575,86 @@ async function expectRailroadSemanticEditor(page: Page): Promise<void> {
     await expect(page.getByTestId('railroad-editor-controls')).toHaveCount(0);
   }
   assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS));
+}
+
+async function expectNumericSemanticEditors(page: Page): Promise<void> {
+  const anchorsBefore = await snapshotAnchors(page, ANCHORS); const transformBefore = await canvasTransform(page);
+  await selectThemePreference(page, 'light');
+
+  await replaceSource(page, PIE_DIAGRAM_FIXTURE); await waitForSource(page, PIE_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Pie · editable · form'); await closeFlyout(page, 'source');
+  const pie = page.getByTestId('pie-editor-controls'); const addSlice = pie.getByRole('button', { name: 'Add slice', exact: true }); await scrollErControlIntoView(addSlice); await assertTouchTarget(page, addSlice, 'Pie add-slice control');
+  await pie.getByLabel('Pie title').fill('Delivery allocation'); await assertAndClickBoardControl(page, pie.getByRole('button', { name: 'Save Pie options', exact: true }), 'Pie options control'); const pieShowData = pie.getByLabel('Pie show data'); await scrollErControlIntoView(pieShowData); await assertTouchTarget(page, pieShowData, 'Pie show-data control'); await pieShowData.check();
+  await pie.getByLabel('New Pie slice label').fill('Docs'); await pie.getByLabel('New Pie slice value').fill('1'); await assertAndClickBoardControl(page, addSlice, 'Pie add-slice control');
+  const docs = pie.getByRole('form', { name: 'Pie slice Docs', exact: true }); const docsValue = docs.getByLabel('Pie slice Docs value'); await docsValue.click(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('Backspace'); await page.keyboard.type('4.25'); await assertAndClickBoardControl(page, docs.getByRole('button', { name: 'Save', exact: true }), 'Pie edit-slice control'); await assertAndClickBoardControl(page, docs.getByLabel('Move Pie slice Docs up'), 'Pie reorder-slice control'); await assertAndClickBoardControl(page, pie.getByLabel('Delete Pie slice Test'), 'Pie delete-slice control');
+  const expectedPie = `pie showData
+  title Delivery allocation
+  "Build" : 3
+  "Docs" : 4.25`;
+  await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedPie); await closeFlyout(page, 'source');
+  await docsValue.click(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('Backspace'); await assertAndClickBoardControl(page, docs.getByRole('button', { name: 'Save', exact: true }), 'Pie empty numeric control'); await expect(pie.getByRole('alert')).toContainText('finite number'); await expect(docsValue).toHaveValue(''); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedPie); await closeFlyout(page, 'source');
+  await pie.getByLabel('New Pie slice label').fill('Invalid'); const invalidPieValue = pie.getByLabel('New Pie slice value'); await invalidPieValue.fill('-1'); await assertAndClickBoardControl(page, addSlice, 'Pie invalid numeric control'); await expect(page.getByTestId('mutation-error-banner')).toContainText('greater than or equal to zero'); await expect(invalidPieValue).toHaveValue('-1'); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedPie); await closeFlyout(page, 'source');
+  const advancedPie = 'pie title Advanced\n  "A" : 1'; await replaceSource(page, advancedPie); await waitForSource(page, advancedPie); await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('Pie · source only'); await closeFlyout(page, 'source'); await expect(pie).toHaveCount(0);
+
+  await replaceSource(page, QUADRANT_DIAGRAM_FIXTURE); await waitForSource(page, QUADRANT_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Quadrant chart · editable · form'); await closeFlyout(page, 'source');
+  const quadrant = page.getByTestId('quadrant-editor-controls'); const addPoint = quadrant.getByRole('button', { name: 'Add point', exact: true }); await scrollErControlIntoView(addPoint); await assertTouchTarget(page, addPoint, 'Quadrant add-point control');
+  await quadrant.getByLabel('Quadrant title text').fill('Delivery portfolio'); await assertAndClickBoardControl(page, quadrant.getByRole('button', { name: 'Save title', exact: true }), 'Quadrant title control'); await quadrant.getByLabel('Quadrant x-axis start').fill('Small'); await quadrant.getByLabel('Quadrant x-axis end').fill('Large'); await assertAndClickBoardControl(page, quadrant.getByRole('button', { name: 'Save x-axis', exact: true }), 'Quadrant axis control'); await quadrant.getByLabel('Quadrant 1 label text').fill('Commit'); await assertAndClickBoardControl(page, quadrant.getByRole('button', { name: 'Save quadrant 1', exact: true }), 'Quadrant label control');
+  await quadrant.getByLabel('New Quadrant point label').fill('Gamma'); await quadrant.getByLabel('New Quadrant point x').fill('0.5'); await quadrant.getByLabel('New Quadrant point y').fill('0.5'); await assertAndClickBoardControl(page, addPoint, 'Quadrant add-point control'); const gamma = quadrant.getByRole('form', { name: 'Quadrant point Gamma', exact: true }); const gammaX = gamma.getByLabel('Quadrant point Gamma x'); const gammaY = gamma.getByLabel('Quadrant point Gamma y'); await gammaX.click(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('Backspace'); await page.keyboard.type('0.625'); await gammaY.fill('Infinity'); await gamma.getByLabel('Quadrant point Gamma radius').fill('6'); await gamma.getByLabel('Quadrant point Gamma color').fill('#336699'); const quadrantBeforeInvalid = `quadrantChart
+  title Delivery portfolio
+  x-axis Small --> Large
+  y-axis Low effort --> High effort
+  quadrant-1 Commit
+  quadrant-2 Explore
+  quadrant-3 Avoid
+  quadrant-4 Improve
+  Alpha: [0.2, 0.8]
+  Beta: [0.7, 0.3]
+  Gamma: [0.5, 0.5]`; await assertAndClickBoardControl(page, gamma.getByRole('button', { name: 'Save', exact: true }), 'Quadrant invalid numeric control'); await expect(quadrant.getByRole('alert')).toContainText('finite number'); await expect(gammaX).toHaveValue('0.625'); await expect(gammaY).toHaveValue('Infinity'); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(quadrantBeforeInvalid); await closeFlyout(page, 'source'); await gammaY.fill('0.4'); await assertAndClickBoardControl(page, gamma.getByRole('button', { name: 'Save', exact: true }), 'Quadrant edit-point control'); await assertAndClickBoardControl(page, gamma.getByLabel('Move Quadrant point Gamma up'), 'Quadrant reorder-point control'); await assertAndClickBoardControl(page, quadrant.getByLabel('Delete Quadrant point Beta'), 'Quadrant delete-point control');
+  const expectedQuadrant = `quadrantChart
+  title Delivery portfolio
+  x-axis Small --> Large
+  y-axis Low effort --> High effort
+  quadrant-1 Commit
+  quadrant-2 Explore
+  quadrant-3 Avoid
+  quadrant-4 Improve
+  Alpha: [0.2, 0.8]
+  Gamma: [0.625, 0.4] radius: 6, color: #336699`;
+  await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedQuadrant); await closeFlyout(page, 'source');
+  const advancedQuadrant = 'quadrantChart\n  title Advanced: source\n  A: [0.5, 0.5]'; await replaceSource(page, advancedQuadrant); await waitForSource(page, advancedQuadrant); await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('Quadrant chart · source only'); await closeFlyout(page, 'source'); await expect(quadrant).toHaveCount(0);
+
+  await replaceSource(page, XY_CHART_DIAGRAM_FIXTURE); await waitForSource(page, XY_CHART_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'XY chart · editable · form'); await closeFlyout(page, 'source');
+  const xy = page.getByTestId('xychart-editor-controls'); const addSeries = xy.getByRole('button', { name: 'Add series', exact: true }); await scrollErControlIntoView(addSeries); await assertTouchTarget(page, addSeries, 'XY add-series control'); await xy.getByLabel('XY chart title').fill('Bookings'); await assertAndClickBoardControl(page, xy.getByRole('button', { name: 'Save XY options', exact: true }), 'XY options control'); await xy.getByLabel('XY chart orientation').selectOption('vertical'); await xy.getByLabel('XY x-axis label').fill('Quarter'); await xy.getByLabel('XY x-axis values').fill('Q1, Q2, Q3'); await assertAndClickBoardControl(page, xy.getByRole('button', { name: 'Save x-axis', exact: true }), 'XY x-axis control'); await xy.getByLabel('XY y-axis label').fill('Units'); await xy.getByLabel('XY y-axis values').fill('0, 12'); await assertAndClickBoardControl(page, xy.getByRole('button', { name: 'Save y-axis', exact: true }), 'XY y-axis control');
+  await xy.getByLabel('New XY series label').fill('Forecast'); await xy.getByLabel('New XY series values').fill('4, 5, 7'); await assertAndClickBoardControl(page, addSeries, 'XY add-series control'); const forecast = xy.getByRole('form', { name: 'XY series Forecast', exact: true }); await forecast.getByLabel('XY series Forecast kind').selectOption('bar'); await forecast.getByLabel('XY series Forecast values').fill('5, 6, 8'); await assertAndClickBoardControl(page, forecast.getByRole('button', { name: 'Save', exact: true }), 'XY edit-series control'); await assertAndClickBoardControl(page, forecast.getByLabel('Move XY series Forecast up'), 'XY reorder-series control'); await assertAndClickBoardControl(page, xy.getByLabel('Delete XY series One time'), 'XY delete-series control');
+  const expectedXy = `xychart-beta vertical
+  title Bookings
+  x-axis "Quarter" ["Q1", "Q2", "Q3"]
+  y-axis "Units" 0 --> 12
+  line "Recurring" [2, 4, 6]
+  bar "Forecast" [5, 6, 8]`;
+  await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedXy); await closeFlyout(page, 'source');
+  const advancedXy = 'xychart-beta\n  x-axis [A, B]\n  bar [1, 2]'; await replaceSource(page, advancedXy); await waitForSource(page, advancedXy); await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('XY chart · source only'); await closeFlyout(page, 'source'); await expect(xy).toHaveCount(0);
+
+  await selectThemePreference(page, 'dark'); await replaceSource(page, RADAR_DIAGRAM_FIXTURE); await waitForSource(page, RADAR_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Radar · editable · form'); await closeFlyout(page, 'source');
+  const radar = page.getByTestId('radar-editor-controls'); const addCurve = radar.getByRole('button', { name: 'Add curve', exact: true }); await scrollErControlIntoView(addCurve); await assertTouchTarget(page, addCurve, 'Radar add-curve control'); const saveRadarOptions = radar.getByRole('button', { name: 'Save Radar options', exact: true }); await assertAndClickBoardControl(page, saveRadarOptions, 'Radar unchanged options control'); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(RADAR_DIAGRAM_FIXTURE); await closeFlyout(page, 'source'); await radar.getByLabel('Radar set maximum').uncheck(); await assertAndClickBoardControl(page, saveRadarOptions, 'Radar remove-maximum control'); const radarWithoutMaximum = RADAR_DIAGRAM_FIXTURE.replace('\n  max 5', ''); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(radarWithoutMaximum); await closeFlyout(page, 'source'); await radar.getByLabel('Radar title text').fill('Updated skills'); await assertAndClickBoardControl(page, radar.getByRole('button', { name: 'Save title', exact: true }), 'Radar title control'); await radar.getByLabel('Radar set maximum').check(); await radar.getByLabel('Radar maximum').fill('6'); await radar.getByLabel('Radar ticks').fill('6'); await radar.getByLabel('Radar graticule').selectOption('circle'); const radarShowLegend = radar.getByLabel('Radar show legend'); await scrollErControlIntoView(radarShowLegend); await assertTouchTarget(page, radarShowLegend, 'Radar show-legend control'); await radarShowLegend.uncheck(); await assertAndClickBoardControl(page, saveRadarOptions, 'Radar options control');
+  await radar.getByLabel('New Radar curve name').fill('forecast'); await radar.getByLabel('New Radar curve label').fill('Forecast'); await radar.getByLabel('New Radar curve values').fill('3, 4, 4, 4'); await assertAndClickBoardControl(page, addCurve, 'Radar add-curve control'); const forecastCurve = radar.getByRole('form', { name: 'Radar curve forecast', exact: true }); await forecastCurve.getByLabel('Radar curve forecast values').fill('4, 4, 4, 4'); await assertAndClickBoardControl(page, forecastCurve.getByRole('button', { name: 'Save', exact: true }), 'Radar edit-curve control'); await assertAndClickBoardControl(page, forecastCurve.getByLabel('Move Radar curve forecast up'), 'Radar reorder-curve control'); await assertAndClickBoardControl(page, radar.getByLabel('Delete Radar curve target'), 'Radar delete-curve control');
+  await radar.getByLabel('New Radar axis name').fill('scope'); await radar.getByLabel('New Radar axis label').fill('Scope'); await radar.getByLabel('New Radar axis curve values').fill('4, 4'); await assertAndClickBoardControl(page, radar.getByRole('button', { name: 'Add axis', exact: true }), 'Radar add-axis control'); const scope = radar.getByRole('form', { name: 'Radar axis scope', exact: true }); await assertAndClickBoardControl(page, scope.getByLabel('Move Radar axis scope up'), 'Radar reorder-axis control'); await scope.getByLabel('Radar axis scope name').fill('reach'); await scope.getByLabel('Radar axis scope label').fill('Reach'); await assertAndClickBoardControl(page, scope.getByRole('button', { name: 'Save', exact: true }), 'Radar edit-axis control'); await assertAndClickBoardControl(page, radar.getByLabel('Delete Radar axis reach'), 'Radar delete-axis control');
+  const expectedRadar = `radar-beta
+  title Updated skills
+  axis speed ["Speed"]
+  axis quality ["Quality"]
+  axis safety ["Safety"]
+  axis cost ["Cost"]
+  curve current ["Current"] { 4, 5, 3, 2 }
+  curve forecast ["Forecast"] { 4, 4, 4, 4 }
+  ticks 6
+  min 0
+  showLegend false
+  graticule circle
+  max 6`;
+  await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedRadar); await closeFlyout(page, 'source');
+  const advancedRadar = 'radar-beta\n  axis A, B, C\n  curve one{1, 2, 3}'; await replaceSource(page, advancedRadar); await waitForSource(page, advancedRadar); await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('Radar · source only'); await closeFlyout(page, 'source'); await expect(radar).toHaveCount(0);
+
+  await selectThemePreference(page, 'light'); assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS)); assert(await canvasTransform(page) === transformBefore, 'Numeric semantic forms changed the generic Mermaid camera transform.');
 }
 
 async function assertAndClickBoardControl(page: Page, target: Locator, label: string): Promise<void> {
@@ -2857,6 +2973,39 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
 
 const PHONE_CONTEXT_OPTIONS = { deviceScaleFactor: 1, hasTouch: true, isMobile: true } as const;
 
+async function expectResponsiveNumericPanel(page: Page, label: 'mobile-390' | 'mobile-320'): Promise<void> {
+  const source = `pie showData
+  title Responsive allocation
+  "One" : 1
+  "Two" : 2
+  "Three" : 3
+  "Four" : 4
+  "Five" : 5
+  "Six" : 6
+  "Seven" : 7
+  "Eight" : 8`;
+  await replaceSource(page, source); await waitForSource(page, source); await waitForSemanticMode(page, 'Pie · editable · form'); await closeFlyout(page, 'source');
+  const panel = page.getByTestId('pie-editor-controls'); await panel.waitFor({ state: 'visible', timeout: 15_000 }); await assertContainedInViewport(page, panel, `${label} Pie semantic panel`);
+  const geometry = await panel.evaluate((element) => { const panelBounds = element.getBoundingClientRect(); const canvasBounds = element.closest('[data-testid="diagram-canvas"]')?.getBoundingClientRect(); return { bottom: panelBounds.bottom, canvasBottom: canvasBounds?.bottom ?? -1, canvasTop: canvasBounds?.top ?? -1, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, top: panelBounds.top }; });
+  assert(geometry.top >= geometry.canvasTop - 0.5 && geometry.bottom <= geometry.canvasBottom + 0.5, `${label} Pie panel escaped the measured canvas bounds: ${JSON.stringify(geometry)}.`); assert(geometry.scrollHeight > geometry.clientHeight, `${label} Pie panel did not provide internal scrolling: ${JSON.stringify(geometry)}.`);
+  const overlayToggle = page.getByRole('button', { name: 'Overlay tools', exact: true }); await assertTouchTarget(page, overlayToggle, `${label} closed overlay toggle above numeric panel`);
+  const add = panel.getByRole('button', { name: 'Add slice', exact: true }); const input = panel.getByLabel('New Pie slice value'); const showData = panel.getByLabel('Pie show data'); await scrollErControlIntoView(showData); await assertTouchTarget(page, showData, `${label} Pie show-data checkbox`); await scrollErControlIntoView(add); await assertTouchTarget(page, add, `${label} Pie add-slice control`); await scrollErControlIntoView(input); await assertTouchTarget(page, input, `${label} Pie numeric input`); await assertTouchTarget(page, overlayToggle, `${label} closed overlay toggle after numeric panel scroll`);
+  const [toggleBounds, inputBounds, canvasBounds] = await Promise.all([overlayToggle.boundingBox(), input.boundingBox(), page.getByTestId('diagram-canvas').boundingBox()]);
+  assert(toggleBounds && inputBounds && canvasBounds, `${label} needs overlay toggle, Pie input, and canvas bounds.`);
+  assert(toggleBounds.y >= canvasBounds.y + 6 && toggleBounds.y <= canvasBounds.y + 12,
+    `${label} closed overlay toggle did not use the reserved top inset: ${JSON.stringify({ canvasBounds, toggleBounds })}.`);
+  assert(toggleBounds.x + toggleBounds.width <= inputBounds.x || inputBounds.x + inputBounds.width <= toggleBounds.x
+    || toggleBounds.y + toggleBounds.height <= inputBounds.y || inputBounds.y + inputBounds.height <= toggleBounds.y,
+  `${label} closed overlay toggle overlaps the centered Pie input: ${JSON.stringify({ inputBounds, toggleBounds })}.`);
+  await input.fill('-1'); await assertAndClickBoardControl(page, add, `${label} invalid Pie mutation control`); const mutationBanner = page.getByTestId('mutation-error-banner'); await mutationBanner.waitFor({ state: 'visible', timeout: 15_000 }); await assertClosedOverlayToggleBesideError(page, mutationBanner, `${label} mutation-error coexistence`); await input.fill('1'); await assertAndClickBoardControl(page, add, `${label} valid Pie mutation control`); await mutationBanner.waitFor({ state: 'detached', timeout: 15_000 });
+  const lastDelete = panel.getByLabel('Delete Pie slice Eight'); await scrollErControlIntoView(lastDelete); await assertTouchTarget(page, lastDelete, `${label} Pie scrolled delete control`); await lastDelete.focus(); assert(await lastDelete.evaluate((element) => document.activeElement === element), `${label} Pie scrolled control was not keyboard focusable.`);
+  const keyboardSource = 'pie\n  title Keyboard source\n  "Saved" : 5'; const editor = await ensureSourceFlyoutOpen(page); await editor.click(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('Backspace');
+  // Synthetic insertText can make y-codemirror reconcile awareness widget DOM into the document.
+  await page.keyboard.type('pie'); await page.keyboard.press('Enter'); await page.keyboard.type('  title Keyboard source'); await page.keyboard.press('Enter'); await page.keyboard.type('"Saved" : 5'); await waitForSource(page, keyboardSource); await closeFlyout(page, 'source'); await waitForSemanticMode(page, 'Pie · editable · form');
+  await replaceSource(page, RADAR_DIAGRAM_FIXTURE); await waitForSource(page, RADAR_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Radar · editable · form'); await closeFlyout(page, 'source'); const radarPanel = page.getByTestId('radar-editor-controls'); await assertContainedInViewport(page, radarPanel, `${label} Radar semantic panel`); const showLegend = radarPanel.getByLabel('Radar show legend'); await scrollErControlIntoView(showLegend); await assertTouchTarget(page, showLegend, `${label} Radar show-legend checkbox`);
+  await replaceSource(page, FLOWCHART_FIXTURE); await waitForSource(page, FLOWCHART_FIXTURE); await closeFlyout(page, 'source'); await waitForCanvas(page, 'flowchart');
+}
+
 async function waitForPhoneLayout(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
@@ -3054,6 +3203,24 @@ async function assertMobileErrorBannerScrollability(page: Page, label: string): 
   });
   assert(canvasReceivesTouchesOutsideBanner,
     `${label} global Mermaid error prevented the canvas receiving pointer hits outside the banner bounds.`);
+  if (label.startsWith('mobile-390') || label.startsWith('mobile-320')) {
+    await assertClosedOverlayToggleBesideError(page, banner, `${label} parse-error coexistence`);
+  }
+}
+
+async function assertClosedOverlayToggleBesideError(page: Page, banner: Locator, label: string): Promise<void> {
+  const toggle = page.getByRole('button', { name: 'Overlay tools', exact: true });
+  await assertTouchTarget(page, toggle, `${label} closed overlay toggle`);
+  await assertContainedInViewport(page, banner, `${label} banner`);
+  const [toggleBounds, bannerBounds, canvasBounds] = await Promise.all([
+    toggle.boundingBox(), banner.boundingBox(), page.getByTestId('diagram-canvas').boundingBox(),
+  ]);
+  assert(toggleBounds && bannerBounds && canvasBounds, `${label} needs toggle, banner, and canvas bounds.`);
+  assert(toggleBounds.y >= canvasBounds.y + 6 && toggleBounds.y <= canvasBounds.y + 12,
+    `${label} toggle left the reserved top inset: ${JSON.stringify({ canvasBounds, toggleBounds })}.`);
+  assert(toggleBounds.x + toggleBounds.width <= bannerBounds.x || bannerBounds.x + bannerBounds.width <= toggleBounds.x
+    || toggleBounds.y + toggleBounds.height <= bannerBounds.y || bannerBounds.y + bannerBounds.height <= toggleBounds.y,
+  `${label} toggle overlaps its error banner: ${JSON.stringify({ bannerBounds, toggleBounds })}.`);
 }
 
 async function waitForCameraChange(page: Page, previous: string, label: string): Promise<string> {
@@ -4110,6 +4277,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'Mindmap, TreeView, and Ishikawa semantic forms expose hit-tested hierarchy controls and fail closed for advanced source');
       await expectRailroadSemanticEditor(page);
       record(results, 'Railroad IR, EBNF, ABNF, and PEG forms expose source-backed production controls and fail closed for advanced grammar');
+      await expectNumericSemanticEditors(page);
+      record(results, 'Pie, Quadrant, XY, and Radar forms expose validated source-backed numeric controls and fail closed for advanced syntax');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');
@@ -4159,6 +4328,10 @@ async function validateWorkspaceUx(): Promise<void> {
         if (label.startsWith('mobile')) {
           await expectPhoneLiveCodingWorkspace(responsivePage, label, diagramName, mobilePinchResiduals);
           record(results, `${label} touch viewport, tabs, flyouts, camera, final-state overflow, screenshots, and canvas controls`);
+          if (label === 'mobile-390' || label === 'mobile-320') {
+            await expectResponsiveNumericPanel(responsivePage, label);
+            record(results, `${label} numeric semantic panel containment, scrolling, 44px controls, focus, and keyboard source editing`);
+          }
         }
         await expectNoDevelopmentIndicator(responsivePage);
         await saveScreenshot(responsivePage, `workspace-ux-${label}`);

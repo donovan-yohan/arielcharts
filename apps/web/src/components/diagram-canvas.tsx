@@ -392,6 +392,8 @@ export interface DiagramCanvasProps {
   onMoveRadarCurve?: (identity: RadarCurveIdentity, direction: 'up' | 'down') => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
+  onCameraChange?: (camera: CanvasCameraState) => void;
+  onLocalCanvasInteraction?: () => void;
   onLaserChange?: (value: { active: boolean; point?: CanvasWorldPoint }) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
   onChooseDiagramType?: (type: 'flowchart' | 'sequence') => void;
@@ -417,13 +419,16 @@ export interface DiagramCanvasProps {
   remoteCanvasPresence?: readonly CanvasPresenceEntry[];
   localLaser?: CanvasLaserState | null;
   localParticipant?: Participant;
+  followedCamera?: CanvasCameraState | null;
 }
 
-interface ViewportState {
+export interface CanvasCameraState {
   panX: number;
   panY: number;
   zoom: number;
 }
+
+interface ViewportState extends CanvasCameraState {}
 
 interface ScreenRect extends SvgBounds {}
 
@@ -910,6 +915,8 @@ export function DiagramCanvas({
   onMoveRadarCurve,
   onAddConnectedNode,
   onCanvasCursorChange,
+  onCameraChange,
+  onLocalCanvasInteraction,
   onLaserChange,
   onChangeNodeShape,
   onChooseDiagramType,
@@ -936,6 +943,7 @@ export function DiagramCanvas({
   remoteCanvasPresence = [],
   localLaser = null,
   localParticipant = { name: 'You', color: '#ef4444', type: 'human' },
+  followedCamera = null,
   selectedNodeIds,
   sequenceParticipants = [],
   sequenceDiagram = null,
@@ -1067,6 +1075,16 @@ export function DiagramCanvas({
   onRenderSettledRef.current = onRenderSettled;
   onCanvasCursorChangeRef.current = onCanvasCursorChange;
   onNodeEditingChangeRef.current = onNodeEditingChange;
+
+  useEffect(() => { onCameraChange?.(viewport); }, [onCameraChange, viewport]);
+
+  useEffect(() => {
+    if (!followedCamera) return;
+    setAnimateTransform(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    setViewport((current) => current.panX === followedCamera.panX
+      && current.panY === followedCamera.panY
+      && current.zoom === followedCamera.zoom ? current : followedCamera);
+  }, [followedCamera]);
 
   useEffect(() => () => {
     onCanvasCursorChangeRef.current?.(null);
@@ -1490,22 +1508,24 @@ export function DiagramCanvas({
     if (isSameNodeSelection(selectionRef.current, nodeIds)) {
       return;
     }
+    onLocalCanvasInteraction?.();
     selectionRef.current = nodeIds;
     onSelectedNodeIdsChange?.(nodeIds);
     if (!isControlledSelection) {
       setInternalSelection(nodeIds);
     }
-  }, [isControlledSelection, onSelectedNodeIdsChange, readOnly]);
+  }, [isControlledSelection, onLocalCanvasInteraction, onSelectedNodeIdsChange, readOnly]);
 
   const setMode = useCallback((nextMode: 'select' | 'connect' | 'laser') => {
     if (!isFlowchart && nextMode === 'connect') {
       return;
     }
+    onLocalCanvasInteraction?.();
     onInteractionModeChange?.(nextMode);
     if (interactionMode === undefined) {
       setInternalMode(nextMode);
     }
-  }, [interactionMode, isFlowchart, onInteractionModeChange]);
+  }, [interactionMode, isFlowchart, onInteractionModeChange, onLocalCanvasInteraction]);
 
   useEffect(() => {
     if (mode === 'laser') return;
@@ -1571,9 +1591,10 @@ export function DiagramCanvas({
   }, [canEditStructure, hasPersistedLayout, onResetSharedLayout, setNodePositions]);
 
   const zoomCanvas = useCallback((factor: number) => {
+    onLocalCanvasInteraction?.();
     setAnimateTransform(false);
     setViewport((current) => ({ ...current, zoom: clamp(current.zoom * factor, MIN_ZOOM, MAX_ZOOM) }));
-  }, []);
+  }, [onLocalCanvasInteraction]);
 
   const fitBoundsToViewport = useCallback((bounds: SvgBounds, animated: boolean) => {
     const container = containerRef.current;
@@ -1602,8 +1623,9 @@ export function DiagramCanvas({
       return;
     }
 
+    onLocalCanvasInteraction?.();
     fitBoundsToViewport(graphBounds, animated);
-  }, [fitBoundsToViewport, graphBounds]);
+  }, [fitBoundsToViewport, graphBounds, onLocalCanvasInteraction]);
 
   const focusNode = useCallback((nodeId: string | null) => {
     if (!nodeId) {
@@ -2161,12 +2183,13 @@ export function DiagramCanvas({
     }
 
     event.preventDefault();
+    onLocalCanvasInteraction?.();
     const rect = container.getBoundingClientRect();
     const gesture = getCanvasWheelGesture(event, { x: event.clientX, y: event.clientY });
 
     setAnimateTransform(false);
     setViewport((current) => applyCanvasWheelGesture(current, gesture, rect, MIN_ZOOM, MAX_ZOOM));
-  }, []);
+  }, [onLocalCanvasInteraction]);
 
   const handleSafariGestureStart = useCallback((event: Event) => {
     const container = containerRef.current;
@@ -2231,10 +2254,11 @@ export function DiagramCanvas({
       return;
     }
 
+    onLocalCanvasInteraction?.();
     const rect = container.getBoundingClientRect();
     setAnimateTransform(false);
     setViewport((current) => applyCanvasTouchGesture(current, gesture, rect, MIN_ZOOM, MAX_ZOOM));
-  }, []);
+  }, [onLocalCanvasInteraction]);
 
   const handleTouchPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const canvas = containerRef.current;
@@ -2360,12 +2384,14 @@ export function DiagramCanvas({
       return;
     }
 
+    onLocalCanvasInteraction?.();
+
     setAnimateTransform(false);
     setViewport((current) => ({
       ...current,
       ...nextPan,
     }));
-  }, [hitMap, mode, onCanvasCursorChange, onLaserChange, viewport.panX, viewport.panY, viewport.zoom]);
+  }, [hitMap, mode, onCanvasCursorChange, onLaserChange, onLocalCanvasInteraction, viewport.panX, viewport.panY, viewport.zoom]);
 
   const suppressCanvasClick = useCallback(() => {
     suppressCanvasClickRef.current = true;

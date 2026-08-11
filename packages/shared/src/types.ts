@@ -29,6 +29,21 @@ export interface CanvasLaserState {
   point?: CanvasWorldPoint;
 }
 
+export interface PresenterViewportState {
+  pan_x: number;
+  pan_y: number;
+  zoom: number;
+}
+
+/** Bounded live presentation signal. Never persist this outside Awareness. */
+export interface PresenterAwarenessState {
+  active: boolean;
+  sequence: number;
+  diagram_id: string;
+  viewport: PresenterViewportState;
+  spotlight_sequence?: number;
+}
+
 /**
  * Live canvas presence. Awareness transports this field only; it is never a
  * Yjs document value, activity entry, revision, or persisted session field.
@@ -52,6 +67,7 @@ export interface AwarenessState {
   user: Participant;
   cursor?: AwarenessCursor;
   canvas?: CanvasAwarenessState;
+  presenter?: PresenterAwarenessState;
 }
 
 export interface ActivityEvent {

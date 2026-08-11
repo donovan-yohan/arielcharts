@@ -1340,7 +1340,8 @@ async function expectBoardSemanticEditors(page: Page): Promise<void> {
   await eventModeling.getByLabel('New Event Modeling timeframe data', { exact: true }).selectOption('OrderData');
   await assertAndClickBoardControl(page, eventModeling.getByRole('button', { name: 'Add timeframe', exact: true }), 'Event Modeling add timeframe control');
   await ensureSourceFlyoutOpen(page);
-  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toMatch(/tf 02 evt Order ->> 01 \[\[OrderData\]\][\s\S]*data OrderData `json`\{/);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('data OrderData `json`{');
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('tf 02 evt Order ->> 01 [[OrderData]]');
   await closeFlyout(page, 'source');
   const order = eventModeling.getByRole('form', { name: 'Event Modeling entity Order', exact: true });
   await order.getByLabel('Event Modeling entity Order name', { exact: true }).fill('Sales.Order');

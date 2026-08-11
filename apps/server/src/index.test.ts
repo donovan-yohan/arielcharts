@@ -10,6 +10,8 @@ import { createApp } from './index.js';
 import { createActivityEvent } from './lib/activity.js';
 import type { ServerEnv } from './lib/types.js';
 import { SessionWebSocketServer } from './lib/websocket.js';
+import { canonicalWorkspaceJson } from './lib/workspace-import.js';
+import { createHash } from 'node:crypto';
 
 const MCP_PROTOCOL_VERSION = '2026-07-28';
 
@@ -84,6 +86,42 @@ describe('server integration', () => {
     });
   }
 
+  function signedWorkspaceBundle(source = 'flowchart TD\n  A[Import] --> B[Ready]') {
+    const payload = {
+      schema_version: 1 as const,
+      order: ['main'],
+      diagrams: [{
+        id: 'main', name: 'Imported',
+        mermaid: { schema_version: 1 as const, source },
+        layout: { schema_version: 1 as const, positions: { A: { x: 12, y: 24 } } },
+        overlay: {
+          version: 1,
+          diagram_id: 'main',
+          objects: [{
+            id: 'note', kind: 'annotation.sticky', version: 1, order_key: '0001',
+            geometry: { x: 10, y: 20, width: 120, height: 80, rotation: 0 },
+            style: {}, metadata: {}, payload: {}, body: 'Imported note',
+          }],
+          layers: [{ id: 'default', name: 'Default', order_key: '0000000000000000', visible: true, locked: false, export: true }],
+        },
+      }],
+    };
+    return {
+      format: 'arielcharts.workspace' as const,
+      version: 1 as const,
+      payload,
+      integrity: { algorithm: 'SHA-256' as const, value: createHash('sha256').update(canonicalWorkspaceJson(payload)).digest('hex') },
+    };
+  }
+
+  async function workspaceRevision() {
+    const response = await fetch(`http://127.0.0.1:${port}/api/sessions/abc123de/workspace`, {
+      headers: { origin: 'http://allowed.test', cookie: roomCookie },
+    });
+    expect(response.status).toBe(200);
+    return response.json() as Promise<{ revision: string }>;
+  }
+
   it('rejects disallowed origins for the MCP endpoint', async () => {
     const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
       method: 'POST',
@@ -124,6 +162,114 @@ describe('server integration', () => {
     expect(response.headers.get('access-control-allow-origin')).toBe('http://allowed.test');
     expect(response.headers.get('access-control-allow-credentials')).toBe('true');
     expect(await app.manager.readSession(missingId)).toBeNull();
+  });
+
+  it('server-authoritatively imports one signed workspace atomically while retaining activity and presence', async () => {
+    const session = await app.manager.requireSession('abc123de');
+    session.doc.transact(() => {
+      session.doc.getArray('activity').push([createActivityEvent({ action: 'edited', actorName: 'Existing', actorType: 'human', detail: 'Keep this.' })]);
+    });
+    session.awareness.setLocalState({ user: { name: 'Existing', color: '#123456', type: 'human' } });
+    await app.manager.persistSession(session);
+    const before = await workspaceRevision();
+    const response = await fetch(`http://127.0.0.1:${port}/api/sessions/abc123de/workspace`, {
+      method: 'POST',
+      headers: { origin: 'http://allowed.test', cookie: roomCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: before.revision, bundle: signedWorkspaceBundle() }),
+    });
+    expect(response.status).toBe(200);
+    const imported = await response.json() as { status: string; revision: string };
+    expect(imported.status).toBe('imported');
+    expect(imported.revision).not.toBe(before.revision);
+    await expect(app.manager.readDiagram('abc123de', 'main')).resolves.toMatchObject({ diagram: { name: 'Imported', mermaid_text: 'flowchart TD\n  A[Import] --> B[Ready]' } });
+    await expect(app.manager.readOverlayScene('abc123de', 'main')).resolves.toMatchObject({ scene: { objects: [{ id: 'note', body: 'Imported note' }] } });
+    const after = await app.manager.readSession('abc123de');
+    expect(after?.activity).toHaveLength(1);
+    expect(after?.participants).toEqual([{ name: 'Existing', color: '#123456', type: 'human' }]);
+  });
+
+  it('rejects stale or tampered workspace imports without mutating the room', async () => {
+    const before = await workspaceRevision();
+    const bundle = signedWorkspaceBundle();
+    const stale = await fetch(`http://127.0.0.1:${port}/api/sessions/abc123de/workspace`, {
+      method: 'POST', headers: { origin: 'http://allowed.test', cookie: roomCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: 'stale', bundle }),
+    });
+    expect(stale.status).toBe(409);
+    await expect(stale.json()).resolves.toMatchObject({ status: 'stale', revision: before.revision });
+    bundle.payload.diagrams[0]!.mermaid.source = 'flowchart TD\n  Tampered';
+    const tampered = await fetch(`http://127.0.0.1:${port}/api/sessions/abc123de/workspace`, {
+      method: 'POST', headers: { origin: 'http://allowed.test', cookie: roomCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: before.revision, bundle }),
+    });
+    expect(tampered.status).toBe(400);
+    await expect(app.manager.readDiagram('abc123de', 'main')).resolves.toMatchObject({ diagram: { mermaid_text: '' } });
+    await expect(workspaceRevision()).resolves.toEqual(before);
+  });
+
+  it('refuses opaque existing overlay roots without collapsing their revision, peer state, activity, or presence', async () => {
+    const session = await app.manager.requireSession('abc123de');
+    session.doc.transact(() => {
+      session.doc.getArray('activity').push([createActivityEvent({ action: 'edited', actorName: 'Existing', actorType: 'human', detail: 'Do not replace.' })]);
+      const scene = new Y.Map<unknown>();
+      scene.set('version', 2); scene.set('objects', new Y.Map()); scene.set('layers', new Y.Map());
+      session.doc.getMap('overlays').set('main', scene);
+    });
+    session.awareness.setLocalState({ user: { name: 'Existing', color: '#123456', type: 'human' } });
+    const newerSceneRevision = await workspaceRevision();
+    session.doc.transact(() => (session.doc.getMap('overlays').get('main') as Y.Map<unknown>).set('version', 3));
+    const changedOpaqueRevision = await workspaceRevision();
+    expect(changedOpaqueRevision.revision).not.toBe(newerSceneRevision.revision);
+    const persistedBefore = Buffer.from(Y.encodeStateAsUpdate(session.doc));
+    const peerUpdates: Uint8Array[] = [];
+    const observePeer = (update: Uint8Array) => peerUpdates.push(update);
+    session.doc.on('update', observePeer);
+    try {
+      const rejected = await fetch(`http://127.0.0.1:${port}/api/sessions/abc123de/workspace`, {
+        method: 'POST', headers: { origin: 'http://allowed.test', cookie: roomCookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ expected_revision: changedOpaqueRevision.revision, bundle: signedWorkspaceBundle() }),
+      });
+      expect(rejected.status).toBe(400);
+      await expect(rejected.json()).resolves.toMatchObject({ error: expect.stringMatching(/unsupported overlay scene/u) });
+      expect(Buffer.from(Y.encodeStateAsUpdate(session.doc))).toEqual(persistedBefore);
+      expect(peerUpdates).toEqual([]);
+      expect(session.doc.getArray('activity')).toHaveLength(1);
+      expect(session.awareness.getLocalState()).toEqual({ user: { name: 'Existing', color: '#123456', type: 'human' } });
+    } finally {
+      session.doc.off('update', observePeer);
+    }
+
+    session.doc.transact(() => {
+      const scene = session.doc.getMap('overlays').get('main') as Y.Map<unknown>;
+      scene.set('version', 1);
+      const layers = new Y.Map<unknown>(); const layer = new Y.Map<unknown>();
+      layer.set('id', 'default'); layer.set('name', 'Default'); layer.set('order_key', 'a'); layer.set('visible', true); layer.set('locked', false); layer.set('export', true);
+      layers.set('default', layer); scene.set('layers', layers);
+      const objects = new Y.Map<unknown>(); const object = new Y.Map<unknown>();
+      object.set('kind', 'future.widget'); object.set('version', 1); object.set('order_key', 'a'); object.set('geometry', { x: 0, y: 0, width: 1, height: 1, rotation: 0 }); object.set('style', {}); object.set('metadata', {}); object.set('payload', {});
+      objects.set('opaque', object); scene.set('objects', objects);
+    });
+    const unknownObjectRevision = await workspaceRevision();
+    const objectRejected = await fetch(`http://127.0.0.1:${port}/api/sessions/abc123de/workspace`, {
+      method: 'POST', headers: { origin: 'http://allowed.test', cookie: roomCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: unknownObjectRevision.revision, bundle: signedWorkspaceBundle() }),
+    });
+    expect(objectRejected.status).toBe(400);
+    await expect(objectRejected.json()).resolves.toMatchObject({ error: expect.stringMatching(/unsupported overlay object/u) });
+
+    session.doc.transact(() => {
+      const scene = session.doc.getMap('overlays').get('main') as Y.Map<unknown>;
+      scene.set('objects', new Y.Map());
+      const layer = (scene.get('layers') as Y.Map<Y.Map<unknown>>).get('default')!;
+      layer.set('future_schema', true);
+    });
+    const unknownLayerRevision = await workspaceRevision();
+    const layerRejected = await fetch(`http://127.0.0.1:${port}/api/sessions/abc123de/workspace`, {
+      method: 'POST', headers: { origin: 'http://allowed.test', cookie: roomCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: unknownLayerRevision.revision, bundle: signedWorkspaceBundle() }),
+    });
+    expect(layerRejected.status).toBe(400);
+    await expect(layerRejected.json()).resolves.toMatchObject({ error: expect.stringMatching(/unsupported overlay layer/u) });
   });
 
   it('rejects an unauthenticated WebSocket upgrade before it can create a room', async () => {

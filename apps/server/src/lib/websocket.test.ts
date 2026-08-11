@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -11,6 +12,7 @@ import { WebSocket, type RawData } from 'ws';
 import * as Y from 'yjs';
 import { createApp } from '../index.js';
 import type { ServerEnv } from './types.js';
+import { canonicalWorkspaceJson } from './workspace-import.js';
 
 const MESSAGE_TYPE_SYNC = 0;
 const MESSAGE_TYPE_AWARENESS = 1;
@@ -98,6 +100,30 @@ function addAnnotation(doc: Y.Doc): void {
   note.set('geometry', { x: 0, y: 0, width: 100, height: 40, rotation: 0 });
   note.set('style', {}); note.set('metadata', {}); note.set('payload', {});
   objects.set('note', note); note.set('body', new Y.Text());
+}
+
+function signedWorkspaceBundle(source: string) {
+  const payload = {
+    schema_version: 1 as const,
+    order: ['main'],
+    diagrams: [{
+      id: 'main', name: 'Imported',
+      mermaid: { schema_version: 1 as const, source },
+      layout: { schema_version: 1 as const, positions: { A: { x: 12, y: 24 } } },
+      overlay: {
+        version: 1,
+        diagram_id: 'main',
+        objects: [],
+        layers: [{ id: 'default', name: 'Default', order_key: '0000000000000000', visible: true, locked: false, export: true }],
+      },
+    }],
+  };
+  return {
+    format: 'arielcharts.workspace' as const,
+    version: 1 as const,
+    payload,
+    integrity: { algorithm: 'SHA-256' as const, value: createHash('sha256').update(canonicalWorkspaceJson(payload)).digest('hex') },
+  };
 }
 
 async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 5_000): Promise<void> {
@@ -322,6 +348,38 @@ describe('SessionWebSocketServer', () => {
 
     await reopenedWriter.close();
     await reopenedReader.close();
+  }, 15_000);
+
+  it('fans a server-authoritative workspace import to the HTTP initiator and peer exactly once', async () => {
+    const sessionId = 'abc123de';
+    const importer = await openClient(port, sessionId, roomCookie);
+    const peer = await openClient(port, sessionId, roomCookie);
+    await waitFor(async () => expect((await app.manager.requireSession(sessionId)).sockets.size).toBe(2));
+    await waitFor(() => {
+      expect(readMermaidText(importer.doc)).toBe('');
+      expect(readMermaidText(peer.doc)).toBe('');
+    });
+
+    const beforePeerWrite = Y.encodeStateVector(peer.doc);
+    const peerText = mainDiagram(peer.doc).get('mermaid');
+    if (!(peerText instanceof Y.Text)) throw new Error('Expected peer Mermaid text.');
+    peerText.insert(0, 'flowchart LR\n  Peer --> BeforeImport');
+    peer.syncUpdate(Y.encodeStateAsUpdate(peer.doc, beforePeerWrite));
+    await waitFor(() => expect(readMermaidText(importer.doc)).toContain('BeforeImport'));
+
+    const beforeImport = await app.manager.readWorkspaceRevision(sessionId);
+    const importerMessagesBefore = importer.documentMessageCount;
+    const peerMessagesBefore = peer.documentMessageCount;
+    await expect(app.manager.importWorkspace(sessionId, beforeImport.revision, signedWorkspaceBundle('flowchart LR\n  Imported --> Workspace')))
+      .resolves.toMatchObject({ status: 'imported' });
+    await waitFor(() => {
+      expect(readMermaidText(importer.doc)).toBe('flowchart LR\n  Imported --> Workspace');
+      expect(readMermaidText(peer.doc)).toBe('flowchart LR\n  Imported --> Workspace');
+    });
+    expect(importer.documentMessageCount - importerMessagesBefore).toBe(1);
+    expect(peer.documentMessageCount - peerMessagesBefore).toBe(1);
+    await importer.close();
+    await peer.close();
   }, 15_000);
 
   it('fans an authoritative repaired offline annotation merge to stale sender, healthy peer, server, and reload', async () => {

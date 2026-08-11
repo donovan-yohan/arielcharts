@@ -198,6 +198,33 @@ export interface WorkspaceSnapshotPair {
   overlayRevisionId: string;
 }
 
+/** Portable, signed workspace export. Activity, presence, and journals are deliberately excluded. */
+export interface WorkspaceBundleDiagram {
+  id: string;
+  name: string;
+  mermaid: { schema_version: 1; source: string };
+  layout: { schema_version: 1; positions: DiagramNodePositions };
+  overlay: OverlaySceneSnapshot;
+}
+
+export interface WorkspaceBundlePayload {
+  schema_version: 1;
+  order: string[];
+  diagrams: WorkspaceBundleDiagram[];
+}
+
+export interface WorkspaceBundle {
+  format: 'arielcharts.workspace';
+  version: 1;
+  payload: WorkspaceBundlePayload;
+  integrity: { algorithm: 'SHA-256'; value: string };
+}
+
+/** The server-derived revision required to replace the complete workspace plane. */
+export interface WorkspaceImportRevision {
+  revision: string;
+}
+
 export type RestoreOverlayRevisionResult =
   | { status: 'restored'; scene: OverlaySceneSnapshot; revision: OverlayRevisionSummary }
   | { status: 'stale'; scene: OverlaySceneSnapshot; current_revision: string };

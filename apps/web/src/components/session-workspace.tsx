@@ -17,6 +17,7 @@ import { useTheme } from './theme-provider';
 import { WorkspaceFlyouts } from './workspace-flyouts';
 import { getCompactCollaboratorOverflowCount, WorkspaceFooter } from './workspace-footer';
 import { WorkspaceSettings } from './workspace-settings';
+import { WorkspaceExportMenu } from './workspace-export-menu';
 import { WorkspaceTabStrip, type WorkspaceDiagramTab } from './workspace-tab-strip';
 import {
   MutationQueue,
@@ -620,6 +621,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const [localLaser, setLocalLaser] = useState<CanvasLaserState | null>(null);
   const [diagrams, setDiagrams] = useState<DiagramTab[]>([]);
   const [activeDiagramId, setActiveDiagramId] = useState<string | null>(null);
+  const [activeDiagramIdentityVersion, setActiveDiagramIdentityVersion] = useState(0);
   const [mermaidText, setMermaidText] = useState('');
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [preview, setPreview] = useState<DiagramPreview | null>(null);
@@ -683,7 +685,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
   const activeDiagram = useMemo(
     () => getActiveDiagramState(collaboration, activeDiagramId),
-    [activeDiagramId, collaboration],
+    [activeDiagramId, activeDiagramIdentityVersion, collaboration],
   );
   const overlayController = useOverlayScene(collaboration?.doc ?? null, activeDiagramId);
 
@@ -1136,6 +1138,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         return tabs.some((tab) => tab.id === stored) ? stored : (tabs[0]?.id ?? null);
       });
     };
+    const syncDiagramMap: Parameters<typeof diagramsMap.observe>[0] = (event) => {
+      const activeId = activeDiagramIdRef.current;
+      if (activeId && event.keysChanged.has(activeId)) {
+        setActiveDiagramIdentityVersion((current) => current + 1);
+      }
+    };
 
     const syncParticipants = () => {
       const nextParticipants = getParticipantsFromCollaborationSources(
@@ -1191,6 +1199,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
     activityArray.observe(syncActivity);
     diagramsMap.observeDeep(syncDiagrams);
+    diagramsMap.observe(syncDiagramMap);
     diagramOrder.observe(syncDiagrams);
     presenceMap.observe(syncParticipants);
     awareness.on('change', syncParticipants);
@@ -1225,6 +1234,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       provider.off('connection-error', handleReconnectSignal);
       activityArray.unobserve(syncActivity);
       diagramsMap.unobserveDeep(syncDiagrams);
+      diagramsMap.unobserve(syncDiagramMap);
       diagramOrder.unobserve(syncDiagrams);
       presenceMap.unobserve(syncParticipants);
       awareness.setLocalState(null);
@@ -2307,6 +2317,18 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             <span>{shareButtonLabel}</span>
             {shareCopyState === 'copied' ? <Check aria-hidden="true" size={13} /> : null}
           </button>
+          <WorkspaceExportMenu
+            activeDiagramName={getActiveDiagramName(diagrams, activeDiagramId)}
+            mermaidSource={mermaidText}
+            mermaidSvg={historyPreview ? '' : (preview?.svg ?? '')}
+            onImported={() => {
+              addActivityRef.current?.('replaced', 'Imported an editable workspace');
+            }}
+            scene={overlayController?.scene ?? null}
+            sessionId={sessionId}
+            theme={resolvedTheme}
+            workspace={collaboration?.doc ?? null}
+          />
           <WorkspaceSettings
             agentCount={connectedAgentCount}
             connectionState={connectionState}

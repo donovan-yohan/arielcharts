@@ -2358,6 +2358,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
               onPaste: overlayController.paste,
               onReorder: overlayController.reorder,
               onUndo: overlayController.undo,
+              onUpdate: overlayController.update,
+              onEditText: overlayController.editText,
+              onDuplicate: overlayController.duplicate,
+              onBeginComposition: overlayController.beginComposition,
+              onCommitComposition: overlayController.commitComposition,
             } : undefined}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}

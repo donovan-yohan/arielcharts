@@ -44,7 +44,7 @@ export type DocumentAdmissionReason =
   | 'overlay_quota_exceeded';
 
 export type DocumentAdmission =
-  | { accepted: true }
+  | { accepted: true; normalizedUpdate?: Uint8Array }
   | { accepted: false; reason: DocumentAdmissionReason };
 
 const OVERLAY_SCHEMA_VERSION = 1;
@@ -212,13 +212,17 @@ function validateOverlayObject(object: unknown): DocumentAdmissionReason | undef
   const geometry = object.get('geometry');
   const anchor = object.get('anchor');
   const layer = object.get('layer');
+  const body = object.get('body');
   if (!isBoundedIdentifier(kind) || !Number.isInteger(version) || (version as number) < 1
     || !isBoundedIdentifier(orderKey) || !isOverlayGeometry(geometry)
     || (layer !== undefined && (typeof layer !== 'string' || byteLength(layer) > COLLABORATION_BUDGETS.identifierBytes))
     || !isOverlayMetadata(object.get('style')) || !isOverlayMetadata(object.get('metadata'))
-    || !isPlainRecord(object.get('payload')) || (anchor !== undefined && !isOverlayAnchor(anchor))) {
+    || !isPlainRecord(object.get('payload')) || (anchor !== undefined && !isOverlayAnchor(anchor))
+    || (body !== undefined && !isYText(body))) {
     return 'invalid_overlay_schema';
   }
+  if ((kind === 'annotation.text' || kind === 'annotation.sticky') && !isYText(body)) return 'invalid_overlay_schema';
+  if (isYText(body) && byteLength(body.toString()) > 8_192) return 'overlay_quota_exceeded';
   return undefined;
 }
 
@@ -457,6 +461,39 @@ export function validateDocumentState(doc: Y.Doc): DocumentAdmission {
   return overlayReason ? rejected(overlayReason) : { accepted: true };
 }
 
+function truncateUtf8(text: string, maxBytes: number): number {
+  let bytes = 0;
+  let index = 0;
+  for (const character of text) {
+    const next = byteLength(character);
+    if (bytes + next > maxBytes) break;
+    bytes += next;
+    index += character.length;
+  }
+  return index;
+}
+
+/** Deterministic authoritative normalization for valid offline edits whose CRDT merge exceeds the per-note bound. */
+function repairMergedAnnotationBodies(doc: Y.Doc): boolean {
+  const overlays = doc.share.get(OVERLAYS_KEY);
+  if (!isYMap(overlays)) return false;
+  let changed = false;
+  for (const scene of overlays.values()) {
+    if (!isYMap(scene) || scene.get('version') !== OVERLAY_SCHEMA_VERSION) continue;
+    const objects = scene.get('objects');
+    if (!isYMap(objects)) continue;
+    for (const object of objects.values()) {
+      if (!isYMap(object) || !['annotation.text', 'annotation.sticky'].includes(String(object.get('kind')))) continue;
+      const body = object.get('body');
+      if (!isYText(body)) continue;
+      const text = body.toString();
+      const keep = truncateUtf8(text, 8_192);
+      if (keep < text.length) { body.delete(keep, text.length - keep); changed = true; }
+    }
+  }
+  return changed;
+}
+
 /**
  * Applies an untrusted raw update to a disposable copy of the current state.
  * The caller may apply it to the live document only after this returns accepted.
@@ -469,7 +506,13 @@ export function admitYjsUpdate(doc: Y.Doc, update: Uint8Array): DocumentAdmissio
   try {
     Y.applyUpdate(candidate, current);
     Y.applyUpdate(candidate, update);
-    return validateDocumentState(candidate);
+    const repaired = repairMergedAnnotationBodies(candidate);
+    const result = validateDocumentState(candidate);
+    if (!result.accepted || !repaired) return result;
+    // Full repaired state is intentional: an offline sender may not possess
+    // structs already accepted from another peer, so a delta from server head
+    // would leave that sender divergent even though it receives the deletion.
+    return { accepted: true, normalizedUpdate: Y.encodeStateAsUpdate(candidate) };
   } catch {
     return rejected('malformed_yjs_update');
   } finally {

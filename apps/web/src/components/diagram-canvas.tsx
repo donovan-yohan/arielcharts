@@ -146,7 +146,7 @@ export interface DiagramCanvasProps {
   readOnly?: boolean;
   selectedNodeIds?: string[];
   svg: string;
-  overlay?: Omit<OverlayCanvasLayerProps, 'semanticAnchors' | 'transform'>;
+  overlay?: Omit<OverlayCanvasLayerProps, 'semanticAnchors' | 'transform' | 'viewport'>;
   sequenceParticipants?: readonly SequenceParticipant[];
   sequenceDiagram?: SequenceDiagramSnapshot | null;
   sequenceTextItems?: readonly SequenceSvgTextItem[];
@@ -3332,6 +3332,7 @@ export function DiagramCanvas({
           {...overlay}
           semanticAnchors={overlaySemanticAnchors}
           transform={{ x: viewport.panX, y: viewport.panY, zoom: viewport.zoom }}
+          viewport={canvasViewport}
         />
       ) : null}
 

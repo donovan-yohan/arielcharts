@@ -18,6 +18,11 @@ export interface OverlaySceneHandle {
   writable: boolean;
 }
 
+export interface OverlayTextComposition {
+  base: string;
+  positions: Y.RelativePosition[];
+}
+
 export interface OverlayLocalState {
   selectedIds: Set<string>;
   draft: unknown | null;
@@ -27,6 +32,11 @@ export interface OverlayLocalState {
 const MAX_METADATA_ENTRIES = 32;
 const MAX_METADATA_KEY_BYTES = 128;
 const MAX_METADATA_STRING_BYTES = 2_048;
+export const MAX_OVERLAY_TEXT_BYTES = 8_192;
+const MAX_TEXT_INSERT_BYTES = 2_048;
+const TEXT_OPERATION_WINDOW_MS = 10_000;
+const TEXT_OPERATIONS_PER_WINDOW = 120;
+const textOperationWindows = new WeakMap<Y.Doc, { startedAt: number; count: number }>();
 
 function byteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
@@ -93,12 +103,14 @@ export function readOverlayObject(id: string, value: unknown): OverlayObjectReco
   const style = value.get('style');
   const metadata = value.get('metadata');
   const payload = cloneJsonRecord(value.get('payload'));
+  const body = value.get('body');
   const layer = value.get('layer');
   const anchor = value.get('anchor');
   if (!id || typeof kind !== 'string' || !kind || !Number.isInteger(version) || (version as number) < 1
     || typeof orderKey !== 'string' || !orderKey || !validGeometry(geometry)
     || !validMetadata(style) || !validMetadata(metadata) || payload === null
-    || (layer !== undefined && typeof layer !== 'string')) return null;
+    || (layer !== undefined && typeof layer !== 'string')
+    || (body !== undefined && !(body instanceof Y.Text))) return null;
   if (anchor !== undefined) {
     if (!anchor || typeof anchor !== 'object' || Array.isArray(anchor)) return null;
     const candidate = anchor as { mermaid_id?: unknown; offset?: unknown; fallback?: unknown };
@@ -116,11 +128,12 @@ export function readOverlayObject(id: string, value: unknown): OverlayObjectReco
     style: structuredClone(style),
     metadata: structuredClone(metadata),
     payload,
+    ...(body instanceof Y.Text ? { body: body.toString() } : {}),
   };
 }
 
 export function isSupportedOverlayObject(object: OverlayObjectRecord): boolean {
-  return object.kind === 'foundation.card' && object.version === 1;
+  return ['foundation.card', 'annotation.text', 'annotation.sticky'].includes(object.kind) && object.version === 1;
 }
 
 export function readOverlayScene(doc: Y.Doc, diagramId: string): OverlaySceneSnapshot {
@@ -146,6 +159,10 @@ function writeObject(target: Y.Map<unknown>, object: OverlayObjectRecord): void 
   target.set('style', structuredClone(object.style));
   target.set('metadata', structuredClone(object.metadata));
   target.set('payload', structuredClone(object.payload));
+  if (object.kind.startsWith('annotation.')) {
+    if (!target.doc) target.set('body', new Y.Text());
+    else if (!(target.get('body') instanceof Y.Text)) target.set('body', new Y.Text());
+  } else target.delete('body');
 }
 
 function validObjectRecord(object: OverlayObjectRecord): boolean {
@@ -153,6 +170,7 @@ function validObjectRecord(object: OverlayObjectRecord): boolean {
     && object.order_key && validGeometry(object.geometry) && validMetadata(object.style)
     && validMetadata(object.metadata) && cloneJsonRecord(object.payload) !== null
     && (object.layer === undefined || typeof object.layer === 'string')
+    && (object.body === undefined || (typeof object.body === 'string' && byteLength(object.body) <= MAX_OVERLAY_TEXT_BYTES))
     && (object.anchor === undefined || (object.anchor.mermaid_id
       && validPoint(object.anchor.offset) && validPoint(object.anchor.fallback))));
 }
@@ -176,6 +194,8 @@ export function addOverlayObject(doc: Y.Doc, diagramId: string, object: OverlayO
     const value = new Y.Map<unknown>();
     writeObject(value, object);
     handle.objects.set(object.id, value);
+    const body = value.get('body');
+    if (body instanceof Y.Text && object.body) body.insert(0, object.body);
   }, overlayOrigins.localHuman);
 }
 
@@ -186,6 +206,67 @@ export function updateOverlayObject(doc: Y.Doc, diagramId: string, objectId: str
   const next = { ...current, ...structuredClone(patch), id: objectId };
   if (!validObjectRecord(next)) throw new Error('Invalid overlay object update.');
   doc.transact(() => writeObject(handle.objects.get(objectId)!, next), overlayOrigins.localHuman);
+}
+
+function consumeTextOperation(doc: Y.Doc): void {
+  const now = Date.now();
+  let window = textOperationWindows.get(doc);
+  if (!window || now - window.startedAt >= TEXT_OPERATION_WINDOW_MS) {
+    window = { startedAt: now, count: 0 };
+    textOperationWindows.set(doc, window);
+  }
+  if (window.count >= TEXT_OPERATIONS_PER_WINDOW) throw new Error('Annotation editing is temporarily rate limited.');
+  window.count += 1;
+}
+
+/** Applies a bounded incremental human edit; composition drafts stay in the component until committed. */
+export function editOverlayText(doc: Y.Doc, diagramId: string, objectId: string, index: number, deleteCount: number, insert: string): void {
+  const handle = requireWritableScene(doc, diagramId);
+  const value = handle.objects.get(objectId);
+  const current = readOverlayObject(objectId, value);
+  const body = value?.get('body');
+  if (!current || !current.kind.startsWith('annotation.') || !(body instanceof Y.Text)) throw new Error('Annotation not found.');
+  if (![index, deleteCount].every(Number.isInteger) || index < 0 || deleteCount < 0 || index + deleteCount > body.length) throw new Error('Invalid annotation text edit.');
+  if (byteLength(insert) > MAX_TEXT_INSERT_BYTES) throw new Error('Annotation text operation is too large.');
+  if (deleteCount === 0 && insert.length === 0) return;
+  const next = body.toString().slice(0, index) + insert + body.toString().slice(index + deleteCount);
+  if (byteLength(next) > MAX_OVERLAY_TEXT_BYTES) throw new Error('Annotation text is too long.');
+  consumeTextOperation(doc);
+  doc.transact(() => {
+    if (deleteCount) body.delete(index, deleteCount);
+    if (insert) body.insert(index, insert);
+  }, overlayOrigins.localHuman);
+}
+
+export function beginOverlayTextComposition(doc: Y.Doc, diagramId: string, objectId: string): OverlayTextComposition {
+  const value = requireWritableScene(doc, diagramId).objects.get(objectId);
+  const body = value?.get('body');
+  if (!(body instanceof Y.Text)) throw new Error('Annotation not found.');
+  return { base: body.toString(), positions: Array.from({ length: body.length + 1 }, (_, index) => Y.createRelativePositionFromTypeIndex(body, index, -1)) };
+}
+
+export function commitOverlayTextComposition(doc: Y.Doc, diagramId: string, objectId: string, composition: OverlayTextComposition, draft: string): void {
+  const change = textChange(composition.base, draft);
+  if (!change.deleteCount && !change.insert) return;
+  const value = requireWritableScene(doc, diagramId).objects.get(objectId);
+  const body = value?.get('body');
+  if (!(body instanceof Y.Text)) throw new Error('Annotation not found.');
+  const start = Y.createAbsolutePositionFromRelativePosition(composition.positions[change.index]!, doc);
+  const end = Y.createAbsolutePositionFromRelativePosition(composition.positions[change.index + change.deleteCount]!, doc);
+  if (!start || !end || start.type !== body || end.type !== body) throw new Error('Annotation changed before composition could be committed.');
+  const originalDeleted = composition.base.slice(change.index, change.index + change.deleteCount);
+  const currentDeleted = body.toString().slice(start.index, end.index);
+  const safeDelete = currentDeleted === originalDeleted ? end.index - start.index : 0;
+  editOverlayText(doc, diagramId, objectId, start.index, safeDelete, change.insert);
+}
+
+function textChange(previous: string, next: string): { index: number; deleteCount: number; insert: string } {
+  let prefix = 0;
+  while (prefix < previous.length && prefix < next.length && previous[prefix] === next[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < previous.length - prefix && suffix < next.length - prefix
+    && previous[previous.length - 1 - suffix] === next[next.length - 1 - suffix]) suffix += 1;
+  return { index: prefix, deleteCount: previous.length - prefix - suffix, insert: next.slice(prefix, next.length - suffix) };
 }
 
 export function deleteOverlayObjects(doc: Y.Doc, diagramId: string, objectIds: Iterable<string>): void {

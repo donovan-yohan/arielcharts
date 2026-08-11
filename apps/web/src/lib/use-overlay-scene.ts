@@ -5,19 +5,23 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Y from 'yjs';
 import {
   addOverlayObject,
+  beginOverlayTextComposition,
+  commitOverlayTextComposition,
   copyOverlayObjects,
   createOverlayUndoManager,
   deleteOverlayObjects,
+  editOverlayText,
   getOverlayScene,
   pasteOverlayObjects,
   readOverlayScene,
   setOverlayOrderKey,
   updateOverlayObject,
+  type OverlayTextComposition,
 } from './overlay-scene';
 
 export interface OverlaySceneController {
   scene: OverlaySceneSnapshot;
-  add: (point: { x: number; y: number }) => void;
+  add: (point: { x: number; y: number }, kind?: 'annotation.text' | 'annotation.sticky') => void;
   move: (id: string, dx: number, dy: number) => void;
   anchor: (id: string, mermaidId: string) => void;
   remove: (ids: readonly string[]) => void;
@@ -25,6 +29,11 @@ export interface OverlaySceneController {
   copy: (ids: readonly string[]) => void;
   paste: () => void;
   undo: () => void;
+  update: (id: string, patch: Partial<Omit<OverlayObjectRecord, 'id'>>) => void;
+  editText: (id: string, index: number, deleteCount: number, insert: string) => void;
+  duplicate: (id: string) => void;
+  beginComposition: (id: string) => OverlayTextComposition | null;
+  commitComposition: (id: string, composition: OverlayTextComposition, draft: string) => void;
 }
 
 export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): OverlaySceneController | null {
@@ -47,24 +56,31 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
     return () => root.unobserveDeep(sync);
   }, [diagramId, doc]);
 
-  const add = useCallback((point: { x: number; y: number }) => {
+  const add = useCallback((point: { x: number; y: number }, kind: 'annotation.text' | 'annotation.sticky' = 'annotation.text') => {
     if (!doc || !diagramId) return;
     const id = `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`;
     addOverlayObject(doc, diagramId, {
       id,
-      kind: 'foundation.card',
+      kind,
       version: 1,
       order_key: `${Date.now().toString().padStart(16, '0')}:${doc.clientID}:${id}`,
-      geometry: { x: point.x, y: point.y, width: 160, height: 72, rotation: 0 },
-      style: {},
-      metadata: {},
-      payload: { label: 'Overlay object' },
+      geometry: { x: point.x, y: point.y, width: kind === 'annotation.sticky' ? 220 : 200, height: kind === 'annotation.sticky' ? 160 : 72, rotation: 0 },
+      style: { color: kind === 'annotation.sticky' ? 'yellow' : 'transparent' },
+      metadata: { export: 'arielcharts-only' },
+      payload: {}, body: '',
     });
   }, [diagramId, doc]);
   const move = useCallback((id: string, dx: number, dy: number) => {
     if (!doc || !diagramId) return;
     const object = readOverlayScene(doc, diagramId).objects.find((candidate) => candidate.id === id);
-    if (object) updateOverlayObject(doc, diagramId, id, { geometry: { ...object.geometry, x: object.geometry.x + dx, y: object.geometry.y + dy } });
+    if (object) updateOverlayObject(doc, diagramId, id, {
+      geometry: { ...object.geometry, x: object.geometry.x + dx, y: object.geometry.y + dy },
+      ...(object.anchor ? { anchor: {
+        ...object.anchor,
+        offset: { x: object.anchor.offset.x + dx, y: object.anchor.offset.y + dy },
+        fallback: { x: object.anchor.fallback.x + dx, y: object.anchor.fallback.y + dy },
+      } } : {}),
+    });
   }, [diagramId, doc]);
   const anchor = useCallback((id: string, mermaidId: string) => {
     if (!doc || !diagramId) return;
@@ -87,6 +103,22 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
     pasteOverlayObjects(doc, diagramId, clipboard, () => `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`);
   }, [clipboard, diagramId, doc]);
 
+  const update = useCallback((id: string, patch: Partial<Omit<OverlayObjectRecord, 'id'>>) => {
+    if (doc && diagramId) updateOverlayObject(doc, diagramId, id, patch);
+  }, [diagramId, doc]);
+  const editText = useCallback((id: string, index: number, deleteCount: number, insert: string) => {
+    if (doc && diagramId) editOverlayText(doc, diagramId, id, index, deleteCount, insert);
+  }, [diagramId, doc]);
+  const duplicate = useCallback((id: string) => {
+    if (!doc || !diagramId) return;
+    const item = readOverlayScene(doc, diagramId).objects.find((candidate) => candidate.id === id);
+    if (item) pasteOverlayObjects(doc, diagramId, [item], () => `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`);
+  }, [diagramId, doc]);
+  const beginComposition = useCallback((id: string) => doc && diagramId ? beginOverlayTextComposition(doc, diagramId, id) : null, [diagramId, doc]);
+  const commitComposition = useCallback((id: string, composition: OverlayTextComposition, draft: string) => {
+    if (doc && diagramId) commitOverlayTextComposition(doc, diagramId, id, composition, draft);
+  }, [diagramId, doc]);
+
   if (!scene) return null;
-  return { scene, add, move, anchor, remove, reorder, copy, paste, undo: () => undoManager?.undo() };
+  return { scene, add, move, anchor, remove, reorder, copy, paste, undo: () => undoManager?.undo(), update, editText, duplicate, beginComposition, commitComposition };
 }

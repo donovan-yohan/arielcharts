@@ -137,6 +137,8 @@ export interface OverlayObjectRecord {
   style: OverlayMetadata;
   metadata: OverlayMetadata;
   payload: Record<string, unknown>;
+  /** Plain-text projection of the durable Y.Text body for annotation kinds. */
+  body?: string;
 }
 
 export interface OverlaySceneSnapshot {

@@ -16,6 +16,45 @@ function setScene(doc: Y.Doc, id: string, objects: Y.Map<unknown>): void {
 }
 
 describe('document admission', () => {
+  it('authoritatively repairs an offline annotation merge over 8KiB and reconciles every replica', () => {
+    const server = createReservedRootDocument();
+    const scene = new Y.Map<unknown>(); scene.set('version', 1); const objects = new Y.Map<Y.Map<unknown>>(); scene.set('objects', objects);
+    const note = new Y.Map<unknown>();
+    note.set('kind', 'annotation.text'); note.set('version', 1); note.set('order_key', 'a');
+    note.set('geometry', { x: 0, y: 0, width: 100, height: 40, rotation: 0 }); note.set('style', {}); note.set('metadata', {}); note.set('payload', {});
+    objects.set('note', note); const body = new Y.Text(); note.set('body', body);
+    server.getMap<Y.Map<unknown>>('overlays').set('main', scene);
+    const left = new Y.Doc(); const right = new Y.Doc();
+    Y.applyUpdate(left, Y.encodeStateAsUpdate(server)); Y.applyUpdate(right, Y.encodeStateAsUpdate(server));
+    ((left.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('note')!.get('body') as Y.Text).insert(0, 'L'.repeat(5_000));
+    ((right.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('note')!.get('body') as Y.Text).insert(0, 'R'.repeat(5_000));
+    const leftUpdate = Y.encodeStateAsUpdate(left, Y.encodeStateVector(server));
+    expect(admitYjsUpdate(server, leftUpdate)).toEqual({ accepted: true }); Y.applyUpdate(server, leftUpdate);
+    const rightUpdate = Y.encodeStateAsUpdate(right, Y.encodeStateVector(server));
+    const repaired = admitYjsUpdate(server, rightUpdate);
+    expect(repaired.accepted && repaired.normalizedUpdate).toBeInstanceOf(Uint8Array);
+    if (!repaired.accepted || !repaired.normalizedUpdate) throw new Error('Expected authoritative repair update.');
+    Y.applyUpdate(server, repaired.normalizedUpdate); Y.applyUpdate(left, repaired.normalizedUpdate); Y.applyUpdate(right, repaired.normalizedUpdate);
+    const read = (doc: Y.Doc) => (((doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('note')!.get('body')) as Y.Text).toString();
+    expect(Buffer.byteLength(read(server), 'utf8')).toBe(8_192);
+    expect(read(left)).toBe(read(server)); expect(read(right)).toBe(read(server));
+    const reload = new Y.Doc(); Y.applyUpdate(reload, Y.encodeStateAsUpdate(server)); expect(read(reload)).toBe(read(server));
+  });
+  it('accepts bounded annotation Y.Text and rejects missing or oversized bodies', () => {
+    const valid = createReservedRootDocument();
+    const scene = new Y.Map<unknown>(); scene.set('version', 1);
+    const objects = new Y.Map<Y.Map<unknown>>(); scene.set('objects', objects);
+    const annotation = new Y.Map<unknown>();
+    annotation.set('kind', 'annotation.text'); annotation.set('version', 1); annotation.set('order_key', 'a');
+    annotation.set('geometry', { x: 0, y: 0, width: 100, height: 40, rotation: 0 });
+    annotation.set('style', {}); annotation.set('metadata', {}); annotation.set('payload', {}); annotation.set('body', new Y.Text('safe text'));
+    objects.set('note', annotation); valid.getMap('overlays').set('main', scene);
+    expect(validateDocumentState(valid)).toEqual({ accepted: true });
+    annotation.delete('body');
+    expect(validateDocumentState(valid)).toEqual({ accepted: false, reason: 'invalid_overlay_schema' });
+    annotation.set('body', new Y.Text('x'.repeat(8_193)));
+    expect(validateDocumentState(valid)).toEqual({ accepted: false, reason: 'overlay_quota_exceeded' });
+  });
   it('keeps rejected raw updates byte-identical to the live document', () => {
     const live = new Y.Doc();
     live.getMap('diagrams').set('main', new Y.Map());

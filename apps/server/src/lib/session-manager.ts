@@ -163,6 +163,7 @@ function readOverlayScene(doc: Y.Doc, diagramId: string): OverlaySceneSnapshot {
       const payload = value.get('payload');
       const anchor = value.get('anchor');
       const layer = value.get('layer');
+      const body = value.get('body');
       if (typeof kind !== 'string' || typeof objectVersion !== 'number' || typeof orderKey !== 'string'
         || !geometry || typeof geometry !== 'object' || !style || typeof style !== 'object'
         || !metadata || typeof metadata !== 'object' || !payload || typeof payload !== 'object') continue;
@@ -177,6 +178,7 @@ function readOverlayScene(doc: Y.Doc, diagramId: string): OverlaySceneSnapshot {
         style: structuredClone(style) as OverlayMetadata,
         metadata: structuredClone(metadata) as OverlayMetadata,
         payload: structuredClone(payload) as Record<string, unknown>,
+        ...(body instanceof Y.Text ? { body: body.toString() } : {}),
       });
     }
   }
@@ -188,7 +190,7 @@ function assertSupportedOverlayScene(scene: OverlaySceneSnapshot): void {
   if (scene.version !== OVERLAY_SCENE_SCHEMA_VERSION) {
     throw new Error(`Unsupported overlay scene version: ${scene.version}`);
   }
-  const unsupported = scene.objects.find((object) => object.kind !== 'foundation.card' || object.version !== 1);
+  const unsupported = scene.objects.find((object) => !['foundation.card', 'annotation.text', 'annotation.sticky'].includes(object.kind) || object.version !== 1);
   if (unsupported) {
     throw new Error(`Unsupported overlay object: ${unsupported.kind}@${unsupported.version}`);
   }
@@ -224,6 +226,11 @@ function replaceOverlayScene(doc: Y.Doc, snapshot: OverlaySceneSnapshot): void {
     value.set('metadata', structuredClone(object.metadata));
     value.set('payload', structuredClone(object.payload));
     objects.set(object.id, value);
+    if (object.kind === 'annotation.text' || object.kind === 'annotation.sticky') {
+      const body = new Y.Text();
+      value.set('body', body);
+      if (object.body) body.insert(0, object.body);
+    }
   }
   scene.set('objects', objects);
   overlaysMap(doc).set(snapshot.diagram_id, scene);

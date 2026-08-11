@@ -273,6 +273,18 @@ const VENN_DIAGRAM_FIXTURE = `venn-beta
   set A ["Alpha"]: 8
   set B ["Beta"]: 6
   union A, B ["Both"]: 2`;
+const WARDLEY_DIAGRAM_FIXTURE = `wardley-beta
+  anchor User [0.95, 0.1]
+  component App [0.75, 0.35] (build) inertia
+  component Platform [0.5, 0.55] (buy)
+  User -> App
+  App +> Platform
+  evolve Platform 0.8
+  pipeline Platform {
+    component Compute [0.6]
+    component Storage [0.75]
+  }
+  note "Customer need" [0.9, 0.15]`;
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
@@ -2187,7 +2199,7 @@ async function mermaidThemeEvidence(root: Locator): Promise<MermaidThemeEvidence
 async function expectThemeStableDiagramAndPanelGeometry(
   page: Page,
   panel: Locator,
-  family: 'treemap' | 'venn',
+  family: 'treemap' | 'venn' | 'wardley',
   label: string,
 ): Promise<void> {
   const panelGeometry = () => panel.evaluate((element) => {
@@ -2795,6 +2807,129 @@ async function expectTreemapAndVennSemanticEditors(
     (await page.locator(".react-flow__node").count()) === 0,
     "Treemap/Venn semantic forms exposed the generic React Flow editor.",
   );
+}
+
+async function expectRemoteWardleyDraftReconciliation(
+  page: Page,
+  mcp: ModernMcpClient,
+  mcpUrl: string,
+  baseUrl: string,
+  roomAccess: RoomAccess,
+  sessionId: string,
+  label: string,
+): Promise<void> {
+  const returnDiagramName = await activeTabName(page);
+  const remoteDiagram = await mcp.createDiagramWithLatestRevision(
+    sessionId,
+    `${returnDiagramName} ${label} Wardley remote`,
+    WARDLEY_DIAGRAM_FIXTURE,
+  );
+  const observer = await openYjsSessionObserver(mcpUrl, sessionId, {
+    cookie: roomAccess.cookie,
+    origin: baseUrl,
+  });
+  try {
+    await selectTabByName(page, remoteDiagram.name);
+    await waitForSemanticMode(page, 'Wardley · editable · form');
+    await closeFlyout(page, 'source');
+    const panel = page.getByTestId('wardley-editor-controls');
+    const app = panel.getByRole('form', { name: 'Wardley component App', exact: true });
+    await app.getByRole('textbox', { name: 'Wardley component App name', exact: true }).fill('Dirty local name');
+    const remoteSource = WARDLEY_DIAGRAM_FIXTURE.replace(
+      'component App [0.75, 0.35]',
+      'component Service [0.8, 0.35]',
+    ).replaceAll('App +>', 'Service +>').replaceAll('User -> App', 'User -> Service');
+    await writeMcpSourceAndAssertRemoteIsolation(
+      page,
+      mcp,
+      observer,
+      sessionId,
+      remoteDiagram.id,
+      remoteSource,
+      `${label} remote Wardley node rename`,
+      `${label} Wardley remote reconciliation`,
+    );
+    await waitForSemanticMode(page, 'Wardley · editable · form');
+    const service = panel.getByRole('form', { name: 'Wardley component Service', exact: true });
+    await expect(service.getByRole('textbox', { name: 'Wardley component Service name', exact: true })).toHaveValue('Dirty local name');
+    await expect(service.getByLabel('Wardley component Service visibility')).toHaveValue('0.8');
+  } finally {
+    observer.destroy();
+    await selectTabByName(page, returnDiagramName);
+  }
+}
+
+async function expectWardleySemanticEditor(
+  page: Page,
+  mcp: ModernMcpClient,
+  mcpUrl: string,
+  baseUrl: string,
+  roomAccess: RoomAccess,
+  sessionId: string,
+): Promise<void> {
+  const anchorsBefore = await snapshotAnchors(page, ANCHORS);
+  const transformBefore = await canvasTransform(page);
+  await replaceSource(page, WARDLEY_DIAGRAM_FIXTURE);
+  await waitForSource(page, WARDLEY_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Wardley · editable · form');
+  await closeFlyout(page, 'source');
+  const panel = page.getByTestId('wardley-editor-controls');
+  const addNode = panel.getByRole('button', { name: 'Add node', exact: true });
+  await assertTouchTarget(page, addNode, 'Wardley add-node control');
+  await expectThemeStableDiagramAndPanelGeometry(page, panel, 'wardley', 'Wardley semantic panel');
+
+  const app = panel.getByRole('form', { name: 'Wardley component App', exact: true });
+  const appVisibility = app.getByLabel('Wardley component App visibility');
+  await appVisibility.fill('-1');
+  await assertAndClickBoardControl(page, app.getByRole('button', { name: 'Save', exact: true }), 'Wardley invalid coordinate');
+  await expect(panel.getByRole('alert')).toContainText('from 0 to 1');
+  await expect(appVisibility).toHaveValue('-1');
+  await appVisibility.fill('0.75');
+  await assertAndClickBoardControl(page, app.getByRole('button', { name: 'Save', exact: true }), 'Wardley exact no-op recovery');
+  await expect(panel.getByRole('alert')).toHaveCount(0);
+
+  await panel.getByLabel('New Wardley node name').fill('API gateway');
+  await panel.getByLabel('New Wardley node visibility').fill('0.65');
+  await panel.getByLabel('New Wardley node evolution').fill('0.45');
+  await panel.getByLabel('New Wardley node strategy').selectOption('outsource');
+  await assertAndClickBoardControl(page, addNode, 'Wardley node add');
+  const added = panel.getByRole('form', { name: 'Wardley component API gateway', exact: true });
+  await added.getByRole('textbox', { name: 'Wardley component API gateway name', exact: true }).fill('Gateway');
+  await assertAndClickBoardControl(page, added.getByLabel('Rename Wardley component API gateway'), 'Wardley atomic node rename');
+
+  await panel.getByLabel('New Wardley link source').selectOption('User');
+  await panel.getByLabel('New Wardley link kind').selectOption('+>');
+  await panel.getByLabel('New Wardley link target').selectOption('Gateway');
+  await assertAndClickBoardControl(page, panel.getByRole('button', { name: 'Add link', exact: true }), 'Wardley flow add');
+  await panel.getByLabel('New Wardley note text').fill('Second note');
+  await assertAndClickBoardControl(page, panel.getByRole('button', { name: 'Add note', exact: true }), 'Wardley note add');
+  const secondNote = panel.getByRole('form', { name: 'Wardley note Second note', exact: true });
+  await assertAndClickBoardControl(page, secondNote.getByLabel('Move Wardley note Second note up'), 'Wardley note reorder');
+  await assertAndClickBoardControl(page, secondNote.getByLabel('Delete Wardley note Second note'), 'Wardley note delete');
+
+  await assertAndClickBoardControl(page, panel.getByLabel('Delete Wardley component Gateway'), 'Wardley node and dependent-flow delete');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { message: 'Wardley exact lifecycle source', timeout: 15_000 }).toBe(WARDLEY_DIAGRAM_FIXTURE);
+  await closeFlyout(page, 'source');
+  const undoCanvas = await focusCurrentDiagramCanvas(page, 'Wardley undo');
+  await undoCanvas.press('ControlOrMeta+z');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { message: 'Wardley undo source', timeout: 15_000 }).toContain('component "Gateway" [0.65, 0.45] (outsource)');
+  await closeFlyout(page, 'source');
+
+  const advanced = 'wardley-beta\n  title Advanced\n  component A [0.5, 0.5]';
+  await replaceSource(page, advanced);
+  await waitForSource(page, advanced);
+  await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { message: 'Wardley advanced family fallback', timeout: 15_000 }).toBe('Wardley · source only');
+  await closeFlyout(page, 'source');
+  await expect(panel).toHaveCount(0);
+  await expectRemoteWardleyDraftReconciliation(page, mcp, mcpUrl, baseUrl, roomAccess, sessionId, 'desktop');
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, advanced);
+  await closeFlyout(page, 'source');
+  assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS));
+  await expect.poll(() => canvasTransform(page), { message: 'Wardley original-tab camera restoration', timeout: 15_000 }).toBe(transformBefore);
+  assert(await page.locator('.react-flow__node').count() === 0, 'Wardley exposed React Flow structural controls.');
 }
 
 async function assertAndClickBoardControl(
@@ -4740,6 +4875,61 @@ H,I,1`;
     overlayToggle,
     `${label} closed overlay toggle after Treemap/Venn panel scroll`,
   );
+  const responsiveWardley = `${WARDLEY_DIAGRAM_FIXTURE}\n${Array.from({ length: 8 }, (_, index) => `  note "Mobile note ${index}" [0.${index + 1}, 0.5]`).join('\n')}`;
+  await replaceSource(page, responsiveWardley);
+  await waitForSource(page, responsiveWardley);
+  await waitForSemanticMode(page, 'Wardley · editable · form');
+  await closeFlyout(page, 'source');
+  const wardleyPanel = page.getByTestId('wardley-editor-controls');
+  await wardleyPanel.waitFor({ state: 'visible', timeout: 15_000 });
+  await resetFixedWorkspaceOrigin(page, `${label} Wardley visible panel`);
+  await assertContainedInViewport(page, wardleyPanel, `${label} Wardley semantic panel`);
+  const wardleyGeometry = await wardleyPanel.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  assert(wardleyGeometry.scrollHeight > wardleyGeometry.clientHeight,
+    `${label} Wardley panel did not provide internal scrolling: ${JSON.stringify(wardleyGeometry)}.`);
+  const wardleyAdd = wardleyPanel.getByRole('button', { name: 'Add node', exact: true });
+  await scrollErControlIntoView(wardleyAdd);
+  await assertTouchTarget(page, wardleyAdd, `${label} Wardley add-node control`);
+  await wardleyPanel.getByLabel('New Wardley node name').fill('Mobile component');
+  const wardleyVisibility = wardleyPanel.getByLabel('New Wardley node visibility');
+  await wardleyVisibility.focus();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('-1');
+  await assertAndClickBoardControl(page, wardleyAdd, `${label} Wardley invalid coordinate no-write`);
+  const wardleyError = wardleyPanel.getByRole('alert');
+  const wardleyBanner = page.getByTestId('mutation-error-banner');
+  await expect(wardleyError).toContainText('from 0 to 1');
+  await expect(wardleyVisibility).toHaveValue('-1');
+  await assertClosedOverlayToggleBesideError(page, wardleyBanner, `${label} Wardley mutation-error coexistence`);
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { message: `${label} Wardley invalid no-write`, timeout: 15_000 }).toBe(responsiveWardley);
+  await closeFlyout(page, 'source');
+  await wardleyVisibility.fill('0.5');
+  await assertAndClickBoardControl(page, wardleyAdd, `${label} Wardley valid recovery`);
+  await expect(wardleyError).toHaveCount(0);
+  await expect(wardleyBanner).toHaveCount(0);
+  const wardleyWithMobile = `${responsiveWardley}\n  component "Mobile component" [0.5, 0.5]`;
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { message: `${label} Wardley exact add source`, timeout: 15_000 }).toBe(wardleyWithMobile);
+  await closeFlyout(page, 'source');
+  const lastWardleyDelete = wardleyPanel.getByLabel('Delete Wardley component Mobile component');
+  await scrollErControlIntoView(lastWardleyDelete);
+  await assertTouchTarget(page, lastWardleyDelete, `${label} Wardley scrolled-last delete control`);
+  const wardleyUndo = await focusCurrentDiagramCanvas(page, `${label} Wardley undo`);
+  await wardleyUndo.press('ControlOrMeta+z');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { message: `${label} Wardley undo source`, timeout: 15_000 }).toBe(responsiveWardley);
+  await closeFlyout(page, 'source');
+  const advancedWardley = 'wardley-beta\n  title Advanced\n  component A [0.5, 0.5]';
+  await replaceSource(page, advancedWardley);
+  await waitForSource(page, advancedWardley);
+  await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { message: `${label} Wardley advanced fallback`, timeout: 15_000 }).toBe('Wardley · source only');
+  await closeFlyout(page, 'source');
+  await expect(wardleyPanel).toHaveCount(0);
+  await expectRemoteWardleyDraftReconciliation(page, mcp, mcpUrl, baseUrl, roomAccess, sessionId, label);
   await expectRemoteTreemapVennDraftReconciliation(
     page,
     mcp,
@@ -6055,6 +6245,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'Cynefin form exposes fixed-domain item and transition lifecycles, deterministic boundaries, recovery, undo/redo, and advanced-source fallback');
       await expectTreemapAndVennSemanticEditors(page, mcp, mcpUrl, baseUrl, roomAccess, sessionId);
       record(results, 'Treemap and Venn forms expose collision-safe subtree controls, authored defaults, exact errors, MCP-isolated remote drafts, deterministic themes, and source-only fallback');
+      await expectWardleySemanticEditor(page, mcp, mcpUrl, baseUrl, roomAccess, sessionId);
+      record(results, 'Wardley form exposes source-safe nodes, links, flows, evolves, notes, pipelines, validated coordinates, MCP-isolated drafts, deterministic themes, and source-only fallback');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');
@@ -6106,7 +6298,7 @@ async function validateWorkspaceUx(): Promise<void> {
           record(results, `${label} touch viewport, tabs, flyouts, camera, final-state overflow, screenshots, and canvas controls`);
           if (label === 'mobile-390' || label === 'mobile-320') {
             await expectResponsiveNumericPanel(responsivePage, label, mcp, mcpUrl, baseUrl, roomAccess, sessionId, diagramName);
-            record(results, `${label} Treemap/Venn exact source, rejection isolation, undo, MCP remote drafts, source-only fallback, scrolled-last 44px targets, and overlay coexistence`);
+            record(results, `${label} Treemap/Venn/Wardley exact source, rejection isolation, undo, MCP remote drafts, source-only fallback, scrolled-last 44px targets, and overlay coexistence`);
           }
         }
         await expectNoDevelopmentIndicator(responsivePage);

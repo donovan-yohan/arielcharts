@@ -123,6 +123,7 @@ import { addPacketField, deletePacketField, editPacketField, getPacketDiagramSna
 import { addCynefinItem, addCynefinTransition, deleteCynefinItem, deleteCynefinTransition, editCynefinItem, editCynefinTransition, getCynefinDiagramSnapshot, moveCynefinItem, moveCynefinTransition } from '../lib/cynefin-mutations';
 import { addTreemapNode, deleteTreemapNode, editTreemapNode, getTreemapDiagramSnapshot, moveTreemapNode, reparentTreemapNode } from '../lib/treemap-mutations';
 import { addVennStyle, addVennSubset, deleteVennStyle, deleteVennSubset, editVennStyle, editVennSubset, getVennDiagramSnapshot, moveVennStyle, moveVennSubset, renameVennSet } from '../lib/venn-mutations';
+import { addWardleyEvolution, addWardleyLink, addWardleyNode, addWardleyNote, addWardleyPipeline, deleteWardleyEvolution, deleteWardleyLink, deleteWardleyNode, deleteWardleyNote, deleteWardleyPipeline, editWardleyEvolution, editWardleyLink, editWardleyNode, editWardleyNote, getWardleyDiagramSnapshot, moveWardleyLink, moveWardleyNode, moveWardleyNote, renameWardleyNode } from '../lib/wardley-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -1851,6 +1852,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isCynefin = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'cynefin');
   const isTreemap = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'treemap');
   const isVenn = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'venn');
+  const isWardley = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'wardley');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1896,6 +1898,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const cynefinDiagram = useMemo(() => isCynefin ? getCynefinDiagramSnapshot(renderedMermaidText) : null, [isCynefin, renderedMermaidText]);
   const treemapDiagram = useMemo(() => isTreemap ? getTreemapDiagramSnapshot(renderedMermaidText) : null, [isTreemap, renderedMermaidText]);
   const vennDiagram = useMemo(() => isVenn ? getVennDiagramSnapshot(renderedMermaidText) : null, [isVenn, renderedMermaidText]);
+  const wardleyDiagram = useMemo(() => isWardley ? getWardleyDiagramSnapshot(renderedMermaidText) : null, [isWardley, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2405,6 +2408,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             treemapDiagram={treemapDiagram}
             isVenn={isVenn}
             vennDiagram={vennDiagram}
+            isWardley={isWardley}
+            wardleyDiagram={wardleyDiagram}
             initialCamera={activeDiagramId ? diagramCameraSessionRef.current.cameras.get(activeDiagramId) : undefined}
             nodePositions={renderedNodePositions}
             overlay={overlayController && activeDiagramId ? {
@@ -2759,6 +2764,24 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onEditVennStyle={(identity, patch) => mutateCanvasSourceDetailed((source) => editVennStyle(source, identity, patch), 'Edited a Venn style')}
             onDeleteVennStyle={(identity) => mutateCanvasSourceDetailed((source) => deleteVennStyle(source, identity), 'Deleted a Venn style')}
             onMoveVennStyle={(identity, direction) => mutateCanvasSourceDetailed((source) => moveVennStyle(source, identity, direction), 'Reordered Venn style')}
+            onAddWardleyNode={(node) => mutateCanvasSourceDetailed((source) => addWardleyNode(source, node), 'Added a Wardley node')}
+            onEditWardleyNode={(identity, patch) => mutateCanvasSourceDetailed((source) => editWardleyNode(source, identity, patch), 'Edited a Wardley node')}
+            onRenameWardleyNode={(identity, name) => mutateCanvasSourceDetailed((source) => renameWardleyNode(source, identity, name), 'Renamed a Wardley node')}
+            onDeleteWardleyNode={(identity) => mutateCanvasSourceDetailed((source) => deleteWardleyNode(source, identity), 'Deleted a Wardley node')}
+            onMoveWardleyNode={(identity, direction) => mutateCanvasSourceDetailed((source) => moveWardleyNode(source, identity, direction), 'Reordered Wardley nodes')}
+            onAddWardleyLink={(link) => mutateCanvasSourceDetailed((source) => addWardleyLink(source, link), 'Added a Wardley link')}
+            onEditWardleyLink={(identity, patch) => mutateCanvasSourceDetailed((source) => editWardleyLink(source, identity, patch), 'Edited a Wardley link')}
+            onDeleteWardleyLink={(identity) => mutateCanvasSourceDetailed((source) => deleteWardleyLink(source, identity), 'Deleted a Wardley link')}
+            onMoveWardleyLink={(identity, direction) => mutateCanvasSourceDetailed((source) => moveWardleyLink(source, identity, direction), 'Reordered Wardley links')}
+            onAddWardleyEvolution={(evolution) => mutateCanvasSourceDetailed((source) => addWardleyEvolution(source, evolution), 'Added a Wardley evolution')}
+            onEditWardleyEvolution={(identity, patch) => mutateCanvasSourceDetailed((source) => editWardleyEvolution(source, identity, patch), 'Edited a Wardley evolution')}
+            onDeleteWardleyEvolution={(identity) => mutateCanvasSourceDetailed((source) => deleteWardleyEvolution(source, identity), 'Deleted a Wardley evolution')}
+            onAddWardleyNote={(note) => mutateCanvasSourceDetailed((source) => addWardleyNote(source, note), 'Added a Wardley note')}
+            onEditWardleyNote={(identity, patch) => mutateCanvasSourceDetailed((source) => editWardleyNote(source, identity, patch), 'Edited a Wardley note')}
+            onDeleteWardleyNote={(identity) => mutateCanvasSourceDetailed((source) => deleteWardleyNote(source, identity), 'Deleted a Wardley note')}
+            onMoveWardleyNote={(identity, direction) => mutateCanvasSourceDetailed((source) => moveWardleyNote(source, identity, direction), 'Reordered Wardley notes')}
+            onAddWardleyPipeline={(pipeline) => mutateCanvasSourceDetailed((source) => addWardleyPipeline(source, pipeline), 'Added a Wardley pipeline')}
+            onDeleteWardleyPipeline={(identity) => mutateCanvasSourceDetailed((source) => deleteWardleyPipeline(source, identity), 'Deleted a Wardley pipeline')}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onLaserChange={handleLaserChange}

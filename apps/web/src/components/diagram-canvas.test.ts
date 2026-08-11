@@ -5,7 +5,7 @@ import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
 import { getConnectModeSourceId } from '../lib/diagram-connect-state';
-import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRendererInteractionMode, getSankeyLinkControlLabel, isSameNodeSelection, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
+import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRendererInteractionMode, getSankeyLinkControlLabel, isSameNodeSelection, pruneInactivePersistentDrafts, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
 import { getDirtyDraftFields, reconcileCanonicalDraft } from '../lib/canonical-draft';
 
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
@@ -144,6 +144,43 @@ describe('new semantic families', () => {
     expect(sourceBackedForms).not.toMatch(/ReactFlow|svgContainer|mermaidPresentation/u);
     expect(workspaceE2eSource).toMatch(/function expectFlowSemanticEditors[^]*?Archive, "cold"[^]*?Hub, "central"[^]*?expectedSankey[^]*?Sankey link A to B weight 1 \(1 of 2\)[^]*?Packet overlap rejection[^]*?Packet exact no-op recovery control[^]*?expectedPacket[^]*?Packet field Reserved bits 0-3 \(1 of 2\)[^]*?toBeDisabled[^]*?react-flow__node/u);
     expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Sankey panel did not provide internal scrolling[^]*?invalid Sankey weight[^]*?Sankey mutation-error coexistence[^]*?Packet panel did not provide internal scrolling[^]*?Packet mutation-error coexistence/u);
+  });
+
+  it('keeps Wardley source-backed, current-preview gated, persistent, and independent from SVG semantics', () => {
+    expect(canvasSource).toContain('data-testid="wardley-editor-controls"');
+    expect(canvasSource).toMatch(/aria-label="Wardley editor"[^]*?data-canvas-pan-exclusion="true"[^]*?maxHeight/u);
+    expect(canvasSource).toMatch(/isWardley && !readOnly && wardleyDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
+    expect(canvasSource).toMatch(/wardleyNodeRenderKeys = useSemanticRenderIdentityKeys[^]*?wardleyLinkRenderKeys = useSemanticRenderIdentityKeys[^]*?wardleyEvolutionRenderKeys = useSemanticRenderIdentityKeys[^]*?wardleyNoteRenderKeys = useSemanticRenderIdentityKeys/u);
+    expect(canvasSource).toMatch(/WardleyNodeForm[^]*?usePersistentCanonicalDraft\(canonical, renderKey, cache\)/u);
+    expect(canvasSource).toMatch(/WardleyLinkForm[^]*?usePersistentCanonicalDraft\(item, renderKey, cache\)/u);
+    expect(canvasSource).toMatch(/WardleyEvolutionForm[^]*?usePersistentCanonicalDraft\(canonical, renderKey, cache\)/u);
+    expect(canvasSource).toMatch(/WardleyNoteForm[^]*?usePersistentCanonicalDraft\(canonical, renderKey, cache\)/u);
+    expect(canvasSource).toMatch(/New Wardley node visibility[^]*?New Wardley node evolution[^]*?New Wardley node strategy[^]*?New Wardley node inertia/u);
+    expect(canvasSource).toMatch(/New Wardley link source[^]*?New Wardley link kind[^]*?New Wardley link target/u);
+    expect(canvasSource).toMatch(/New Wardley evolution component[^]*?New Wardley evolution target/u);
+    expect(canvasSource).toMatch(/New Wardley note text[^]*?New Wardley note visibility[^]*?New Wardley note evolution/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'wardley'\)/u);
+    for (const action of ['AddWardleyNode', 'EditWardleyNode', 'RenameWardleyNode', 'DeleteWardleyNode', 'MoveWardleyNode', 'AddWardleyLink', 'EditWardleyLink', 'DeleteWardleyLink', 'MoveWardleyLink', 'AddWardleyEvolution', 'EditWardleyEvolution', 'DeleteWardleyEvolution', 'AddWardleyNote', 'EditWardleyNote', 'DeleteWardleyNote', 'MoveWardleyNote', 'AddWardleyPipeline', 'DeleteWardleyPipeline']) {
+      expect(workspaceSource).toMatch(new RegExp(`on${action}[^]*?mutateCanvasSourceDetailed`, 'u'));
+    }
+    const wardleyForms = canvasSource.slice(canvasSource.indexOf('function WardleyEditorControls'), canvasSource.indexOf('function C4EditorControls'));
+    expect(wardleyForms).not.toMatch(/ReactFlow|svgContainer|mermaidPresentation/u);
+    expect(workspaceE2eSource).toMatch(/function expectWardleySemanticEditor[^]*?Wardley invalid coordinate[^]*?Wardley node add[^]*?Wardley atomic node rename[^]*?Wardley flow add[^]*?Wardley note reorder[^]*?Wardley node and dependent-flow delete[^]*?Wardley undo source[^]*?Wardley · source only/u);
+    expect(workspaceE2eSource).toMatch(/function expectRemoteWardleyDraftReconciliation[^]*?writeMcpSourceAndAssertRemoteIsolation[^]*?Dirty local name[^]*?Wardley component Service visibility/u);
+    expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Wardley semantic panel[^]*?Wardley invalid coordinate no-write[^]*?Wardley mutation-error coexistence[^]*?Wardley scrolled-last delete control[^]*?Wardley · source only[^]*?expectRemoteWardleyDraftReconciliation/u);
+    expect(workspaceE2eSource).toMatch(/expectThemeStableDiagramAndPanelGeometry\(page, panel, 'wardley'/u);
+  });
+
+  it('prunes converted Wardley drafts only after a current representable snapshot arrives', () => {
+    const cache = new Map([
+      ['wardley-node:active', { draft: 'dirty' }],
+      ['wardley-node:deleted', { draft: 'stale' }],
+    ]);
+    pruneInactivePersistentDrafts(cache, ['wardley-node:active'], false);
+    expect([...cache.keys()]).toEqual(['wardley-node:active', 'wardley-node:deleted']);
+    pruneInactivePersistentDrafts(cache, ['wardley-node:active'], true);
+    expect([...cache.keys()]).toEqual(['wardley-node:active']);
+    expect(canvasSource).toMatch(/pruneInactivePersistentDrafts\(\s*wardleyNodeDraftCacheRef\.current[^]*?wardleyDiagram !== null[^]*?wardleyEvolutionDraftCacheRef\.current[^]*?wardleyNoteDraftCacheRef\.current/u);
   });
 
   it('keeps Cynefin source-backed with fixed domains, safe identities, canonical drafts, and deterministic rendering', () => {

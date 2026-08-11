@@ -29,6 +29,7 @@ import { addPacketField } from './packet-mutations';
 import { addCynefinItem } from './cynefin-mutations';
 import { addTreemapNode } from './treemap-mutations';
 import { addVennSubset } from './venn-mutations';
+import { addWardleyNode } from './wardley-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -158,6 +159,7 @@ describe('collaboration transaction origins', () => {
     ['Cynefin', 'cynefin-beta\n  complex\n    "Emergent"', (source: string) => addCynefinItem(source, { domain: 'complex', label: 'Probe' })],
     ['Treemap', 'treemap-beta\n  "Root"', (source: string) => addTreemapNode(source, { label: 'Leaf', value: 1 }, { node: { ancestorLabels: [], label: 'Root', value: null }, occurrenceCount: 1 })],
     ['Venn', 'venn-beta\n  set A: 1', (source: string) => addVennSubset(source, { label: null, sets: ['B'], value: 1 })],
+    ['Wardley', 'wardley-beta\n  component A [0.5, 0.5]', (source: string) => addWardleyNode(source, { evolution: 0.7, inertia: false, kind: 'component', name: 'B', pipelineParent: null, strategy: null, visibility: 0.6 })],
   ])('keeps %s semantic form mutations in the local visual undo stack', (_family, initial, mutate) => {
     const doc = new Y.Doc();
     const source = doc.getText('semantic-source');

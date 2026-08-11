@@ -16,6 +16,12 @@ html[data-theme='light'] {
   --ink: #252522;
   --ink-muted: #5f5f5a;
   --ink-subtle: #5f5f5a;
+  --source-syntax-keyword: #1559c8;
+  --source-syntax-string: #195e2d;
+  --source-syntax-number: #774400;
+  --source-syntax-comment: #5f5f5a;
+  --source-syntax-operator: #8d1730;
+  --source-syntax-invalid: #a80f24;
   --line-subtle: #d4d4cd;
   --line-strong: #a4a49b;
   --control-surface: #ffffff;
@@ -68,6 +74,12 @@ html[data-theme='dark'] {
   --ink: #e7e7e7;
   --ink-muted: #b3b3b3;
   --ink-subtle: #929292;
+  --source-syntax-keyword: #9abfff;
+  --source-syntax-string: #a2e6b2;
+  --source-syntax-number: #f4d493;
+  --source-syntax-comment: #b3b3b3;
+  --source-syntax-operator: #ffb8c4;
+  --source-syntax-invalid: #ff9eaa;
   --line-subtle: #363636;
   --line-strong: #666666;
   --control-surface: #252525;
@@ -2443,6 +2455,15 @@ code {
 }
 
 @media (forced-colors: active) {
+  :root {
+    --source-syntax-keyword: CanvasText;
+    --source-syntax-string: CanvasText;
+    --source-syntax-number: CanvasText;
+    --source-syntax-comment: CanvasText;
+    --source-syntax-operator: CanvasText;
+    --source-syntax-invalid: CanvasText;
+  }
+
   .laser-pointer-sample {
     background: Highlight !important;
     border-color: CanvasText;

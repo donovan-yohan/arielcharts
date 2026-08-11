@@ -5,7 +5,6 @@ import { APP_NAME, STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/sh
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { markdown } from '@codemirror/lang-markdown';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { Check, KeyRound, Share2 } from 'lucide-react';
@@ -130,6 +129,7 @@ import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodeP
 import { getServerHttpUrl, getWebsocketServerUrl } from '../lib/session';
 import { listDiagramHistory, readCurrentDiagram, readDiagramRevision, restoreDiagramRevision } from '../lib/history-api';
 import { getMermaidRenderId } from '../lib/mermaid-render-id';
+import { mermaidSourceLanguage } from '../lib/mermaid-language';
 import { formatMermaidForGitHub } from '../lib/github-mermaid';
 import { getNextPreviewCameraLock } from '../lib/renderer-camera-policy';
 import type { ConnectionState } from '../lib/connection-state';
@@ -1364,7 +1364,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       doc: activeDiagram.yText.toString(),
       extensions: [
         basicSetup,
-        markdown(),
+        mermaidSourceLanguage,
         keymap.of(yUndoManagerKeymap),
         editorThemeRef.current.of(editorTheme),
         yCollab(activeDiagram.yText, collaboration.awareness, { undoManager }),

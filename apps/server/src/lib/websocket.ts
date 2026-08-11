@@ -25,6 +25,7 @@ const MAX_CANVAS_AWARENESS_NODE_IDS = 100;
 const MAX_CANVAS_AWARENESS_NODE_ID_LENGTH = 256;
 const MAX_CANVAS_AWARENESS_COORDINATE = 1_000_000;
 const MAX_CANVAS_LASER_SEQUENCE = Number.MAX_SAFE_INTEGER;
+const MAX_CANVAS_INK_PREVIEW_POINTS = 64;
 const MIN_PRESENTER_ZOOM = 0.1;
 const MAX_PRESENTER_ZOOM = 4;
 const INGRESS_RATE_WINDOW_MS = 10_000;
@@ -46,6 +47,7 @@ type IngressRejectionReason = DocumentAdmissionReason
   | 'awareness_update_too_large'
   | 'malformed_awareness_update'
   | 'stale_laser_sequence'
+  | 'stale_ink_preview_sequence'
   | 'stale_presenter_sequence'
   | 'outbound_sync_too_large';
 
@@ -137,6 +139,7 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
   const selectedNodeIds = candidate.selected_node_ids;
   const editingNodeId = candidate.editing_node_id;
   const laser = candidate.laser;
+  const inkPreview = candidate.ink_preview;
   const hasValidDiagramId = typeof diagramId === 'string'
     && diagramId.length > 0
     && diagramId.length <= MAX_CANVAS_AWARENESS_DIAGRAM_ID_LENGTH;
@@ -173,7 +176,24 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
         && isFiniteCanvasCoordinate(((laser as Record<string, unknown>).point as Record<string, unknown>).x)
         && isFiniteCanvasCoordinate(((laser as Record<string, unknown>).point as Record<string, unknown>).y))
   );
-  if (!hasValidDiagramId || !hasValidCursor || !hasValidSelectedNodeIds || !hasValidEditingNodeId || !hasValidLaser) {
+  const hasValidInkPreview = inkPreview === undefined || (
+    inkPreview !== null && typeof inkPreview === 'object' && !Array.isArray(inkPreview)
+    && typeof (inkPreview as Record<string, unknown>).active === 'boolean'
+    && Number.isSafeInteger((inkPreview as Record<string, unknown>).sequence)
+    && ((inkPreview as Record<string, unknown>).sequence as number) >= 0
+    && ((inkPreview as Record<string, unknown>).sequence as number) <= MAX_CANVAS_LASER_SEQUENCE
+    && ((inkPreview as Record<string, unknown>).active === false
+      ? (inkPreview as Record<string, unknown>).points === undefined
+      : ((inkPreview as Record<string, unknown>).mode === 'pen' || (inkPreview as Record<string, unknown>).mode === 'highlighter')
+        && typeof (inkPreview as Record<string, unknown>).color === 'string'
+        && Buffer.byteLength((inkPreview as Record<string, unknown>).color as string, 'utf8') <= 32
+        && typeof (inkPreview as Record<string, unknown>).width === 'number' && Number.isFinite((inkPreview as Record<string, unknown>).width) && ((inkPreview as Record<string, unknown>).width as number) > 0 && ((inkPreview as Record<string, unknown>).width as number) <= 64
+        && typeof (inkPreview as Record<string, unknown>).opacity === 'number' && Number.isFinite((inkPreview as Record<string, unknown>).opacity) && ((inkPreview as Record<string, unknown>).opacity as number) >= 0 && ((inkPreview as Record<string, unknown>).opacity as number) <= 1
+        && Array.isArray((inkPreview as Record<string, unknown>).points) && ((inkPreview as Record<string, unknown>).points as unknown[]).length >= 1 && ((inkPreview as Record<string, unknown>).points as unknown[]).length <= MAX_CANVAS_INK_PREVIEW_POINTS
+        && ((inkPreview as Record<string, unknown>).points as unknown[]).every((point) => point && typeof point === 'object' && !Array.isArray(point) && isFiniteCanvasCoordinate((point as Record<string, unknown>).x) && isFiniteCanvasCoordinate((point as Record<string, unknown>).y))
+    )
+  );
+  if (!hasValidDiagramId || !hasValidCursor || !hasValidSelectedNodeIds || !hasValidEditingNodeId || !hasValidLaser || !hasValidInkPreview) {
     const { canvas: _canvas, ...state } = entry.state;
     return { ...entry, state, stateJson: JSON.stringify(state) };
   }
@@ -184,6 +204,7 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
     ...(selectedNodeIds === undefined ? {} : { selected_node_ids: selectedNodeIds }),
     ...(editingNodeId === undefined ? {} : { editing_node_id: editingNodeId }),
     ...(laser === undefined ? {} : { laser }),
+    ...(inkPreview === undefined ? {} : { ink_preview: inkPreview }),
   };
   const state = { ...entry.state, canvas: normalizedCanvas };
   return { ...entry, state, stateJson: JSON.stringify(state) };
@@ -236,6 +257,7 @@ export class SessionWebSocketServer {
   private readonly ingressBySocket = new WeakMap<WebSocket, Map<IngressClass, { windowStartedAt: number; messages: number; bytes: number }>>();
   private readonly ingressRejectionCounts = new Map<IngressRejectionReason, number>();
   private readonly laserSequencesBySession = new WeakMap<SessionState, Map<number, number>>();
+  private readonly inkPreviewSequencesBySession = new WeakMap<SessionState, Map<number, number>>();
   private readonly presenterSequencesBySession = new WeakMap<SessionState, Map<number, number>>();
   /**
    * An upgraded connection does not join SessionState.sockets until its
@@ -372,9 +394,11 @@ export class SessionWebSocketServer {
       const orphanedClientIds = [...clientIds].filter((clientId) => !this.findLiveOwner(session, clientId));
       if (orphanedClientIds.length > 0) {
         const laserSequences = this.laserSequencesBySession.get(session);
+        const inkPreviewSequences = this.inkPreviewSequencesBySession.get(session);
         const presenterSequences = this.presenterSequencesBySession.get(session);
         orphanedClientIds.forEach((clientId) => {
           laserSequences?.delete(clientId);
+          inkPreviewSequences?.delete(clientId);
           presenterSequences?.delete(clientId);
         });
         removeAwarenessStates(session.awareness, orphanedClientIds, socket);
@@ -622,10 +646,11 @@ export class SessionWebSocketServer {
       if (nextOwnedClientIds.has(entry.clientId)) {
         const authoritativeClock = session.awareness.meta.get(entry.clientId)?.clock;
         if (authoritativeClock !== undefined && entry.clock <= authoritativeClock) continue;
-        if (!this.admitLaserSequence(session, entry) || !this.admitPresenterSequence(session, entry)) continue;
+        if (!this.admitLaserSequence(session, entry) || !this.admitInkPreviewSequence(session, entry) || !this.admitPresenterSequence(session, entry)) continue;
         allowed.push(entry);
         if (entry.state === null) {
           this.laserSequencesBySession.get(session)?.delete(entry.clientId);
+          this.inkPreviewSequencesBySession.get(session)?.delete(entry.clientId);
           this.presenterSequencesBySession.get(session)?.delete(entry.clientId);
           nextOwnedClientIds.delete(entry.clientId);
           releasedClientIds.push(entry.clientId);
@@ -637,8 +662,9 @@ export class SessionWebSocketServer {
       if (!liveOwner && !session.managedAwarenessClientIds.has(entry.clientId) && entry.state !== null) {
         this.releaseStaleOwners(session, entry.clientId, socket);
         this.laserSequencesBySession.get(session)?.delete(entry.clientId);
+        this.inkPreviewSequencesBySession.get(session)?.delete(entry.clientId);
         this.presenterSequencesBySession.get(session)?.delete(entry.clientId);
-        if (!this.admitLaserSequence(session, entry) || !this.admitPresenterSequence(session, entry)) continue;
+        if (!this.admitLaserSequence(session, entry) || !this.admitInkPreviewSequence(session, entry) || !this.admitPresenterSequence(session, entry)) continue;
         nextOwnedClientIds.add(entry.clientId);
         claimedClientIds.push(entry.clientId);
         allowed.push(entry);
@@ -682,6 +708,23 @@ export class SessionWebSocketServer {
       return false;
     }
     sequences.set(entry.clientId, candidate.sequence);
+    return true;
+  }
+
+  private admitInkPreviewSequence(session: SessionState, entry: AwarenessEntry): boolean {
+    let sequences = this.inkPreviewSequencesBySession.get(session);
+    if (!sequences) { sequences = new Map(); this.inkPreviewSequencesBySession.set(session, sequences); }
+    const canvas = entry.state?.canvas;
+    const preview = canvas && typeof canvas === 'object' && !Array.isArray(canvas)
+      ? (canvas as Record<string, unknown>).ink_preview : undefined;
+    if (!preview || typeof preview !== 'object' || Array.isArray(preview)) return true;
+    const sequence = (preview as { sequence: number }).sequence;
+    const previous = sequences.get(entry.clientId);
+    if (previous !== undefined && sequence <= previous) {
+      this.recordIngressRejection('stale_ink_preview_sequence');
+      return false;
+    }
+    sequences.set(entry.clientId, sequence);
     return true;
   }
 

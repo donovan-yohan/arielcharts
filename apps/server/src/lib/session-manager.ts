@@ -190,7 +190,7 @@ function assertSupportedOverlayScene(scene: OverlaySceneSnapshot): void {
   if (scene.version !== OVERLAY_SCENE_SCHEMA_VERSION) {
     throw new Error(`Unsupported overlay scene version: ${scene.version}`);
   }
-  const unsupported = scene.objects.find((object) => !['foundation.card', 'annotation.text', 'annotation.sticky'].includes(object.kind) || object.version !== 1);
+  const unsupported = scene.objects.find((object) => !['foundation.card', 'annotation.text', 'annotation.sticky', 'ink.stroke'].includes(object.kind) || object.version !== 1);
   if (unsupported) {
     throw new Error(`Unsupported overlay object: ${unsupported.kind}@${unsupported.version}`);
   }

@@ -1,9 +1,10 @@
 'use client';
 
-import type { OverlayObjectRecord, OverlaySceneSnapshot, OverlayWorldPoint } from '@arielcharts/shared';
-import React, { useMemo, useRef, useState } from 'react';
+import type { CanvasInkPreviewState, OverlayObjectRecord, OverlaySceneSnapshot, OverlayWorldPoint } from '@arielcharts/shared';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listOverlayHistory, readCurrentOverlayScene, restoreOverlayRevision } from '../lib/overlay-history-api';
 import { adaptOverlaySceneToViewport, type OverlayTextComposition, type OverlayViewportTransform } from '../lib/overlay-scene';
+import { INK_MAX_PREVIEW_POINTS, INK_PREVIEW_INTERVAL_MS, simplifyInkPoints, type InkMode, type InkPoint } from '../lib/freehand-ink';
 
 export interface OverlayCanvasLayerProps {
   diagramId: string;
@@ -26,6 +27,24 @@ export interface OverlayCanvasLayerProps {
   onDuplicate: (id: string) => void;
   onBeginComposition: (id: string) => OverlayTextComposition | null;
   onCommitComposition: (id: string, composition: OverlayTextComposition, draft: string) => void;
+  onAddStroke?: (points: readonly InkPoint[], mode: InkMode, style: { color: string; width: number; opacity: number; compositeExport: boolean }) => void;
+  onInkPreview?: (preview: CanvasInkPreviewState | null) => void;
+  remoteInkPreviews?: readonly { id: string; color: string; preview: CanvasInkPreviewState }[];
+}
+
+type InkDraft = { mode: InkMode; pointerId: number; points: InkPoint[] };
+type InkTool = 'select' | InkMode | 'eraser';
+
+function pointsFromPayload(value: unknown): InkPoint[] {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as { points?: unknown }).points)) return [];
+  return (value as { points: unknown[] }).points.flatMap((point) => point && typeof point === 'object'
+    && typeof (point as InkPoint).x === 'number' && Number.isFinite((point as InkPoint).x)
+    && typeof (point as InkPoint).y === 'number' && Number.isFinite((point as InkPoint).y)
+    ? [{ x: (point as InkPoint).x, y: (point as InkPoint).y, ...((typeof (point as InkPoint).pressure === 'number') ? { pressure: (point as InkPoint).pressure } : {}) }] : []);
+}
+
+function screenInkPath(points: readonly InkPoint[], transform: OverlayViewportTransform): string {
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'}${(point.x * transform.zoom) + transform.x} ${(point.y * transform.zoom) + transform.y}`).join(' ');
 }
 
 export function incrementalTextChange(previous: string, next: string): { index: number; deleteCount: number; insert: string } {
@@ -50,13 +69,72 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
   const [historyStatus, setHistoryStatus] = useState('');
   const [compositionDrafts, setCompositionDrafts] = useState<Record<string, string>>({});
   const [compositions, setCompositions] = useState<Record<string, OverlayTextComposition>>({});
+  const [inkTool, setInkTool] = useState<InkTool>('select');
+  const [inkCompositeExport, setInkCompositeExport] = useState(true);
+  const [inkDraft, setInkDraft] = useState<InkDraft | null>(null);
   const canvasOwnerRef = useRef<HTMLDivElement>(null);
+  const inkDraftRef = useRef<InkDraft | null>(null);
+  const inkSequenceRef = useRef(0);
+  const lastInkPreviewAtRef = useRef(0);
   const objects = useMemo(
     () => adaptOverlaySceneToViewport(props.scene, props.transform, props.semanticAnchors),
     [props.scene, props.semanticAnchors, props.transform],
   );
   const selected = objects.find(({ id }) => id === selectedId) ?? null;
   const writable = !props.readOnly && props.scene.version === 1;
+
+  const pointForEvent = useCallback((event: React.PointerEvent<HTMLDivElement>): InkPoint | null => {
+    const bounds = canvasOwnerRef.current?.getBoundingClientRect();
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return null;
+    const point = { x: (event.clientX - bounds.left - props.transform.x) / props.transform.zoom, y: (event.clientY - bounds.top - props.transform.y) / props.transform.zoom, pressure: event.pressure };
+    return Number.isFinite(point.x) && Number.isFinite(point.y) ? point : null;
+  }, [props.transform]);
+  const publishInkPreview = useCallback((draft: InkDraft | null, force = false) => {
+    const now = Date.now();
+    if (!draft) { props.onInkPreview?.(null); return; }
+    if (!force && now - lastInkPreviewAtRef.current < INK_PREVIEW_INTERVAL_MS) return;
+    lastInkPreviewAtRef.current = now;
+    inkSequenceRef.current += 1;
+    props.onInkPreview?.({ active: true, sequence: inkSequenceRef.current, mode: draft.mode, color: draft.mode === 'pen' ? '#2563eb' : '#f59e0b', width: draft.mode === 'pen' ? 3 : 16, opacity: draft.mode === 'pen' ? 1 : 0.32, points: simplifyInkPoints(draft.points, INK_MAX_PREVIEW_POINTS, 1) });
+  }, [props.onInkPreview]);
+  const stopInk = useCallback((commit: boolean) => {
+    const draft = inkDraftRef.current;
+    inkDraftRef.current = null;
+    setInkDraft(null);
+    publishInkPreview(null, true);
+    if (!draft || !commit || draft.points.length < 2) return;
+    props.onAddStroke?.(draft.points, draft.mode, { color: draft.mode === 'pen' ? '#2563eb' : '#f59e0b', width: draft.mode === 'pen' ? 3 : 16, opacity: draft.mode === 'pen' ? 1 : 0.32, compositeExport: inkCompositeExport });
+  }, [inkCompositeExport, props.onAddStroke, publishInkPreview]);
+  useEffect(() => () => { props.onInkPreview?.(null); }, [props.onInkPreview]);
+  useEffect(() => { if (inkTool === 'select') stopInk(false); }, [inkTool, stopInk]);
+  useEffect(() => { stopInk(false); }, [props.diagramId, stopInk]);
+
+  const eraseAt = useCallback((point: InkPoint) => {
+    const hit = objects.find((object) => object.kind === 'ink.stroke'
+      && point.x >= object.geometry.x && point.x <= object.geometry.x + object.geometry.width
+      && point.y >= object.geometry.y && point.y <= object.geometry.y + object.geometry.height);
+    if (hit) { props.onDelete([hit.id]); setSelectedId(null); }
+  }, [objects, props]);
+  const handleInkDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const stylusEraser = event.pointerType === 'pen' && event.nativeEvent.button === 5;
+    if (!writable || inkTool === 'select' || (!stylusEraser && event.button !== 0)) return;
+    const point = pointForEvent(event); if (!point) return;
+    event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
+    if (inkTool === 'eraser' || stylusEraser) { eraseAt(point); return; }
+    const draft: InkDraft = { mode: inkTool, pointerId: event.pointerId, points: [point] };
+    inkDraftRef.current = draft; setInkDraft(draft); publishInkPreview(draft, true);
+  }, [eraseAt, inkTool, pointForEvent, publishInkPreview, writable]);
+  const handleInkMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const draft = inkDraftRef.current; if (!draft || draft.pointerId !== event.pointerId) return;
+    const point = pointForEvent(event); if (!point) return;
+    event.preventDefault();
+    const next = { ...draft, points: [...draft.points.slice(-2_047), point] };
+    inkDraftRef.current = next; setInkDraft(next); publishInkPreview(next);
+  }, [pointForEvent, publishInkPreview]);
+  const handleInkEnd = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (inkDraftRef.current?.pointerId !== event.pointerId) return;
+    event.preventDefault(); stopInk(event.type === 'pointerup');
+  }, [stopInk]);
 
   const restorePrevious = async () => {
     setHistoryStatus('loading overlay history…');
@@ -88,6 +166,24 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
 
   return (<>
     <div data-testid="overlay-canvas-owner" ref={canvasOwnerRef} style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 8 }}>
+      {inkTool !== 'select' ? <div
+        aria-label={`${inkTool} drawing surface`}
+        data-testid="ink-drawing-surface"
+        onLostPointerCapture={handleInkEnd}
+        onPointerCancel={handleInkEnd}
+        onPointerDown={handleInkDown}
+        onPointerMove={handleInkMove}
+        onPointerUp={handleInkEnd}
+        style={{ cursor: inkTool === 'eraser' ? 'cell' : 'crosshair', inset: 0, pointerEvents: writable ? 'auto' : 'none', position: 'absolute', touchAction: 'none', zIndex: 2 }}
+      /> : null}
+      <svg aria-hidden="true" data-testid="ink-overlay-renderer" style={{ height: '100%', inset: 0, overflow: 'visible', pointerEvents: 'none', position: 'absolute', width: '100%' }}>
+        {objects.filter((object) => object.kind === 'ink.stroke').map((object) => {
+          const points = pointsFromPayload(object.payload); const mode = object.payload.mode === 'highlighter' ? 'highlighter' : 'pen';
+          return points.length > 1 ? <path data-testid={`ink-stroke-${object.id}`} d={screenInkPath(points, props.transform)} fill="none" key={object.id} opacity={Number(object.style.opacity ?? 1)} stroke={String(object.style.color ?? '#2563eb')} strokeLinecap="round" strokeLinejoin="round" strokeWidth={Number(object.style.width ?? (mode === 'pen' ? 3 : 16)) * props.transform.zoom} /> : null;
+        })}
+        {inkDraft && inkDraft.points.length > 1 ? <path data-testid="ink-local-draft" d={screenInkPath(inkDraft.points, props.transform)} fill="none" opacity={inkDraft.mode === 'pen' ? 1 : 0.32} stroke={inkDraft.mode === 'pen' ? '#2563eb' : '#f59e0b'} strokeLinecap="round" strokeLinejoin="round" strokeWidth={(inkDraft.mode === 'pen' ? 3 : 16) * props.transform.zoom} /> : null}
+        {(props.remoteInkPreviews ?? []).flatMap(({ id, color, preview }) => preview.active && preview.points && preview.points.length > 1 ? [<path data-testid={`ink-preview-${id}`} d={screenInkPath(preview.points, props.transform)} fill="none" key={id} opacity={preview.opacity ?? 0.5} stroke={preview.color ?? color} strokeDasharray="3 3" strokeLinecap="round" strokeLinejoin="round" strokeWidth={(preview.width ?? 3) * props.transform.zoom} />] : [])}
+      </svg>
       {objects.map((object) => (
         <div
           aria-label={`${object.orphaned ? 'Orphaned ' : ''}overlay ${object.id}`}
@@ -122,7 +218,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
             width: object.screen_geometry.width,
           }}
         >
-          {object.kind.startsWith('annotation.') ? <textarea
+          {object.kind === 'ink.stroke' ? <span className="sr-only">{object.payload.mode === 'highlighter' ? 'Highlighter' : 'Pen'} stroke</span> : object.kind.startsWith('annotation.') ? <textarea
             aria-label={`${object.kind === 'annotation.sticky' ? 'Sticky note' : 'Free text'} contents`}
             onChange={(event) => {
               if (compositionDrafts[object.id] !== undefined) setCompositionDrafts((drafts) => ({ ...drafts, [object.id]: event.target.value }));
@@ -172,6 +268,10 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
         <button disabled={!writable} onClick={props.onUndo} type="button">Undo overlay</button>
         <button disabled={!writable} onClick={() => { void restorePrevious(); }} type="button">Restore overlay</button>
         <button disabled={!writable} onClick={() => addAtViewportCenter('annotation.sticky')} type="button">Add sticky note</button>
+        <button aria-pressed={inkTool === 'pen'} disabled={!writable} onClick={() => setInkTool((tool) => tool === 'pen' ? 'select' : 'pen')} type="button">Pen</button>
+        <button aria-pressed={inkTool === 'highlighter'} disabled={!writable} onClick={() => setInkTool((tool) => tool === 'highlighter' ? 'select' : 'highlighter')} type="button">Highlighter</button>
+        <button aria-pressed={inkTool === 'eraser'} disabled={!writable} onClick={() => setInkTool((tool) => tool === 'eraser' ? 'select' : 'eraser')} type="button">Erase stroke</button>
+        <label><input checked={inkCompositeExport} disabled={!writable} onChange={(event) => setInkCompositeExport(event.target.checked)} type="checkbox" /> Include ink in composite export</label>
         <button disabled={!writable || !selected} onClick={() => selected && props.onReorder(selected.id, 'back')} type="button">Send back</button>
         <button disabled={!writable || !selected} onClick={() => selected && props.onDuplicate(selected.id)} type="button">Duplicate</button>
         <button disabled={!writable || !selected} onClick={() => selected && props.onUpdate(selected.id, { geometry: { ...selected.geometry, width: selected.geometry.width + 24, height: selected.geometry.height + 16 } })} type="button">Resize larger</button>

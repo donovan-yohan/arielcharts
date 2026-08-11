@@ -55,6 +55,23 @@ describe('document admission', () => {
     annotation.set('body', new Y.Text('x'.repeat(8_193)));
     expect(validateDocumentState(valid)).toEqual({ accepted: false, reason: 'overlay_quota_exceeded' });
   });
+  it('accepts bounded immutable ink and rejects partial, oversized, or non-finite stroke payloads', () => {
+    const doc = createReservedRootDocument(); const objects = new Y.Map<unknown>();
+    const ink = new Y.Map<unknown>();
+    ink.set('kind', 'ink.stroke'); ink.set('version', 1); ink.set('order_key', 'a');
+    ink.set('geometry', { x: -1.5, y: -1.5, width: 13, height: 13, rotation: 0 });
+    ink.set('style', { color: '#2563eb', width: 3, opacity: 1 }); ink.set('metadata', { export: 'composite-export' });
+    ink.set('payload', { mode: 'pen', composite_export: true, points: [{ x: 0, y: 0 }, { x: 10, y: 10, pressure: 0.5 }] });
+    objects.set('ink', ink); setScene(doc, 'main', objects);
+    expect(validateDocumentState(doc)).toEqual({ accepted: true });
+    ink.set('payload', { mode: 'pen', composite_export: true, points: [{ x: 0, y: 0 }] });
+    expect(validateDocumentState(doc)).toEqual({ accepted: false, reason: 'invalid_overlay_schema' });
+    ink.set('payload', { mode: 'pen', composite_export: true, points: Array.from({ length: 513 }, () => ({ x: 0, y: 0 })) });
+    expect(validateDocumentState(doc)).toEqual({ accepted: false, reason: 'invalid_overlay_schema' });
+    ink.set('payload', { mode: 'pen', composite_export: true, points: [{ x: 0, y: 0 }, { x: 10, y: 10 }] });
+    ink.set('geometry', { x: 1e308, y: -1.5, width: 13, height: 13, rotation: 0 });
+    expect(validateDocumentState(doc)).toEqual({ accepted: false, reason: 'invalid_overlay_schema' });
+  });
   it('keeps rejected raw updates byte-identical to the live document', () => {
     const live = new Y.Doc();
     live.getMap('diagrams').set('main', new Y.Map());

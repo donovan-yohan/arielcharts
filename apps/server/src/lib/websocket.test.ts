@@ -427,6 +427,31 @@ describe('SessionWebSocketServer', () => {
     await peer.close();
   });
 
+  it('rejects unbounded ink geometry before live state, peer fan-out, or persistence', async () => {
+    const sessionId = 'abc123de';
+    const attacker = await openClient(port, sessionId, roomCookie);
+    const peer = await openClient(port, sessionId, roomCookie);
+    const session = await app.manager.getOrCreateSession(sessionId);
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    const before = Buffer.from(Y.encodeStateAsUpdate(session.doc));
+    const peerMessagesBefore = peer.documentMessageCount;
+    const persist = vi.spyOn(app.manager, 'persistSession');
+    const invalid = new Y.Doc(); Y.applyUpdate(invalid, Y.encodeStateAsUpdate(attacker.doc));
+    const scene = new Y.Map<unknown>(); const objects = new Y.Map<unknown>(); const ink = new Y.Map<unknown>();
+    scene.set('version', 1); scene.set('objects', objects);
+    ink.set('kind', 'ink.stroke'); ink.set('version', 1); ink.set('order_key', 'ink');
+    ink.set('geometry', { x: 1e308, y: -1.5, width: 13, height: 13, rotation: 0 });
+    ink.set('style', { color: '#2563eb', width: 3, opacity: 1 }); ink.set('metadata', { export: 'composite-export' });
+    ink.set('payload', { mode: 'pen', composite_export: true, points: [{ x: 0, y: 0 }, { x: 10, y: 10 }] });
+    objects.set('ink', ink); invalid.getMap<Y.Map<unknown>>('overlays').set('main', scene);
+    attacker.sendSyncStep2(Y.encodeStateAsUpdate(invalid, Y.encodeStateVector(attacker.doc)));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(Buffer.from(Y.encodeStateAsUpdate(session.doc))).toEqual(before);
+    expect(peer.documentMessageCount).toBe(peerMessagesBefore);
+    expect(persist).not.toHaveBeenCalled();
+    persist.mockRestore(); await attacker.close(); await peer.close();
+  });
+
   it('accepts a realistic burst of source deltas without consuming the awareness budget', async () => {
     const sessionId = 'abc123de';
     const writer = await openClient(port, sessionId, roomCookie);
@@ -814,6 +839,26 @@ describe('SessionWebSocketServer', () => {
     expect(sender.socket.readyState).toBe(WebSocket.OPEN);
     await sender.close();
     await observer.close();
+  });
+
+  it('keeps ink previews ephemeral, bounded, and immune to delayed or duplicate packets', async () => {
+    const sessionId = 'abc123de';
+    const sender = await openClient(port, sessionId, roomCookie); const observer = await openClient(port, sessionId, roomCookie);
+    const session = await app.manager.getOrCreateSession(sessionId);
+    const participant = { name: 'Ink peer', color: '#2563eb', type: 'human' };
+    const preview = (sequence: number) => ({ user: participant, canvas: { diagram_id: 'main', ink_preview: { active: true, sequence, mode: 'pen', color: '#2563eb', width: 3, opacity: 1, points: [{ x: 1, y: 2 }, { x: 3, y: 4 }] } } });
+    sender.sendAwareness([{ clientId: 419, clock: 1, state: preview(2) }]);
+    await waitFor(() => expect(session.awareness.getStates().get(419)).toEqual(preview(2)));
+    const revision = Y.encodeStateAsUpdate(session.doc);
+    sender.sendAwareness([{ clientId: 419, clock: 2, state: preview(2) }, { clientId: 419, clock: 3, state: preview(1) }]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(session.awareness.getStates().get(419)).toEqual(preview(2));
+    sender.sendAwareness([{ clientId: 419, clock: 4, state: { user: participant } }]);
+    await waitFor(() => expect(session.awareness.getStates().get(419)).toEqual({ user: participant }));
+    sender.sendAwareness([{ clientId: 419, clock: 5, state: preview(3) }]);
+    await waitFor(() => expect(session.awareness.getStates().get(419)).toEqual(preview(3)));
+    expect(Buffer.from(Y.encodeStateAsUpdate(session.doc))).toEqual(Buffer.from(revision));
+    await sender.close(); await observer.close();
   });
 
   it('drops over-state-byte-limit awareness before parsing, ownership, or peer fan-out', async () => {

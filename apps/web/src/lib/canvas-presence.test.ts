@@ -57,6 +57,14 @@ describe('canvas presence', () => {
     ]), 1, 'main')).toEqual([]);
   });
 
+  it('keeps only bounded non-authoritative ink previews and includes their sequence in equality', () => {
+    const participant = { name: 'Other', color: '#f0a', type: 'human' as const };
+    const preview = { active: true, sequence: 4, mode: 'pen' as const, color: '#2563eb', width: 3, opacity: 1, points: [{ x: 12, y: 16 }, { x: 16, y: 20 }] };
+    expect(getRemoteCanvasPresence(new Map([[9, { user: participant, canvas: { diagram_id: 'main', ink_preview: preview } }]]), 1, 'main')[0]?.canvas.ink_preview).toEqual(preview);
+    expect(getRemoteCanvasPresence(new Map([[9, { user: participant, canvas: { diagram_id: 'main', ink_preview: { ...preview, points: Array.from({ length: 65 }, () => ({ x: 1, y: 2 })) } } }]]), 1, 'main')).toEqual([]);
+    expect(areCanvasAwarenessStatesEqual({ diagram_id: 'main', ink_preview: preview }, { diagram_id: 'main', ink_preview: { ...preview, sequence: 5 } })).toBe(false);
+  });
+
   it('drops malformed editing awareness with the same all-or-nothing policy as other canvas fields', () => {
     const states = new Map<number, unknown>([
       [9, { user: { name: 'Other', color: '#f0a', type: 'human' }, canvas: { diagram_id: 'main', editing_node_id: '' } }],

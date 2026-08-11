@@ -16,6 +16,7 @@ import {
   setOverlayOrderKey,
   updateOverlayObject,
 } from './overlay-scene';
+import { inkGeometry, simplifyInkPoints } from './freehand-ink';
 
 function object(id: string, orderKey = 'm') {
   return {
@@ -85,6 +86,33 @@ describe('overlay scene', () => {
     editOverlayText(doc, 'main', 'note', 6, 0, ' me');
     updateOverlayObject(doc, 'main', 'note', { geometry: { x: 30, y: 40, width: 220, height: 120, rotation: 0 } });
     deleteOverlayObjects(doc, 'main', ['note']);
+    expect(source.toString()).toBe(before);
+  });
+  it('commits concurrent finalized immutable strokes once each without changing Mermaid source', () => {
+    const left = new Y.Doc(); const source = new Y.Text('flowchart TD\nA-->B  ');
+    left.getMap<unknown>('diagrams').set('main', new Y.Map([['mermaid', source]]));
+    getOverlayScene(left, 'main', true);
+    const right = new Y.Doc(); Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
+    const stroke = (id: string, offset: number) => { const points = simplifyInkPoints([{ x: offset, y: 0 }, { x: offset + 10, y: 10 }]); return { ...object(id), kind: 'ink.stroke', geometry: inkGeometry(points, 3), style: { color: '#2563eb', width: 3, opacity: 1 }, metadata: { export: 'composite-export' }, payload: { mode: 'pen', composite_export: true, points } }; };
+    const before = source.toString();
+    addOverlayObject(left, 'main', stroke('left-ink', 0)); addOverlayObject(right, 'main', stroke('right-ink', 20));
+    Y.applyUpdate(left, Y.encodeStateAsUpdate(right, Y.encodeStateVector(left)));
+    Y.applyUpdate(right, Y.encodeStateAsUpdate(left, Y.encodeStateVector(right)));
+    expect(readOverlayScene(left, 'main')).toEqual(readOverlayScene(right, 'main'));
+    expect(readOverlayScene(left, 'main').objects.filter(({ kind }) => kind === 'ink.stroke')).toHaveLength(2);
+    expect(source.toString()).toBe(before);
+  });
+  it('moves an ink stroke as one immutable whole-stroke object', () => {
+    const doc = new Y.Doc();
+    const points = [{ x: 10, y: 20 }, { x: 20, y: 30 }];
+    addOverlayObject(doc, 'main', { ...object('ink'), kind: 'ink.stroke', geometry: inkGeometry(points, 3), style: { color: '#2563eb', width: 3, opacity: 1 }, metadata: { export: 'composite-export' }, payload: { mode: 'pen', composite_export: true, points } });
+    const source = doc.getText('mermaid'); source.insert(0, 'flowchart TD\nA-->B'); const before = source.toString();
+    const controller = { move: (id: string, dx: number, dy: number) => {
+      const current = readOverlayScene(doc, 'main').objects.find((item) => item.id === id)!;
+      updateOverlayObject(doc, 'main', id, { geometry: { ...current.geometry, x: current.geometry.x + dx, y: current.geometry.y + dy }, payload: { ...current.payload, points: (current.payload.points as Array<{ x: number; y: number }>).map((point) => ({ ...point, x: point.x + dx, y: point.y + dy })) } });
+    } };
+    controller.move('ink', 5, -2);
+    expect(readOverlayScene(doc, 'main').objects[0]?.payload.points).toEqual([{ x: 15, y: 18 }, { x: 25, y: 28 }]);
     expect(source.toString()).toBe(before);
   });
   it('converges concurrent inserts, field updates, reorder, and delete with deterministic order', () => {

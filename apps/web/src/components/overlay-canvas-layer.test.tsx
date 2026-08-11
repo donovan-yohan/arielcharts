@@ -30,6 +30,7 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => ([...host.querySelectorAll('button')].find(({ textContent }) => textContent === 'Overlay tools') as HTMLButtonElement).click());
     expect(host.querySelector('[aria-label="ArielCharts overlay list"]')?.textContent).toContain('Sticky note: <script>alert(1)</script>');
     expect(host.textContent).toContain('not in Mermaid export');
+    expect(host.textContent).toContain('Include ink in composite export');
     await act(async () => root.unmount());
   });
   it('renders a visible orphan and routes common controls through the focused owner', async () => {
@@ -96,5 +97,45 @@ describe('OverlayCanvasLayer', () => {
     expect(host.textContent).toContain('newer overlay scene is read-only');
     expect(([...host.querySelectorAll('button')].find((candidate) => candidate.textContent === 'Add overlay') as HTMLButtonElement).disabled).toBe(true);
     await act(async () => root.unmount());
+  });
+
+  it('keeps ink drafts local and clears preview on cancel, tool exit, diagram switch, and unmount', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onAddStroke = vi.fn(); const onInkPreview = vi.fn();
+    const props = {
+      diagramId: 'main', sessionId: 'abc123de', readOnly: false,
+      scene: { version: 1 as const, diagram_id: 'main', objects: [] },
+      transform: { x: 0, y: 0, zoom: 1 }, semanticAnchors: new Map(),
+      onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(),
+      onAddStroke, onInkPreview,
+    };
+    const render = async (diagramId = 'main') => act(async () => root.render(<OverlayCanvasLayer {...props} diagramId={diagramId} scene={{ ...props.scene, diagram_id: diagramId }} />));
+    const pointer = (surface: HTMLElement, type: string, pointerId: number, x: number, y: number) => {
+      const event = Object.assign(new Event(type, { bubbles: true, cancelable: true }), { button: 0, clientX: x, clientY: y, pointerId, pointerType: 'pen', pressure: 0.5 });
+      surface.dispatchEvent(event);
+    };
+    await render();
+    await act(async () => ([...host.querySelectorAll('button')].find((button) => button.textContent === 'Overlay tools') as HTMLButtonElement).click());
+    const pen = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Pen') as HTMLButtonElement;
+    await act(async () => pen.click());
+    const surface = host.querySelector<HTMLElement>('[data-testid="ink-drawing-surface"]')!;
+    surface.setPointerCapture = vi.fn();
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    owner.getBoundingClientRect = () => ({ bottom: 400, height: 400, left: 0, right: 400, top: 0, width: 400, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    await act(async () => { pointer(surface, 'pointerdown', 1, 20, 20); pointer(surface, 'pointermove', 1, 80, 60); pointer(surface, 'pointercancel', 1, 80, 60); });
+    expect(onAddStroke).not.toHaveBeenCalled();
+    expect(onInkPreview).toHaveBeenLastCalledWith(null);
+    await act(async () => { pointer(surface, 'pointerdown', 2, 20, 20); pointer(surface, 'pointermove', 2, 80, 60); pen.click(); });
+    expect(onAddStroke).not.toHaveBeenCalled();
+    expect(onInkPreview).toHaveBeenLastCalledWith(null);
+    await act(async () => pen.click());
+    const switchedSurface = host.querySelector<HTMLElement>('[data-testid="ink-drawing-surface"]')!;
+    switchedSurface.setPointerCapture = vi.fn();
+    await act(async () => { pointer(switchedSurface, 'pointerdown', 3, 20, 20); pointer(switchedSurface, 'pointermove', 3, 80, 60); });
+    await render('next');
+    expect(onAddStroke).not.toHaveBeenCalled();
+    expect(onInkPreview).toHaveBeenLastCalledWith(null);
+    await act(async () => root.unmount());
+    expect(onInkPreview).toHaveBeenLastCalledWith(null);
   });
 });

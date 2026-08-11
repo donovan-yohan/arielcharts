@@ -1,6 +1,6 @@
 'use client';
 
-import type { ActivityEvent, AwarenessState, CanvasAwarenessState, CanvasLaserState, CanvasPresenceEntry, CanvasWorldPoint, DiagramRevision, DiagramRevisionSummary, ListDiagramHistoryOutput, Participant, StarterTemplateId } from '@arielcharts/shared';
+import type { ActivityEvent, AwarenessState, CanvasAwarenessState, CanvasInkPreviewState, CanvasLaserState, CanvasPresenceEntry, CanvasWorldPoint, DiagramRevision, DiagramRevisionSummary, ListDiagramHistoryOutput, Participant, StarterTemplateId } from '@arielcharts/shared';
 import { APP_NAME, STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
@@ -599,6 +599,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const canvasCursorTimerRef = useRef<number | null>(null);
   const canvasPresenceReadyDiagramIdRef = useRef<string | null>(null);
   const localLaserRef = useRef<CanvasLaserState | null>(null);
+  const localInkPreviewRef = useRef<CanvasInkPreviewState | null>(null);
   const laserPublisherRef = useRef<LaserPresencePublisher | null>(null);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
@@ -726,13 +727,15 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     }
 
     const laser = localLaserRef.current;
-    const next: CanvasAwarenessState | null = cursor || selectedNodeIds.length > 0 || editingNodeId || laser
+    const inkPreview = localInkPreviewRef.current;
+    const next: CanvasAwarenessState | null = cursor || selectedNodeIds.length > 0 || editingNodeId || laser || inkPreview
       ? {
         diagram_id: diagramId,
         ...(cursor ? { cursor } : {}),
         ...(selectedNodeIds.length > 0 ? { selected_node_ids: [...selectedNodeIds] } : {}),
         ...(editingNodeId ? { editing_node_id: editingNodeId } : {}),
         ...(laser ? { laser } : {}),
+        ...(inkPreview ? { ink_preview: inkPreview } : {}),
       }
       : null;
     if (areCanvasAwarenessStatesEqual(localCanvasPresenceRef.current, next)) {
@@ -763,6 +766,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     if (value.active && value.point) laserPublisherRef.current?.move(value.point);
     else laserPublisherRef.current?.stop();
   }, []);
+
+  const handleInkPreviewChange = useCallback((preview: CanvasInkPreviewState | null) => {
+    localInkPreviewRef.current = preview;
+    publishCanvasPresence(localCanvasCursorRef.current, selectedNodeIdsRef.current);
+  }, [publishCanvasPresence]);
 
   const handleNodeEditingChange = useCallback((nodeId: string | null) => {
     if (editingNodeIdRef.current === nodeId) {
@@ -832,6 +840,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     localCanvasPresenceRef.current = null;
     laserPublisherRef.current?.destroy();
     localLaserRef.current = null;
+    localInkPreviewRef.current = null;
     setLocalLaser(null);
     if (collaboration) {
       collaboration.awareness.setLocalStateField('canvas', null);
@@ -848,6 +857,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     localCanvasPresenceRef.current = null;
     laserPublisherRef.current?.destroy();
     localLaserRef.current = null;
+    localInkPreviewRef.current = null;
     setLocalLaser(null);
     if (collaboration) {
       collaboration.awareness.setLocalStateField('canvas', null);
@@ -2381,6 +2391,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
               onDuplicate: overlayController.duplicate,
               onBeginComposition: overlayController.beginComposition,
               onCommitComposition: overlayController.commitComposition,
+              onAddStroke: overlayController.addStroke,
+              onInkPreview: historyPreview === null ? handleInkPreviewChange : () => undefined,
+              remoteInkPreviews: historyPreview === null ? remoteCanvasPresence.flatMap((presence) => presence.canvas.ink_preview ? [{ id: String(presence.client_id), color: presence.participant.color, preview: presence.canvas.ink_preview }] : []) : [],
             } : undefined}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}

@@ -2758,7 +2758,7 @@ async function expectTreemapAndVennSemanticEditors(
     .toBe(VENN_DIAGRAM_FIXTURE);
   await closeFlyout(page, "source");
   const vennUndo = await focusCurrentDiagramCanvas(page, "Venn undo");
-  await vennUndo.press("ControlOrMeta+z");
+  await pressCanvasHistoryShortcut(page, vennUndo, "ControlOrMeta+z", "Venn undo");
   await ensureSourceFlyoutOpen(page);
   await expect.poll(() => canonicalSource(page), { message: "Venn undo canonical source", timeout: 15_000 })
     .toBe(`venn-beta
@@ -2767,7 +2767,8 @@ async function expectTreemapAndVennSemanticEditors(
   set GammaSet["Gamma"]: 4
   union A, B ["Both"]: 2`);
   await closeFlyout(page, "source");
-  await vennUndo.press("ControlOrMeta+Shift+z");
+  const vennRedo = await focusCurrentDiagramCanvas(page, "Venn redo");
+  await pressCanvasHistoryShortcut(page, vennRedo, "ControlOrMeta+Shift+z", "Venn redo");
   await ensureSourceFlyoutOpen(page);
   await expect
     .poll(() => canonicalSource(page), { message: "Venn redo canonical source", timeout: 15_000 })

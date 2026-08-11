@@ -1,6 +1,6 @@
 import {
   APP_NAME,
-  STARTER_TEMPLATES,
+  ALL_STARTER_TEMPLATES,
   type DiagramRevision,
   type DiagramRevisionSummary,
   type RestoreDiagramRevisionResult,
@@ -59,9 +59,9 @@ const actorInputSchema = {
   detail: z.string().optional().describe('Optional concise activity-feed description of the change.'),
 };
 
-const starterTemplateIds = STARTER_TEMPLATES.map((template) => template.id) as [StarterTemplateId, ...StarterTemplateId[]];
+const starterTemplateIds = ALL_STARTER_TEMPLATES.map((template) => template.id) as [StarterTemplateId, ...StarterTemplateId[]];
 const starterTemplateIdSchema = z.enum(starterTemplateIds);
-const starterTemplateDescription = STARTER_TEMPLATES
+const starterTemplateDescription = ALL_STARTER_TEMPLATES
   .map((template) => `${template.id}: ${template.description}`)
   .join(' ');
 
@@ -170,11 +170,11 @@ function createMcpServer(manager: SessionManager, authorizedSessionId: string): 
     'createDiagram',
     {
       title: 'Create a named Mermaid diagram tab',
-      description: 'Create one new named tab in a session. First call getSession and pass its latest revision as expectedRevision. Supply exactly one of templateId or mermaidText. Use the API sequence starter for end-to-end calls between parties; do not create a duplicate topic or alter another tab.',
+      description: 'Create one new named Mermaid diagram tab in a session. First call getSession and pass its latest revision as expectedRevision. Supply exactly one catalog templateId or ordinary mermaidText; do not create a duplicate topic or alter another tab.',
       inputSchema: z.object({
         sessionId: z.string(),
         name: z.string().describe('Unique human-readable tab name within the session.'),
-        templateId: starterTemplateIdSchema.optional().describe(`Curated starter ID. Supply exactly one of templateId or mermaidText. ${starterTemplateDescription}`),
+        templateId: starterTemplateIdSchema.optional().describe(`Catalog starter ID (legacy aliases remain accepted). Supply exactly one of templateId or mermaidText. ${starterTemplateDescription}`),
         mermaidText: z.string().optional().describe('Initial full Mermaid source. Supply exactly one of mermaidText or templateId.'),
         expectedRevision: z.string().describe('Latest session revision returned by getSession.'),
         ...actorInputSchema,

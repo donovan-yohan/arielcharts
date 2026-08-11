@@ -37,7 +37,8 @@ import {
   type YjsSessionSnapshotHistory,
   type YjsSessionObserver,
 } from './e2e/support/yjs-session.ts';
-import { STARTER_TEMPLATES } from './packages/shared/src/starter-templates.js';
+import { EXTERNAL_MERMAID_PLUGIN_FAMILIES, MERMAID_DIAGRAM_FAMILIES } from './packages/shared/src/mermaid-diagram-catalog.js';
+import { CHOOSER_STARTER_TEMPLATES, PRIMARY_STARTER_TEMPLATES } from './packages/shared/src/starter-templates.js';
 import { getWebsocketServerUrl } from './apps/web/src/lib/session.ts';
 import { getCanvasDotGridGeometry } from './apps/web/src/lib/canvas-dot-grid.ts';
 import {
@@ -67,6 +68,15 @@ import {
 
 const SETTINGS_TRIGGER_TEST_ID = 'workspace-settings-trigger';
 const SETTINGS_DIALOG_TEST_ID = 'workspace-settings-dialog';
+const FORBIDDEN_TEMPLATE_IDENTITY_FIELDS = ['template_id', 'templateId', 'family_id', 'familyId'] as const;
+const FORBIDDEN_TEMPLATE_IDENTITY_ATTRIBUTES = [
+  'data-template-id',
+  'data-template_id',
+  'data-templateid',
+  'data-family-id',
+  'data-family_id',
+  'data-familyid',
+] as const;
 
 const ANCHORS = {
   canvas: '[data-testid="canvas-first-workspace"]',
@@ -454,9 +464,10 @@ async function waitForFocusedTestId(page: Page, testId: string, label: string): 
 async function waitForFocusedLocator(page: Page, target: Locator, label: string): Promise<void> {
   try {
     await target.waitFor({ state: 'visible', timeout: 5_000 });
-    const element = await target.elementHandle();
-    assert(element, `${label} has no focusable element.`);
-    await page.waitForFunction((candidate) => document.activeElement === candidate, element, { timeout: 5_000 });
+    await expect.poll(() => target.evaluate((element) => document.activeElement === element), {
+      message: `${label} did not receive focus.`,
+      timeout: 5_000,
+    }).toBe(true);
   } catch {
     const active = await page.evaluate(() => ({
       ariaLabel: document.activeElement?.getAttribute('aria-label'),
@@ -584,11 +595,22 @@ async function canvasTransform(page: Page): Promise<string | null> {
   return layer.getAttribute('style');
 }
 
-async function assertTemplateIdentityAbsent(page: Page): Promise<void> {
-  const renderedDocument = await page.locator('html').innerHTML();
-  for (const { id } of STARTER_TEMPLATES) {
-    assert(!renderedDocument.includes(id), `Creation-time template identity leaked into rendered document markup: ${id}.`);
-  }
+async function assertTemplateIdentityAbsent(page: Page, expectedSource: string, label: string): Promise<void> {
+  assert(await canonicalSource(page) === expectedSource,
+    `${label} source differed from its selected starter, indicating an injected creation marker.`);
+  const identityAttributes = await page.locator('*').evaluateAll((elements, attributes) => elements.flatMap((element) =>
+    attributes.flatMap((attribute) => element.hasAttribute(attribute)
+      ? [{ attribute, value: element.getAttribute(attribute) }]
+      : []),
+  ), [...FORBIDDEN_TEMPLATE_IDENTITY_ATTRIBUTES]);
+  assert(identityAttributes.length === 0,
+    `${label} leaked creation-time template identity through exact DOM data attributes: ${JSON.stringify(identityAttributes)}.`);
+}
+
+function assertNoTemplateIdentityFields(record: object, label: string): void {
+  const leakedFields = FORBIDDEN_TEMPLATE_IDENTITY_FIELDS.filter((field) => Object.hasOwn(record, field));
+  assert(leakedFields.length === 0,
+    `${label} leaked creation-time template identity through exact durable fields: ${JSON.stringify(leakedFields)}.`);
 }
 
 async function renderedCanvasTransform(page: Page, label: string): Promise<string> {
@@ -716,6 +738,64 @@ async function waitForStableCanvasTransform(page: Page, label: string): Promise<
     }
   }
   throw new Error(`${label} did not settle a rendered canvas camera transform: ${JSON.stringify(samples)}.`);
+}
+
+/**
+ * Tab selection restores the browser-local camera asynchronously. Let that
+ * restoration cross two frames, then prove the rendered transform is stable
+ * before using it as the source-panel lifecycle baseline.
+ */
+async function waitForCatalogStarterCameraReady(page: Page, label: string): Promise<string> {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => { resolve(); });
+      });
+    });
+  });
+  let previous = await renderedCanvasCameraTransform(page, `${label} after two animation frames`);
+  await expect.poll(async () => {
+    await page.evaluate(async () => {
+      await new Promise<void>((resolve) => { requestAnimationFrame(() => { resolve(); }); });
+    });
+    const current = await renderedCanvasCameraTransform(page, `${label} stability sample`);
+    const stable = current === previous;
+    previous = current;
+    return stable;
+  }, {
+    message: `${label} did not settle its rendered camera after tab selection.`,
+    timeout: 5_000,
+    intervals: [50],
+  }).toBe(true);
+  return previous;
+}
+
+async function waitForCatalogStarterReadiness(
+  page: Page,
+  family: typeof MERMAID_DIAGRAM_FAMILIES[number],
+  name: string,
+  label: string,
+): Promise<void> {
+  let latest = { activeTab: '', mode: '' };
+  try {
+    await expect.poll(async () => {
+      latest = {
+        activeTab: await activeTabName(page),
+        mode: (await page.getByTestId('diagram-mode').textContent())?.trim() ?? '',
+      };
+      return latest.activeTab === name && latest.mode.includes(`${family.label} · editable`);
+    }, {
+      message: `${label} did not converge on the selected ${family.label} catalog tab and editable mode.`,
+      timeout: 15_000,
+      intervals: [50],
+    }).toBe(true);
+  } catch (error) {
+    const sourceFlyout = page.getByTestId('source-flyout');
+    const source = await sourceFlyout.isVisible()
+      ? canonicalSource(page).catch((sourceError) => `unavailable: ${describeError(sourceError)}`)
+      : null;
+    throw new Error(`${label} catalog readiness failed: ${JSON.stringify({ ...latest, expectedMode: `${family.label} · editable`, expectedTab: name, source })}`, { cause: error });
+  }
 }
 
 type CanvasCameraSnapshot = {
@@ -1069,15 +1149,38 @@ async function expectTemplateMenu(page: Page): Promise<string> {
   const before = await snapshotAnchors(page, ANCHORS);
   const beforeTransform = await canvasTransform(page);
   const menu = await openTemplateMenu(page);
+  await expect(menu).toHaveAttribute('role', 'dialog');
+  assert(await menu.locator('[role="menu"], [role="menuitem"]').count() === 0,
+    'Starter chooser must use normal dialog controls so Docs links are not invalid menu descendants.');
+  const documentationLinks = menu.getByRole('link', { name: /Learn about .+ Mermaid syntax/u });
+  assert(await documentationLinks.count() === CHOOSER_STARTER_TEMPLATES.length + EXTERNAL_MERMAID_PLUGIN_FAMILIES.length,
+    'Starter chooser must expose one separate documentation link for every visible family.');
+  const expectedHelpUrls = new Map([
+    ['Blank sheet', 'https://mermaid.js.org/intro/'],
+    ...MERMAID_DIAGRAM_FAMILIES.map((family) => [family.label, family.helpUrl] as const),
+    ...EXTERNAL_MERMAID_PLUGIN_FAMILIES.map((family) => [family.label, family.helpUrl] as const),
+  ]);
+  for (const [label, helpUrl] of expectedHelpUrls) {
+    const link = menu.getByRole('link', { name: `Learn about ${label} Mermaid syntax`, exact: true });
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(link).toHaveAttribute('rel', 'noreferrer');
+    await expect(link).toHaveAttribute('href', helpUrl);
+  }
   await assertDocumentHasNoHorizontalOverflow(page);
   await assertContainedInViewport(page, menu, 'desktop starter template menu');
-  const blank = templateMenuItem(page, 'Blank sheet');
-  const apiSequence = templateMenuItem(page, 'End-to-end API sequence');
-  const deployment = templateMenuItem(page, 'Deployment architecture');
-  const labels = (await menu.getByRole('menuitem').allTextContents()).map((value) => value.trim());
-  assert(labels[0]?.startsWith('Blank sheet'), `Blank sheet is not first in the template menu: ${JSON.stringify(labels)}.`);
+  const labels = (await menu.locator('[data-testid="starter-template-create"] > span').allTextContents())
+    .map((value) => value.trim());
+  const [firstLabel, nextLabel] = labels;
+  const lastLabel = labels.at(-1);
+  assert(labels.length === CHOOSER_STARTER_TEMPLATES.length,
+    `Starter chooser DOM labels diverged from its catalog-owned templates: ${JSON.stringify(labels)}.`);
+  assert(firstLabel && nextLabel && lastLabel,
+    `Starter chooser must expose first, next, and last labels: ${JSON.stringify(labels)}.`);
+  assert(firstLabel === CHOOSER_STARTER_TEMPLATES[0]?.label,
+    `Blank starter is not first in the template menu: ${JSON.stringify(labels)}.`);
+  const blank = await templateMenuItem(menu, firstLabel);
   await waitForFocusedLocator(page, blank, 'Opening template menu');
-  const tabStops = await menu.getByRole('menuitem').evaluateAll((items) => items.map((item) => ({
+  const tabStops = await menu.getByTestId('starter-template-create').evaluateAll((items) => items.map((item) => ({
     tabIndex: (item as HTMLElement).tabIndex,
     text: item.textContent?.trim() ?? '',
   })).filter((item) => item.tabIndex === 0));
@@ -1085,47 +1188,56 @@ async function expectTemplateMenu(page: Page): Promise<string> {
     `Template menu must begin with only Blank sheet in the tab order: ${JSON.stringify(tabStops)}.`);
   await saveScreenshot(page, 'issue-28-light-flat-template-menu');
   await blank.press('Tab');
+  await waitForFocusedLocator(page, menu.getByRole('link', { name: 'Learn about Blank sheet Mermaid syntax' }), 'Tabbing from a starter to its Mermaid help link');
+  await page.keyboard.press('Escape');
   await menu.waitFor({ state: 'detached', timeout: 15_000 });
-  await waitForFocusedTestId(page, 'source-flyout-toggle', 'Tabbing forward out of the template menu');
+  await waitForFocusedTestId(page, 'create-diagram-tab', 'Closing starter template menu after help-link focus');
 
-  await openTemplateMenu(page);
-  await waitForFocusedLocator(page, blank, 'Reopening template menu after Tab exit');
-  await blank.press('ArrowDown');
-  await waitForFocusedLocator(page, apiSequence, 'ArrowDown in template menu');
-  await apiSequence.press('ArrowUp');
-  await waitForFocusedLocator(page, blank, 'ArrowUp in template menu');
-  await blank.press('ArrowDown');
-  await waitForFocusedLocator(page, apiSequence, 'ArrowDown adjacency check in template menu');
-  await apiSequence.press('Home');
-  await waitForFocusedLocator(page, blank, 'Home in template menu');
-  await blank.press('End');
-  await waitForFocusedLocator(page, deployment, 'End in template menu');
-  await deployment.press('Escape');
-  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  const reopenedMenu = await openTemplateMenu(page);
+  const reopenedBlank = await templateMenuItem(reopenedMenu, firstLabel);
+  const reopenedNext = await templateMenuItem(reopenedMenu, nextLabel);
+  const reopenedLast = await templateMenuItem(reopenedMenu, lastLabel);
+  await waitForFocusedLocator(page, reopenedBlank, 'Reopening template menu after Tab exit');
+  await reopenedBlank.press('ArrowDown');
+  await waitForFocusedLocator(page, reopenedNext, 'ArrowDown in template menu');
+  await reopenedNext.press('ArrowUp');
+  await waitForFocusedLocator(page, reopenedBlank, 'ArrowUp in template menu');
+  await reopenedBlank.press('ArrowDown');
+  await waitForFocusedLocator(page, reopenedNext, 'ArrowDown adjacency check in template menu');
+  await reopenedNext.press('Home');
+  await waitForFocusedLocator(page, reopenedBlank, 'Home in template menu');
+  await reopenedBlank.press('End');
+  await waitForFocusedLocator(page, reopenedLast, 'End in template menu');
+  await reopenedLast.press('ArrowDown');
+  await waitForFocusedLocator(page, reopenedBlank, 'ArrowDown wrap in template menu');
+  await reopenedBlank.press('ArrowUp');
+  await waitForFocusedLocator(page, reopenedLast, 'ArrowUp wrap in template menu');
+  await reopenedLast.press('Escape');
+  await reopenedMenu.waitFor({ state: 'detached', timeout: 15_000 });
   await waitForFocusedTestId(page, 'create-diagram-tab', 'Closing template menu with Escape');
   assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
   assert(await canvasTransform(page) === beforeTransform, 'Opening and closing the template menu changed the canvas camera.');
 
   await selectThemePreference(page, 'dark');
-  await openTemplateMenu(page);
+  const darkMenu = await openTemplateMenu(page);
   await saveScreenshot(page, 'issue-28-dark-flat-template-menu');
   await page.keyboard.press('Escape');
-  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await darkMenu.waitFor({ state: 'detached', timeout: 15_000 });
   await selectThemePreference(page, 'light');
 
   const outsideBefore = await snapshotAnchors(page, ANCHORS);
   const outsideBeforeTransform = await canvasTransform(page);
-  await openTemplateMenu(page);
+  const outsideMenu = await openTemplateMenu(page);
   await page.locator('.workspace-logo').click();
-  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await outsideMenu.waitFor({ state: 'detached', timeout: 15_000 });
   await waitForFocusedTestId(page, 'create-diagram-tab', 'Closing template menu from nonfocusable page chrome');
   assertAnchorsStable(outsideBefore, await snapshotAnchors(page, ANCHORS));
   assert(await canvasTransform(page) === outsideBeforeTransform, 'Outside-closing the template menu changed the canvas camera.');
 
-  await openTemplateMenu(page);
+  const sourceMenu = await openTemplateMenu(page);
   const sourceToggle = page.getByTestId('source-flyout-toggle');
   await sourceToggle.click();
-  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await sourceMenu.waitFor({ state: 'detached', timeout: 15_000 });
   await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
   await waitForFocusedLocator(page, page.locator('.cm-content'), 'Clicking an interactive control outside the template menu');
   assert(await trigger.evaluate((element) => document.activeElement !== element),
@@ -1141,20 +1253,24 @@ async function expectTemplateMenu(page: Page): Promise<string> {
 }
 
 async function expectTemplateDiagramCreation(page: Page): Promise<void> {
-  const flowchartName = await createDiagramFromTemplate(page, 'Service / system flowchart');
+  const flowchartTemplate = PRIMARY_STARTER_TEMPLATES.find((template) => template.label === 'Flowchart');
+  const sequenceTemplate = PRIMARY_STARTER_TEMPLATES.find((template) => template.label === 'Sequence');
+  assert(flowchartTemplate && sequenceTemplate, 'Primary chooser catalog omitted its Flowchart or Sequence starter.');
+  const flowchartName = await createDiagramFromTemplate(page, 'Flowchart');
   await waitForCanvas(page, 'flowchart');
   assert(await page.locator('form[aria-label="Add Mermaid node"]').count() === 1,
     'Service flowchart template did not expose structural controls.');
   await renameActiveDiagram(page, 'Service API flow');
   await ensureSourceFlyoutOpen(page);
   const flowchartSource = await canonicalSource(page);
+  await assertTemplateIdentityAbsent(page, flowchartTemplate.source, 'Flowchart browser starter');
   await replaceSource(page, `${flowchartSource}\n  Service --> Audit[Audit log]`);
   await waitForSource(page, `${flowchartSource}\n  Service --> Audit[Audit log]`);
   await waitForCanvas(page, 'flowchart');
   await closeFlyout(page, 'source');
   await saveScreenshot(page, 'issue-15-service-flowchart');
 
-  const sequenceName = await createDiagramFromTemplate(page, 'End-to-end API sequence');
+  const sequenceName = await createDiagramFromTemplate(page, 'Sequence');
   await waitForCanvas(page, 'sequence');
   assert(await page.locator('form[aria-label="Add Mermaid node"]').count() === 0,
     'API sequence template retained flowchart structural controls.');
@@ -1165,12 +1281,12 @@ async function expectTemplateDiagramCreation(page: Page): Promise<void> {
   await renameActiveDiagram(page, 'API request timing');
   await ensureSourceFlyoutOpen(page);
   const sequenceSource = await canonicalSource(page);
+  await assertTemplateIdentityAbsent(page, sequenceTemplate.source, 'Sequence browser starter');
   await replaceSource(page, `${sequenceSource}\n  Note over Client,API: traced in live coding`);
   await waitForSource(page, `${sequenceSource}\n  Note over Client,API: traced in live coding`);
   await waitForCanvas(page, 'sequence');
   await closeFlyout(page, 'source');
   await saveScreenshot(page, 'issue-15-api-sequence');
-  await assertTemplateIdentityAbsent(page);
   const headerOnlySequenceSource = 'sequenceDiagram';
   await ensureSourceFlyoutOpen(page);
   await replaceSource(page, headerOnlySequenceSource);
@@ -1199,6 +1315,152 @@ async function expectTemplateDiagramCreation(page: Page): Promise<void> {
     `Centered header-only sequence controls did not overlay the canvas: ${JSON.stringify(centeredSequenceLayout)}.`);
   await assertHitTarget(page, page.getByRole('button', { name: 'Add sequence participant', exact: true }), 'centered header-only sequence participant control');
   assert(flowchartName !== sequenceName, 'Flowchart and sequence templates reused the same created tab.');
+}
+
+/**
+ * This intentionally checks generated creation and source/render conformance
+ * only. Deep CRUD remains in the owning family suites, so catalog additions do
+ * not multiply the browser gate's semantic mutation matrix.
+ */
+async function expectCatalogStarterSweep(page: Page, mcp: ModernMcpClient, sessionId: string): Promise<void> {
+  const originalWorkingTabName = await activeTabName(page);
+  await ensureSourceFlyoutOpen(page);
+  const originalWorkingSource = await canonicalSource(page);
+  const originalWorkingMode = (await page.getByTestId('diagram-mode').textContent())?.trim();
+  assert(originalWorkingMode, 'Catalog handoff could not capture the pre-sweep diagram mode.');
+  await closeFlyout(page, 'source');
+  const originalWorkingCamera = await waitForStableCanvasTransform(page, 'catalog handoff pre-sweep camera');
+  const originalWorkingSession = await mcp.getSession(sessionId);
+  const originalWorkingDiagrams = originalWorkingSession.diagrams.filter((diagram) => diagram.name === originalWorkingTabName);
+  assert(originalWorkingDiagrams.length === 1,
+    `Catalog handoff could not uniquely resolve the pre-sweep active tab ${JSON.stringify(originalWorkingTabName)}: ${JSON.stringify(originalWorkingDiagrams)}.`);
+  const originalWorkingDiagram = originalWorkingDiagrams[0]!;
+
+  const menu = await openTemplateMenu(page);
+  const blank = await templateMenuItem(menu, 'Blank sheet');
+  await waitForFocusedLocator(page, blank, 'Opening generated catalog starter chooser');
+  const enabledItems = menu.getByTestId('starter-template-create');
+  assert(await enabledItems.count() === CHOOSER_STARTER_TEMPLATES.length,
+    `Catalog picker exposed ${await enabledItems.count()} enabled rows instead of ${CHOOSER_STARTER_TEMPLATES.length}.`);
+  for (const family of EXTERNAL_MERMAID_PLUGIN_FAMILIES) {
+    const unavailable = menu.locator('[aria-disabled="true"]', { hasText: new RegExp(`^${family.label}.*plugin unavailable`, 'u') });
+    await expect(unavailable).toHaveAttribute('aria-disabled', 'true');
+    assert(await unavailable.getByRole('link').count() === 0,
+      `${family.label} availability status must not contain a nested interactive documentation link.`);
+  }
+  await page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, 'create-diagram-tab', 'Closing generated catalog starter chooser with Escape');
+
+  const catalogDiagrams: Array<{ family: typeof MERMAID_DIAGRAM_FAMILIES[number]; id: string; name: string }> = [];
+  const catalogDiagramIds = new Set<string>();
+  for (const family of MERMAID_DIAGRAM_FAMILIES) {
+    const name = `Catalog ${family.label} (${family.id})`;
+    const created = await mcp.createDiagramFromTemplateWithLatestRevision(sessionId, name, family.starter.id);
+    assert(created.name === name && created.mermaidText === family.starter.source,
+      `${family.label} MCP templateId creation did not resolve the catalog starter.`);
+    assert(!catalogDiagramIds.has(created.id), `${family.label} MCP catalog creation reused a previous diagram ID.`);
+    catalogDiagramIds.add(created.id);
+    const session = await mcp.getSession(sessionId);
+    const current = session.diagrams.find((diagram) => diagram.id === created.id);
+    assert(current?.name === name && current.revision === created.revision,
+      `${family.label} MCP create did not expose its current session revision.`);
+    const currentRead = await mcp.readDiagram(sessionId, created.id);
+    const history = await mcp.listDiagramHistory(sessionId, created.id);
+    assertNoTemplateIdentityFields(currentRead, `${family.label} MCP starter record`);
+    assert(currentRead.mermaidText === family.starter.source && currentRead.revision === history.currentRevision
+      && history.revisions.some((revision) => revision.resultRevision === currentRead.revision),
+    `${family.label} MCP templateId creation did not expose a readable current revision/history.`);
+    catalogDiagrams.push({ family, id: created.id, name });
+  }
+
+  for (const { family, id, name } of catalogDiagrams) {
+    await selectTabByName(page, name);
+    await page.locator('.diagram-canvas-svg > svg').waitFor({ state: 'visible', timeout: 15_000 });
+    await expect(page.getByTestId('diagram-mode')).toContainText(`${family.label} · editable`);
+    await ensureSourceFlyoutOpen(page);
+    assert(await canonicalSource(page) === family.starter.source,
+      `${family.label} starter did not preserve its catalog source in Y.Text.`);
+    await assertTemplateIdentityAbsent(page, family.starter.source, `${family.label} catalog starter`);
+    const sourceEdit = `${family.starter.source}\n`;
+    await replaceSource(page, sourceEdit);
+    await waitForSource(page, sourceEdit);
+    await expect(page.getByTestId('diagram-mode')).toContainText(`${family.label} · editable`);
+    await page.keyboard.press('ControlOrMeta+z');
+    await waitForSource(page, family.starter.source);
+    await expect(page.getByTestId('diagram-mode')).toContainText(`${family.label} · editable`);
+    await closeFlyout(page, 'source');
+    const afterBrowserRead = await mcp.readDiagram(sessionId, id);
+    const afterBrowserHistory = await mcp.listDiagramHistory(sessionId, id);
+    assertNoTemplateIdentityFields(afterBrowserRead, `${family.label} browser starter record`);
+    assert(afterBrowserRead.mermaidText === family.starter.source
+      && afterBrowserRead.revision === afterBrowserHistory.currentRevision
+      && afterBrowserHistory.revisions.some((revision) => revision.resultRevision === afterBrowserRead.revision),
+    `${family.label} browser source round-trip leaked across catalog families or lost its current MCP revision.`);
+  }
+
+  await selectThemePreference(page, 'dark');
+  for (const { family, name } of catalogDiagrams) {
+    await selectTabByName(page, name);
+    await page.locator('.diagram-canvas-svg > svg').waitFor({ state: 'visible', timeout: 15_000 });
+    await expect(page.getByTestId('diagram-mode')).toContainText(`${family.label} · editable`);
+    await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), `${family.label} catalog starter Fit`);
+  }
+  await selectThemePreference(page, 'light');
+  const flowchartDiagram = catalogDiagrams.find(({ family }) => family.id === 'flowchart');
+  assert(flowchartDiagram, 'Generated catalog did not retain its Flowchart starter.');
+  await expectRemoteUpdateWithoutAnchorJump(page, mcp, sessionId, flowchartDiagram.name);
+
+  const restoredFlowchart = await mcp.writeLatest(
+    sessionId,
+    flowchartDiagram.id,
+    flowchartDiagram.family.starter.source,
+    'Restore generated Flowchart catalog starter after representative MCP proof',
+  );
+  const restoredFlowchartRead = await mcp.readDiagram(sessionId, flowchartDiagram.id);
+  const restoredFlowchartHistory = await mcp.listDiagramHistory(sessionId, flowchartDiagram.id);
+  assertNoTemplateIdentityFields(restoredFlowchartRead, 'Generated Flowchart MCP handoff record');
+  assert(
+    restoredFlowchart.mermaidText === flowchartDiagram.family.starter.source
+      && restoredFlowchartRead.mermaidText === flowchartDiagram.family.starter.source
+      && restoredFlowchartRead.revision === restoredFlowchart.revision
+      && restoredFlowchartHistory.currentRevision === restoredFlowchart.revision
+      && restoredFlowchartHistory.revisions.some((revision) => revision.resultRevision === restoredFlowchart.revision),
+    'Generated Flowchart MCP handoff did not restore the exact catalog starter at the current revision.',
+  );
+  await waitForSource(page, flowchartDiagram.family.starter.source);
+  await expect(page.getByTestId('diagram-mode')).toContainText('Flowchart · editable');
+  await assertTemplateIdentityAbsent(page, flowchartDiagram.family.starter.source, 'Generated Flowchart browser handoff');
+  await closeFlyout(page, 'source');
+
+  for (const { family, id, name } of catalogDiagrams) {
+    const current = await mcp.readDiagram(sessionId, id);
+    const history = await mcp.listDiagramHistory(sessionId, id);
+    assertNoTemplateIdentityFields(current, `${family.label} generated catalog handoff record`);
+    assert(
+      current.name === name
+        && current.mermaidText === family.starter.source
+        && current.revision === history.currentRevision
+        && history.revisions.some((revision) => revision.resultRevision === current.revision),
+      `${family.label} generated catalog handoff did not retain its exact primary starter source/current revision.`,
+    );
+  }
+
+  await selectTabByName(page, originalWorkingTabName);
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, originalWorkingSource);
+  await expect(page.getByTestId('diagram-mode')).toHaveText(originalWorkingMode);
+  await closeFlyout(page, 'source');
+  assert(await activeTabName(page) === originalWorkingTabName,
+    `Catalog handoff left generated scratch state active instead of returning to ${JSON.stringify(originalWorkingTabName)}.`);
+  assert(await waitForStableCanvasTransform(page, 'catalog handoff original working camera') === originalWorkingCamera,
+    'Catalog handoff changed the original working tab local camera.');
+  const restoredOriginalWorkingDiagram = await mcp.readDiagram(sessionId, originalWorkingDiagram.id);
+  assert(
+    restoredOriginalWorkingDiagram.name === originalWorkingTabName
+      && restoredOriginalWorkingDiagram.mermaidText === originalWorkingSource,
+    'Catalog handoff changed the original working diagram durable record.',
+  );
 }
 
 async function scrollErControlIntoView(control: Locator): Promise<void> {
@@ -3764,9 +4026,9 @@ async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: st
   await closeWorkspaceSettings(page);
   await page.getByTestId('activity-flyout').waitFor({ state: 'visible', timeout: 15_000 });
   await closeFlyout(page, 'activity');
-  await openTemplateMenu(page);
+  const templatesBeforeSettings = await openTemplateMenu(page);
   await openWorkspaceSettings(page);
-  await page.getByRole('menu', { name: 'Starter templates', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
+  await templatesBeforeSettings.waitFor({ state: 'detached', timeout: 15_000 });
   await closeWorkspaceSettings(page);
 
   assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
@@ -3869,8 +4131,8 @@ async function expectFlatChrome(page: Page): Promise<void> {
   const templateMenu = await openTemplateMenu(page);
   await assertNoProductShadows(page, {
     canvasToolbar: '[data-testid="canvas-controls-toolbar"]',
-    menu: '[role="menu"][aria-label="Starter templates"]',
-    templateCard: '[role="menuitem"]',
+    menu: '[role="dialog"][aria-label="Starter templates"]',
+    templateCard: '[data-testid="starter-template-create"]',
   });
   const settings = await openWorkspaceSettings(page);
   await templateMenu.waitFor({ state: 'detached', timeout: 15_000 });
@@ -4303,7 +4565,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   const templateTrigger = page.getByTestId('create-diagram-tab');
   await assertHitTarget(page, templateTrigger, `${label} template creation control`);
   const templateMenu = await openTemplateMenu(page);
-  const blankTemplate = templateMenuItem(page, 'Blank sheet');
+  const blankTemplate = await templateMenuItem(templateMenu, 'Blank sheet');
   await waitForFocusedLocator(page, blankTemplate, `${label} opening starter template menu`);
   await assertDocumentHasNoHorizontalOverflow(page);
   await assertContainedInViewport(page, templateTrigger, `${label} template creation control`);
@@ -4351,6 +4613,18 @@ async function expectResponsiveNumericPanel(
   sessionId: string,
   diagramName: string,
 ): Promise<void> {
+  await selectTabByName(page, diagramName);
+  await ensureSourceFlyoutOpen(page);
+  const intendedSource = await canonicalSource(page);
+  const intendedMode = (await page.getByTestId('diagram-mode').textContent())?.trim();
+  await closeFlyout(page, 'source');
+  const intendedCamera = await waitForCatalogStarterCameraReady(page, `${label} numeric intended-tab camera`);
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, intendedSource);
+  await expect(page.getByTestId('diagram-mode')).toHaveText(intendedMode ?? '');
+  await closeFlyout(page, 'source');
+  assert(await waitForCatalogStarterCameraReady(page, `${label} numeric restored intended-tab camera`) === intendedCamera,
+    `${label} numeric panel did not begin on the intended tab camera.`);
   await resetFixedWorkspaceOrigin(page, label);
   const source = `pie showData
   title Responsive allocation
@@ -5089,7 +5363,7 @@ async function assertVisiblePhoneActionTargets(page: Page, label: string, state:
         '[data-testid="source-flyout"]',
         '[data-testid="activity-flyout"]',
         '[data-testid="workspace-settings-dialog"]',
-        '[role="menu"][aria-label="Starter templates"]',
+        '[role="dialog"][aria-label="Starter templates"]',
       ];
       const occludedByActiveSurface = !targetHit && !!hit && activeSurfaceSelectors.some((selector) => {
         const surface = document.querySelector(selector);
@@ -5487,6 +5761,77 @@ async function expectTouchCanvasControls(
   await assertPinchZoomIncrease(page, label, renderer, residuals);
 }
 
+/**
+ * The desktop sweep creates each catalog family through MCP. Reuse those tabs
+ * here rather than creating a second 30-tab mobile fixture: this stays a
+ * bounded responsive contract while still checking every chooser target and
+ * every family source/panel/camera seam at both narrow widths.
+ */
+async function expectCatalogStarterMobileSweep(page: Page, label: 'mobile-390' | 'mobile-320', mcp: ModernMcpClient, sessionId: string): Promise<void> {
+  const originalWorkingTabName = await activeTabName(page);
+  await ensureSourceFlyoutOpen(page);
+  const originalWorkingSource = await canonicalSource(page);
+  const originalWorkingMode = (await page.getByTestId('diagram-mode').textContent())?.trim();
+  assert(originalWorkingMode, `${label} catalog handoff could not capture the original mode.`);
+  await closeFlyout(page, 'source');
+  const originalWorkingCamera = await waitForCatalogStarterCameraReady(page, `${label} catalog handoff original camera`);
+  const originalWorkingSession = await mcp.getSession(sessionId);
+  const originalWorkingDiagrams = originalWorkingSession.diagrams.filter((diagram) => diagram.name === originalWorkingTabName);
+  assert(originalWorkingDiagrams.length === 1, `${label} catalog handoff could not uniquely resolve ${JSON.stringify(originalWorkingTabName)}.`);
+  const originalWorkingDiagram = originalWorkingDiagrams[0]!;
+  const menuCamera = await renderedCanvasCameraTransform(page, `${label} catalog chooser baseline`);
+  const menu = await openTemplateMenu(page);
+  const blank = await templateMenuItem(menu, 'Blank sheet');
+  await waitForFocusedLocator(page, blank, `${label} opening generated catalog chooser`);
+  await assertContainedInViewport(page, menu, `${label} catalog chooser`);
+  assert(await menu.getByTestId('starter-template-create').count() === PRIMARY_STARTER_TEMPLATES.length,
+    `${label} catalog chooser did not expose all primary starters.`);
+  for (const template of PRIMARY_STARTER_TEMPLATES) {
+    const choice = await templateMenuItem(menu, template.label);
+    await choice.scrollIntoViewIfNeeded();
+    await assertTouchTarget(page, choice, `${label} ${template.label} catalog chooser target`);
+    await choice.click({ trial: true, timeout: 15_000 });
+    await assertContainedInViewport(page, menu, `${label} ${template.label} chooser containment`);
+    await assertDocumentMatchesViewport(page, `${label} ${template.label} chooser`);
+    assert(await renderedCanvasCameraTransform(page, `${label} ${template.label} chooser camera`) === menuCamera,
+      `${label} scrolling to ${template.label} changed the active canvas camera.`);
+  }
+  await page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedTestId(page, 'create-diagram-tab', `${label} closing generated catalog chooser with Escape`);
+
+  for (const family of MERMAID_DIAGRAM_FAMILIES) {
+    const name = `Catalog ${family.label} (${family.id})`;
+    await selectTabByName(page, name);
+    await waitForCatalogStarterReadiness(page, family, name, `${label} ${family.label}`);
+    const currentSvg = page.locator('.diagram-canvas-svg > svg');
+    await currentSvg.waitFor({ state: 'visible', timeout: 15_000 });
+    const camera = await waitForCatalogStarterCameraReady(page, `${label} ${family.label} source baseline`);
+    await ensureSourceFlyoutOpen(page);
+    await assertContainedInViewport(page, page.getByTestId('source-flyout'), `${label} ${family.label} source panel`);
+    await assertDocumentMatchesViewport(page, `${label} ${family.label} source panel`);
+    assert(await canonicalSource(page) === family.starter.source,
+      `${label} ${family.label} mobile tab leaked a different catalog family's source.`);
+    assert(await renderedCanvasCameraTransform(page, `${label} ${family.label} source open camera`) === camera,
+      `${label} ${family.label} source panel changed its local canvas camera.`);
+    await closeFlyout(page, 'source');
+    assert(await renderedCanvasCameraTransform(page, `${label} ${family.label} source close camera`) === camera,
+      `${label} ${family.label} closing source panel changed its local canvas camera.`);
+  }
+  await selectTabByName(page, originalWorkingTabName);
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, originalWorkingSource);
+  await expect(page.getByTestId('diagram-mode')).toHaveText(originalWorkingMode);
+  await closeFlyout(page, 'source');
+  assert(await activeTabName(page) === originalWorkingTabName, `${label} catalog handoff left a catalog scratch tab active.`);
+  assert(await waitForCatalogStarterCameraReady(page, `${label} catalog handoff restored camera`) === originalWorkingCamera,
+    `${label} catalog handoff changed the original working tab camera.`);
+  const restoredOriginal = await mcp.readDiagram(sessionId, originalWorkingDiagram.id);
+  assert(restoredOriginal.name === originalWorkingTabName && restoredOriginal.mermaidText === originalWorkingSource
+    && restoredOriginal.revision === originalWorkingDiagram.revision,
+  `${label} catalog handoff changed the original durable diagram.`);
+}
+
 async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagramName: string, residuals: string[]): Promise<void> {
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
   await selectTabByName(page, diagramName);
@@ -5521,13 +5866,32 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   assert(await renderedCanvasCameraTransform(page, `${label} template open`) === templateCamera,
     `${label} opening templates changed the local canvas camera.`);
   await assertContainedInViewport(page, templateMenu, `${label} starter template menu`);
-  const blankTemplate = templateMenuItem(page, 'Blank sheet');
+  assert(await templateMenu.getByTestId('starter-template-create').count() === CHOOSER_STARTER_TEMPLATES.length,
+    `${label} did not expose every built-in catalog starter.`);
+  const unavailableZenUml = templateMenu.locator('[aria-disabled="true"]', { hasText: /^ZenUML.*plugin unavailable/u });
+  await unavailableZenUml.scrollIntoViewIfNeeded();
+  await expect(unavailableZenUml).toHaveAttribute('aria-disabled', 'true');
+  const blankTemplate = await templateMenuItem(templateMenu, 'Blank sheet');
+  await blankTemplate.scrollIntoViewIfNeeded();
   await assertTouchTarget(page, blankTemplate, `${label} Blank sheet template`);
-  await blankTemplate.click({ trial: true, timeout: 15_000 });
+  const finalTemplate = await templateMenuItem(templateMenu, 'Flowchart');
+  await finalTemplate.scrollIntoViewIfNeeded();
+  await assertTouchTarget(page, finalTemplate, `${label} final catalog template`);
+  const blankDocs = templateMenu.getByRole('link', { name: 'Learn about Blank sheet Mermaid syntax' });
+  await blankDocs.scrollIntoViewIfNeeded();
+  await assertTouchTarget(page, blankDocs, `${label} Blank sheet documentation link`);
+  const finalDocs = templateMenu.getByRole('link', { name: 'Learn about Flowchart Mermaid syntax' });
+  await finalDocs.scrollIntoViewIfNeeded();
+  await assertTouchTarget(page, finalDocs, `${label} final catalog documentation link`);
+  const blankTrial = await templateMenuItem(templateMenu, 'Blank sheet');
+  await blankTrial.scrollIntoViewIfNeeded();
+  await blankTrial.click({ trial: true, timeout: 15_000 });
   await assertPhoneSurface(page, label, 'templates');
   if (label === 'mobile-390') {
     const beforeTabCount = await page.getByRole('tab').count();
-    await blankTemplate.click();
+    const blankCreate = await templateMenuItem(templateMenu, 'Blank sheet');
+    await blankCreate.scrollIntoViewIfNeeded();
+    await blankCreate.click();
     await page.waitForFunction((count) => document.querySelectorAll('[role="tab"]').length === count + 1, beforeTabCount, { timeout: 15_000 });
     await assertActiveTabVisible(page, `${label} blank-sheet tab`);
     await assertPhoneSurface(page, label, 'tab-overflow');
@@ -5540,8 +5904,10 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
     await expect(page.getByRole('tab', { name: 'Phone scratchpad', exact: true })).toHaveCount(0);
     await expectTouchLabelStatus(page, 'Delete', `${label} delete tab`);
   } else {
-    await waitForFocusedLocator(page, blankTemplate, `${label} opening starter templates`);
-    await blankTemplate.press('Escape');
+    const blankEscape = await templateMenuItem(templateMenu, 'Blank sheet');
+    await blankEscape.scrollIntoViewIfNeeded();
+    await waitForFocusedLocator(page, blankEscape, `${label} opening starter templates`);
+    await blankEscape.press('Escape');
     await templateMenu.waitFor({ state: 'detached', timeout: 15_000 });
     await waitForFocusedTestId(page, 'create-diagram-tab', `${label} closing starter templates with Escape`);
   }
@@ -6303,6 +6669,8 @@ async function validateWorkspaceUx(): Promise<void> {
       await saveScreenshot(page, 'issue-14-blank');
       await expectTemplateDiagramCreation(page);
       record(results, 'flowchart and API sequence templates render, rename, edit, and remain ordinary diagrams');
+      await expectCatalogStarterSweep(page, mcp, sessionId);
+      record(results, 'all 30 primary starters create/render in their advertised mode, round-trip one local source edit/undo, and retain dark-theme/Fit behavior; one generated Flowchart tab proves the real MCP remote-write browser observation seam while the dedicated history contract below proves preview/restore');
       await expectErSemanticEditor(page);
       record(results, 'ER semantic form has hit-tested entity controls, source-safe writes, stable anchors, and no generic graph editor');
       await expectRelationshipArchitectureEditors(page);
@@ -6374,6 +6742,10 @@ async function validateWorkspaceUx(): Promise<void> {
         if (label.startsWith('mobile')) {
           await expectPhoneLiveCodingWorkspace(responsivePage, label, diagramName, mobilePinchResiduals);
           record(results, `${label} touch viewport, tabs, flyouts, camera, final-state overflow, screenshots, and canvas controls`);
+          if (label === 'mobile-390' || label === 'mobile-320') {
+            await expectCatalogStarterMobileSweep(responsivePage, label, mcp, sessionId);
+            record(results, `${label} generated all-30 catalog chooser targets plus per-family source-panel containment, exact source isolation, and camera stability`);
+          }
           if (label === 'mobile-390' || label === 'mobile-320') {
             await expectResponsiveNumericPanel(responsivePage, label, mcp, mcpUrl, baseUrl, roomAccess, sessionId, diagramName);
             record(results, `${label} Treemap/Venn/Wardley exact source, rejection isolation, undo, MCP remote drafts, source-only fallback, scrolled-last 44px targets, and overlay coexistence`);

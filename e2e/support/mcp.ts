@@ -171,6 +171,25 @@ export class ModernMcpClient {
     throw new Error('Unreachable createDiagram retry state.');
   }
 
+  async createDiagramFromTemplateWithLatestRevision(sessionId: string, name: string, templateId: string): Promise<Diagram> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const session = await this.getSession(sessionId);
+      const payload = await this.tool('createDiagram', {
+        sessionId,
+        name,
+        templateId,
+        expectedRevision: session.revision,
+        actorName: 'UX harness',
+        actorType: 'agent',
+        detail: 'Generated catalog template conformance',
+      });
+      if (!isRevisionConflict(payload) || attempt === 1) {
+        return this.expectContent<{ diagram: Diagram }>(payload, 'createDiagram templateId').diagram;
+      }
+    }
+    throw new Error('Unreachable template createDiagram retry state.');
+  }
+
   async writeLatest(sessionId: string, diagramId: string, mermaidText: string, detail = 'Remote UX anchor update'): Promise<Diagram> {
     const current = await this.readDiagram(sessionId, diagramId);
     const metadata = {

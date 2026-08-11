@@ -13,7 +13,7 @@ while Mermaid source remains the canonical representation.
 - Provides a canvas-first workspace with CodeMirror source editing, flowchart
   structure controls, sequence participant/message controls, last-valid SVG
   fallback, local camera/selection state, and responsive light/dark themes.
-- Includes curated starters for blank sheets, API sequences, service flows,
+- Includes a catalog-backed starter for every built-in Mermaid family plus blank sheets,
   ER diagrams, state machines, timelines, and deployment diagrams.
 - Stores immutable per-diagram revision history that can be previewed and
   deliberately restored as a new revision.

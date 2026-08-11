@@ -1,7 +1,7 @@
 'use client';
 
 import type { ActivityEvent, AwarenessState, CanvasAwarenessState, CanvasInkPreviewState, CanvasLaserState, CanvasPresenceEntry, CanvasWorldPoint, DiagramRevision, DiagramRevisionSummary, ListDiagramHistoryOutput, Participant, StarterTemplateId } from '@arielcharts/shared';
-import { APP_NAME, STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/shared';
+import { APP_NAME, CHOOSER_STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
@@ -2329,7 +2329,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         }}
         renamingDiagramId={renamingDiagramId}
         sourceOpen={openFlyout === 'source'}
-        starterTemplates={STARTER_TEMPLATES}
+        starterTemplates={CHOOSER_STARTER_TEMPLATES}
       />
 
       <section aria-labelledby={activeDiagramId ? `diagram-tab-${activeDiagramId}` : undefined} className="workspace-main" data-testid="canvas-first-workspace" id="diagram-workspace" role="tabpanel">

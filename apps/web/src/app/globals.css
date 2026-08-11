@@ -953,6 +953,46 @@ code {
   font: 600 12px var(--font-sans);
 }
 
+.workspace-template-menu-choice {
+  display: flex;
+  align-items: stretch;
+}
+
+.workspace-template-menu-choice .workspace-template-menu-item {
+  flex: 1;
+}
+
+.workspace-template-menu-help {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 7px 8px;
+  color: var(--interactive);
+  font: 700 11px var(--font-sans);
+}
+
+.workspace-template-menu-help:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.workspace-template-menu-group + .workspace-template-menu-group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--control-border);
+}
+
+.workspace-template-menu-group-label {
+  margin: 2px 10px 4px;
+  color: var(--ink-muted);
+  font: 700 10px var(--font-sans);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
 .workspace-template-menu-item small {
   color: var(--ink-muted);
   font: 11px var(--font-sans);
@@ -968,6 +1008,11 @@ code {
   color: var(--interactive-hover);
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
+}
+
+.workspace-template-menu-item.is-unavailable {
+  cursor: not-allowed;
+  opacity: .68;
 }
 
 .workspace-diagram-tab-add:hover,

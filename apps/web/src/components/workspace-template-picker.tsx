@@ -1,5 +1,5 @@
-import type { StarterTemplate, StarterTemplateId } from '@arielcharts/shared';
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { EXTERNAL_MERMAID_PLUGIN_FAMILIES, type StarterTemplate, type StarterTemplateId } from '@arielcharts/shared';
+import React, { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Plus } from 'lucide-react';
 
 const INTERACTIVE_OUTSIDE_TARGET = 'a[href], button, input, select, textarea, [contenteditable="true"], [role="button"], [role="link"], [role="menuitem"], [role="tab"], [tabindex]:not([tabindex="-1"])';
@@ -7,6 +7,40 @@ const INTERACTIVE_OUTSIDE_TARGET = 'a[href], button, input, select, textarea, [c
 export function getTemplateMenuOrder(templates: readonly StarterTemplate[]): readonly StarterTemplate[] {
   const blank = templates.find((template) => template.id === 'blank');
   return blank ? [blank, ...templates.filter((template) => template.id !== 'blank')] : [...templates];
+}
+
+export interface TemplateMenuGroup {
+  id: string;
+  label: string;
+  templates: readonly StarterTemplate[];
+}
+
+export function getTemplateMenuGroups(templates: readonly StarterTemplate[]): readonly TemplateMenuGroup[] {
+  const ordered = getTemplateMenuOrder(templates);
+  const groups = new Map<string, TemplateMenuGroup>();
+  for (const template of ordered) {
+    const key = template.id === 'blank'
+      ? 'start'
+      : template.editingModel === 'canvas'
+        ? 'canvas'
+        : template.stability === 'stable'
+          ? 'form-stable'
+          : 'form-beta';
+    const label = key === 'start'
+      ? 'Start'
+      : key === 'canvas'
+        ? 'Canvas editing · stable'
+        : key === 'form-stable'
+          ? 'Form editing · stable'
+          : 'Form editing · preview';
+    const group = groups.get(key);
+    if (group) {
+      groups.set(key, { ...group, templates: [...group.templates, template] });
+    } else {
+      groups.set(key, { id: key, label, templates: [template] });
+    }
+  }
+  return [...groups.values()];
 }
 
 export function getTemplateMenuFocusIndex(key: string, currentIndex: number, itemCount: number): number | null {
@@ -30,7 +64,7 @@ export function getTemplateMenuKeyboardAction(
   itemCount: number,
 ): TemplateMenuKeyboardAction {
   if (key === 'Escape') return { type: 'close', returnFocus: true };
-  if (key === 'Tab') return { type: 'close', returnFocus: false };
+  if (key === 'Tab') return null;
   if (key === 'Enter' || key === ' ') return { type: 'select' };
   const nextIndex = getTemplateMenuFocusIndex(key, currentIndex, itemCount);
   return nextIndex === null ? null : { type: 'move', index: nextIndex };
@@ -47,7 +81,8 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, templates }: Workspac
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const orderedTemplates = getTemplateMenuOrder(templates);
+  const templateGroups = getTemplateMenuGroups(templates);
+  const menuTemplates = templateGroups.flatMap((group) => group.templates);
 
   const closeMenu = useCallback((returnFocus: boolean) => {
     setOpen(false);
@@ -72,7 +107,7 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, templates }: Workspac
   }, [closeMenu, open]);
 
   const onItemKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number, templateId: StarterTemplateId) => {
-    const action = getTemplateMenuKeyboardAction(event.key, index, orderedTemplates.length);
+    const action = getTemplateMenuKeyboardAction(event.key, index, menuTemplates.length);
     if (!action) return;
     if (action.type === 'close') {
       if (action.returnFocus) {
@@ -97,7 +132,7 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, templates }: Workspac
       <button
         aria-controls="starter-template-menu"
         aria-expanded={open}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-label="Create diagram from template"
         className="workspace-diagram-tab-add workspace-touch-label"
         data-touch-label="New diagram"
@@ -115,22 +150,60 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, templates }: Workspac
         type="button"
       ><Plus aria-hidden="true" size={18} /></button>
       {open ? (
-        <div aria-label="Starter templates" className="workspace-template-menu" id="starter-template-menu" ref={menuRef} role="menu">
-          {orderedTemplates.map((template, index) => (
-            <button
-              className="workspace-template-menu-item"
-              key={template.id}
-              onClick={() => { setOpen(false); onCreateDiagram(template.id); }}
-              onKeyDown={(event) => { onItemKeyDown(event, index, template.id); }}
-              ref={(element) => { itemRefs.current[index] = element; }}
-              role="menuitem"
-              tabIndex={index === activeIndex ? 0 : -1}
-              type="button"
-            >
-              <span>{template.label}</span>
-              <small>{template.description}</small>
-            </button>
+        <div
+          aria-label="Starter templates"
+          className="workspace-template-menu"
+          id="starter-template-menu"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              closeMenu(true);
+            }
+          }}
+          ref={menuRef}
+          role="dialog"
+        >
+          {templateGroups.map((group) => (
+            <div aria-label={group.label} className="workspace-template-menu-group" key={group.id} role="group">
+              <p className="workspace-template-menu-group-label">{group.label}</p>
+              {group.templates.map((template) => {
+                const index = menuTemplates.findIndex((candidate) => candidate.id === template.id);
+                return (
+                  <div className="workspace-template-menu-choice" key={template.id}>
+                    <button
+                      className="workspace-template-menu-item"
+                      data-testid="starter-template-create"
+                      onClick={() => { setOpen(false); onCreateDiagram(template.id as StarterTemplateId); }}
+                      onKeyDown={(event) => { onItemKeyDown(event, index, template.id as StarterTemplateId); }}
+                      ref={(element) => { itemRefs.current[index] = element; }}
+                      tabIndex={index === activeIndex ? 0 : -1}
+                      type="button"
+                    >
+                      <span>{template.label}</span>
+                      <small>{template.description}</small>
+                    </button>
+                    {template.helpUrl ? <a aria-label={`Learn about ${template.label} Mermaid syntax`} className="workspace-template-menu-help" href={template.helpUrl} rel="noreferrer" target="_blank">Docs</a> : null}
+                  </div>
+                );
+              })}
+            </div>
           ))}
+          <div aria-label="External plugins" className="workspace-template-menu-group" role="group">
+            <p className="workspace-template-menu-group-label">External plugins</p>
+            {EXTERNAL_MERMAID_PLUGIN_FAMILIES.map((family) => (
+              <div className="workspace-template-menu-choice" key={family.id}>
+                <div
+                  aria-describedby={`starter-template-${family.id}-help`}
+                  aria-disabled="true"
+                  className="workspace-template-menu-item is-unavailable"
+                >
+                  <span>{family.label} · plugin unavailable</span>
+                  <small id={`starter-template-${family.id}-help`}>{family.help}</small>
+                </div>
+                <a aria-label={`Learn about ${family.label} Mermaid syntax`} className="workspace-template-menu-help" href={family.helpUrl} rel="noreferrer" target="_blank">Docs</a>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
     </div>

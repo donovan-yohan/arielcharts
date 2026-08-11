@@ -118,12 +118,18 @@ export async function activeTabName(page: Page): Promise<string> {
   return name.trim();
 }
 
-function accessibleNamePattern(name: string): RegExp {
-  return new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?:\\s|$)`, 'u');
+function exactTextPattern(value: string): RegExp {
+  return new RegExp(`^${value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u');
 }
 
-export function templateMenuItem(page: Page, name: string): Locator {
-  return page.getByRole('menuitem', { name: accessibleNamePattern(name) });
+export async function templateMenuItem(menu: Locator, name: string): Promise<Locator> {
+  const label = menu.locator('[data-testid="starter-template-create"] > span')
+    .filter({ hasText: exactTextPattern(name) });
+  await expect(label).toHaveCount(1);
+  const button = label.locator('..');
+  await expect(button).toHaveCount(1);
+  await expect(button).toHaveAttribute('data-testid', 'starter-template-create');
+  return button;
 }
 
 export async function openTemplateMenu(page: Page): Promise<Locator> {
@@ -131,7 +137,7 @@ export async function openTemplateMenu(page: Page): Promise<Locator> {
   if (await trigger.getAttribute('aria-expanded') !== 'true') {
     await trigger.click();
   }
-  const menu = page.getByRole('menu', { name: 'Starter templates', exact: true });
+  const menu = page.getByRole('dialog', { name: 'Starter templates', exact: true });
   await menu.waitFor({ state: 'visible', timeout: 15_000 });
   return menu;
 }
@@ -153,9 +159,9 @@ export async function selectWorkspaceTheme(page: Page, preference: 'system' | 'l
 }
 
 export async function selectTemplateByAccessibleName(page: Page, name: string): Promise<void> {
-  await openTemplateMenu(page);
-  await templateMenuItem(page, name).click();
-  await page.getByRole('menu', { name: 'Starter templates', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
+  const menu = await openTemplateMenu(page);
+  await (await templateMenuItem(menu, name)).click();
+  await page.getByRole('dialog', { name: 'Starter templates', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
 }
 
 export async function createDiagramFromTemplate(page: Page, name: string): Promise<string> {

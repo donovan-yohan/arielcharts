@@ -708,8 +708,14 @@ describe('SessionWebSocketServer', () => {
         canvas: { diagram_id: 'main', laser: { active: false, sequence: 81 } },
       });
     });
+    await waitFor(() => {
+      expect(observer.awareness.getStates().get(418)).toEqual({
+        user: participant,
+        canvas: { diagram_id: 'main', laser: { active: false, sequence: 81 } },
+      });
+      expect(observer.awarenessMessageCount).toBeGreaterThanOrEqual(81);
+    });
     expect(sender.socket.readyState).toBe(WebSocket.OPEN);
-    expect(observer.awarenessMessageCount).toBeGreaterThanOrEqual(81);
     await sender.close();
     await observer.close();
   });

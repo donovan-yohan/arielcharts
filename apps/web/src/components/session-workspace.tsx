@@ -13,6 +13,7 @@ import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
 import { DiagramCanvas } from './diagram-canvas';
+import { PresenterControls } from './presenter-controls';
 import { useTheme } from './theme-provider';
 import { WorkspaceFlyouts } from './workspace-flyouts';
 import { getCompactCollaboratorOverflowCount, WorkspaceFooter } from './workspace-footer';
@@ -140,6 +141,7 @@ import {
   quantizeCanvasCursor,
 } from '../lib/canvas-presence';
 import { LaserPresencePublisher } from '../lib/laser-presence-publisher';
+import { usePresenterFollow } from '../lib/use-presenter-follow';
 
 const DIAGRAMS_KEY = 'diagrams';
 const DIAGRAM_ORDER_KEY = 'diagramOrder';
@@ -635,6 +637,24 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const [restorePending, setRestorePending] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [touchLabelStatus, setTouchLabelStatus] = useState<{ label: string } | null>(null);
+  const selectPresentedDiagram = useCallback((diagramId: string) => { setActiveDiagramId(diagramId); }, []);
+  const presenterFollow = usePresenterFollow(collaboration?.awareness ?? null, activeDiagramId, selectPresentedDiagram);
+
+  useEffect(() => {
+    if (presenterFollow.followingClientId === null) return;
+    const leaveOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') presenterFollow.stopFollowing();
+    };
+    window.addEventListener('keydown', leaveOnEscape);
+    return () => window.removeEventListener('keydown', leaveOnEscape);
+  }, [presenterFollow.followingClientId, presenterFollow.stopFollowing]);
+
+  useEffect(() => {
+    if (historyPreview !== null || connectionState !== 'connected') {
+      presenterFollow.stopFollowing();
+      presenterFollow.stopPresenting();
+    }
+  }, [connectionState, historyPreview, presenterFollow.stopFollowing, presenterFollow.stopPresenting]);
 
   const activeDiagram = useMemo(
     () => getActiveDiagramState(collaboration, activeDiagramId),
@@ -2038,9 +2058,10 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   }, [activeDiagramId, diagrams]);
 
   const focusDiagramTab = useCallback((diagramId: string) => {
+    presenterFollow.stopFollowing();
     setActiveDiagramId(diagramId);
     window.requestAnimationFrame(() => { diagramTabRefs.current.get(diagramId)?.focus(); });
-  }, []);
+  }, [presenterFollow.stopFollowing]);
 
   const handleDiagramTabKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>, diagramId: string) => {
     const index = diagrams.findIndex((diagram) => diagram.id === diagramId);
@@ -2164,6 +2185,20 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         </div>
 
         <div className="workspace-topbar-right">
+          <PresenterControls
+            disabled={historyPreview !== null || connectionState !== 'connected'}
+            followedPeer={presenterFollow.followedPeer}
+            incomingSpotlight={presenterFollow.incomingSpotlight}
+            onAcceptSpotlight={presenterFollow.acceptSpotlight}
+            onFollow={presenterFollow.startFollowing}
+            onIgnoreSpotlight={presenterFollow.ignoreSpotlight}
+            onSpotlight={presenterFollow.requestSpotlight}
+            onStart={presenterFollow.startPresenting}
+            onStop={presenterFollow.stopPresenting}
+            onStopFollowing={presenterFollow.stopFollowing}
+            peers={presenterFollow.peers}
+            presenting={presenterFollow.presenting}
+          />
           <div data-testid="presence-bar" className="workspace-presence-avatars" aria-label="Session presence">
             {participants.length > 0 ? (
               participants.map((participant, index) => (
@@ -2225,7 +2260,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         diagramModeLabel={diagramModeLabel}
         diagramNameDraft={diagramNameDraft}
         diagrams={diagrams}
-        onActiveDiagramChange={setActiveDiagramId}
+        onActiveDiagramChange={(diagramId) => { presenterFollow.stopFollowing(); setActiveDiagramId(diagramId); }}
         onCommitDiagramName={commitDiagramName}
         onCreateDiagram={createDiagramFromTemplate}
         onDeleteDiagram={deleteActiveDiagram}
@@ -2329,6 +2364,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             remoteCanvasPresence={historyPreview === null ? remoteCanvasPresence : []}
             localLaser={historyPreview === null ? localLaser : null}
             localParticipant={currentIdentityRef.current ?? { color: '#ef4444', name: displayName, type: 'human' }}
+            followedCamera={presenterFollow.followedCamera}
+            onCameraChange={presenterFollow.onCameraChange}
+            onLocalCanvasInteraction={presenterFollow.stopFollowing}
             onAddEdge={(source, target, label, type) => {
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.addEdge(source, target, { label, type }));

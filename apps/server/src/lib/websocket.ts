@@ -24,6 +24,8 @@ const MAX_CANVAS_AWARENESS_NODE_IDS = 100;
 const MAX_CANVAS_AWARENESS_NODE_ID_LENGTH = 256;
 const MAX_CANVAS_AWARENESS_COORDINATE = 1_000_000;
 const MAX_CANVAS_LASER_SEQUENCE = Number.MAX_SAFE_INTEGER;
+const MIN_PRESENTER_ZOOM = 0.1;
+const MAX_PRESENTER_ZOOM = 4;
 const INGRESS_RATE_WINDOW_MS = 10_000;
 const INGRESS_BUDGETS = {
   // A normal text-editor burst emits many small Yjs deltas. Permit that path
@@ -43,6 +45,7 @@ type IngressRejectionReason = DocumentAdmissionReason
   | 'awareness_update_too_large'
   | 'malformed_awareness_update'
   | 'stale_laser_sequence'
+  | 'stale_presenter_sequence'
   | 'outbound_sync_too_large';
 
 function toUint8Array(message: RawData): Uint8Array {
@@ -185,6 +188,46 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
   return { ...entry, state, stateJson: JSON.stringify(state) };
 }
 
+function sanitizePresenterAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
+  if (!entry.state || !Object.hasOwn(entry.state, 'presenter')) return entry;
+  const presenter = entry.state.presenter;
+  const discard = () => {
+    const { presenter: _presenter, ...state } = entry.state!;
+    return { ...entry, state, stateJson: JSON.stringify(state) };
+  };
+  if (presenter === null) return entry;
+  if (!presenter || typeof presenter !== 'object' || Array.isArray(presenter)) return discard();
+  const candidate = presenter as Record<string, unknown>;
+  const viewport = candidate.viewport;
+  const validViewport = viewport && typeof viewport === 'object' && !Array.isArray(viewport)
+    && isFiniteCanvasCoordinate((viewport as Record<string, unknown>).pan_x)
+    && isFiniteCanvasCoordinate((viewport as Record<string, unknown>).pan_y)
+    && typeof (viewport as Record<string, unknown>).zoom === 'number'
+    && Number.isFinite((viewport as Record<string, unknown>).zoom)
+    && ((viewport as Record<string, unknown>).zoom as number) >= MIN_PRESENTER_ZOOM
+    && ((viewport as Record<string, unknown>).zoom as number) <= MAX_PRESENTER_ZOOM;
+  const valid = typeof candidate.active === 'boolean'
+    && Number.isSafeInteger(candidate.sequence) && (candidate.sequence as number) >= 0
+    && typeof candidate.diagram_id === 'string' && candidate.diagram_id.length > 0
+    && candidate.diagram_id.length <= MAX_CANVAS_AWARENESS_DIAGRAM_ID_LENGTH
+    && validViewport
+    && (candidate.spotlight_sequence === undefined
+      || (Number.isSafeInteger(candidate.spotlight_sequence) && (candidate.spotlight_sequence as number) >= 0));
+  if (!valid) return discard();
+  const state = { ...entry.state, presenter: {
+    active: candidate.active,
+    sequence: candidate.sequence,
+    diagram_id: candidate.diagram_id,
+    viewport: {
+      pan_x: (viewport as Record<string, unknown>).pan_x,
+      pan_y: (viewport as Record<string, unknown>).pan_y,
+      zoom: (viewport as Record<string, unknown>).zoom,
+    },
+    ...(candidate.spotlight_sequence === undefined ? {} : { spotlight_sequence: candidate.spotlight_sequence }),
+  } };
+  return { ...entry, state, stateJson: JSON.stringify(state) };
+}
+
 export class SessionWebSocketServer {
   private readonly wss = new WebSocketServer({ noServer: true, maxPayload: COLLABORATION_BUDGETS.websocketFrameBytes });
   private readonly observedDocs = new WeakSet<object>();
@@ -192,6 +235,7 @@ export class SessionWebSocketServer {
   private readonly ingressBySocket = new WeakMap<WebSocket, Map<IngressClass, { windowStartedAt: number; messages: number; bytes: number }>>();
   private readonly ingressRejectionCounts = new Map<IngressRejectionReason, number>();
   private readonly laserSequencesBySession = new WeakMap<SessionState, Map<number, number>>();
+  private readonly presenterSequencesBySession = new WeakMap<SessionState, Map<number, number>>();
   /**
    * An upgraded connection does not join SessionState.sockets until its
    * asynchronous session lookup completes. Track that interval so key
@@ -327,7 +371,11 @@ export class SessionWebSocketServer {
       const orphanedClientIds = [...clientIds].filter((clientId) => !this.findLiveOwner(session, clientId));
       if (orphanedClientIds.length > 0) {
         const laserSequences = this.laserSequencesBySession.get(session);
-        orphanedClientIds.forEach((clientId) => laserSequences?.delete(clientId));
+        const presenterSequences = this.presenterSequencesBySession.get(session);
+        orphanedClientIds.forEach((clientId) => {
+          laserSequences?.delete(clientId);
+          presenterSequences?.delete(clientId);
+        });
         removeAwarenessStates(session.awareness, orphanedClientIds, socket);
       }
     }
@@ -558,14 +606,15 @@ export class SessionWebSocketServer {
     const claimedClientIds: number[] = [];
     const releasedClientIds: number[] = [];
     for (const rawEntry of entries) {
-      const entry = sanitizeCanvasAwarenessEntry(rawEntry);
+      const entry = sanitizePresenterAwarenessEntry(sanitizeCanvasAwarenessEntry(rawEntry));
       if (nextOwnedClientIds.has(entry.clientId)) {
         const authoritativeClock = session.awareness.meta.get(entry.clientId)?.clock;
         if (authoritativeClock !== undefined && entry.clock <= authoritativeClock) continue;
-        if (!this.admitLaserSequence(session, entry)) continue;
+        if (!this.admitLaserSequence(session, entry) || !this.admitPresenterSequence(session, entry)) continue;
         allowed.push(entry);
         if (entry.state === null) {
           this.laserSequencesBySession.get(session)?.delete(entry.clientId);
+          this.presenterSequencesBySession.get(session)?.delete(entry.clientId);
           nextOwnedClientIds.delete(entry.clientId);
           releasedClientIds.push(entry.clientId);
         }
@@ -576,7 +625,8 @@ export class SessionWebSocketServer {
       if (!liveOwner && !session.managedAwarenessClientIds.has(entry.clientId) && entry.state !== null) {
         this.releaseStaleOwners(session, entry.clientId, socket);
         this.laserSequencesBySession.get(session)?.delete(entry.clientId);
-        if (!this.admitLaserSequence(session, entry)) continue;
+        this.presenterSequencesBySession.get(session)?.delete(entry.clientId);
+        if (!this.admitLaserSequence(session, entry) || !this.admitPresenterSequence(session, entry)) continue;
         nextOwnedClientIds.add(entry.clientId);
         claimedClientIds.push(entry.clientId);
         allowed.push(entry);
@@ -620,6 +670,26 @@ export class SessionWebSocketServer {
       return false;
     }
     sequences.set(entry.clientId, candidate.sequence);
+    return true;
+  }
+
+  private admitPresenterSequence(session: SessionState, entry: AwarenessEntry): boolean {
+    const presenter = entry.state?.presenter;
+    if (!presenter || typeof presenter !== 'object' || Array.isArray(presenter)) return true;
+    let sequences = this.presenterSequencesBySession.get(session);
+    if (!sequences) {
+      sequences = new Map();
+      this.presenterSequencesBySession.set(session, sequences);
+    }
+    const sequence = (presenter as Record<string, unknown>).sequence as number;
+    const previous = sequences.get(entry.clientId);
+    if (previous !== undefined && sequence <= previous) {
+      const current = session.awareness.getStates().get(entry.clientId) as Record<string, unknown> | undefined;
+      if (sequence === previous && isDeepStrictEqual(presenter, current?.presenter)) return true;
+      this.recordIngressRejection('stale_presenter_sequence');
+      return false;
+    }
+    sequences.set(entry.clientId, sequence);
     return true;
   }
 

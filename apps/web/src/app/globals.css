@@ -481,6 +481,53 @@ code {
   min-width: 0;
 }
 
+.presenter-controls,
+.presenter-desktop-controls { align-items: center; display: flex; gap: 6px; }
+.presenter-controls button { min-height: 36px; }
+.presenter-following { align-items: center; display: inline-flex; gap: 6px; }
+.presenter-mobile-menu { display: none; position: relative; }
+.presenter-mobile-menu summary {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  min-height: 44px;
+  padding: 0 10px;
+}
+.presenter-mobile-menu-items {
+  background: var(--surface-raised);
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  min-width: min(260px, calc(100vw - 24px));
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 70;
+}
+.presenter-mobile-menu-items button,
+.spotlight-request button { min-height: 44px; }
+.spotlight-request {
+  background: var(--surface-raised);
+  border: 1px solid var(--selection);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 24%);
+  display: flex;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 24px));
+  padding: 10px;
+  position: fixed;
+  right: 12px;
+  top: 64px;
+  z-index: 80;
+}
+
+@media (max-width: 720px), (max-height: 500px) {
+  .presenter-desktop-controls { display: none; }
+  .presenter-mobile-menu { display: block; }
+}
+
 .workspace-settings {
   position: relative;
   flex: none;

@@ -634,6 +634,131 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     assert(JSON.stringify(finalLaserSnapshot) === JSON.stringify(postReconnectBaseline),
       'Final laser gesture changed source/layout/activity after the reconnect baseline.');
 
+    const presenterBaseline = laserObserver.snapshot(main.id);
+    await pageA.getByRole('button', { name: 'Present', exact: true }).click();
+    await pageA.getByRole('button', { name: 'Spotlight', exact: true }).click();
+    const spotlight = pageB.getByRole('dialog', { name: 'Spotlight request' });
+    await spotlight.waitFor({ state: 'visible', timeout: 15_000 });
+    await spotlight.getByRole('button', { name: 'Ignore', exact: true }).click();
+    await spotlight.waitFor({ state: 'detached', timeout: 15_000 });
+    await pageA.getByRole('button', { name: 'Spotlight', exact: true }).click();
+    await spotlight.waitFor({ state: 'visible', timeout: 15_000 });
+    await spotlight.getByRole('button', { name: 'Accept', exact: true }).click();
+    await pageB.locator('.presenter-desktop-controls').getByText(
+      new RegExp(`^Following ${pageAParticipantName.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}`),
+    ).waitFor({ state: 'visible', timeout: 15_000 });
+    await pageB.emulateMedia({ reducedMotion: 'reduce' });
+    await pageA.getByRole('button', { name: 'Zoom in', exact: true }).click();
+    const presentedTransform = await transformedLayer(pageA).getAttribute('style');
+    assert(presentedTransform, 'Presenter camera transform was missing.');
+    await pageB.waitForFunction((expected) => {
+      const sourceMatch = expected.match(/translate\(([-+\d.eE]+)px, ([-+\d.eE]+)px\) scale\(([-+\d.eE]+)\)/u);
+      const receivedMatch = document.querySelector<HTMLElement>('.diagram-canvas-svg')?.parentElement?.getAttribute('style')
+        ?.match(/translate\(([-+\d.eE]+)px, ([-+\d.eE]+)px\) scale\(([-+\d.eE]+)\)/u);
+      const source = sourceMatch?.slice(1).map(Number);
+      const received = receivedMatch?.slice(1).map(Number);
+      return Boolean(source && received && source.every((value, index) => Math.abs(value - received[index]!) <= 0.51));
+    }, presentedTransform, { timeout: 15_000 });
+    assert(await transformedLayer(pageB).evaluate((element) => getComputedStyle(element).transitionDuration) === '0s',
+      'Reduced-motion follower retained a camera transition.');
+    await pageB.emulateMedia({ reducedMotion: 'no-preference' });
+
+    await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
+    const presenterCanvasBox = await boxOf(pageA.getByTestId('diagram-canvas'), 'Presenter laser canvas was missing.');
+    await pageA.mouse.move(presenterCanvasBox.x + 260, presenterCanvasBox.y + 190);
+    await pageA.mouse.down();
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'visible', timeout: 15_000 });
+    assert(await pageB.getByRole('button', { name: 'Leave', exact: true }).count() === 1,
+      'Receiving a presenter laser unexpectedly ended follow mode.');
+    await pageA.mouse.up();
+    await pageA.keyboard.press('Escape');
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'detached', timeout: 15_000 });
+
+    await pageB.getByRole('button', { name: 'Zoom out', exact: true }).click();
+    await pageB.getByRole('button', { name: 'Leave', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
+
+    const followPresenter = pageB.getByRole('button', { name: new RegExp(`^Follow ${pageAParticipantName.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}`) });
+    await followPresenter.click();
+    await nodeById(pageB, await nodeIdAt(pageB, 0)).click();
+    await pageB.getByRole('button', { name: 'Leave', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
+    await followPresenter.click();
+    await pageB.getByRole('button', { name: 'Laser pointer', exact: true }).click();
+    await pageB.getByRole('button', { name: 'Leave', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
+    await pageB.getByRole('button', { name: 'Exit laser pointer', exact: true }).click();
+    await followPresenter.click();
+    const followerCanvasBox = await boxOf(pageB.getByTestId('diagram-canvas'), 'Follower pan canvas was missing.');
+    await pageB.mouse.move(followerCanvasBox.x + 18, followerCanvasBox.y + 18);
+    await pageB.mouse.down({ button: 'middle' });
+    await pageB.mouse.move(followerCanvasBox.x + 70, followerCanvasBox.y + 62, { steps: 3 });
+    await pageB.mouse.up({ button: 'middle' });
+    await pageB.getByRole('button', { name: 'Leave', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
+
+    await followPresenter.click();
+    await selectTabByName(pageA, 'Local view');
+    await pageB.getByRole('tab', { name: 'Local view', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+    await pageB.waitForFunction(() => [...document.querySelectorAll<HTMLElement>('[role="tab"]')]
+      .some((tab) => tab.textContent?.trim() === 'Local view' && tab.getAttribute('aria-selected') === 'true'), undefined, { timeout: 15_000 });
+    assert(await pageB.getByRole('tab', { name: 'Local view', exact: true }).getAttribute('aria-selected') === 'true',
+      'Follower did not track the presenter active diagram.');
+    await pageB.keyboard.press('Escape');
+    await pageB.getByRole('button', { name: 'Leave', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
+    await selectTabByName(pageA, 'Main');
+    await selectTabByName(pageB, 'Main');
+
+    await followPresenter.click();
+    await pageA.reload({ waitUntil: 'domcontentloaded' });
+    await pageB.getByRole('button', { name: 'Leave', exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
+
+    await pageA.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+    await waitForFlowchart(pageA);
+    await pageA.setViewportSize({ width: 390, height: 844 });
+    const presenterMenu = pageA.locator('.presenter-mobile-menu').locator('summary');
+    await presenterMenu.focus();
+    await pageA.keyboard.press('Enter');
+    const mobileStart = pageA.getByRole('button', { name: 'Start presenting', exact: true });
+    const mobileStartBox = await boxOf(mobileStart, 'Mobile presenter control was missing.');
+    assert(mobileStartBox.height >= 44, `Mobile presenter target was too short: ${mobileStartBox.height}px.`);
+    await mobileStart.focus();
+    await pageA.keyboard.press('Enter');
+    await pageB.setViewportSize({ width: 390, height: 844 });
+    const followerMenu = pageB.locator('.presenter-mobile-menu').locator('summary');
+    await followerMenu.focus();
+    await pageB.keyboard.press('Enter');
+    const mobileFollow = pageB.locator('[data-testid^="mobile-follow-presenter-"]').first();
+    await mobileFollow.waitFor({ state: 'visible', timeout: 15_000 });
+    const mobileFollowBox = await boxOf(mobileFollow, 'Mobile follow control was missing.');
+    assert(mobileFollowBox.height >= 44, `Mobile follow target was too short: ${mobileFollowBox.height}px.`);
+    await mobileFollow.focus();
+    await pageB.keyboard.press('Enter');
+    await pageB.getByRole('button', { name: 'Stop following', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+    await pageB.reload({ waitUntil: 'domcontentloaded' });
+    await pageB.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+    await pageB.waitForTimeout(1_100);
+    assert(await pageB.getByRole('button', { name: 'Leave', exact: true }).count() === 0,
+      'Follower state replayed after reload.');
+    const mobileStop = pageA.getByRole('button', { name: 'Stop presenting', exact: true });
+    await mobileStop.focus();
+    await pageA.keyboard.press('Enter');
+    await Promise.all([
+      pageA.setViewportSize({ width: 1440, height: 900 }),
+      pageB.setViewportSize({ width: 1440, height: 900 }),
+    ]);
+    await pageA.locator('.presenter-mobile-menu').evaluate((element) => { (element as HTMLDetailsElement).open = false; });
+    await Promise.all([
+      pageA.reload({ waitUntil: 'domcontentloaded' }),
+      pageB.reload({ waitUntil: 'domcontentloaded' }),
+    ]);
+    await Promise.all([waitForFlowchart(pageA), waitForFlowchart(pageB)]);
+    await Promise.all([waitForMainTabActive(pageA), waitForMainTabActive(pageB)]);
+    await pageA.waitForTimeout(1_100);
+    const presenterAfter = laserObserver.snapshot(main.id);
+    assert(getYjsSourceLayoutSignature(presenterAfter) === getYjsSourceLayoutSignature(presenterBaseline),
+      'Presenter/follow/spotlight behavior changed durable source/layout.');
+    const baselineActivityIds = new Set(presenterBaseline.activity.map((event) => event.id));
+    assert(presenterAfter.activity.filter((event) => !baselineActivityIds.has(event.id))
+      .every((event) => event.action === 'joined' || event.action === 'left'),
+    'Presenter/follow/spotlight behavior wrote durable activity beyond ordinary reload lifecycle.');
+
     const durableAfterLaser = await mcp.readDiagram(sessionId, main.id);
     const sessionAfterLaser = await mcp.getSession(sessionId);
     const yjsAfterLaser = finalLaserSnapshot;
@@ -648,7 +773,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
       'Laser use changed the exported session diagram catalog/revisions.');
     assert(getYjsSourceLayoutSignature(yjsAfterLaser) === getYjsSourceLayoutSignature(yjsBeforeLaser),
       'Laser lifecycle testing changed durable source/layout.');
-    assert(JSON.stringify(persistedAfterLaser) === JSON.stringify(yjsAfterLaser),
+    assert(JSON.stringify(persistedAfterLaser) === JSON.stringify(presenterAfter),
       'Fresh persisted reload did not match the post-reconnect durable source/layout/activity baseline.');
 
     await nodeById(pageA, presenceNodeId).click();
@@ -921,6 +1046,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     console.log(`remote local-state isolation tab=${activeTabPreserved} flyouts=${sourceFlyoutsPreserved} selection=${localSelectionPreserved} mode=${localConnectModePreserved} camera=${localCameraPreserved}`);
     console.log('remote node editing awareness open/draft/inactive-resume/Escape/commit/history cleanup passed=true');
     console.log('awareness laser world reprojection, mouse/stylus/touch/Escape, a11y media, fade/switch/socket/reconnect cleanup, camera and durable isolation passed=true');
+    console.log('awareness presenter voluntary spotlight, camera/tab follow, local escape, disconnect/reload cleanup, and durable isolation passed=true');
     console.log(`concurrent drag active overlay stable=${activeDragStable} replicas converged=${replicasConverged}`);
     console.log(`post-release same-node winner moved=${postReleaseWinnerMoved} replicas converged=${postReleaseReplicasConverged}`);
     console.log(`pending removal reconciled before commit=${removalAdvanceMs}ms timer pruned=${pendingPrunedBeforeStop} stop pruned=${pendingPrunedAfterStop}`);

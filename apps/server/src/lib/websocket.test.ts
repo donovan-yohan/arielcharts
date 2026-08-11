@@ -481,6 +481,38 @@ describe('SessionWebSocketServer', () => {
     await client.close();
   });
 
+  it('bounds presenter awareness and rejects stale camera sequences without durable writes', async () => {
+    const sessionId = 'abc123de';
+    const client = await openClient(port, sessionId, roomCookie);
+    const user = { name: 'Presenter', color: '#1188cc', type: 'human' };
+    const valid = { active: true, sequence: 4, diagram_id: 'main', viewport: { pan_x: 12, pan_y: 24, zoom: 1.25 }, extra: 'drop-me' };
+    client.sendAwareness([{ clientId: 704, clock: 1, state: { user, presenter: valid } }]);
+    const session = await app.manager.getOrCreateSession(sessionId);
+    await waitFor(() => expect(session.awareness.getStates().get(704)).toEqual({
+      user,
+      presenter: { active: true, sequence: 4, diagram_id: 'main', viewport: { pan_x: 12, pan_y: 24, zoom: 1.25 } },
+    }));
+
+    client.sendAwareness([{ clientId: 704, clock: 2, state: { user, canvas: { diagram_id: 'main', cursor: { x: 4, y: 8 } }, presenter: valid } }]);
+    await waitFor(() => expect(session.awareness.getStates().get(704)).toEqual({
+      user,
+      canvas: { diagram_id: 'main', cursor: { x: 4, y: 8 } },
+      presenter: { active: true, sequence: 4, diagram_id: 'main', viewport: { pan_x: 12, pan_y: 24, zoom: 1.25 } },
+    }));
+
+    client.sendAwareness([{ clientId: 704, clock: 3, state: { user, presenter: { ...valid, sequence: 3 } } }]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(session.awareness.getStates().get(704)).toEqual({
+      user,
+      canvas: { diagram_id: 'main', cursor: { x: 4, y: 8 } },
+      presenter: { active: true, sequence: 4, diagram_id: 'main', viewport: { pan_x: 12, pan_y: 24, zoom: 1.25 } },
+    });
+
+    client.sendAwareness([{ clientId: 704, clock: 4, state: { user, presenter: { ...valid, sequence: 5, viewport: { pan_x: 0, pan_y: 0, zoom: 99 } } } }]);
+    await waitFor(() => expect(session.awareness.getStates().get(704)).toEqual({ user }));
+    await client.close();
+  });
+
   it('keeps awareness-only agents live-only and removes them on disconnect', async () => {
     const sessionId = 'abc123de';
     const client = await openClient(port, sessionId, roomCookie);

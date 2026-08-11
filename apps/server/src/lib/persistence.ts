@@ -1,13 +1,15 @@
 import { Level, type BatchOperation } from 'level';
-import type { DiagramRevision } from '@arielcharts/shared';
-import type { DiagramHistoryMetadata, HistoryPersistenceChange, RoomAccessRecord, SessionRecord } from './types.js';
+import type { DiagramRevision, OverlayRevision } from '@arielcharts/shared';
+import type { DiagramHistoryMetadata, HistoryPersistenceChange, OverlayHistoryMetadata, RoomAccessRecord, SessionRecord } from './types.js';
 
 const SESSION_KEY_PREFIX = 'session:';
 const HISTORY_KEY_PREFIX = 'history:';
 const HISTORY_METADATA_KEY_PREFIX = 'history-meta:';
+const OVERLAY_HISTORY_KEY_PREFIX = 'overlay-history:';
+const OVERLAY_HISTORY_METADATA_KEY_PREFIX = 'overlay-history-meta:';
 const ROOM_ACCESS_KEY_PREFIX = 'room-access:';
 
-type PersistedValue = SessionRecord | DiagramRevision | DiagramHistoryMetadata | RoomAccessRecord;
+type PersistedValue = SessionRecord | DiagramRevision | DiagramHistoryMetadata | OverlayRevision | OverlayHistoryMetadata | RoomAccessRecord;
 
 function sequenceKey(sequence: number): string {
   return sequence.toString().padStart(16, '0');
@@ -92,6 +94,24 @@ export class SessionStore {
     return null;
   }
 
+  async listOverlayHistoryMetadata(sessionId: string): Promise<OverlayHistoryMetadata[]> {
+    const metadata: OverlayHistoryMetadata[] = [];
+    const prefix = `${OVERLAY_HISTORY_METADATA_KEY_PREFIX}${sessionId}:`;
+    for await (const [, value] of this.db.iterator({ gte: prefix, lte: `${prefix}~` })) metadata.push(value as OverlayHistoryMetadata);
+    return metadata;
+  }
+
+  async listOverlayHistory(sessionId: string, diagramId: string): Promise<OverlayRevision[]> {
+    const revisions: OverlayRevision[] = [];
+    const prefix = this.overlayHistoryKeyPrefix(sessionId, diagramId);
+    for await (const [, value] of this.db.iterator({ gte: prefix, lte: `${prefix}~` })) revisions.push(value as OverlayRevision);
+    return revisions.sort((left, right) => right.sequence - left.sequence);
+  }
+
+  async getOverlayRevision(sessionId: string, diagramId: string, revisionId: string): Promise<OverlayRevision | null> {
+    return (await this.listOverlayHistory(sessionId, diagramId)).find((revision) => revision.revision_id === revisionId) ?? null;
+  }
+
   /** Commits the canonical document and every history mutation as one LevelDB batch. */
   async persistWithHistory(
     record: SessionRecord,
@@ -135,6 +155,23 @@ export class SessionStore {
       operations.push({ type: 'del', key: this.historyMetadataKey(target.sessionId, target.diagramId) });
     }
 
+    for (const revision of history.overlayRevisions) {
+      operations.push({ type: 'put', key: this.overlayHistoryKey(record.id, revision.diagram_id, revision.sequence), value: revision });
+    }
+    for (const metadata of history.overlayMetadata) {
+      operations.push({ type: 'put', key: this.overlayHistoryMetadataKey(metadata.sessionId, metadata.diagramId), value: metadata });
+    }
+    for (const target of history.deleteOverlaySequences) {
+      operations.push({ type: 'del', key: this.overlayHistoryKey(target.sessionId, target.diagramId, target.sequence) });
+    }
+    for (const target of history.deleteOverlayHistory) {
+      for await (const key of this.db.keys({
+        gte: this.overlayHistoryKeyPrefix(target.sessionId, target.diagramId),
+        lte: `${this.overlayHistoryKeyPrefix(target.sessionId, target.diagramId)}~`,
+      })) operations.push({ type: 'del', key });
+      operations.push({ type: 'del', key: this.overlayHistoryMetadataKey(target.sessionId, target.diagramId) });
+    }
+
     await this.db.batch(operations);
     return true;
   }
@@ -160,6 +197,8 @@ export class SessionStore {
     for await (const key of this.db.keys({ gte: `${HISTORY_METADATA_KEY_PREFIX}${sessionId}:`, lte: `${HISTORY_METADATA_KEY_PREFIX}${sessionId}:~` })) {
       operations.push({ type: 'del', key });
     }
+    for await (const key of this.db.keys({ gte: `${OVERLAY_HISTORY_KEY_PREFIX}${sessionId}:`, lte: `${OVERLAY_HISTORY_KEY_PREFIX}${sessionId}:~` })) operations.push({ type: 'del', key });
+    for await (const key of this.db.keys({ gte: `${OVERLAY_HISTORY_METADATA_KEY_PREFIX}${sessionId}:`, lte: `${OVERLAY_HISTORY_METADATA_KEY_PREFIX}${sessionId}:~` })) operations.push({ type: 'del', key });
     await this.db.batch(operations);
   }
 
@@ -185,6 +224,18 @@ export class SessionStore {
 
   private roomAccessKey(sessionId: string): string {
     return `${ROOM_ACCESS_KEY_PREFIX}${sessionId}`;
+  }
+
+  private overlayHistoryKeyPrefix(sessionId: string, diagramId: string): string {
+    return `${OVERLAY_HISTORY_KEY_PREFIX}${sessionId}:${diagramId}:`;
+  }
+
+  private overlayHistoryKey(sessionId: string, diagramId: string, sequence: number): string {
+    return `${this.overlayHistoryKeyPrefix(sessionId, diagramId)}${sequenceKey(sequence)}`;
+  }
+
+  private overlayHistoryMetadataKey(sessionId: string, diagramId: string): string {
+    return `${OVERLAY_HISTORY_METADATA_KEY_PREFIX}${sessionId}:${diagramId}`;
   }
 
   private isNotFound(error: unknown): boolean {

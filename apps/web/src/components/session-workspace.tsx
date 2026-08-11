@@ -127,6 +127,7 @@ import { getMermaidThemeVariables } from '../lib/theme';
 import { getActivityFlyoutViewOnOpen, getNextWorkspaceFlyout, type ActivityFlyoutView, type WorkspaceFlyout } from '../lib/workspace-flyout-state';
 import { SOURCE_FLYOUT_DEFAULT_WIDTH } from '../lib/source-flyout-resize';
 import { getMcpRoomBearer, getRoomShareUrl, rotateRoomKey } from '../lib/room-access-api';
+import { useOverlayScene } from '../lib/use-overlay-scene';
 import {
   CANVAS_CURSOR_INTERVAL_MS,
   areCanvasAwarenessStatesEqual,
@@ -631,6 +632,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     () => getActiveDiagramState(collaboration, activeDiagramId),
     [activeDiagramId, collaboration],
   );
+  const overlayController = useOverlayScene(collaboration?.doc ?? null, activeDiagramId);
 
   useEffect(() => {
     activeDiagramIdRef.current = activeDiagramId;
@@ -2252,6 +2254,20 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             isRailroad={isRailroad}
             railroadDiagram={railroadDiagram}
             nodePositions={renderedNodePositions}
+            overlay={overlayController && activeDiagramId ? {
+              diagramId: activeDiagramId,
+              sessionId,
+              scene: overlayController.scene,
+              readOnly: historyPreview !== null,
+              onAdd: overlayController.add,
+              onAnchor: overlayController.anchor,
+              onCopy: overlayController.copy,
+              onDelete: overlayController.remove,
+              onMove: overlayController.move,
+              onPaste: overlayController.paste,
+              onReorder: overlayController.reorder,
+              onUndo: overlayController.undo,
+            } : undefined}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
             remoteCanvasPresence={historyPreview === null ? remoteCanvasPresence : []}

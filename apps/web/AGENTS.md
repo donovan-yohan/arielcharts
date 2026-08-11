@@ -11,7 +11,7 @@ only mirrors its resolved value before hydration to prevent a first-paint flash.
 ## Current boundaries
 
 - Durable shared state is the server/Yjs-owned tab catalog/order, Mermaid
-  source, node positions, and activity feed. The browser renders that activity
+  source, node positions, per-diagram overlay scenes, and activity feed. The browser renders that activity
   but does not own it. Active tab, camera, selection, open flyout, toolbar,
   rename draft, theme preference/system resolution, and transient drag state
   are local; remote updates must not take them over.
@@ -54,6 +54,11 @@ only mirrors its resolved value before hydration to prevent a first-paint flash.
 - Undo is per diagram and tracks only explicit local-human source/visual/layout
   origins. Remote, MCP, initialization, and reconciliation updates never enter
   that stack; keep `src/lib/collaboration-origins.test.ts` authoritative.
+- Overlay scenes use renderer-neutral world geometry and deterministic
+  `(order_key, object id)` ordering. The focused overlay adapter owns semantic
+  anchor fallback/orphan projection; selection, active tool, drafts, handles,
+  and camera are local. Overlay history uses its own browser-cookie API and
+  revision domain, never the Mermaid revision or MCP.
 - `DragLayoutCommitter` is the sole durable drag-write path: it batches at 120
   ms. On a normal drag finish, it final-flushes the remaining canonical pending
   ids before local runtime ownership is released. Source invalidation drops

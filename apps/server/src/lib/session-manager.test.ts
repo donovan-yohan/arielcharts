@@ -36,6 +36,20 @@ function deferred() {
   return { promise, resolve };
 }
 
+function setOverlayObject(doc: Y.Doc, diagramId: string, id: string, text: string): void {
+  const scene = doc.getMap<Y.Map<unknown>>('overlays').get(diagramId)!;
+  const objects = scene.get('objects') as Y.Map<Y.Map<unknown>>;
+  const object = new Y.Map<unknown>();
+  object.set('kind', 'foundation.card');
+  object.set('version', 1);
+  object.set('order_key', id);
+  object.set('geometry', { x: 10, y: 20, width: 100, height: 40, rotation: 0 });
+  object.set('style', {});
+  object.set('metadata', {});
+  object.set('payload', { text });
+  objects.set(id, object);
+}
+
 describe('SessionManager multi-diagram persistence and invariants', () => {
   let resources: Awaited<ReturnType<typeof createResources>>;
   let manager: SessionManager;
@@ -200,22 +214,143 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
 
   it('preserves a newer overlay scene unchanged across persisted reload', async () => {
     const state = await manager.getOrCreateSession('abc123de');
+    const baselineId = (await manager.listOverlayHistory('abc123de', 'main')).revisions[0]!.revision_id;
     state.doc.transact(() => {
       const scene = new Y.Map<unknown>();
       scene.set('version', 2);
-      scene.set('objects', new Y.Map());
+      const objects = new Y.Map<Y.Map<unknown>>();
+      const standardLooking = new Y.Map<unknown>();
+      standardLooking.set('kind', 'future.card');
+      standardLooking.set('version', 1);
+      standardLooking.set('order_key', 'a');
+      standardLooking.set('geometry', { x: 1, y: 2, width: 3, height: 4, rotation: 0 });
+      standardLooking.set('style', {});
+      standardLooking.set('metadata', {});
+      standardLooking.set('payload', { text: 'future' });
+      objects.set('future-object', standardLooking);
+      scene.set('objects', objects);
       const opaque = new Y.Map<unknown>();
       opaque.set('newer', true);
       scene.set('opaque_newer_field', opaque);
       state.doc.getMap<Y.Map<unknown>>('overlays').set('main', scene);
     });
     await manager.persistSession(state);
+    await expect(manager.readOverlayScene('abc123de', 'main')).rejects.toThrow('Unsupported overlay scene version: 2');
+    await expect(manager.listOverlayHistory('abc123de', 'main')).rejects.toThrow('Unsupported overlay scene version: 2');
+    await expect(manager.restoreOverlayRevision('abc123de', 'main', baselineId, 'unused', { name: 'Ada', type: 'human' }))
+      .rejects.toThrow('Unsupported overlay scene version: 2');
     await manager.cleanupExpiredSessions({ ttlMs: 0, diskTtlMs: Infinity, now: state.lastAccessedAt + 1 });
 
     const restored = await manager.getOrCreateSession('abc123de');
     const scene = restored.doc.getMap<Y.Map<unknown>>('overlays').get('main');
     expect(scene?.get('version')).toBe(2);
+    expect(((scene?.get('objects') as Y.Map<Y.Map<unknown>>).get('future-object')?.get('payload') as { text: string }).text).toBe('future');
     expect((scene?.get('opaque_newer_field') as Y.Map<unknown>).get('newer')).toBe(true);
+  });
+
+  it('fails closed on unsupported v1 objects without projecting, restoring, or rewriting the raw record', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const baselineId = (await manager.listOverlayHistory('abc123de', 'main')).revisions[0]!.revision_id;
+    state.doc.transact(() => setOverlayObject(state.doc, 'main', 'future', 'opaque'));
+    const object = ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('future'))!;
+    object.set('kind', 'future.tool');
+    object.set('payload', { opaque: { keep: true } });
+    await manager.persistSession(state);
+    const before = Buffer.from(Y.encodeStateAsUpdate(state.doc));
+    await expect(manager.readOverlayScene('abc123de', 'main')).rejects.toThrow('Unsupported overlay object: future.tool@1');
+    await expect(manager.listOverlayHistory('abc123de', 'main')).rejects.toThrow('Unsupported overlay object: future.tool@1');
+    await expect(manager.restoreOverlayRevision('abc123de', 'main', baselineId, 'unused', { name: 'Ada', type: 'human' }))
+      .rejects.toThrow('Unsupported overlay object: future.tool@1');
+    expect(Buffer.from(Y.encodeStateAsUpdate(state.doc))).toEqual(before);
+    expect(object.get('payload')).toEqual({ opaque: { keep: true } });
+    await manager.cleanupExpiredSessions({ ttlMs: 0, diskTtlMs: Infinity, now: state.lastAccessedAt + 1 });
+    const reloaded = await manager.getOrCreateSession('abc123de');
+    const restoredObject = ((reloaded.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('future'))!;
+    expect(restoredObject.get('kind')).toBe('future.tool');
+    expect(restoredObject.get('payload')).toEqual({ opaque: { keep: true } });
+  });
+
+  it('does not resurrect an overlay scene when its diagram is deleted during restore history lookup', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const initial = await manager.getSession('abc123de');
+    const extra = await manager.createDiagram('abc123de', 'Race', '', initial.revision, activity('created'));
+    state.doc.transact(() => setOverlayObject(state.doc, extra.id, 'note', 'saved'));
+    await manager.persistSession(state);
+    const current = await manager.readOverlayScene('abc123de', extra.id);
+    const target = (await manager.listOverlayHistory('abc123de', extra.id)).revisions.at(-1)!;
+    const originalGet = resources.store.getOverlayRevision.bind(resources.store);
+    const readStarted = deferred();
+    const continueRead = deferred();
+    let pauseOnce = true;
+    resources.store.getOverlayRevision = async (...args) => {
+      if (pauseOnce) { pauseOnce = false; readStarted.resolve(); await continueRead.promise; }
+      return originalGet(...args);
+    };
+    const restore = manager.restoreOverlayRevision('abc123de', extra.id, target.revision_id, current.revision, { name: 'Ada', type: 'human' });
+    await readStarted.promise;
+    await manager.deleteDiagram('abc123de', extra.id, extra.revision, activity('deleted'));
+    continueRead.resolve();
+    await expect(restore).rejects.toThrow(`Diagram not found: ${extra.id}`);
+    expect(state.doc.getMap('overlays').has(extra.id)).toBe(false);
+    expect(await resources.store.listOverlayHistory('abc123de', extra.id)).toEqual([]);
+  });
+
+  it('rejects oversized overlay restore actor names before reading or changing history', async () => {
+    await manager.getOrCreateSession('abc123de');
+    const current = await manager.readOverlayScene('abc123de', 'main');
+    const target = (await manager.listOverlayHistory('abc123de', 'main')).revisions[0]!;
+    const before = await resources.store.listOverlayHistory('abc123de', 'main');
+    await expect(manager.restoreOverlayRevision('abc123de', 'main', target.revision_id, current.revision, { name: 'x'.repeat(257), type: 'human' }))
+      .rejects.toThrow('identifier budget');
+    expect(await resources.store.listOverlayHistory('abc123de', 'main')).toEqual(before);
+  });
+
+  it('versions and restores overlay scenes independently from Mermaid source', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const sessionRevisionBefore = (await manager.getSession('abc123de')).revision;
+    const sourceBefore = (await manager.readDiagram('abc123de', 'main')).diagram;
+    const baseline = await manager.readOverlayScene('abc123de', 'main');
+    expect(baseline.scene.objects).toEqual([]);
+
+    state.doc.transact(() => setOverlayObject(state.doc, 'main', 'note-a', 'first'));
+    await manager.persistSession(state);
+    const changed = await manager.readOverlayScene('abc123de', 'main');
+    expect(changed.revision).not.toBe(baseline.revision);
+    expect((await manager.getSession('abc123de')).revision).toBe(sessionRevisionBefore);
+    expect((await manager.readDiagram('abc123de', 'main')).diagram.revision).toBe(sourceBefore.revision);
+
+    const written = await manager.writeDiagram('abc123de', 'main', 'flowchart LR\n  A-->B', sourceBefore.revision, activity('edited'));
+    const sourceHistory = await manager.listDiagramHistory('abc123de', 'main');
+    const sourceBaseline = sourceHistory.revisions.at(-1)!;
+    await manager.restoreDiagramRevision('abc123de', 'main', sourceBaseline.revision_id, written.revision, activity('restored'));
+    expect(await manager.readOverlayScene('abc123de', 'main')).toEqual(changed);
+    const history = await manager.listOverlayHistory('abc123de', 'main');
+    expect(history.revisions.map(({ action }) => action)).toEqual(['checkpoint', 'baseline']);
+
+    const result = await manager.restoreOverlayRevision(
+      'abc123de',
+      'main',
+      history.revisions.at(-1)!.revision_id,
+      changed.revision,
+      { name: 'Ada', type: 'human' },
+    );
+    expect(result).toMatchObject({ status: 'restored', scene: { objects: [] }, revision: { action: 'restored' } });
+    expect((await manager.readDiagram('abc123de', 'main')).diagram).toEqual(sourceBefore);
+    await expect(manager.restoreOverlayRevision('abc123de', 'main', history.revisions[0]!.revision_id, changed.revision, { name: 'Ada', type: 'human' }))
+      .resolves.toMatchObject({ status: 'stale' });
+  });
+
+  it('atomically erases a deleted diagram overlay scene and its private overlay history', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const initial = await manager.getSession('abc123de');
+    const extra = await manager.createDiagram('abc123de', 'Extra', '', initial.revision, activity('created'));
+    state.doc.transact(() => setOverlayObject(state.doc, extra.id, 'note', 'erase me'));
+    await manager.persistSession(state);
+    expect(await resources.store.listOverlayHistory('abc123de', extra.id)).toHaveLength(2);
+    await manager.deleteDiagram('abc123de', extra.id, extra.revision, activity('deleted'));
+    expect(state.doc.getMap('overlays').has(extra.id)).toBe(false);
+    expect(await resources.store.listOverlayHistory('abc123de', extra.id)).toEqual([]);
+    expect((await resources.store.listOverlayHistoryMetadata('abc123de')).some(({ diagramId }) => diagramId === extra.id)).toBe(false);
   });
 
   it('repairs combined malformed structure, order, and duplicate names before snapshot and reload', async () => {

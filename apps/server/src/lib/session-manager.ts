@@ -8,7 +8,14 @@ import {
   type DiagramRevisionOrigin,
   type DiagramRevisionSummary,
   type DiagramSummary,
+  OVERLAY_SCENE_SCHEMA_VERSION,
+  type OverlayMetadata,
+  type OverlayObjectRecord,
+  type OverlayRevision,
+  type OverlayRevisionSummary,
+  type OverlaySceneSnapshot,
   type Participant,
+  type RestoreOverlayRevisionResult,
   type RestoreDiagramRevisionResult,
   type SessionSummary,
   type SourceLayoutPolicy,
@@ -26,6 +33,7 @@ import {
   DIAGRAM_NAME_KEY,
   DIAGRAMS_KEY,
   PRESENCE_KEY,
+  OVERLAYS_KEY,
 } from './constants.js';
 import {
   COLLABORATION_BUDGETS,
@@ -36,7 +44,7 @@ import {
   validateReservedRootTypes,
 } from './document-admission.js';
 import { SessionStore } from './persistence.js';
-import type { CleanupOptions, DiagramHistoryMetadata, HistoryPersistenceChange, RoomAccessRecord, SessionRecord, SessionSnapshot, SessionState } from './types.js';
+import type { CleanupOptions, DiagramHistoryMetadata, HistoryPersistenceChange, OverlayHistoryMetadata, RoomAccessRecord, SessionRecord, SessionSnapshot, SessionState } from './types.js';
 
 const MANAGED_AWARENESS_ORIGIN = 'session-manager';
 const CATALOG_REPAIR_ORIGIN = 'catalog-repair';
@@ -59,7 +67,26 @@ interface DiagramHistorySnapshot {
 
 interface HistorySnapshot {
   diagrams: DiagramHistorySnapshot[];
+  overlayScenes: OverlaySceneSnapshot[];
   activity: ActivityEvent[];
+}
+
+interface OverlayRestoreContext {
+  diagramId: string;
+  revisionId: string;
+  actor: ActivityEvent['actor'];
+}
+
+interface PersistedRevisions {
+  diagramRevisions: DiagramRevision[];
+  overlayRevisions: OverlayRevision[];
+}
+
+interface PersistenceOptions {
+  recovery?: boolean;
+  activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin>;
+  initialRoomAccess?: RoomAccessRecord;
+  overlayRestore?: OverlayRestoreContext;
 }
 
 interface PendingSessionPersistence {
@@ -102,6 +129,104 @@ function readRevisionNodePositions(diagram: DiagramMap): DiagramNodePositions {
     }
   }
   return positions;
+}
+
+function overlaysMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
+  return doc.getMap<Y.Map<unknown>>(OVERLAYS_KEY);
+}
+
+function createEmptyOverlayScene(): Y.Map<unknown> {
+  const scene = new Y.Map<unknown>();
+  scene.set('version', OVERLAY_SCENE_SCHEMA_VERSION);
+  scene.set('objects', new Y.Map<Y.Map<unknown>>());
+  return scene;
+}
+
+function readOverlayScene(doc: Y.Doc, diagramId: string): OverlaySceneSnapshot {
+  const scene = overlaysMap(doc).get(diagramId);
+  if (!(scene instanceof Y.Map)) return { version: OVERLAY_SCENE_SCHEMA_VERSION, diagram_id: diagramId, objects: [] };
+  const version = scene.get('version');
+  const objects = scene.get('objects');
+  const result: OverlayObjectRecord[] = [];
+  if (version !== OVERLAY_SCENE_SCHEMA_VERSION) {
+    return { version: typeof version === 'number' ? version : 0, diagram_id: diagramId, objects: [] };
+  }
+  if (objects instanceof Y.Map) {
+    for (const [id, value] of objects.entries()) {
+      if (!(value instanceof Y.Map)) continue;
+      const kind = value.get('kind');
+      const objectVersion = value.get('version');
+      const orderKey = value.get('order_key');
+      const geometry = value.get('geometry');
+      const style = value.get('style');
+      const metadata = value.get('metadata');
+      const payload = value.get('payload');
+      const anchor = value.get('anchor');
+      const layer = value.get('layer');
+      if (typeof kind !== 'string' || typeof objectVersion !== 'number' || typeof orderKey !== 'string'
+        || !geometry || typeof geometry !== 'object' || !style || typeof style !== 'object'
+        || !metadata || typeof metadata !== 'object' || !payload || typeof payload !== 'object') continue;
+      result.push({
+        id,
+        kind,
+        version: objectVersion,
+        order_key: orderKey,
+        geometry: structuredClone(geometry) as OverlayObjectRecord['geometry'],
+        ...(anchor === undefined ? {} : { anchor: structuredClone(anchor) as OverlayObjectRecord['anchor'] }),
+        ...(typeof layer === 'string' ? { layer } : {}),
+        style: structuredClone(style) as OverlayMetadata,
+        metadata: structuredClone(metadata) as OverlayMetadata,
+        payload: structuredClone(payload) as Record<string, unknown>,
+      });
+    }
+  }
+  result.sort((left, right) => left.order_key.localeCompare(right.order_key) || left.id.localeCompare(right.id));
+  return { version: typeof version === 'number' ? version : OVERLAY_SCENE_SCHEMA_VERSION, diagram_id: diagramId, objects: result };
+}
+
+function assertSupportedOverlayScene(scene: OverlaySceneSnapshot): void {
+  if (scene.version !== OVERLAY_SCENE_SCHEMA_VERSION) {
+    throw new Error(`Unsupported overlay scene version: ${scene.version}`);
+  }
+  const unsupported = scene.objects.find((object) => object.kind !== 'foundation.card' || object.version !== 1);
+  if (unsupported) {
+    throw new Error(`Unsupported overlay object: ${unsupported.kind}@${unsupported.version}`);
+  }
+}
+
+function isSupportedOverlayScene(scene: OverlaySceneSnapshot): boolean {
+  try { assertSupportedOverlayScene(scene); return true; } catch { return false; }
+}
+
+function assertBoundedOverlayActor(actor: ActivityEvent['actor']): void {
+  if (!actor.name.trim() || Buffer.byteLength(actor.name, 'utf8') > COLLABORATION_BUDGETS.identifierBytes) {
+    throw new Error('Overlay actor name exceeds the collaboration identifier budget.');
+  }
+}
+
+function overlayRevisionForScene(scene: OverlaySceneSnapshot): string {
+  return createHash('sha256').update(JSON.stringify(scene)).digest('base64url');
+}
+
+function replaceOverlayScene(doc: Y.Doc, snapshot: OverlaySceneSnapshot): void {
+  const scene = new Y.Map<unknown>();
+  scene.set('version', snapshot.version);
+  const objects = new Y.Map<Y.Map<unknown>>();
+  for (const object of snapshot.objects) {
+    const value = new Y.Map<unknown>();
+    value.set('kind', object.kind);
+    value.set('version', object.version);
+    value.set('order_key', object.order_key);
+    value.set('geometry', structuredClone(object.geometry));
+    if (object.anchor) value.set('anchor', structuredClone(object.anchor));
+    if (object.layer) value.set('layer', object.layer);
+    value.set('style', structuredClone(object.style));
+    value.set('metadata', structuredClone(object.metadata));
+    value.set('payload', structuredClone(object.payload));
+    objects.set(object.id, value);
+  }
+  scene.set('objects', objects);
+  overlaysMap(doc).set(snapshot.diagram_id, scene);
 }
 
 /** Source is canonical: only accepted blank/generic/flowchart source can prune layout. */
@@ -158,7 +283,12 @@ function diagramId(): string {
 }
 
 function revisionFromDoc(doc: Y.Doc): string {
-  return Buffer.from(Y.encodeStateVector(doc)).toString('base64url');
+  const diagrams = diagramsMap(doc);
+  const catalog = orderedDiagramIds(doc).flatMap((id) => {
+    const diagram = diagrams.get(id);
+    return diagram ? [{ id, revision: revisionForDiagram(diagram, id) }] : [];
+  });
+  return createHash('sha256').update(JSON.stringify(catalog)).digest('base64url');
 }
 
 function revisionForDiagram(diagram: DiagramMap, id: string): string {
@@ -664,6 +794,64 @@ export class SessionManager {
     return revision;
   }
 
+  async readOverlayScene(sessionId: string, diagramId: string): Promise<{ scene: OverlaySceneSnapshot; revision: string }> {
+    const session = await this.requireSession(sessionId);
+    readDiagram(session.doc, diagramId);
+    const scene = readOverlayScene(session.doc, diagramId);
+    assertSupportedOverlayScene(scene);
+    return { scene, revision: overlayRevisionForScene(scene) };
+  }
+
+  async listOverlayHistory(sessionId: string, diagramId: string): Promise<{ revisions: OverlayRevisionSummary[]; current_revision: string }> {
+    const current = await this.readOverlayScene(sessionId, diagramId);
+    const revisions = await this.store.listOverlayHistory(sessionId, diagramId);
+    return {
+      revisions: revisions.map(({ scene: _scene, ...summary }) => summary),
+      current_revision: current.revision,
+    };
+  }
+
+  async readOverlayRevision(sessionId: string, diagramId: string, revisionId: string): Promise<OverlayRevision> {
+    await this.readOverlayScene(sessionId, diagramId);
+    const revision = await this.store.getOverlayRevision(sessionId, diagramId, revisionId);
+    if (!revision) throw new Error(`Overlay revision not found: ${revisionId}`);
+    return revision;
+  }
+
+  async restoreOverlayRevision(
+    sessionId: string,
+    diagramId: string,
+    revisionId: string,
+    expectedRevision: string,
+    actor: ActivityEvent['actor'],
+  ): Promise<RestoreOverlayRevisionResult> {
+    const session = await this.requireSession(sessionId);
+    assertBoundedOverlayActor(actor);
+    readDiagram(session.doc, diagramId);
+    const current = readOverlayScene(session.doc, diagramId);
+    assertSupportedOverlayScene(current);
+    const currentRevision = overlayRevisionForScene(current);
+    if (expectedRevision !== currentRevision) return { status: 'stale', scene: current, current_revision: currentRevision };
+    const target = await this.store.getOverlayRevision(sessionId, diagramId, revisionId);
+    readDiagram(session.doc, diagramId);
+    if (!target) throw new Error(`Overlay revision not found: ${revisionId}`);
+    const beforeRestore = readOverlayScene(session.doc, diagramId);
+    assertSupportedOverlayScene(beforeRestore);
+    const beforeRevision = overlayRevisionForScene(beforeRestore);
+    if (expectedRevision !== beforeRevision) return { status: 'stale', scene: beforeRestore, current_revision: beforeRevision };
+    assertSupportedOverlayScene(target.scene);
+    session.doc.transact(() => replaceOverlayScene(session.doc, target.scene), CATALOG_REPAIR_ORIGIN);
+    const now = Date.now();
+    session.lastAccessedAt = now;
+    session.updatedAt = now;
+    const revisions = await this.persistSession(session, { overlayRestore: { diagramId, revisionId, actor } });
+    const restored = revisions.overlayRevisions.find((revision) => revision.restored_from_revision_id === revisionId);
+    if (!restored) throw new Error('Overlay restore checkpoint was not persisted.');
+    const scene = readOverlayScene(session.doc, diagramId);
+    const { scene: _scene, ...summary } = restored;
+    return { status: 'restored', scene, revision: summary };
+  }
+
   async restoreDiagramRevision(
     sessionId: string,
     diagramId: string,
@@ -718,7 +906,7 @@ export class SessionManager {
       });
     });
     const revisions = await this.afterMutation(session, ensuredParticipants, restoreEvent.id, origin);
-    const revision = revisions.find((candidate) => candidate.activity_id === restoreEvent.id);
+    const revision = revisions.diagramRevisions.find((candidate) => candidate.activity_id === restoreEvent.id);
     if (!revision) {
       throw new Error('Restore history checkpoint was not persisted.');
     }
@@ -734,6 +922,7 @@ export class SessionManager {
     this.assertUniqueDiagramName(session.doc, normalizedName);
     const ensuredParticipants = this.mutateWithParticipants(session, participants, () => {
       diagramsMap(session.doc).set(id, createDiagram(id, normalizedName, mermaidText));
+      overlaysMap(session.doc).set(id, createEmptyOverlayScene());
       diagramOrder(session.doc).push([id]);
       this.appendActivity(session.doc, {
         ...event,
@@ -812,6 +1001,7 @@ export class SessionManager {
     }
     const ensuredParticipants = this.mutateWithParticipants(session, participants, () => {
       diagrams.delete(diagramId);
+      overlaysMap(session.doc).delete(diagramId);
       const order = diagramOrder(session.doc);
       const index = order.toArray().indexOf(diagramId);
       if (index >= 0) {
@@ -850,7 +1040,7 @@ export class SessionManager {
     return removed;
   }
 
-  async persistSession(session: SessionState, options: { recovery?: boolean; activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin>; initialRoomAccess?: RoomAccessRecord } = {}): Promise<DiagramRevision[]> {
+  async persistSession(session: SessionState, options: PersistenceOptions = {}): Promise<PersistedRevisions> {
     const pending = this.capturePendingPersistence(session);
     return this.runSessionPersistence(session.id, () => this.persistSessionLocked(session, pending, options));
   }
@@ -858,13 +1048,13 @@ export class SessionManager {
   private async persistSessionLocked(
     session: SessionState,
     pending: PendingSessionPersistence,
-    options: { recovery?: boolean; activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin>; initialRoomAccess?: RoomAccessRecord },
-  ): Promise<DiagramRevision[]> {
+    options: PersistenceOptions,
+  ): Promise<PersistedRevisions> {
     const history = await this.historyChanges(session.id, pending.snapshot, options);
     const persisted = await this.store.persistWithHistory(pending.record, history, { initialRoomAccess: options.initialRoomAccess });
     if (persisted === false) throw new Error(`Session already exists: ${session.id}`);
     session.lastPersistedAt = Math.max(session.lastPersistedAt, pending.record.updatedAt);
-    return history.revisions;
+    return { diagramRevisions: history.revisions, overlayRevisions: history.overlayRevisions };
   }
 
   async close(): Promise<void> {
@@ -963,7 +1153,7 @@ export class SessionManager {
   private async historyChanges(
     sessionId: string,
     snapshot: HistorySnapshot,
-    options: { recovery?: boolean; activityOrigins?: ReadonlyMap<string, DiagramRevisionOrigin> },
+    options: PersistenceOptions,
   ): Promise<HistoryPersistenceChange> {
     const revisions: DiagramRevision[] = [];
     const metadataUpdates: DiagramHistoryMetadata[] = [];
@@ -972,6 +1162,7 @@ export class SessionManager {
     const storedMetadata = await this.store.listSessionHistoryMetadata(sessionId);
     const metadataByDiagram = new Map(storedMetadata.map((metadata) => [metadata.diagramId, metadata]));
     const sessionHasHistory = storedMetadata.length > 0;
+    const storedOverlayMetadata = await this.store.listOverlayHistoryMetadata(sessionId);
 
     for (const id of diagramIds) {
       const diagram = snapshot.diagrams.find((candidate) => candidate.id === id);
@@ -1044,12 +1235,55 @@ export class SessionManager {
       }
     }
 
+    const overlayRevisions: OverlayRevision[] = [];
+    const overlayMetadata: OverlayHistoryMetadata[] = [];
+    const deleteOverlaySequences: Array<{ sessionId: string; diagramId: string; sequence: number }> = [];
+    for (const scene of snapshot.overlayScenes) {
+      if (!isSupportedOverlayScene(scene)) continue;
+      const prior = storedOverlayMetadata.find((metadata) => metadata.diagramId === scene.diagram_id) ?? null;
+      const currentRevision = overlayRevisionForScene(scene);
+      const restore = options.overlayRestore?.diagramId === scene.diagram_id ? options.overlayRestore : undefined;
+      if (prior?.latestRevision === currentRevision && !restore) continue;
+      const sequence = prior?.nextSequence ?? 0;
+      const action = restore ? 'restored' : prior ? 'checkpoint' : 'baseline';
+      overlayRevisions.push({
+        revision_id: `overlay_revision_${sequence.toString().padStart(16, '0')}`,
+        sequence,
+        diagram_id: scene.diagram_id,
+        timestamp: Date.now(),
+        actor: restore?.actor ?? SYSTEM_HISTORY_ACTOR,
+        action,
+        result_revision: currentRevision,
+        ...(restore ? { restored_from_revision_id: restore.revisionId } : {}),
+        scene,
+      });
+      const nextSequence = sequence + 1;
+      const firstRetainedSequence = Math.max(1, nextSequence - HISTORY_RETAINED_MUTATIONS);
+      overlayMetadata.push({
+        sessionId,
+        diagramId: scene.diagram_id,
+        firstRetainedSequence,
+        nextSequence,
+        latestRevision: currentRevision,
+      });
+      for (let retained = prior?.firstRetainedSequence ?? 1; retained < firstRetainedSequence; retained += 1) {
+        deleteOverlaySequences.push({ sessionId, diagramId: scene.diagram_id, sequence: retained });
+      }
+    }
+
+    const overlayDiagramIds = new Set(snapshot.overlayScenes.map((scene) => scene.diagram_id));
     return {
       revisions,
       metadata: metadataUpdates,
       deleteSequences: [...deleteSequences.values()],
       deleteDiagramHistory: storedMetadata
         .filter((metadata) => !diagramIds.includes(metadata.diagramId))
+        .map((metadata) => ({ sessionId, diagramId: metadata.diagramId })),
+      overlayRevisions,
+      overlayMetadata,
+      deleteOverlaySequences,
+      deleteOverlayHistory: storedOverlayMetadata
+        .filter((metadata) => !overlayDiagramIds.has(metadata.diagramId))
         .map((metadata) => ({ sessionId, diagramId: metadata.diagramId })),
     };
   }
@@ -1142,7 +1376,7 @@ export class SessionManager {
     participants?: Participant[],
     activityId?: string,
     origin: Extract<DiagramRevisionOrigin, 'browser' | 'mcp'> = 'mcp',
-  ): Promise<DiagramRevision[]> {
+  ): Promise<PersistedRevisions> {
     const now = Date.now();
     session.lastAccessedAt = now;
     session.updatedAt = now;
@@ -1165,6 +1399,7 @@ export class SessionManager {
           revision: revisionForDiagram(diagram, id),
         }];
       }),
+      overlayScenes: orderedDiagramIds(doc).map((id) => readOverlayScene(doc, id)),
       activity,
     };
   }

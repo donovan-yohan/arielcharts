@@ -1452,6 +1452,7 @@ code {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     left: 132px !important;
     max-height: calc(100% - 16px);
+    max-width: none !important;
     min-width: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -1470,6 +1471,15 @@ code {
     display: flex;
     min-height: 44px;
     min-width: 44px;
+  }
+
+  .overlay-scene-list {
+    bottom: 12px !important;
+    left: auto !important;
+    max-width: none !important;
+    right: 12px !important;
+    top: auto !important;
+    width: auto !important;
   }
 
   .canvas-empty-chooser-card {
@@ -1551,6 +1561,64 @@ code {
 
   .canvas-sequence-message-form button {
     grid-column: 4;
+  }
+}
+
+@media (min-width: 421px) and (max-height: 420px) and (orientation: landscape) {
+  .overlay-tools-toggle {
+    bottom: auto !important;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  .overlay-tools-toggle[aria-expanded="false"] {
+    top: 8px;
+    transform: none;
+    width: 104px;
+  }
+
+  .workspace-diagram-pane:has(.overlay-tools-toggle[aria-expanded="false"]) > .error-banner {
+    left: 128px;
+    right: 12px;
+    transform: none;
+    width: auto;
+  }
+
+  .overlay-scene-controls {
+    bottom: 8px;
+    box-sizing: border-box;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    left: 132px !important;
+    max-height: calc(100% - 16px);
+    max-width: none !important;
+    min-width: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    right: 8px;
+    top: 8px !important;
+    touch-action: pan-y;
+  }
+
+  .overlay-scene-controls button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .overlay-scene-controls label {
+    align-items: center;
+    display: flex;
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .overlay-scene-list {
+    bottom: 12px !important;
+    left: auto !important;
+    max-width: none !important;
+    right: 12px !important;
+    top: auto !important;
+    width: auto !important;
   }
 }
 
@@ -1894,6 +1962,36 @@ code {
   border-left: 1px solid var(--control-border);
   border-bottom: 1px solid var(--control-border);
   background: var(--surface-overlay);
+}
+
+@media (min-width: 421px) and (min-height: 421px) {
+  .overlay-scene-controls {
+    max-height: calc(100% - 140px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+.overlay-scene-list {
+  pointer-events: none !important;
+}
+
+.overlay-scene-list button,
+.overlay-scene-list input,
+.overlay-scene-list label,
+.overlay-scene-list select {
+  pointer-events: auto;
+}
+
+.overlay-scene-controls {
+  pointer-events: none !important;
+}
+
+.overlay-scene-controls button,
+.overlay-scene-controls input,
+.overlay-scene-controls label,
+.overlay-scene-controls select {
+  pointer-events: auto;
 }
 
 .workspace-source-flyout {

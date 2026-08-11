@@ -10,6 +10,7 @@ import {
   type DiagramSummary,
   OVERLAY_SCENE_SCHEMA_VERSION,
   type OverlayMetadata,
+  type OverlayLayerRecord,
   type OverlayObjectRecord,
   type OverlayRevision,
   type OverlayRevisionSummary,
@@ -139,7 +140,24 @@ function createEmptyOverlayScene(): Y.Map<unknown> {
   const scene = new Y.Map<unknown>();
   scene.set('version', OVERLAY_SCENE_SCHEMA_VERSION);
   scene.set('objects', new Y.Map<Y.Map<unknown>>());
+  const layers = new Y.Map<Y.Map<unknown>>();
+  const layer = new Y.Map<unknown>();
+  layer.set('id', 'default'); layer.set('name', 'Default'); layer.set('order_key', '0000000000000000'); layer.set('visible', true); layer.set('locked', false); layer.set('export', true);
+  layers.set('default', layer); scene.set('layers', layers);
   return scene;
+}
+
+function readOverlayLayers(scene: Y.Map<unknown>): OverlayLayerRecord[] {
+  const raw = scene.get('layers');
+  if (!(raw instanceof Y.Map)) return [{ id: 'default', name: 'Default', order_key: '0000000000000000', visible: true, locked: false, export: true }];
+  const layers = [...raw.entries()].flatMap(([id, value]) => {
+    if (!(value instanceof Y.Map)) return [];
+    const candidate = Object.fromEntries(value.entries()) as Partial<OverlayLayerRecord>;
+    return candidate.id === id && typeof candidate.name === 'string' && typeof candidate.order_key === 'string'
+      && typeof candidate.visible === 'boolean' && typeof candidate.locked === 'boolean' && typeof candidate.export === 'boolean'
+      ? [candidate as OverlayLayerRecord] : [];
+  }).sort((left, right) => left.order_key.localeCompare(right.order_key) || left.id.localeCompare(right.id));
+  return layers.length ? layers : [{ id: 'default', name: 'Default', order_key: '0000000000000000', visible: true, locked: false, export: true }];
 }
 
 function readOverlayScene(doc: Y.Doc, diagramId: string): OverlaySceneSnapshot {
@@ -182,15 +200,19 @@ function readOverlayScene(doc: Y.Doc, diagramId: string): OverlaySceneSnapshot {
       });
     }
   }
-  result.sort((left, right) => left.order_key.localeCompare(right.order_key) || left.id.localeCompare(right.id));
-  return { version: typeof version === 'number' ? version : OVERLAY_SCENE_SCHEMA_VERSION, diagram_id: diagramId, objects: result };
+  const layers = readOverlayLayers(scene);
+  const layerOrder = new Map(layers.map((layer, index) => [layer.id, index]));
+  result.sort((left, right) => (layerOrder.get(left.layer ?? 'default') ?? 0) - (layerOrder.get(right.layer ?? 'default') ?? 0)
+    || left.order_key.localeCompare(right.order_key) || left.id.localeCompare(right.id));
+  return { version: typeof version === 'number' ? version : OVERLAY_SCENE_SCHEMA_VERSION, diagram_id: diagramId, objects: result, layers };
 }
 
 function assertSupportedOverlayScene(scene: OverlaySceneSnapshot): void {
   if (scene.version !== OVERLAY_SCENE_SCHEMA_VERSION) {
     throw new Error(`Unsupported overlay scene version: ${scene.version}`);
   }
-  const unsupported = scene.objects.find((object) => !['foundation.card', 'annotation.text', 'annotation.sticky', 'ink.stroke'].includes(object.kind) || object.version !== 1);
+  const supported = new Set(['foundation.card', 'annotation.text', 'annotation.sticky', 'ink.stroke', 'shape.rectangle', 'shape.ellipse', 'shape.diamond', 'shape.line', 'shape.arrow', 'connector.overlay', 'frame.section']);
+  const unsupported = scene.objects.find((object) => !supported.has(object.kind) || object.version !== 1);
   if (unsupported) {
     throw new Error(`Unsupported overlay object: ${unsupported.kind}@${unsupported.version}`);
   }
@@ -226,13 +248,20 @@ function replaceOverlayScene(doc: Y.Doc, snapshot: OverlaySceneSnapshot): void {
     value.set('metadata', structuredClone(object.metadata));
     value.set('payload', structuredClone(object.payload));
     objects.set(object.id, value);
-    if (object.kind === 'annotation.text' || object.kind === 'annotation.sticky') {
+    if (object.kind === 'annotation.text' || object.kind === 'annotation.sticky' || object.kind.startsWith('shape.')) {
       const body = new Y.Text();
       value.set('body', body);
       if (object.body) body.insert(0, object.body);
     }
   }
   scene.set('objects', objects);
+  const layers = new Y.Map<Y.Map<unknown>>();
+  for (const layer of snapshot.layers ?? [{ id: 'default', name: 'Default', order_key: '0000000000000000', visible: true, locked: false, export: true }]) {
+    const value = new Y.Map<unknown>();
+    for (const [key, entry] of Object.entries(layer)) value.set(key, entry);
+    layers.set(layer.id, value);
+  }
+  scene.set('layers', layers);
   overlaysMap(doc).set(snapshot.diagram_id, scene);
 }
 

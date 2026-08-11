@@ -85,6 +85,23 @@ async function expectCollaborativeAnnotations(pageA: Page, pageB: Page): Promise
     verifiedOverlayClick(pageB, 'Overlay tools'),
   ]);
   await verifiedOverlayClick(pageA, 'Add overlay');
+  await verifiedOverlayClick(pageA, 'Rectangle');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(2);
+  await verifiedOverlayClick(pageA, 'Ellipse');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(3);
+  const overlayList = pageA.getByLabel('ArielCharts overlay list', { exact: true });
+  await overlayList.getByRole('button', { name: /shape\.rectangle:/u }).click();
+  await overlayList.getByRole('button', { name: /shape\.ellipse:/u }).click({ modifiers: ['Control'] });
+  await verifiedOverlayClick(pageA, 'Frame selection');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(4);
+  const frame = pageA.locator('[data-testid^="overlay-object-"]').last();
+  await frame.click(); await verifiedOverlayClick(pageA, 'Lock frame');
+  await expect(pageA.getByRole('button', { name: 'Move right', exact: true })).toBeDisabled();
+  await verifiedOverlayClick(pageA, 'Unlock frame');
+  const excludeFrameMembers = pageA.getByRole('button', { name: 'Exclude frame members from composite export', exact: true });
+  await expect(excludeFrameMembers).toBeEnabled();
+  await verifiedOverlayClick(pageA, 'Exclude frame members from composite export');
+  await expect(pageA.getByRole('button', { name: 'Include frame members in composite export', exact: true })).toBeVisible();
   const notesA = pageA.locator('textarea[aria-label="Free text contents"]');
   const notesB = pageB.locator('textarea[aria-label="Free text contents"]');
   await Promise.all([notesA.first().waitFor({ state: 'visible' }), notesB.first().waitFor({ state: 'visible' })]);

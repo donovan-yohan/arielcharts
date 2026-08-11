@@ -196,6 +196,16 @@ const ISHIKAWA_DIAGRAM_FIXTURE = `ishikawa-beta
   Delivery delay
   Process
   Equipment`;
+const RAILROAD_DIAGRAM_FIXTURES = [
+  { addExpression: 'terminal("tail")', editedExpression: 'terminal("end")', header: 'railroad-beta', notation: 'IR', operator: '=', source: `railroad-beta
+  start = terminal("x") ;` },
+  { addExpression: '"tail"', editedExpression: '"end"', header: 'railroad-ebnf-beta', notation: 'EBNF', operator: '=', source: `railroad-ebnf-beta
+  start = "x" ;` },
+  { addExpression: '"tail"', editedExpression: '"end"', header: 'railroad-abnf-beta', notation: 'ABNF', operator: '=', source: `railroad-abnf-beta
+  start = "x" ;` },
+  { addExpression: '"tail"', editedExpression: '"end"', header: 'railroad-peg-beta', notation: 'PEG', operator: '<-', source: `railroad-peg-beta
+  start <- "x" ;` },
+] as const;
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
@@ -1460,6 +1470,70 @@ async function expectHierarchySemanticEditors(page: Page): Promise<void> {
   await replaceSource(page, ISHIKAWA_DIAGRAM_FIXTURE); await waitForSource(page, ISHIKAWA_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Ishikawa · editable · form'); await closeFlyout(page, 'source');
   const ishikawa = page.getByTestId('ishikawa-editor-controls'); const effect = ishikawa.getByLabel('Ishikawa effect'); await assertBoardControl(page, effect, 'Ishikawa effect control'); await effect.fill('Delivery risk'); await assertAndClickBoardControl(page, ishikawa.getByRole('button', { name: 'Save effect', exact: true }), 'Ishikawa effect save control'); await ishikawa.getByLabel('New Ishikawa cause').fill('Training'); await ishikawa.getByLabel('New Ishikawa parent').selectOption({ label: 'Process' }); const addCause = ishikawa.getByRole('button', { name: 'Add cause', exact: true }); await assertTouchTarget(page, addCause, 'Ishikawa hierarchy add-cause control'); await assertAndClickBoardControl(page, addCause, 'Ishikawa add-cause control'); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe('ishikawa-beta\n  Delivery risk\n  Process\n    Training\n  Equipment'); await closeFlyout(page, 'source'); const training = ishikawa.getByRole('form', { name: 'Ishikawa cause Training', exact: true }); await training.getByLabel('Ishikawa cause Training label').fill('Operator training'); await assertAndClickBoardControl(page, training.getByRole('button', { name: 'Save', exact: true }), 'Ishikawa edit-cause control'); const operatorTraining = ishikawa.getByRole('form', { name: 'Ishikawa cause Operator training', exact: true }); await operatorTraining.getByLabel('Ishikawa cause Operator training parent').selectOption({ label: 'Equipment' }); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('Equipment\n    Operator training'); await closeFlyout(page, 'source'); await assertAndClickBoardControl(page, operatorTraining.getByLabel('Delete Ishikawa cause Operator training', { exact: true }), 'Ishikawa delete-cause control'); await assertAndClickBoardControl(page, ishikawa.getByLabel('Move Ishikawa cause Equipment up', { exact: true }), 'Ishikawa reorder control');
   await replaceSource(page, 'ishikawa-beta\n  Effect\n  Parent\n      Skipped'); await waitForSource(page, 'ishikawa-beta\n  Effect\n  Parent\n      Skipped'); await expect(page.getByTestId('ishikawa-editor-controls')).toHaveCount(0);
+  assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS));
+}
+
+async function expectRailroadSemanticEditor(page: Page): Promise<void> {
+  const anchorsBefore = await snapshotAnchors(page, ANCHORS);
+  for (const fixture of RAILROAD_DIAGRAM_FIXTURES) {
+    await replaceSource(page, fixture.source);
+    await waitForSource(page, fixture.source);
+    await waitForSemanticMode(page, 'Railroad · editable · form');
+    await closeFlyout(page, 'source');
+    const railroad = page.getByTestId('railroad-editor-controls');
+    const beforeTransform = await canvasTransform(page);
+    const add = railroad.getByRole('button', { name: 'Add production', exact: true });
+    await assertTouchTarget(page, add, `Railroad ${fixture.notation} add-production control`);
+    await railroad.getByLabel('New Railroad production name').fill('tail');
+    await railroad.getByLabel('New Railroad production expression').fill(fixture.addExpression);
+    await assertAndClickBoardControl(page, add, `Railroad ${fixture.notation} add-production control`);
+    const added = `${fixture.source}\n  tail ${fixture.operator} ${fixture.addExpression} ;`;
+    await ensureSourceFlyoutOpen(page);
+    await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(added);
+    await closeFlyout(page, 'source');
+
+    const tail = railroad.getByRole('form', { name: 'Railroad production tail', exact: true });
+    await tail.getByLabel('Railroad production tail expression').fill(fixture.editedExpression);
+    await assertAndClickBoardControl(page, tail.getByRole('button', { name: 'Save expression', exact: true }), `Railroad ${fixture.notation} edit-production control`);
+    const edited = `${fixture.source}\n  tail ${fixture.operator} ${fixture.editedExpression} ;`;
+    await ensureSourceFlyoutOpen(page);
+    await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(edited);
+    await closeFlyout(page, 'source');
+
+    await tail.getByLabel('Railroad production tail name').fill('end');
+    await assertAndClickBoardControl(page, tail.getByLabel('Rename Railroad production tail'), `Railroad ${fixture.notation} rename-production control`);
+    const renamed = `${fixture.source}\n  end ${fixture.operator} ${fixture.editedExpression} ;`;
+    await ensureSourceFlyoutOpen(page);
+    await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(renamed);
+    await closeFlyout(page, 'source');
+
+    const end = railroad.getByRole('form', { name: 'Railroad production end', exact: true });
+    await assertAndClickBoardControl(page, end.getByLabel('Move Railroad production end up'), `Railroad ${fixture.notation} reorder-production control`);
+    const reordered = `${fixture.header}\n  end ${fixture.operator} ${fixture.editedExpression} ;\n  start ${fixture.operator} ${fixture.source.split('\n')[1]!.trim().slice(`start ${fixture.operator} `.length)}`;
+    await ensureSourceFlyoutOpen(page);
+    await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(reordered);
+    await closeFlyout(page, 'source');
+    await assertAndClickBoardControl(page, end.getByLabel('Delete Railroad production end'), `Railroad ${fixture.notation} delete-production control`);
+    await ensureSourceFlyoutOpen(page);
+    await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(fixture.source);
+    await closeFlyout(page, 'source');
+    assert(await canvasTransform(page) === beforeTransform, `Railroad ${fixture.notation} form operations changed the generic Mermaid camera transform.`);
+  }
+  const advancedSources = [
+    'railroad-beta\n  start = optional(terminal("x")) ;',
+    'railroad-ebnf-beta\n  start = ("x") ;',
+    'railroad-abnf-beta\n  start = %x41 ;',
+    'railroad-peg-beta\n  start <- !word ;',
+  ];
+  for (const source of advancedSources) {
+    await replaceSource(page, source);
+    await waitForSource(page, source);
+    await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('Railroad · source only');
+    await ensureSourceFlyoutOpen(page);
+    await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(source);
+    await closeFlyout(page, 'source');
+    await expect(page.getByTestId('railroad-editor-controls')).toHaveCount(0);
+  }
   assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS));
 }
 
@@ -3865,6 +3939,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'GitGraph, Event Modeling, and Kanban semantic forms expose hit-tested source-backed controls and fail closed for invalid history/source');
       await expectHierarchySemanticEditors(page);
       record(results, 'Mindmap, TreeView, and Ishikawa semantic forms expose hit-tested hierarchy controls and fail closed for advanced source');
+      await expectRailroadSemanticEditor(page);
+      record(results, 'Railroad IR, EBNF, ABNF, and PEG forms expose source-backed production controls and fail closed for advanced grammar');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');

@@ -112,6 +112,7 @@ import { addKanbanCard, addKanbanColumn, deleteKanbanCard, deleteKanbanColumn, e
 import { addMindmapNode, deleteMindmapNode, editMindmapNode, getMindmapDiagramSnapshot, moveMindmapNode, reparentMindmapNode } from '../lib/mindmap-mutations';
 import { addTreeViewNode, deleteTreeViewNode, editTreeViewNode, getTreeViewDiagramSnapshot, moveTreeViewNode, reparentTreeViewNode } from '../lib/treeview-mutations';
 import { addIshikawaCause, deleteIshikawaCause, editIshikawaCause, editIshikawaEffect, getIshikawaDiagramSnapshot, moveIshikawaCause, reparentIshikawaCause, setIshikawaEffect } from '../lib/ishikawa-mutations';
+import { addRailroadRule, deleteRailroadRule, editRailroadRule, getRailroadDiagramSnapshot, moveRailroadRule, renameRailroadRule } from '../lib/railroad-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -1737,6 +1738,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isMindmap = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'mindmap');
   const isTreeView = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'tree-view');
   const isIshikawa = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'ishikawa');
+  const isRailroad = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'railroad');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1772,6 +1774,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const mindmapDiagram = useMemo(() => isMindmap ? getMindmapDiagramSnapshot(renderedMermaidText) : null, [isMindmap, renderedMermaidText]);
   const treeViewDiagram = useMemo(() => isTreeView ? getTreeViewDiagramSnapshot(renderedMermaidText) : null, [isTreeView, renderedMermaidText]);
   const ishikawaDiagram = useMemo(() => isIshikawa ? getIshikawaDiagramSnapshot(renderedMermaidText) : null, [isIshikawa, renderedMermaidText]);
+  const railroadDiagram = useMemo(() => isRailroad ? getRailroadDiagramSnapshot(renderedMermaidText) : null, [isRailroad, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2246,6 +2249,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             treeViewDiagram={treeViewDiagram}
             isIshikawa={isIshikawa}
             ishikawaDiagram={ishikawaDiagram}
+            isRailroad={isRailroad}
+            railroadDiagram={railroadDiagram}
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
@@ -2506,6 +2511,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onDeleteIshikawaCause={(identity) => { mutateCanvasSource((source) => deleteIshikawaCause(source, identity), 'Deleted an Ishikawa cause'); }}
             onMoveIshikawaCause={(identity, direction) => { mutateCanvasSource((source) => moveIshikawaCause(source, identity, direction), 'Reordered Ishikawa causes'); }}
             onReparentIshikawaCause={(identity, parent) => { mutateCanvasSource((source) => reparentIshikawaCause(source, identity, parent), 'Reparented an Ishikawa cause'); }}
+            onAddRailroadRule={(rule) => { mutateCanvasSource((source) => addRailroadRule(source, rule), 'Added a Railroad rule'); }}
+            onEditRailroadRule={(identity, patch) => { mutateCanvasSource((source) => editRailroadRule(source, identity, patch), 'Edited a Railroad rule'); }}
+            onRenameRailroadRule={(identity, name) => { mutateCanvasSource((source) => renameRailroadRule(source, identity, name), 'Renamed a Railroad rule'); }}
+            onDeleteRailroadRule={(identity) => { mutateCanvasSource((source) => deleteRailroadRule(source, identity), 'Deleted a Railroad rule'); }}
+            onMoveRailroadRule={(identity, direction) => { mutateCanvasSource((source) => moveRailroadRule(source, identity, direction), 'Reordered Railroad rules'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onChangeNodeShape={(nodeId, shape) => {

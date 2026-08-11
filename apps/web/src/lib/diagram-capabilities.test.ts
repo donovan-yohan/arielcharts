@@ -69,7 +69,7 @@ describe('diagram capability catalog', () => {
     expect(classifyDiagramCapability('classDiagram')).toMatchObject({ family: 'class', editingMode: 'semantic-form', adapter: 'class' });
     expect(classifyDiagramCapability('stateDiagram')).toMatchObject({ family: 'state', editingMode: 'semantic-form', adapter: 'state' });
     for (const parserType of ['railroad', 'railroadEbnf', 'railroadAbnf', 'railroadPeg']) {
-      expect(classifyDiagramCapability(parserType)).toMatchObject({ family: 'railroad', editingMode: 'source-only' });
+      expect(classifyDiagramCapability(parserType)).toMatchObject({ family: 'railroad', editingMode: 'semantic-form', adapter: 'railroad' });
     }
   });
 
@@ -101,6 +101,7 @@ describe('diagram capability catalog', () => {
     const mindmap = classifyDiagramCapability('mindmap');
     const treeView = classifyDiagramCapability('treeView');
     const ishikawa = classifyDiagramCapability('ishikawa');
+    const railroad = classifyDiagramCapability('railroad');
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A -->', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
@@ -125,6 +126,7 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(mindmap).getOperationResult('mindmap\n  Root\n    Child', 'reparent-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(treeView).getOperationResult('treeView-beta\n  Root\n    child.txt', 'move-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(ishikawa).getOperationResult('ishikawa-beta\n  Effect\n  Cause', 'set-effect')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(railroad).getOperationResult('railroad-ebnf-beta\n  start = "x" ;', 'add-rule')).toEqual({ supported: true });
     const noteOnlySequence = 'sequenceDiagram\n  Note over A: details';
     await expect(mermaid.parse(noteOnlySequence)).resolves.toMatchObject({ diagramType: 'sequence' });
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult(noteOnlySequence, 'add-message')).toEqual({ supported: true });
@@ -134,6 +136,8 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(eventModeling).getOperationResult('eventmodeling\n  entity Order', 'unsupported')).toEqual({ supported: false, reason: 'unsupported-operation' });
     expect(getDiagramSourceModelAdapter(kanban).getOperationResult('kanban\n  todo[', 'add-card')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(kanban).getOperationResult('kanban\n  todo[Todo]', 'unsupported')).toEqual({ supported: false, reason: 'unsupported-operation' });
+    expect(getDiagramSourceModelAdapter(railroad).getOperationResult('railroad-beta\n  start = optional(terminal("x"));', 'add-rule')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(railroad).getOperationResult('railroad-ebnf-beta\n  start = "x" ;', 'unsupported')).toEqual({ supported: false, reason: 'unsupported-operation' });
   });
 
   it('exposes the existing canvas and semantic-form controls through the adapter contract', () => {
@@ -156,6 +160,7 @@ describe('diagram capability catalog', () => {
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('mindmap'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('treeView'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('ishikawa'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('railroad'))).toBe(true);
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('flowchart-v2'))).toBe('Flowchart · editable · canvas');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('sequence'))).toBe('Sequence · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('er'))).toBe('Entity relationship · editable · form');
@@ -174,6 +179,7 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('mindmap'))).toBe('Mindmap · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('treeView'))).toBe('Tree view · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('ishikawa'))).toBe('Ishikawa · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('railroad'))).toBe('Railroad · editable · form');
   });
 
   it('labels a current unrepresentable structural source as source-only', () => {
@@ -192,6 +198,7 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('swimlane'), 'swimlane-beta\n  subgraph Sales\n    a(A)\n  end')).toBe('Swimlane · source only');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('journey'), 'journey\n  Task: 6: Alice')).toBe('User journey · source only');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('gitGraph'), 'gitGraph\n  checkout missing')).toBe('Gitgraph · source only');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('railroad'), 'railroad-beta\n  start = optional(terminal("x"));')).toBe('Railroad · source only');
     expect(getDiagramCapabilityLabel(null, 'sequenceDiagram\nA->>B: request')).toBe('Mermaid · source only');
   });
 });

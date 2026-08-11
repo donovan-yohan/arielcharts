@@ -99,6 +99,7 @@ import type { KanbanCard, KanbanColumn, KanbanDiagramSnapshot } from '../lib/kan
 import { getMindmapNodeIdentity, type MindmapDiagramSnapshot, type MindmapNode, type MindmapNodeIdentity, type MindmapNodeShape } from '../lib/mindmap-mutations';
 import { getTreeViewNodeIdentity, type TreeViewDiagramSnapshot, type TreeViewNode, type TreeViewNodeIdentity } from '../lib/treeview-mutations';
 import { getIshikawaCauseIdentity, type IshikawaCause, type IshikawaCauseIdentity, type IshikawaCauseInput, type IshikawaDiagramSnapshot } from '../lib/ishikawa-mutations';
+import { getRailroadRuleIdentity, type RailroadDiagramSnapshot, type RailroadRule, type RailroadRuleIdentity } from '../lib/railroad-mutations';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
@@ -128,6 +129,7 @@ export interface DiagramCanvasProps {
   isMindmap?: boolean;
   isTreeView?: boolean;
   isIshikawa?: boolean;
+  isRailroad?: boolean;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
@@ -153,6 +155,7 @@ export interface DiagramCanvasProps {
   mindmapDiagram?: MindmapDiagramSnapshot | null;
   treeViewDiagram?: TreeViewDiagramSnapshot | null;
   ishikawaDiagram?: IshikawaDiagramSnapshot | null;
+  railroadDiagram?: RailroadDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
@@ -336,6 +339,11 @@ export interface DiagramCanvasProps {
   onDeleteIshikawaCause?: (identity: IshikawaCauseIdentity) => void;
   onMoveIshikawaCause?: (identity: IshikawaCauseIdentity, direction: 'up' | 'down') => void;
   onReparentIshikawaCause?: (identity: IshikawaCauseIdentity, parent: IshikawaCauseIdentity | null) => void;
+  onAddRailroadRule?: (value: RailroadRule) => void;
+  onEditRailroadRule?: (identity: RailroadRuleIdentity, value: Partial<RailroadRule>) => void;
+  onRenameRailroadRule?: (identity: RailroadRuleIdentity, name: string) => void;
+  onDeleteRailroadRule?: (identity: RailroadRuleIdentity) => void;
+  onMoveRailroadRule?: (identity: RailroadRuleIdentity, direction: 'up' | 'down') => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
@@ -866,6 +874,7 @@ export function DiagramCanvas({
   isMindmap = false,
   isTreeView = false,
   isIshikawa = false,
+  isRailroad = false,
   journeyDiagram = null,
   ganttDiagram = null,
   timelineDiagram = null,
@@ -875,6 +884,12 @@ export function DiagramCanvas({
   mindmapDiagram = null,
   treeViewDiagram = null,
   ishikawaDiagram = null,
+  railroadDiagram = null,
+  onAddRailroadRule,
+  onEditRailroadRule,
+  onRenameRailroadRule,
+  onDeleteRailroadRule,
+  onMoveRailroadRule,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -3483,6 +3498,7 @@ export function DiagramCanvas({
         {isMindmap && !readOnly && mindmapDiagram ? <MindmapEditorControls bottom={erEditorBottom} diagram={mindmapDiagram} maxHeight={hierarchyPanelMaxHeight} onAdd={onAddMindmapNode} onDelete={onDeleteMindmapNode} onEdit={onEditMindmapNode} onMove={onMoveMindmapNode} onReparent={onReparentMindmapNode} /> : null}
         {isTreeView && !readOnly && treeViewDiagram ? <TreeViewEditorControls bottom={erEditorBottom} diagram={treeViewDiagram} maxHeight={hierarchyPanelMaxHeight} onAdd={onAddTreeViewNode} onDelete={onDeleteTreeViewNode} onEdit={onEditTreeViewNode} onMove={onMoveTreeViewNode} onReparent={onReparentTreeViewNode} /> : null}
         {isIshikawa && !readOnly && ishikawaDiagram ? <IshikawaEditorControls bottom={erEditorBottom} diagram={ishikawaDiagram} maxHeight={hierarchyPanelMaxHeight} onAdd={onAddIshikawaCause} onDelete={onDeleteIshikawaCause} onEdit={onEditIshikawaCause} onEditEffect={onEditIshikawaEffect ?? onSetIshikawaEffect} onMove={onMoveIshikawaCause} onReparent={onReparentIshikawaCause} /> : null}
+        {isRailroad && !readOnly && railroadDiagram ? <RailroadEditorControls bottom={erEditorBottom} diagram={railroadDiagram} maxHeight={hierarchyPanelMaxHeight} onAdd={onAddRailroadRule} onDelete={onDeleteRailroadRule} onEdit={onEditRailroadRule} onMove={onMoveRailroadRule} onRename={onRenameRailroadRule} /> : null}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
@@ -4635,6 +4651,81 @@ function TreeViewNodeForm({ index, node, nodes, onDelete, onEdit, onMove, onRepa
 
 function IshikawaEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onEditEffect, onMove, onReparent }: { bottom: number; diagram: IshikawaDiagramSnapshot; maxHeight: number; onAdd?: (value: IshikawaCauseInput) => void; onDelete?: (identity: IshikawaCauseIdentity) => void; onEdit?: (identity: IshikawaCauseIdentity, value: Partial<Pick<IshikawaCause, 'label'>>) => void; onEditEffect?: (value: string) => void; onMove?: (identity: IshikawaCauseIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: IshikawaCauseIdentity, parent: IshikawaCauseIdentity | null) => void }) { const [effect, setEffect] = useState(diagram.effect); const [cause, setCause] = useState('Cause'); const [parentIndex, setParentIndex] = useState(-1); useEffect(() => { setEffect(diagram.effect); setParentIndex((current) => Math.min(current, diagram.causes.length - 1)); }, [diagram.causes.length, diagram.effect]); const parent = parentIndex >= 0 ? diagram.causes[parentIndex] : undefined; const parentIdentity = parent ? getIshikawaCauseIdentity(parent, diagram.causes) : null; const canAdd = parentIdentity === null || isSafeHierarchyIdentity(parentIdentity); return <aside className="canvas-semantic-editor canvas-hierarchy-editor" data-canvas-pan-exclusion="true" data-testid="ishikawa-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}><strong>Ishikawa</strong><form onSubmit={(event) => { event.preventDefault(); onEditEffect?.(effect); }}><input aria-label="Ishikawa effect" onChange={(event) => setEffect(event.target.value)} value={effect} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save effect</button></form><form onSubmit={(event) => { event.preventDefault(); if (canAdd) onAdd?.({ label: cause, parent: parentIdentity }); }}><input aria-label="New Ishikawa cause" onChange={(event) => setCause(event.target.value)} value={cause} /><select aria-label="New Ishikawa parent" onChange={(event) => setParentIndex(Number(event.target.value))} style={HIERARCHY_CONTROL_STYLE} value={parentIndex}><option value={-1}>Root cause</option>{diagram.causes.map((item, index) => <option disabled={!isSafeHierarchyIdentity(getIshikawaCauseIdentity(item, diagram.causes))} key={`${index}:${hierarchyPath(item)}`} value={index}>{hierarchyPath(item)}</option>)}</select><button disabled={!canAdd} style={HIERARCHY_CONTROL_STYLE} type="submit">Add cause</button></form>{diagram.causes.map((item, index) => <IshikawaCauseForm cause={item} causes={diagram.causes} index={index} key={`${index}:${hierarchyPath(item)}`} onDelete={onDelete} onEdit={onEdit} onMove={onMove} onReparent={onReparent} />)}</aside>; }
 function IshikawaCauseForm({ cause, causes, index, onDelete, onEdit, onMove, onReparent }: { cause: IshikawaCause; causes: IshikawaCause[]; index: number; onDelete?: (identity: IshikawaCauseIdentity) => void; onEdit?: (identity: IshikawaCauseIdentity, value: Partial<Pick<IshikawaCause, 'label'>>) => void; onMove?: (identity: IshikawaCauseIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: IshikawaCauseIdentity, parent: IshikawaCauseIdentity | null) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(cause); const label = `Ishikawa cause ${cause.label}`; const identity = getIshikawaCauseIdentity(cause, causes); const safe = isSafeHierarchyIdentity(identity); const parentIndex = hierarchyParentIndex(causes, cause); return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe) onEdit?.(identity, { label: draft.label }); resetDraft(); }}><input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><select aria-label={`${label} parent`} disabled={!safe} onChange={(event) => { const candidate = Number(event.target.value); const parent = candidate < 0 ? null : causes[candidate]; const parentIdentity = parent ? getIshikawaCauseIdentity(parent, causes) : null; if (safe && (parentIdentity === null || isSafeHierarchyIdentity(parentIdentity)) && (candidate < 0 || !isInvalidHierarchyParent(causes, index, candidate))) onReparent?.(identity, parentIdentity); }} style={HIERARCHY_CONTROL_STYLE} value={parentIndex}><option value={-1}>Root cause</option>{causes.map((item, candidate) => <option disabled={isInvalidHierarchyParent(causes, index, candidate) || !isSafeHierarchyIdentity(getIshikawaCauseIdentity(item, causes))} key={`${candidate}:${hierarchyPath(item)}`} value={candidate}>{hierarchyPath(item)}</option>)}</select><button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move Ishikawa cause ${cause.label} up`} disabled={!safe} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move Ishikawa cause ${cause.label} down`} disabled={!safe} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete Ishikawa cause ${cause.label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>; }
+
+function railroadDialectLabel(notation: RailroadDiagramSnapshot['notation']): string {
+  return notation === 'ir' ? 'IR' : notation.toUpperCase();
+}
+
+function createRailroadRuleDraft(notation: RailroadDiagramSnapshot['notation']): RailroadRule {
+  return {
+    definition: notation === 'ir' ? 'terminal("value")' : '"value"',
+    name: 'production',
+  };
+}
+
+function RailroadEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onRename }: {
+  bottom: number;
+  diagram: RailroadDiagramSnapshot;
+  maxHeight: number;
+  onAdd?: (value: RailroadRule) => void;
+  onDelete?: (identity: RailroadRuleIdentity) => void;
+  onEdit?: (identity: RailroadRuleIdentity, value: Partial<RailroadRule>) => void;
+  onMove?: (identity: RailroadRuleIdentity, direction: 'up' | 'down') => void;
+  onRename?: (identity: RailroadRuleIdentity, name: string) => void;
+}) {
+  const [rule, setRule] = useState<RailroadRule>(() => createRailroadRuleDraft(diagram.notation));
+  useEffect(() => { setRule(createRailroadRuleDraft(diagram.notation)); }, [diagram.notation]);
+  const dialect = railroadDialectLabel(diagram.notation);
+
+  return <aside
+    className="canvas-semantic-editor canvas-railroad-editor"
+    data-canvas-pan-exclusion="true"
+    data-testid="railroad-editor-controls"
+    style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}
+  >
+    <strong>Railroad <small>{dialect} safe subset</small></strong>
+    <form aria-label={`New Railroad ${dialect} production`} onSubmit={(event) => { event.preventDefault(); onAdd?.(rule); }} style={{ display: 'grid', gap: 4, marginTop: 5 }}>
+      <input aria-label="New Railroad production name" onChange={(event) => setRule((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={rule.name} />
+      <textarea aria-label="New Railroad production expression" onChange={(event) => setRule((current) => ({ ...current, definition: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={rule.definition} />
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add production</button>
+    </form>
+    {diagram.rules.map((rule) => <RailroadRuleForm key={`${rule.name}:${rule.definition}`} notation={diagram.notation} onDelete={onDelete} onEdit={onEdit} onMove={onMove} onRename={onRename} rule={rule} rules={diagram.rules} />)}
+  </aside>;
+}
+
+function RailroadRuleForm({ notation, onDelete, onEdit, onMove, onRename, rule, rules }: {
+  notation: RailroadDiagramSnapshot['notation'];
+  onDelete?: (identity: RailroadRuleIdentity) => void;
+  onEdit?: (identity: RailroadRuleIdentity, value: Partial<RailroadRule>) => void;
+  onMove?: (identity: RailroadRuleIdentity, direction: 'up' | 'down') => void;
+  onRename?: (identity: RailroadRuleIdentity, name: string) => void;
+  rule: RailroadRule;
+  rules: RailroadRule[];
+}) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(rule);
+  const identity = getRailroadRuleIdentity(rule, rules, notation);
+  const safe = identity.occurrenceCount === 1;
+  const label = `Railroad production ${rule.name}`;
+  const dialect = railroadDialectLabel(notation);
+
+  return <form aria-label={label} onSubmit={(event) => {
+    event.preventDefault();
+    if (safe) onEdit?.(identity, { definition: draft.definition });
+    resetDraft();
+  }} style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+    <small>{dialect} production</small>
+    <input aria-label={`${label} name`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.name} />
+    <textarea aria-label={`${label} expression`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, definition: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.definition} />
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+      <button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save expression</button>
+      <button aria-label={`Rename Railroad production ${rule.name}`} disabled={!safe} onClick={() => { onRename?.(identity, draft.name); resetDraft(); }} style={HIERARCHY_CONTROL_STYLE} type="button">Rename</button>
+      <button aria-label={`Move Railroad production ${rule.name} up`} disabled={!safe} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
+      <button aria-label={`Move Railroad production ${rule.name} down`} disabled={!safe} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
+      <button aria-label={`Delete Railroad production ${rule.name}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
+    </div>
+  </form>;
+}
+
 function SectionForm({ family, item, onDelete, onMove, onSave }: { family: string; item: { label: string }; onDelete?: (label: string) => void; onMove?: (label: string, direction: 'up' | 'down') => void; onSave?: (label: string, value: { label?: string }) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(item); return <form aria-label={`${family} section ${item.label}`} onSubmit={(event) => { event.preventDefault(); onSave?.(item.label, draft); resetDraft(); }}><input aria-label={`${family} section ${item.label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><button type="submit">Save</button><button aria-label={`Move ${family} section ${item.label} up`} onClick={() => onMove?.(item.label, 'up')} type="button">↑</button><button aria-label={`Move ${family} section ${item.label} down`} onClick={() => onMove?.(item.label, 'down')} type="button">↓</button><button aria-label={`Delete ${family} section ${item.label}`} onClick={() => onDelete?.(item.label)} type="button">Delete</button></form>; }
 
 function ClassEditorControls({

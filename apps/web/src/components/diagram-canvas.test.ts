@@ -64,6 +64,20 @@ describe('new semantic families', () => {
     expect(workspaceSource).toMatch(/onAddTreeViewNode[^]*?mutateCanvasSource/u);
     expect(workspaceSource).toMatch(/onSetIshikawaEffect[^]*?mutateCanvasSource/u);
   });
+
+  it('keeps every Railroad dialect in the measured semantic layer with separate canonical production drafts', () => {
+    expect(canvasSource).toMatch(/data-testid="railroad-editor-controls"/u);
+    expect(canvasSource).toMatch(/function railroadDialectLabel\(notation: RailroadDiagramSnapshot\['notation'\]\)/u);
+    expect(canvasSource).toMatch(/Railroad <small>\{dialect\} safe subset<\/small>/u);
+    expect(canvasSource).toMatch(/RailroadEditorControls[^]*?data-canvas-pan-exclusion="true"[^]*?maxHeight/u);
+    expect(canvasSource).toMatch(/RailroadRuleForm[^]*?useCanonicalDraft\(rule\)/u);
+    expect(canvasSource).toMatch(/getRailroadRuleIdentity\(rule, rules, notation\)/u);
+    expect(canvasSource).toMatch(/onEdit\?\.\(identity, \{ definition: draft\.definition \}\)/u);
+    expect(canvasSource).toMatch(/onRename\?\.\(identity, draft\.name\)/u);
+    expect(canvasSource).toMatch(/onMove\?\.\(identity, 'up'\)/u);
+    expect(canvasSource).toMatch(/onDelete\?\.\(identity\)/u);
+    expect(canvasSource).toMatch(/isRailroad && !readOnly && railroadDiagram \? <RailroadEditorControls[^]*?maxHeight=\{hierarchyPanelMaxHeight\}/u);
+  });
 });
 
 describe('ER editor safe area', () => {

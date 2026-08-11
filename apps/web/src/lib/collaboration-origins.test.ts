@@ -19,6 +19,7 @@ import { addKanbanColumn } from './kanban-mutations';
 import { addMindmapNode } from './mindmap-mutations';
 import { addTreeViewNode } from './treeview-mutations';
 import { addIshikawaCause } from './ishikawa-mutations';
+import { addRailroadRule } from './railroad-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -138,6 +139,7 @@ describe('collaboration transaction origins', () => {
     ['mindmap', 'mindmap\n  Root', (source: string) => addMindmapNode(source, { classes: [], label: 'Child', shape: 'default' }, { node: { classes: [], label: 'Root', shape: 'default' }, occurrenceCount: 1 })],
     ['tree view', 'treeView-beta\n  Root', (source: string) => addTreeViewNode(source, { classes: [], directory: false, label: 'child.txt', quoted: false }, { node: { classes: [], directory: false, label: 'Root', quoted: false, sourceStyle: 'indent' }, occurrenceCount: 1 })],
     ['ishikawa', 'ishikawa-beta\n  Effect', (source: string) => addIshikawaCause(source, { label: 'Cause', parent: null })],
+    ['railroad', 'railroad-ebnf-beta', (source: string) => addRailroadRule(source, { definition: '"x"', name: 'start' })],
   ])('keeps %s semantic form mutations in the local visual undo stack', (_family, initial, mutate) => {
     const doc = new Y.Doc();
     const source = doc.getText('semantic-source');

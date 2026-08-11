@@ -71,9 +71,12 @@ describe('DiagramPreviewRegistry', () => {
     const mindmapPreview: DiagramPreview = { capability: { adapter: 'mindmap', diagramType: 'mindmap', kind: 'generic' }, diagramId: 'mindmap', flowchartSnapshot: null, source: 'mindmap\n  Root\n    Child', svg: '<svg />' };
     const treeViewPreview: DiagramPreview = { capability: { adapter: 'tree-view', diagramType: 'treeView', kind: 'generic' }, diagramId: 'tree', flowchartSnapshot: null, source: 'treeView-beta\n  Root\n    child.txt', svg: '<svg />' };
     const ishikawaPreview: DiagramPreview = { capability: { adapter: 'ishikawa', diagramType: 'ishikawa', kind: 'generic' }, diagramId: 'fish', flowchartSnapshot: null, source: 'ishikawa-beta\n  Effect\n  Cause', svg: '<svg />' };
+    const railroadPreview: DiagramPreview = { capability: { adapter: 'railroad', diagramType: 'railroad', kind: 'generic' }, diagramId: 'grammar', flowchartSnapshot: null, source: 'railroad-ebnf-beta\n  start = "x" ;', svg: '<svg />' };
     expect(canUseSemanticFamilyControls(mindmapPreview.source, mindmapPreview, 'mindmap')).toBe(true);
     expect(canUseSemanticFamilyControls(treeViewPreview.source, treeViewPreview, 'tree-view')).toBe(true);
     expect(canUseSemanticFamilyControls(ishikawaPreview.source, ishikawaPreview, 'ishikawa')).toBe(true);
+    expect(canUseSemanticFamilyControls(railroadPreview.source, railroadPreview, 'railroad')).toBe(true);
+    expect(canUseSemanticFamilyControls('railroad-beta\n  start = optional(terminal("x"));', { ...railroadPreview, source: 'railroad-beta\n  start = optional(terminal("x"));' }, 'railroad')).toBe(false);
     expect(canUseSemanticFamilyControls('mindmap\n  Root\n    Child:::inline', { ...mindmapPreview, source: 'mindmap\n  Root\n    Child:::inline' }, 'mindmap')).toBe(false);
   });
 

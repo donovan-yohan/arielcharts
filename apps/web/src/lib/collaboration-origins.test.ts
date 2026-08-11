@@ -13,6 +13,9 @@ import { addSwimlaneNode } from './swimlane-mutations';
 import { addJourneyTask } from './journey-mutations';
 import { addGanttTask } from './gantt-mutations';
 import { addTimelineEvent } from './timeline-mutations';
+import { addGitGraphCommit } from './gitgraph-mutations';
+import { addEventModelingEntity } from './event-modeling-mutations';
+import { addKanbanColumn } from './kanban-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -126,6 +129,9 @@ describe('collaboration transaction origins', () => {
     ['journey', 'journey\n  section Product', (source: string) => addJourneyTask(source, { actors: ['Customer'], score: 5, section: 'Product', text: 'Browse' })],
     ['gantt', 'gantt\n  dateFormat YYYY-MM-DD', (source: string) => addGanttTask(source, { end: '1d', id: 'build', section: '', start: '2026-01-01', statuses: [], text: 'Build' })],
     ['timeline', 'timeline\n  2026', (source: string) => addTimelineEvent(source, { period: '2026', section: '', text: 'Started' })],
+    ['gitgraph', 'gitGraph', (source: string) => addGitGraphCommit(source, { id: 'base', tags: [] })],
+    ['event modeling', 'eventmodeling', (source: string) => addEventModelingEntity(source, 'Order')],
+    ['kanban', 'kanban', (source: string) => addKanbanColumn(source, { id: 'todo', title: 'Todo' })],
   ])('keeps %s semantic form mutations in the local visual undo stack', (_family, initial, mutate) => {
     const doc = new Y.Doc();
     const source = doc.getText('semantic-source');

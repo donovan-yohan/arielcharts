@@ -106,6 +106,9 @@ import { addSwimlane, addSwimlaneHandoff, addSwimlaneNode, deleteSwimlane, delet
 import { addJourneySection, addJourneyTask, deleteJourneySection, deleteJourneyTask, editJourneySection, editJourneyTask, getJourneyDiagramSnapshot, moveJourneySection, moveJourneyTask } from '../lib/journey-mutations';
 import { addGanttSection, addGanttTask, deleteGanttSection, deleteGanttTask, editGanttSection, editGanttTask, getGanttDiagramSnapshot, moveGanttSection, moveGanttTask } from '../lib/gantt-mutations';
 import { addTimelineEvent, addTimelinePeriod, addTimelineSection, deleteTimelineEvent, deleteTimelinePeriod, deleteTimelineSection, editTimelineEvent, editTimelinePeriod, editTimelineSection, getTimelineDiagramSnapshot, moveTimelineEvent, moveTimelinePeriod, moveTimelineSection, setTimelineDirection } from '../lib/timeline-mutations';
+import { addGitGraphBranch, addGitGraphCheckout, addGitGraphCherryPick, addGitGraphCommit, addGitGraphMerge, deleteGitGraphOperation, editGitGraphBranch, editGitGraphCheckout, editGitGraphCherryPick, editGitGraphCommit, editGitGraphMerge, getGitGraphDiagramSnapshot, moveGitGraphOperation } from '../lib/gitgraph-mutations';
+import { addEventModelingDataBlock, addEventModelingEntity, addEventModelingTimeframe, deleteEventModelingDataBlock, deleteEventModelingEntity, deleteEventModelingTimeframe, editEventModelingDataBlock, editEventModelingTimeframe, getEventModelingDiagramSnapshot, moveEventModelingTimeframe, renameEventModelingEntity } from '../lib/event-modeling-mutations';
+import { addKanbanCard, addKanbanColumn, deleteKanbanCard, deleteKanbanColumn, editKanbanCard, editKanbanColumn, getKanbanDiagramSnapshot, moveKanbanCard } from '../lib/kanban-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -1725,6 +1728,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isJourney = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'journey');
   const isGantt = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'gantt');
   const isTimeline = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'timeline');
+  const isGitGraph = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'gitgraph');
+  const isEventModeling = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'event-modeling');
+  const isKanban = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'kanban');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1754,6 +1760,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const journeyDiagram = useMemo(() => isJourney ? getJourneyDiagramSnapshot(renderedMermaidText) : null, [isJourney, renderedMermaidText]);
   const ganttDiagram = useMemo(() => isGantt ? getGanttDiagramSnapshot(renderedMermaidText) : null, [isGantt, renderedMermaidText]);
   const timelineDiagram = useMemo(() => isTimeline ? getTimelineDiagramSnapshot(renderedMermaidText) : null, [isTimeline, renderedMermaidText]);
+  const gitGraphDiagram = useMemo(() => isGitGraph ? getGitGraphDiagramSnapshot(renderedMermaidText) : null, [isGitGraph, renderedMermaidText]);
+  const eventModelingDiagram = useMemo(() => isEventModeling ? getEventModelingDiagramSnapshot(renderedMermaidText) : null, [isEventModeling, renderedMermaidText]);
+  const kanbanDiagram = useMemo(() => isKanban ? getKanbanDiagramSnapshot(renderedMermaidText) : null, [isKanban, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2216,6 +2225,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             ganttDiagram={ganttDiagram}
             isTimeline={isTimeline}
             timelineDiagram={timelineDiagram}
+            isGitGraph={isGitGraph}
+            gitGraphDiagram={gitGraphDiagram}
+            isEventModeling={isEventModeling}
+            eventModelingDiagram={eventModelingDiagram}
+            isKanban={isKanban}
+            kanbanDiagram={kanbanDiagram}
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
@@ -2430,6 +2445,35 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onDeleteTimelineEvent={(identity) => { mutateCanvasSource((source) => deleteTimelineEvent(source, identity), 'Deleted a timeline event'); }}
             onMoveTimelineEvent={(identity, direction) => { mutateCanvasSource((source) => moveTimelineEvent(source, identity, direction), 'Reordered timeline events'); }}
             onSetTimelineDirection={(value) => { mutateCanvasSource((source) => setTimelineDirection(source, value), 'Updated timeline direction'); }}
+            onAddGitGraphCommit={(value) => { mutateCanvasSource((source) => addGitGraphCommit(source, value), 'Added a GitGraph commit'); }}
+            onEditGitGraphCommit={(index, value) => { mutateCanvasSource((source) => editGitGraphCommit(source, index, value), 'Edited a GitGraph commit'); }}
+            onAddGitGraphBranch={(value) => { mutateCanvasSource((source) => addGitGraphBranch(source, value), 'Added a GitGraph branch'); }}
+            onEditGitGraphBranch={(index, value) => { mutateCanvasSource((source) => editGitGraphBranch(source, index, value), 'Edited a GitGraph branch'); }}
+            onAddGitGraphCheckout={(value) => { mutateCanvasSource((source) => addGitGraphCheckout(source, value), 'Added a GitGraph checkout'); }}
+            onEditGitGraphCheckout={(index, value) => { mutateCanvasSource((source) => editGitGraphCheckout(source, index, value), 'Edited a GitGraph checkout'); }}
+            onAddGitGraphMerge={(value) => { mutateCanvasSource((source) => addGitGraphMerge(source, value), 'Added a GitGraph merge'); }}
+            onEditGitGraphMerge={(index, value) => { mutateCanvasSource((source) => editGitGraphMerge(source, index, value), 'Edited a GitGraph merge'); }}
+            onAddGitGraphCherryPick={(value) => { mutateCanvasSource((source) => addGitGraphCherryPick(source, value), 'Added a GitGraph cherry-pick'); }}
+            onEditGitGraphCherryPick={(index, value) => { mutateCanvasSource((source) => editGitGraphCherryPick(source, index, value), 'Edited a GitGraph cherry-pick'); }}
+            onDeleteGitGraphOperation={(index) => { mutateCanvasSource((source) => deleteGitGraphOperation(source, index), 'Deleted a GitGraph operation'); }}
+            onMoveGitGraphOperation={(from, to) => { mutateCanvasSource((source) => moveGitGraphOperation(source, from, to), 'Reordered GitGraph history'); }}
+            onAddEventModelingTimeframe={(value) => { mutateCanvasSource((source) => addEventModelingTimeframe(source, value), 'Added an Event Modeling timeframe'); }}
+            onEditEventModelingTimeframe={(index, value) => { mutateCanvasSource((source) => editEventModelingTimeframe(source, index, value), 'Edited an Event Modeling timeframe'); }}
+            onDeleteEventModelingTimeframe={(index) => { mutateCanvasSource((source) => deleteEventModelingTimeframe(source, index), 'Deleted an Event Modeling timeframe'); }}
+            onMoveEventModelingTimeframe={(index, target) => { mutateCanvasSource((source) => moveEventModelingTimeframe(source, index, target), 'Reordered Event Modeling timeframes'); }}
+            onAddEventModelingEntity={(name) => { mutateCanvasSource((source) => addEventModelingEntity(source, name), 'Added an Event Modeling entity'); }}
+            onRenameEventModelingEntity={(name, next) => { mutateCanvasSource((source) => renameEventModelingEntity(source, name, next), 'Renamed an Event Modeling entity'); }}
+            onDeleteEventModelingEntity={(name) => { mutateCanvasSource((source) => deleteEventModelingEntity(source, name), 'Deleted an Event Modeling entity'); }}
+            onAddEventModelingData={(value) => { mutateCanvasSource((source) => addEventModelingDataBlock(source, value), 'Added an Event Modeling data block'); }}
+            onEditEventModelingData={(name, value) => { mutateCanvasSource((source) => editEventModelingDataBlock(source, name, value), 'Edited an Event Modeling data block'); }}
+            onDeleteEventModelingData={(name) => { mutateCanvasSource((source) => deleteEventModelingDataBlock(source, name), 'Deleted an Event Modeling data block'); }}
+            onAddKanbanColumn={(value) => { mutateCanvasSource((source) => addKanbanColumn(source, value), 'Added a Kanban column'); }}
+            onEditKanbanColumn={(id, value) => { mutateCanvasSource((source) => editKanbanColumn(source, id, value), 'Edited a Kanban column'); }}
+            onDeleteKanbanColumn={(id) => { mutateCanvasSource((source) => deleteKanbanColumn(source, id), 'Deleted a Kanban column'); }}
+            onAddKanbanCard={(value) => { mutateCanvasSource((source) => addKanbanCard(source, value), 'Added a Kanban card'); }}
+            onEditKanbanCard={(id, value) => { mutateCanvasSource((source) => editKanbanCard(source, id, value), 'Edited a Kanban card'); }}
+            onDeleteKanbanCard={(id) => { mutateCanvasSource((source) => deleteKanbanCard(source, id), 'Deleted a Kanban card'); }}
+            onMoveKanbanCard={(id, column, target) => { mutateCanvasSource((source) => moveKanbanCard(source, id, column, target), 'Moved a Kanban card'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onChangeNodeShape={(nodeId, shape) => {

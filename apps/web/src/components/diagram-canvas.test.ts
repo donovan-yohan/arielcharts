@@ -117,6 +117,22 @@ describe('sequence semantic editor', () => {
   });
 });
 
+describe('board semantic editor fields', () => {
+  it('renders optional GitGraph fields from the operation kind, not whether the source happened to declare them', () => {
+    expect(canvasSource).toMatch(/const fields = operation\.kind === 'commit'/u);
+    expect(canvasSource).toMatch(/operation\.kind === 'branch'[^]*?GitGraphBranch[^]*?order:/u);
+    expect(canvasSource).toMatch(/operation\.kind === 'merge'[^]*?GitGraphMerge[^]*?id: event\.target\.value \|\| undefined/u);
+    expect(canvasSource).toMatch(/GitGraphCherryPick[^]*?parent: event\.target\.value \|\| undefined/u);
+    expect(canvasSource).not.toMatch(/'order' in draft|'parent' in draft|'type' in draft/u);
+  });
+
+  it('uses structured Kanban metadata controls so punctuation remains value data', () => {
+    expect(canvasSource).toMatch(/metadata \$\{key\} key/u);
+    expect(canvasSource).toMatch(/new metadata key/u);
+    expect(canvasSource).not.toMatch(/event\.target\.value\.split\(','\)\.map\(\(item\)/u);
+  });
+});
+
 describe('canvas blank-click selection ownership', () => {
   it('clears app-owned selection from both the generic canvas click and the React Flow pane while keeping focus roving-only', () => {
     const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');

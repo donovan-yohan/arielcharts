@@ -111,8 +111,18 @@ import { getSankeyLinkIdentity, getSankeyNodeIdentity, type SankeyDiagramSnapsho
 import { getPacketFieldIdentity, type PacketDiagramSnapshot, type PacketField, type PacketFieldIdentity } from '../lib/packet-mutations';
 import { CYNEFIN_DOMAIN_NAMES, getCynefinItemIdentity, getCynefinTransitionIdentity, isCynefinSourceRepresentable, type CynefinDiagramSnapshot, type CynefinDomainName, type CynefinItem, type CynefinItemIdentity, type CynefinTransition, type CynefinTransitionIdentity } from '../lib/cynefin-mutations';
 import { reconcileCynefinItemRenderIdentities, reconcileCynefinTransitionRenderIdentities, type CynefinRenderIdentityState } from '../lib/cynefin-render-identities';
+import { getTreemapNodeIdentity, isTreemapSourceRepresentable, type TreemapDiagramSnapshot, type TreemapNode, type TreemapNodeIdentity } from '../lib/treemap-mutations';
+import { getVennStyleIdentity, getVennSubsetIdentity, isVennSourceRepresentable, type VennDiagramSnapshot, type VennStyle, type VennStyleIdentity, type VennSubset, type VennSubsetIdentity } from '../lib/venn-mutations';
+import { reconcileHierarchicalSemanticRenderIdentities, reconcileSemanticRenderIdentities, type SemanticRenderIdentityState } from '../lib/semantic-render-identities';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
+
+export interface SemanticFormMutationResult {
+  applied: boolean;
+  error?: string;
+}
+
+type SemanticFormActionResult = boolean | void | SemanticFormMutationResult;
 
 export interface DiagramCanvasProps {
   className?: string;
@@ -148,6 +158,9 @@ export interface DiagramCanvasProps {
   isSankey?: boolean;
   isPacket?: boolean;
   isCynefin?: boolean;
+  isTreemap?: boolean;
+  isVenn?: boolean;
+  initialCamera?: CanvasCameraState;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
@@ -182,6 +195,8 @@ export interface DiagramCanvasProps {
   sankeyDiagram?: SankeyDiagramSnapshot | null;
   packetDiagram?: PacketDiagramSnapshot | null;
   cynefinDiagram?: CynefinDiagramSnapshot | null;
+  treemapDiagram?: TreemapDiagramSnapshot | null;
+  vennDiagram?: VennDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
@@ -417,6 +432,20 @@ export interface DiagramCanvasProps {
   onEditCynefinTransition?: (identity: CynefinTransitionIdentity, value: Partial<CynefinTransition>) => boolean | void;
   onDeleteCynefinTransition?: (identity: CynefinTransitionIdentity) => void;
   onMoveCynefinTransition?: (identity: CynefinTransitionIdentity, direction: 'up' | 'down') => void;
+  onAddTreemapNode?: (value: Pick<TreemapNode, 'label' | 'value'>, parent?: TreemapNodeIdentity) => SemanticFormActionResult;
+  onEditTreemapNode?: (identity: TreemapNodeIdentity, value: Partial<Pick<TreemapNode, 'label' | 'value'>>) => SemanticFormActionResult;
+  onDeleteTreemapNode?: (identity: TreemapNodeIdentity) => SemanticFormActionResult;
+  onMoveTreemapNode?: (identity: TreemapNodeIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onReparentTreemapNode?: (identity: TreemapNodeIdentity, parent: TreemapNodeIdentity) => SemanticFormActionResult;
+  onAddVennSubset?: (value: VennSubset) => SemanticFormActionResult;
+  onEditVennSubset?: (identity: VennSubsetIdentity, value: Partial<VennSubset>) => SemanticFormActionResult;
+  onDeleteVennSubset?: (identity: VennSubsetIdentity) => SemanticFormActionResult;
+  onMoveVennSubset?: (identity: VennSubsetIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onRenameVennSet?: (identity: VennSubsetIdentity, value: string) => SemanticFormActionResult;
+  onAddVennStyle?: (value: VennStyle) => SemanticFormActionResult;
+  onEditVennStyle?: (identity: VennStyleIdentity, value: Partial<VennStyle>) => SemanticFormActionResult;
+  onDeleteVennStyle?: (identity: VennStyleIdentity) => SemanticFormActionResult;
+  onMoveVennStyle?: (identity: VennStyleIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onCameraChange?: (camera: CanvasCameraState) => void;
@@ -721,6 +750,7 @@ export function DiagramCanvas({
   isClass = false,
   isState = false,
   isRequirement = false,
+  initialCamera,
   nodePositions,
   preserveCamera = false,
   onAddEdge,
@@ -957,6 +987,20 @@ export function DiagramCanvas({
   onEditCynefinTransition,
   onDeleteCynefinTransition,
   onMoveCynefinTransition,
+  onAddTreemapNode,
+  onEditTreemapNode,
+  onDeleteTreemapNode,
+  onMoveTreemapNode,
+  onReparentTreemapNode,
+  onAddVennSubset,
+  onEditVennSubset,
+  onDeleteVennSubset,
+  onMoveVennSubset,
+  onRenameVennSet,
+  onAddVennStyle,
+  onEditVennStyle,
+  onDeleteVennStyle,
+  onMoveVennStyle,
   onAddConnectedNode,
   onCanvasCursorChange,
   onCameraChange,
@@ -1021,6 +1065,8 @@ export function DiagramCanvas({
   isSankey = false,
   isPacket = false,
   isCynefin = false,
+  isTreemap = false,
+  isVenn = false,
   journeyDiagram = null,
   ganttDiagram = null,
   timelineDiagram = null,
@@ -1039,6 +1085,8 @@ export function DiagramCanvas({
   sankeyDiagram = null,
   packetDiagram = null,
   cynefinDiagram = null,
+  treemapDiagram = null,
+  vennDiagram = null,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -1067,7 +1115,7 @@ export function DiagramCanvas({
   const controlledNodeComposer = useMemo(() => createControlledNodeComposer<MermaidFlowNode>(), []);
   const persistedNodePositions = nodePositions ?? uncontrolledNodePositions;
   const persistedNodePositionsRef = useRef<DiagramNodePositions>(persistedNodePositions);
-  const hasAutoFitInitialRenderRef = useRef(false);
+  const hasAutoFitInitialRenderRef = useRef(initialCamera !== undefined);
   const suppressCanvasClickRef = useRef(false);
   const suppressCanvasClickResetRef = useRef<number | null>(null);
   const visibleNodePositions = useMemo(
@@ -1085,7 +1133,7 @@ export function DiagramCanvas({
   }, [selection]);
   const [internalMode, setInternalMode] = useState<'select' | 'connect' | 'laser'>(interactionMode ?? 'select');
   const mode = interactionMode ?? internalMode;
-  const [viewport, setViewport] = useState<ViewportState>({ panX: 24, panY: 24, zoom: 1 });
+  const [viewport, setViewport] = useState<ViewportState>(initialCamera ?? { panX: 24, panY: 24, zoom: 1 });
   const [animateTransform, setAnimateTransform] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [spacePressed, setSpacePressed] = useState(false);
@@ -1126,6 +1174,27 @@ export function DiagramCanvas({
     cynefinDiagram,
     isCynefinSourceRepresentable(mermaidSource ?? ''),
   );
+  const treemapRenderIdentityKeys = useSemanticRenderIdentityKeys(
+    treemapDiagram?.nodes ?? null,
+    isTreemapSourceRepresentable(mermaidSource ?? ''),
+    'treemap-node-render',
+    (node) => JSON.stringify([node.label, node.value]),
+    (node) => [...node.ancestorLabels, node.label],
+  );
+  const vennSubsetRenderIdentityKeys = useSemanticRenderIdentityKeys(
+    vennDiagram?.subsets ?? null,
+    isVennSourceRepresentable(mermaidSource ?? ''),
+    'venn-subset-render',
+    (subset) => JSON.stringify([subset.sets, subset.label, subset.authoredValue ?? null, subset.value]),
+  );
+  const vennStyleRenderIdentityKeys = useSemanticRenderIdentityKeys(
+    vennDiagram?.styles ?? null,
+    isVennSourceRepresentable(mermaidSource ?? '') && (vennDiagram?.styles.every((style) => style.properties.length === 1) ?? false),
+    'venn-style-render',
+    (style) => JSON.stringify([style.sets, style.properties]),
+  );
+  const vennRenameDraftCacheRef = useRef<PersistentCanonicalDraftCache<{ value: string }>>(new Map());
+  if (!isVennSourceRepresentable(mermaidSource ?? '')) vennRenameDraftCacheRef.current.clear();
   onRenderSettledRef.current = onRenderSettled;
   onCanvasCursorChangeRef.current = onCanvasCursorChange;
   onNodeEditingChangeRef.current = onNodeEditingChange;
@@ -3738,6 +3807,8 @@ export function DiagramCanvas({
         {isSankey && !readOnly && sankeyDiagram ? <SankeyEditorControls bottom={semanticPanelPlacement.bottom} diagram={sankeyDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddSankeyLink} onDelete={onDeleteSankeyLink} onEdit={onEditSankeyLink} onMove={onMoveSankeyLink} onRenameNode={onRenameSankeyNode} /> : null}
         {isPacket && !readOnly && packetDiagram ? <PacketEditorControls bottom={semanticPanelPlacement.bottom} diagram={packetDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddPacketField} onDelete={onDeletePacketField} onEdit={onEditPacketField} onMove={onMovePacketField} /> : null}
         {isCynefin && !readOnly && cynefinDiagram ? <CynefinEditorControls bottom={semanticPanelPlacement.bottom} diagram={cynefinDiagram} itemDraftCache={cynefinRenderIdentityKeys.itemDraftCache} itemKeys={cynefinRenderIdentityKeys.itemKeys} maxHeight={semanticPanelPlacement.maxHeight} onAddItem={onAddCynefinItem} onAddTransition={onAddCynefinTransition} onDeleteItem={onDeleteCynefinItem} onDeleteTransition={onDeleteCynefinTransition} onEditItem={onEditCynefinItem} onEditTransition={onEditCynefinTransition} onMoveItem={onMoveCynefinItem} onMoveTransition={onMoveCynefinTransition} transitionDraftCache={cynefinRenderIdentityKeys.transitionDraftCache} transitionKeys={cynefinRenderIdentityKeys.transitionKeys} /> : null}
+        {isTreemap && !readOnly && treemapDiagram ? <TreemapEditorControls bottom={semanticPanelPlacement.bottom} diagram={treemapDiagram} draftCache={treemapRenderIdentityKeys.draftCache} keys={treemapRenderIdentityKeys.keys} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddTreemapNode} onDelete={onDeleteTreemapNode} onEdit={onEditTreemapNode} onMove={onMoveTreemapNode} onReparent={onReparentTreemapNode} /> : null}
+        {isVenn && !readOnly && vennDiagram ? <VennEditorControls bottom={semanticPanelPlacement.bottom} diagram={vennDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAddStyle={onAddVennStyle} onAddSubset={onAddVennSubset} onDeleteStyle={onDeleteVennStyle} onDeleteSubset={onDeleteVennSubset} onEditStyle={onEditVennStyle} onEditSubset={onEditVennSubset} onMoveStyle={onMoveVennStyle} onMoveSubset={onMoveVennSubset} onRenameSet={onRenameVennSet} renameDraftCache={vennRenameDraftCacheRef.current} styleDraftCache={vennStyleRenderIdentityKeys.draftCache} styleKeys={vennStyleRenderIdentityKeys.keys} subsetDraftCache={vennSubsetRenderIdentityKeys.draftCache} subsetKeys={vennSubsetRenderIdentityKeys.keys} /> : null}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
@@ -4989,12 +5060,19 @@ function parseSemanticNumberList(value: string, label: string): number[] {
   return parts.map((part) => parseSemanticNumber(part, label));
 }
 
-function runNumericForm(setError: (value: string | null) => void, action: () => boolean | void): boolean {
+function runSemanticForm(setError: (value: string | null) => void, action: () => SemanticFormActionResult): boolean {
   try {
-    if (action() === false) { setError('The diagram update could not be applied.'); return false; }
+    const result = action();
+    if (result === false) { setError('The diagram update could not be applied.'); return false; }
+    if (result && typeof result === 'object' && !result.applied) {
+      setError(result.error ?? 'The diagram update could not be applied.');
+      return false;
+    }
     setError(null); return true;
   } catch (error) { setError(error instanceof Error ? error.message : 'The numeric values are invalid.'); return false; }
 }
+
+const runNumericForm = runSemanticForm;
 
 function NumericEditorError({ error }: { error: string | null }) {
   return error ? <small className="semantic-editor-error" role="alert">{error}</small> : null;
@@ -5186,6 +5264,30 @@ function formatCynefinDomain(domain: CynefinDomainName): string {
 }
 
 type PersistentCanonicalDraftCache<T extends object> = Map<string, { canonical: T; draft: T }>;
+
+function useSemanticRenderIdentityKeys<T extends object>(
+  records: readonly T[] | null, sourceRepresentable: boolean, prefix: string, fingerprint: (record: T) => string,
+  path?: (record: T) => readonly string[],
+) {
+  const stateRef = useRef<SemanticRenderIdentityState<T> | null>(null);
+  const draftCacheRef = useRef<PersistentCanonicalDraftCache<T>>(new Map());
+  if (!sourceRepresentable) {
+    stateRef.current = null;
+    draftCacheRef.current.clear();
+    return { draftCache: draftCacheRef.current, keys: new Map<T, string>() };
+  }
+  if (records === null) {
+    return { draftCache: draftCacheRef.current, keys: new Map<T, string>() };
+  }
+  const state = path
+    ? reconcileHierarchicalSemanticRenderIdentities(stateRef.current, records, { fingerprint, path, prefix })
+    : reconcileSemanticRenderIdentities(stateRef.current, records, { fingerprint, prefix });
+  stateRef.current = state;
+  const keys = new Map(state.entries.map((entry) => [entry.record, entry.renderKey]));
+  const active = new Set(keys.values());
+  for (const key of draftCacheRef.current.keys()) if (!active.has(key)) draftCacheRef.current.delete(key);
+  return { draftCache: draftCacheRef.current, keys };
+}
 
 function useCynefinRenderIdentityKeys(diagram: CynefinDiagramSnapshot | null, sourceRepresentable: boolean) {
   const itemStateRef = useRef<CynefinRenderIdentityState<CynefinItem> | null>(null);
@@ -5384,6 +5486,85 @@ function CynefinTransitionForm({ draftCache, index, onDelete, onEdit, onMove, re
     <button aria-label={`Move ${label} down`} disabled={!safe || index === transitions.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
     <button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
   </form>;
+}
+
+function TreemapEditorControls({ bottom, diagram, draftCache, keys, maxHeight, onAdd, onDelete, onEdit, onMove, onReparent }: {
+  bottom: number; diagram: TreemapDiagramSnapshot; draftCache: PersistentCanonicalDraftCache<TreemapNode>; keys: Map<TreemapNode, string>; maxHeight: number;
+  onAdd?: (value: Pick<TreemapNode, 'label' | 'value'>, parent?: TreemapNodeIdentity) => SemanticFormActionResult;
+  onDelete?: (identity: TreemapNodeIdentity) => SemanticFormActionResult; onEdit?: (identity: TreemapNodeIdentity, value: Partial<Pick<TreemapNode, 'label' | 'value'>>) => SemanticFormActionResult;
+  onMove?: (identity: TreemapNodeIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onReparent?: (identity: TreemapNodeIdentity, parent: TreemapNodeIdentity) => SemanticFormActionResult;
+}) {
+  const roots = diagram.nodes.filter((node) => node.ancestorLabels.length === 0);
+  const [newNode, setNewNode] = useState({ label: 'Node', parent: roots[0] ? treemapPathKey(roots[0]) : '', value: '' });
+  const [error, setError] = useState<string | null>(null);
+  const parents = diagram.nodes.filter((node) => node.value === null);
+  const parentKey = JSON.stringify(parents.map(treemapPathKey));
+  useEffect(() => { setNewNode((current) => parents.some((node) => treemapPathKey(node) === current.parent) ? current : { ...current, parent: parents[0] ? treemapPathKey(parents[0]) : '' }); }, [parentKey]);
+  return <aside aria-label="Treemap editor" className="canvas-semantic-editor canvas-treemap-venn-editor" data-canvas-pan-exclusion="true" data-testid="treemap-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+    <strong>Treemap</strong>
+    <form aria-label="New Treemap node" onSubmit={(event) => { event.preventDefault(); const parent = parents.find((node) => treemapPathKey(node) === newNode.parent); if (runNumericForm(setError, () => onAdd?.({ label: newNode.label, value: newNode.value.trim() ? parseSemanticNumber(newNode.value, 'Treemap value') : null }, parent ? getTreemapNodeIdentity(parent, diagram.nodes) : undefined)) === true) setNewNode((current) => ({ ...current, label: 'Node', value: '' })); }}>
+      <input aria-label="New Treemap node label" onChange={(event) => setNewNode((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.label} />
+      <input aria-label="New Treemap node value" inputMode="decimal" onChange={(event) => setNewNode((current) => ({ ...current, value: event.target.value }))} placeholder="optional leaf value" style={HIERARCHY_CONTROL_STYLE} value={newNode.value} />
+      {parents.length ? <select aria-label="New Treemap node parent" onChange={(event) => setNewNode((current) => ({ ...current, parent: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.parent}>{parents.map((node) => <option key={treemapPathKey(node)} value={treemapPathKey(node)}>{treemapPathLabel(node)}</option>)}</select> : null}
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add node</button>
+    </form>
+    <NumericEditorError error={error} />{diagram.nodes.map((node) => <TreemapNodeForm allNodes={diagram.nodes} draftCache={draftCache} key={keys.get(node)} node={node} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} onReparent={onReparent} renderKey={keys.get(node)!} />)}
+  </aside>;
+}
+
+function treemapPathSegments(node: TreemapNode): string[] { return [...node.ancestorLabels, node.label]; }
+function treemapPathKey(node: TreemapNode): string { return node.opaqueId ?? JSON.stringify(treemapPathSegments(node)); }
+function treemapPathLabel(node: TreemapNode): string { return treemapPathSegments(node).map((segment) => JSON.stringify(segment)).join(' / '); }
+function sameTreemapPath(left: readonly string[], right: readonly string[]): boolean { return left.length === right.length && left.every((segment, index) => segment === right[index]); }
+function isTreemapDescendant(candidate: TreemapNode, ancestor: TreemapNode): boolean {
+  const ancestorPath = treemapPathSegments(ancestor);
+  return candidate.ancestorLabels.length >= ancestorPath.length
+    && ancestorPath.every((segment, index) => candidate.ancestorLabels[index] === segment);
+}
+
+function TreemapNodeForm({ allNodes, draftCache, node, onDelete, onEdit, onError, onMove, onReparent, renderKey }: {
+  allNodes: TreemapNode[]; draftCache: PersistentCanonicalDraftCache<TreemapNode>; node: TreemapNode; renderKey: string;
+  onDelete?: (identity: TreemapNodeIdentity) => SemanticFormActionResult; onEdit?: (identity: TreemapNodeIdentity, value: Partial<Pick<TreemapNode, 'label' | 'value'>>) => SemanticFormActionResult;
+  onError: (error: string | null) => void;
+  onMove?: (identity: TreemapNodeIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onReparent?: (identity: TreemapNodeIdentity, parent: TreemapNodeIdentity) => SemanticFormActionResult;
+}) {
+  const identity = getTreemapNodeIdentity(node, allNodes); const safe = identity.occurrenceCount === 1; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(node, renderKey, draftCache); const { draft: valueDraft, resetDraft: resetValueDraft, updateDraft: updateValueDraft } = useCanonicalDraft({ value: node.value === null ? '' : String(node.value) });
+  const label = `Treemap node ${treemapPathLabel(node)}`; const isRoot = node.ancestorLabels.length === 0; const descendants = allNodes.filter((candidate) => isTreemapDescendant(candidate, node));
+  const peers = allNodes.filter((candidate) => sameTreemapPath(candidate.ancestorLabels, node.ancestorLabels)); const peerIndex = peers.indexOf(node);
+  const possibleParents = allNodes.filter((candidate) => candidate.value === null && candidate !== node && !isTreemapDescendant(candidate, node));
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe && runNumericForm(onError, () => onEdit?.(identity, { label: draft.label, value: valueDraft.value.trim() ? parseSemanticNumber(valueDraft.value, 'Treemap value') : null })) === true) { resetDraft(); resetValueDraft(); } }}>
+    <span>{'— '.repeat(node.ancestorLabels.length)}{node.label}</span><input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
+    <input aria-label={`${label} value`} disabled={!safe || descendants.length > 0} inputMode="decimal" onChange={(event) => updateValueDraft(() => ({ value: event.target.value }))} placeholder="branch" style={HIERARCHY_CONTROL_STYLE} value={valueDraft.value} />
+    <button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ${label} up`} disabled={!safe || isRoot || peerIndex === 0} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={!safe || isRoot || peerIndex === peers.length - 1} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
+    {!isRoot ? <select aria-label={`Move ${label} to parent`} disabled={!safe} onChange={(event) => { const parent = possibleParents.find((candidate) => treemapPathKey(candidate) === event.target.value); if (parent) runSemanticForm(onError, () => onReparent?.(identity, getTreemapNodeIdentity(parent, allNodes))); }} style={HIERARCHY_CONTROL_STYLE} value=""><option value="">Move subtree…</option>{possibleParents.map((parent) => <option key={treemapPathKey(parent)} value={treemapPathKey(parent)}>{treemapPathLabel(parent)}</option>)}</select> : null}
+    {!isRoot ? <button aria-label={`Delete ${label} subtree containing ${descendants.length + 1} ${descendants.length === 0 ? 'node' : 'nodes'}`} disabled={!safe} onClick={() => runSemanticForm(onError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">{descendants.length ? `Delete subtree (${descendants.length + 1} nodes)` : 'Delete'}</button> : null}
+  </form>;
+}
+
+const VENN_STYLE_PROPERTIES = ['color', 'fill', 'fill-opacity', 'opacity', 'stroke', 'stroke-opacity', 'stroke-width'] as const;
+function VennEditorControls({ bottom, diagram, maxHeight, onAddStyle, onAddSubset, onDeleteStyle, onDeleteSubset, onEditStyle, onEditSubset, onMoveStyle, onMoveSubset, onRenameSet, renameDraftCache, styleDraftCache, styleKeys, subsetDraftCache, subsetKeys }: {
+  bottom: number; diagram: VennDiagramSnapshot; maxHeight: number; subsetDraftCache: PersistentCanonicalDraftCache<VennSubset>; subsetKeys: Map<VennSubset, string>; renameDraftCache: PersistentCanonicalDraftCache<{ value: string }>; styleDraftCache: PersistentCanonicalDraftCache<VennStyle>; styleKeys: Map<VennStyle, string>;
+  onAddSubset?: (value: VennSubset) => SemanticFormActionResult; onEditSubset?: (identity: VennSubsetIdentity, value: Partial<VennSubset>) => SemanticFormActionResult; onDeleteSubset?: (identity: VennSubsetIdentity) => SemanticFormActionResult; onMoveSubset?: (identity: VennSubsetIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onRenameSet?: (identity: VennSubsetIdentity, value: string) => SemanticFormActionResult;
+  onAddStyle?: (value: VennStyle) => SemanticFormActionResult; onEditStyle?: (identity: VennStyleIdentity, value: Partial<VennStyle>) => SemanticFormActionResult; onDeleteStyle?: (identity: VennStyleIdentity) => SemanticFormActionResult; onMoveStyle?: (identity: VennStyleIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+}) {
+  const setNames = diagram.subsets.filter((subset) => subset.sets.length === 1).map((subset) => subset.sets[0]!); const setNameKey = setNames.join('\u0000'); const [subset, setSubset] = useState({ label: '', setId: 'C', sets: [] as string[], value: '1' }); const [style, setStyle] = useState({ property: 'fill', sets: setNames.slice(0, 1), value: '#60a5fa' }); const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setSubset((current) => ({ ...current, sets: current.sets.filter((name) => setNames.includes(name)) })); setStyle((current) => ({ ...current, sets: current.sets.filter((name) => setNames.includes(name)).length ? current.sets.filter((name) => setNames.includes(name)) : setNames.slice(0, 1) })); }, [setNameKey]);
+  return <aside aria-label="Venn editor" className="canvas-semantic-editor canvas-treemap-venn-editor" data-canvas-pan-exclusion="true" data-testid="venn-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+    <strong>Venn</strong><form aria-label="New Venn subset" onSubmit={(event) => { event.preventDefault(); if (runNumericForm(setError, () => { if (subset.sets.length === 1) throw new Error('A Venn overlap requires at least two authored sets.'); const sets = subset.sets.length ? subset.sets : [subset.setId]; return onAddSubset?.({ label: subset.label || null, sets, value: parseSemanticNumber(subset.value, 'Venn subset value') }); }) === true) setSubset((current) => ({ ...current, label: '', setId: 'Set', sets: [] })); }}><input aria-label="New Venn set id" disabled={subset.sets.length > 0} onChange={(event) => setSubset((current) => ({ ...current, setId: event.target.value }))} placeholder="new set id" style={HIERARCHY_CONTROL_STYLE} value={subset.setId} /><select aria-label="New Venn overlap sets" multiple onChange={(event) => { const sets = [...event.currentTarget.selectedOptions].map((option) => option.value); setSubset((current) => ({ ...current, sets })); }} style={HIERARCHY_CONTROL_STYLE} value={subset.sets}>{setNames.map((name) => <option key={name}>{name}</option>)}</select><input aria-label="New Venn subset label" onChange={(event) => setSubset((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={subset.label} /><input aria-label="New Venn subset value" inputMode="decimal" onChange={(event) => setSubset((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={subset.value} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add subset</button></form>
+    <NumericEditorError error={error} />{diagram.subsets.map((item) => <VennSubsetForm all={diagram.subsets} draftCache={subsetDraftCache} item={item} key={subsetKeys.get(item)} onDelete={onDeleteSubset} onEdit={onEditSubset} onError={setError} onMove={onMoveSubset} onRename={onRenameSet} renameDraftCache={renameDraftCache} renderKey={subsetKeys.get(item)!} />)}
+    <section aria-label="Venn styles"><h3>Styles</h3><form aria-label="New Venn style" onSubmit={(event) => { event.preventDefault(); runSemanticForm(setError, () => onAddStyle?.({ properties: [{ name: style.property, value: style.value }], sets: style.sets })); }}><select aria-label="New Venn style target" onChange={(event) => { const target = diagram.subsets.find((candidate) => candidate.sets.join('\u0000') === event.target.value); if (target) setStyle((current) => ({ ...current, sets: target.sets })); }} style={HIERARCHY_CONTROL_STYLE} value={style.sets.join('\u0000')}>{diagram.subsets.map((target) => <option key={target.sets.join('\u0000')} value={target.sets.join('\u0000')}>{target.sets.join(', ')}</option>)}</select><select aria-label="New Venn style property" onChange={(event) => setStyle((current) => ({ ...current, property: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={style.property}>{VENN_STYLE_PROPERTIES.map((property) => <option key={property}>{property}</option>)}</select><input aria-label="New Venn style value" onChange={(event) => setStyle((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={style.value} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add style</button></form>{diagram.styles.map((item, index) => <VennStyleForm all={diagram.styles} draftCache={styleDraftCache} index={index} item={item} key={styleKeys.get(item)} onDelete={onDeleteStyle} onEdit={onEditStyle} onError={setError} onMove={onMoveStyle} renderKey={styleKeys.get(item)!} targets={diagram.subsets} />)}</section>
+  </aside>;
+}
+
+function VennSubsetForm({ all, draftCache, item, onDelete, onEdit, onError, onMove, onRename, renameDraftCache, renderKey }: { all: VennSubset[]; draftCache: PersistentCanonicalDraftCache<VennSubset>; item: VennSubset; renderKey: string; renameDraftCache: PersistentCanonicalDraftCache<{ value: string }>; onDelete?: (identity: VennSubsetIdentity) => SemanticFormActionResult; onEdit?: (identity: VennSubsetIdentity, value: Partial<VennSubset>) => SemanticFormActionResult; onError: (error: string | null) => void; onMove?: (identity: VennSubsetIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onRename?: (identity: VennSubsetIdentity, value: string) => SemanticFormActionResult; }) {
+  const identity = getVennSubsetIdentity(item, all); const safe = identity.occurrenceCount === 1; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(item, renderKey, draftCache); const { draft: valueDraft, resetDraft: resetValueDraft, updateDraft: updateValueDraft } = useCanonicalDraft({ value: String(item.value) }); const { draft: renameDraft, resetDraft: resetRenameDraft, updateDraft: updateRenameDraft } = usePersistentCanonicalDraft({ value: item.sets.length === 1 ? item.sets[0]! : '' }, `${renderKey}:rename`, renameDraftCache); const label = `Venn ${item.sets.length === 1 ? 'set' : 'overlap'} ${item.sets.join(' and ')}`;
+  const baseSetNames = all.filter((subset) => subset.sets.length === 1).map((subset) => subset.sets[0]!); const peers = all.filter((subset) => (subset.sets.length === 1) === (item.sets.length === 1)); const peerIndex = peers.indexOf(item);
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (!safe) return; if (runNumericForm(onError, () => { const patch: Partial<VennSubset> = { label: draft.label || null, sets: draft.sets }; if (valueDraft.value !== String(item.value)) patch.value = parseSemanticNumber(valueDraft.value, 'Venn subset value'); return onEdit?.(identity, patch); }) === true) { resetDraft(); resetValueDraft(); } }}>{item.sets.length === 1 ? <input aria-label={`${label} sets`} disabled style={HIERARCHY_CONTROL_STYLE} value={draft.sets[0]} /> : <select aria-label={`${label} sets`} disabled={!safe} multiple onChange={(event) => { const sets = [...event.currentTarget.selectedOptions].map((option) => option.value); updateDraft((current) => ({ ...current, sets })); }} style={HIERARCHY_CONTROL_STYLE} value={draft.sets}>{baseSetNames.map((name) => <option key={name}>{name}</option>)}</select>}<input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value || null }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label ?? ''} /><input aria-label={`${label} value`} disabled={!safe} inputMode="decimal" onChange={(event) => updateValueDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={valueDraft.value} /><button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>{item.sets.length === 1 ? <><input aria-label={`Rename ${label}`} disabled={!safe} onChange={(event) => updateRenameDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={renameDraft.value} /><button aria-label={`Save rename ${label}`} disabled={!safe || renameDraft.value === item.sets[0]} onClick={() => { if (runSemanticForm(onError, () => onRename?.(identity, renameDraft.value))) resetRenameDraft(); }} style={HIERARCHY_CONTROL_STYLE} type="button">Rename</button></> : null}<button aria-label={`Move ${label} up`} disabled={!safe || peerIndex === 0} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={!safe || peerIndex === peers.length - 1} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => runSemanticForm(onError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+}
+
+function VennStyleForm({ all, draftCache, index, item, onDelete, onEdit, onError, onMove, renderKey, targets }: { all: VennStyle[]; draftCache: PersistentCanonicalDraftCache<VennStyle>; index: number; item: VennStyle; renderKey: string; targets: VennSubset[]; onDelete?: (identity: VennStyleIdentity) => SemanticFormActionResult; onEdit?: (identity: VennStyleIdentity, value: Partial<VennStyle>) => SemanticFormActionResult; onError: (error: string | null) => void; onMove?: (identity: VennStyleIdentity, direction: 'up' | 'down') => SemanticFormActionResult; }) {
+  const identity = getVennStyleIdentity(item, all); const safe = identity.occurrenceCount === 1; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(item, renderKey, draftCache); const label = `Venn style ${item.sets.join(' and ')}`;
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe && runSemanticForm(onError, () => onEdit?.(identity, draft))) resetDraft(); }}><select aria-label={`${label} target`} disabled={!safe} onChange={(event) => { const target = targets.find((candidate) => candidate.sets.join('\u0000') === event.target.value); if (target) updateDraft((current) => ({ ...current, sets: target.sets })); }} style={HIERARCHY_CONTROL_STYLE} value={draft.sets.join('\u0000')}>{targets.map((target) => <option key={target.sets.join('\u0000')} value={target.sets.join('\u0000')}>{target.sets.join(', ')}</option>)}</select><select aria-label={`${label} property`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, properties: [{ ...current.properties[0]!, name: event.target.value }] }))} style={HIERARCHY_CONTROL_STYLE} value={draft.properties[0]?.name ?? 'fill'}>{VENN_STYLE_PROPERTIES.map((property) => <option key={property}>{property}</option>)}</select><input aria-label={`${label} value`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, properties: [{ ...current.properties[0]!, value: event.target.value }] }))} style={HIERARCHY_CONTROL_STYLE} value={draft.properties[0]?.value ?? ''} /><button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={!safe || index === all.length - 1} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => runSemanticForm(onError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
 }
 
 function PieEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onSetShowData, onSetTitle }: {

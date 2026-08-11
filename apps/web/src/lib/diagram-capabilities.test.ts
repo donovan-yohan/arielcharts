@@ -109,6 +109,11 @@ describe('diagram capability catalog', () => {
     const sankey = classifyDiagramCapability('sankey');
     const packet = classifyDiagramCapability('packet');
     const cynefin = classifyDiagramCapability('cynefin');
+    const treemap = classifyDiagramCapability('treemap');
+    const venn = classifyDiagramCapability('venn');
+
+    expect(treemap).toMatchObject({ adapter: 'treemap', diagramType: 'treemap', editingMode: 'semantic-form', kind: 'generic' });
+    expect(venn).toMatchObject({ adapter: 'venn', diagramType: 'venn', editingMode: 'semantic-form', kind: 'generic' });
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A -->', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
@@ -143,6 +148,19 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(cynefin).getOperationResult('cynefin-beta\n  complex\n    "Emergent"', 'move-item')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(cynefin).getOperationResult('cynefin-beta\n  complex --> complex', 'add-transition')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(cynefin).getOperationResult('cynefin-beta\n  complex\n    "Emergent"', 'add-domain')).toEqual({ supported: false, reason: 'unsupported-operation' });
+    expect(getDiagramSourceModelAdapter(treemap).getOperationResult('treemap-beta\n  "Root"\n    "Leaf": 1', 'reparent-node')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(venn).getOperationResult('venn-beta\n  set A: 1\n  set B: 1\n  union A, B: 0.5', 'add-style')).toEqual({ supported: true });
+    for (const operation of ['add-node', 'edit-node', 'delete-node', 'move-node', 'reparent-node']) {
+      expect(getDiagramSourceModelAdapter(treemap).getOperationResult('treemap-beta\n  "Root"\n    "Leaf": 1', operation)).toEqual({ supported: true });
+    }
+    for (const operation of ['add-subset', 'edit-subset', 'delete-subset', 'move-subset', 'rename-set', 'add-style', 'edit-style', 'delete-style', 'move-style']) {
+      expect(getDiagramSourceModelAdapter(venn).getOperationResult('venn-beta\n  set A\n  set B\n  union A, B', operation)).toEqual({ supported: true });
+    }
+    expect(getDiagramSourceModelAdapter(treemap).getOperationResult('treemap-beta\n  "Root"', 'rename-set')).toEqual({ supported: false, reason: 'unsupported-operation' });
+    expect(getDiagramSourceModelAdapter(venn).getOperationResult('venn-beta\n  set A', 'reparent-node')).toEqual({ supported: false, reason: 'unsupported-operation' });
+    expect(getDiagramSourceModelAdapter(treemap).getOperationResult('treemap-beta\n  "Root":::important\n    "Leaf": 1', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(venn).getOperationResult('venn-beta\n  set A: 1\n  %%{init: {}}%%', 'add-subset')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(venn).getOperationResult('venn-beta\n  set A: 1\n  style A fill:#22c55e,stroke:#166534', 'edit-style')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(quadrant).getOperationResult('quadrantChart\n  A: [1.2, 0.5]', 'edit-point')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(radar).getOperationResult('radar-beta\n  axis a\n  axis b', 'add-axis')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(sankey).getOperationResult('sankey-beta\nSource,Target,0', 'add-link')).toEqual({ supported: false, reason: 'unrepresentable' });

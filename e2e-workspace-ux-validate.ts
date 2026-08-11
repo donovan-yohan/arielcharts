@@ -35,6 +35,7 @@ import {
   openYjsSessionObserver,
   type YjsSessionSnapshot,
   type YjsSessionSnapshotHistory,
+  type YjsSessionObserver,
 } from './e2e/support/yjs-session.ts';
 import { STARTER_TEMPLATES } from './packages/shared/src/starter-templates.js';
 import { getWebsocketServerUrl } from './apps/web/src/lib/session.ts';
@@ -264,6 +265,14 @@ const CYNEFIN_DIAGRAM_FIXTURE = `cynefin-beta
     "Decide"
   complex --> complicated : "Investigate"
   chaotic --> clear`;
+const TREEMAP_DIAGRAM_FIXTURE = `treemap-beta
+  "Portfolio"
+    "Core": 8
+    "Growth": 4`;
+const VENN_DIAGRAM_FIXTURE = `venn-beta
+  set A ["Alpha"]: 8
+  set B ["Beta"]: 6
+  union A, B ["Both"]: 2`;
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
@@ -1177,7 +1186,23 @@ async function expectTemplateDiagramCreation(page: Page): Promise<void> {
 async function scrollErControlIntoView(control: Locator): Promise<void> {
   await control.evaluate((element) => {
     element.scrollIntoView({ block: 'center', inline: 'nearest' });
+    window.scrollTo(0, 0);
   });
+}
+
+async function resetFixedWorkspaceOrigin(page: Page, label: string): Promise<void> {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => { resolve(); });
+      });
+    });
+    window.scrollTo(0, 0);
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollY), {
+    message: `${label} semantic-panel acceptance did not begin at the fixed workspace origin.`,
+    timeout: 5_000,
+  }).toBe(0);
 }
 
 async function expectErSemanticEditor(page: Page): Promise<void> {
@@ -2100,7 +2125,683 @@ async function expectCynefinSemanticEditor(page: Page): Promise<void> {
   assert(await page.locator('.react-flow__node').count() === 0, 'Cynefin semantic forms exposed the generic React Flow editor.');
 }
 
-async function assertAndClickBoardControl(page: Page, target: Locator, label: string): Promise<void> {
+function treemapControlLabel(path: readonly string[]): string {
+  return `Treemap node ${path.map((segment) => JSON.stringify(segment)).join(' / ')}`;
+}
+
+function treemapForm(panel: Locator, path: readonly string[]): Locator {
+  return panel.getByRole('form', { name: treemapControlLabel(path), exact: true });
+}
+
+type MermaidThemeEvidence = {
+  fillColors: string[];
+  geometryFingerprint: string;
+  shapeCount: number;
+  strokeColors: string[];
+  textColors: string[];
+};
+
+async function mermaidThemeEvidence(root: Locator): Promise<MermaidThemeEvidence> {
+  return root.evaluate((svg) => {
+    const geometryAttributes = [
+      'cx', 'cy', 'd', 'dx', 'dy', 'height', 'points', 'r', 'rx', 'ry',
+      'transform', 'width', 'x', 'x1', 'x2', 'y', 'y1', 'y2',
+    ];
+    const geometry = Array.from(svg.querySelectorAll('*')).flatMap((element) => {
+      const attributes = geometryAttributes.flatMap((attribute) => {
+        const value = (element.getAttribute(attribute) ?? '').trim().replace(/[\s,]+/gu, ' ');
+        return value ? [[attribute, value] as const] : [];
+      });
+      return attributes.length > 0 ? [{ attributes, tag: element.tagName.toLowerCase() }] : [];
+    });
+    const shapes = Array.from(svg.querySelectorAll('path, rect, circle, ellipse, line, polyline, polygon'));
+    const texts = Array.from(svg.querySelectorAll('text'));
+    const fillColors = Array.from(new Set(
+      shapes
+        .map((element) => getComputedStyle(element).fill)
+        .filter((value) => Boolean(value) && value !== 'none' && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)'),
+    )).sort();
+    const strokeColors = Array.from(new Set(
+      shapes
+        .map((element) => getComputedStyle(element).stroke)
+        .filter((value) => Boolean(value) && value !== 'none' && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)'),
+    )).sort();
+    const textColors = Array.from(new Set(
+      texts
+        .map((element) => getComputedStyle(element).fill)
+        .filter((value) => Boolean(value) && value !== 'none' && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)'),
+    )).sort();
+    return {
+      fillColors,
+      geometryFingerprint: JSON.stringify({
+        geometry,
+        viewBox: (svg.getAttribute('viewBox') ?? '').trim().replace(/[\s,]+/gu, ' '),
+      }),
+      shapeCount: shapes.length,
+      strokeColors,
+      textColors,
+    };
+  });
+}
+
+async function expectThemeStableDiagramAndPanelGeometry(
+  page: Page,
+  panel: Locator,
+  family: 'treemap' | 'venn',
+  label: string,
+): Promise<void> {
+  const panelGeometry = () => panel.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return { height: bounds.height, left: bounds.left, top: bounds.top, width: bounds.width };
+  });
+  const root = page.locator('.diagram-canvas-svg > svg');
+
+  await selectThemePreference(page, 'light');
+  await root.waitFor({ state: 'visible', timeout: 15_000 });
+  const lightPanel = await panelGeometry();
+  const lightDiagram = await mermaidThemeEvidence(root);
+  assert(lightPanel.height > 0 && lightPanel.width > 0, `${label} had empty panel geometry: ${JSON.stringify(lightPanel)}.`);
+  assert(
+    lightDiagram.shapeCount > 0
+      && lightDiagram.geometryFingerprint.length > 0
+      && lightDiagram.fillColors.length > 0
+      && lightDiagram.textColors.length > 0,
+    `${label} lacked rendered light-theme geometry or palette evidence: ${JSON.stringify(lightDiagram)}.`,
+  );
+  await saveScreenshot(page, `issue-55-${family}-light`);
+
+  await selectThemePreference(page, 'dark');
+  await expect.poll(async () => {
+    const evidence = await mermaidThemeEvidence(root);
+    return JSON.stringify([evidence.fillColors, evidence.strokeColors, evidence.textColors]);
+  }, { message: `${label} dark palette transition`, timeout: 15_000 }).not.toBe(JSON.stringify([
+    lightDiagram.fillColors,
+    lightDiagram.strokeColors,
+    lightDiagram.textColors,
+  ]));
+  const darkPanel = await panelGeometry();
+  const darkDiagram = await mermaidThemeEvidence(root);
+  expect(darkPanel).toEqual(lightPanel);
+  expect(darkDiagram.geometryFingerprint).toBe(lightDiagram.geometryFingerprint);
+  assert(
+    darkDiagram.shapeCount > 0 && darkDiagram.fillColors.length > 0 && darkDiagram.textColors.length > 0,
+    `${label} lacked rendered dark-theme geometry or palette evidence: ${JSON.stringify(darkDiagram)}.`,
+  );
+  await saveScreenshot(page, `issue-55-${family}-dark`);
+
+  await selectThemePreference(page, 'light');
+  await expect.poll(async () => {
+    const evidence = await mermaidThemeEvidence(root);
+    return JSON.stringify([evidence.fillColors, evidence.strokeColors, evidence.textColors]);
+  }, { message: `${label} light palette restoration`, timeout: 15_000 }).toBe(JSON.stringify([
+    lightDiagram.fillColors,
+    lightDiagram.strokeColors,
+    lightDiagram.textColors,
+  ]));
+  expect(await panelGeometry()).toEqual(lightPanel);
+  expect((await mermaidThemeEvidence(root)).geometryFingerprint).toBe(lightDiagram.geometryFingerprint);
+}
+
+async function writeMcpSourceAndAssertRemoteIsolation(
+  page: Page,
+  mcp: ModernMcpClient,
+  observer: YjsSessionObserver,
+  sessionId: string,
+  diagramId: string,
+  source: string,
+  detail: string,
+  label: string,
+): Promise<void> {
+  const beforeIds = new Set(observer.snapshot(diagramId).activity.map((event) => event.id));
+  const written = await mcp.writeLatest(sessionId, diagramId, source, detail);
+  await observer.waitFor((current) => {
+    const snapshot = current.snapshot(diagramId);
+    return snapshot.mermaidText === source && snapshot.activity.some((event) => event.detail === detail);
+  }, `${label} MCP source and activity`);
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, source);
+  await closeFlyout(page, 'source');
+  const addedActivity = observer.snapshot(diagramId).activity.filter(
+    (event) => event.diagramId === diagramId && !beforeIds.has(event.id),
+  );
+  assert(
+    addedActivity.length === 1
+      && addedActivity[0]?.actorType === 'agent'
+      && addedActivity[0]?.detail === detail,
+    `${label} did not produce exactly one agent activity event: ${JSON.stringify(addedActivity)}.`,
+  );
+  const history = await mcp.listDiagramHistory(sessionId, diagramId);
+  assert(
+    history.currentRevision === written.revision
+      && history.revisions.some(
+        (revision) => revision.resultRevision === written.revision && revision.origin === 'mcp',
+      ),
+    `${label} was not recorded as the current MCP revision.`,
+  );
+  const isolation = observer.trackDiagramSnapshot(diagramId);
+  const canvas = await focusCurrentDiagramCanvas(page, `${label} remote undo isolation`);
+  await canvas.press('ControlOrMeta+z');
+  await isolation.expectUnchangedFor(HISTORY_NEGATIVE_OBSERVATION_MS, `${label} remote undo isolation`);
+  isolation.destroy();
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), {
+    message: `${label} canonical MCP source`,
+    timeout: 15_000,
+  }).toBe(source);
+  await closeFlyout(page, 'source');
+}
+
+async function expectRemoteTreemapVennDraftReconciliation(
+  page: Page,
+  mcp: ModernMcpClient,
+  mcpUrl: string,
+  baseUrl: string,
+  roomAccess: RoomAccess,
+  sessionId: string,
+  label: string,
+): Promise<void> {
+  const returnDiagramName = await activeTabName(page);
+  const initialTreemap = `treemap-beta
+  "Root"
+    "P"
+      "A": 1
+      "B": 2`;
+  const remoteDiagram = await mcp.createDiagramWithLatestRevision(sessionId, `${returnDiagramName} ${label} remote`, initialTreemap);
+  const observer = await openYjsSessionObserver(mcpUrl, sessionId, { cookie: roomAccess.cookie, origin: baseUrl });
+  try {
+    await selectTabByName(page, remoteDiagram.name);
+    await ensureSourceFlyoutOpen(page);
+    await waitForSource(page, initialTreemap);
+    await closeFlyout(page, 'source');
+    await waitForSemanticMode(page, 'Treemap · editable · form');
+    const treemap = page.getByTestId('treemap-editor-controls');
+    const originalA = treemapForm(treemap, ['Root', 'P', 'A']);
+    const rejectedTreemap = observer.trackDiagramSnapshot(remoteDiagram.id);
+    const originalAValue = originalA.getByLabel(`${treemapControlLabel(['Root', 'P', 'A'])} value`);
+    const originalASave = originalA.getByRole('button', { name: 'Save', exact: true });
+    await originalAValue.fill('-1');
+    await scrollErControlIntoView(originalASave);
+    await assertAndClickBoardControl(page, originalASave, `${label} rejected Treemap domain mutation`);
+    const treemapError = treemap.getByRole('alert');
+    const treemapBanner = page.getByTestId('mutation-error-banner');
+    await expect(treemapError).toHaveText('Treemap values must be finite numbers greater than zero.');
+    await expect(treemapBanner).toContainText('Treemap values must be finite numbers greater than zero.');
+    await assertClosedOverlayToggleBesideError(page, treemapBanner, `${label} Treemap error and overlay coexistence`);
+    await expect(originalAValue).toHaveValue('-1');
+    const rejectedTreemapCanvas = await focusCurrentDiagramCanvas(page, `${label} rejected Treemap undo`);
+    await rejectedTreemapCanvas.press('ControlOrMeta+z');
+    await rejectedTreemap.expectUnchangedFor(
+      HISTORY_NEGATIVE_OBSERVATION_MS,
+      `${label} rejected Treemap source, activity, and undo`,
+    );
+    rejectedTreemap.destroy();
+    await originalAValue.fill('1');
+    await scrollErControlIntoView(originalASave);
+    await assertAndClickBoardControl(
+      page,
+      originalASave,
+      `${label} Treemap error recovery`,
+    );
+    await expect(treemapError).toHaveCount(0);
+    await expect(treemapBanner).toHaveCount(0);
+    await originalA.getByLabel(`${treemapControlLabel(['Root', 'P', 'A'])} label`).fill('Dirty descendant');
+    const renamedAncestor = `treemap-beta
+  "Root"
+    "X"
+      "A": 1
+      "B": 3`;
+    await writeMcpSourceAndAssertRemoteIsolation(
+      page,
+      mcp,
+      observer,
+      sessionId,
+      remoteDiagram.id,
+      renamedAncestor,
+      `${label} remote Treemap ancestor rename`,
+      `${label} Treemap remote reconciliation`,
+    );
+    const remoteA = treemapForm(treemap, ['Root', 'X', 'A']);
+    await expect(remoteA.getByLabel(`${treemapControlLabel(['Root', 'X', 'A'])} label`)).toHaveValue('Dirty descendant');
+    await expect(
+      treemapForm(treemap, ['Root', 'X', 'B']).getByLabel(
+        `${treemapControlLabel(['Root', 'X', 'B'])} value`,
+      ),
+    ).toHaveValue('3');
+
+    const initialVenn = `venn-beta
+  set A ["Alpha"]: 8
+  set B ["Beta"]: 6
+  union A, B ["Both"]: 2`;
+    await writeMcpSourceAndAssertRemoteIsolation(
+      page,
+      mcp,
+      observer,
+      sessionId,
+      remoteDiagram.id,
+      initialVenn,
+      `${label} remote Venn setup`,
+      `${label} Venn remote setup`,
+    );
+    await waitForSemanticMode(page, 'Venn · editable · form');
+    const venn = page.getByTestId('venn-editor-controls');
+    const rejectedVenn = observer.trackDiagramSnapshot(remoteDiagram.id);
+    const setA = venn.getByRole('form', { name: 'Venn set A', exact: true });
+    const deleteSetA = setA.getByLabel('Delete Venn set A');
+    await scrollErControlIntoView(deleteSetA);
+    await assertAndClickBoardControl(page, deleteSetA, `${label} rejected dependent Venn delete`);
+    const vennError = venn.getByRole('alert');
+    const vennBanner = page.getByTestId('mutation-error-banner');
+    await expect(vennError).toHaveText('A Venn set cannot be deleted while intersections depend on it.');
+    await expect(vennBanner).toContainText('A Venn set cannot be deleted while intersections depend on it.');
+    await assertClosedOverlayToggleBesideError(page, vennBanner, `${label} Venn error and overlay coexistence`);
+    const rejectedVennCanvas = await focusCurrentDiagramCanvas(page, `${label} rejected Venn undo`);
+    await rejectedVennCanvas.press('ControlOrMeta+z');
+    await rejectedVenn.expectUnchangedFor(
+      HISTORY_NEGATIVE_OBSERVATION_MS,
+      `${label} rejected Venn source, activity, and undo`,
+    );
+    rejectedVenn.destroy();
+    const saveSetA = setA.getByRole('button', { name: 'Save', exact: true });
+    await scrollErControlIntoView(saveSetA);
+    await assertAndClickBoardControl(
+      page,
+      saveSetA,
+      `${label} Venn error recovery`,
+    );
+    await expect(vennError).toHaveCount(0);
+    await expect(vennBanner).toHaveCount(0);
+    const oneSetOverlap = observer.trackDiagramSnapshot(remoteDiagram.id);
+    await venn.getByLabel('New Venn overlap sets').selectOption(['A']);
+    const addSubset = venn.getByRole('button', { name: 'Add subset', exact: true });
+    await scrollErControlIntoView(addSubset);
+    await assertAndClickBoardControl(
+      page,
+      addSubset,
+      `${label} rejected one-set Venn overlap`,
+    );
+    await expect(venn.getByRole('alert')).toHaveText('A Venn overlap requires at least two authored sets.');
+    await oneSetOverlap.expectUnchangedFor(
+      HISTORY_NEGATIVE_OBSERVATION_MS,
+      `${label} one-set Venn overlap no-write`,
+    );
+    oneSetOverlap.destroy();
+    await expect(venn.getByRole('textbox', { name: 'Rename Venn set A', exact: true })).toHaveValue('A');
+    const alphaVenn = `venn-beta
+  set AlphaSet ["Alpha"]: 8
+  set B ["Beta"]: 6
+  union AlphaSet, B ["Both"]: 2`;
+    await writeMcpSourceAndAssertRemoteIsolation(
+      page,
+      mcp,
+      observer,
+      sessionId,
+      remoteDiagram.id,
+      alphaVenn,
+      `${label} remote Venn clean rename`,
+      `${label} Venn clean rename`,
+    );
+    await expect(venn.getByRole('textbox', { name: 'Rename Venn set AlphaSet', exact: true })).toHaveValue('AlphaSet');
+    await venn.getByRole('textbox', { name: 'Rename Venn set AlphaSet', exact: true }).fill('Dirty set rename');
+    const omegaVenn = alphaVenn
+      .replace('set AlphaSet ["Alpha"]: 8', 'set OmegaSet ["Remote Alpha"]: 9')
+      .replaceAll('AlphaSet, B', 'OmegaSet, B');
+    await writeMcpSourceAndAssertRemoteIsolation(
+      page,
+      mcp,
+      observer,
+      sessionId,
+      remoteDiagram.id,
+      omegaVenn,
+      `${label} remote Venn dirty rename`,
+      `${label} Venn dirty rename`,
+    );
+    await expect(venn.getByRole('textbox', { name: 'Rename Venn set OmegaSet', exact: true })).toHaveValue('Dirty set rename');
+    await expect(venn.getByLabel('Venn set OmegaSet value')).toHaveValue('9');
+  } finally {
+    observer.destroy();
+    await selectTabByName(page, returnDiagramName);
+  }
+}
+
+async function expectTreemapAndVennSemanticEditors(
+  page: Page,
+  mcp: ModernMcpClient,
+  mcpUrl: string,
+  baseUrl: string,
+  roomAccess: RoomAccess,
+  sessionId: string,
+): Promise<void> {
+  const anchorsBefore = await snapshotAnchors(page, ANCHORS);
+  const transformBefore = await canvasTransform(page);
+  await replaceSource(page, TREEMAP_DIAGRAM_FIXTURE);
+  await waitForSource(page, TREEMAP_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, "Treemap · editable · form");
+  await closeFlyout(page, "source");
+  const treemap = page.getByTestId("treemap-editor-controls");
+  const addTreemap = treemap.getByRole("button", {
+    name: "Add node",
+    exact: true,
+  });
+  await assertTouchTarget(page, addTreemap, "Treemap add-node control");
+  await expectThemeStableDiagramAndPanelGeometry(page, treemap, 'treemap', 'Treemap semantic panel');
+  const growth = treemapForm(treemap, ["Portfolio", "Growth"]);
+  const growthValue = growth.getByLabel(
+    `${treemapControlLabel(["Portfolio", "Growth"])} value`,
+  );
+  await growthValue.fill("not-a-number");
+  await assertAndClickBoardControl(
+    page,
+    growth.getByRole("button", { name: "Save", exact: true }),
+    "Treemap invalid numeric value",
+  );
+  await expect(treemap.getByRole("alert")).toContainText("number");
+  await expect(growthValue).toHaveValue("not-a-number");
+  await growthValue.fill("4");
+  await assertAndClickBoardControl(
+    page,
+    growth.getByRole("button", { name: "Save", exact: true }),
+    "Treemap exact no-op recovery",
+  );
+  await expect(treemap.getByRole("alert")).toHaveCount(0);
+  await treemap.getByLabel("New Treemap node label").fill("Holding");
+  await treemap.getByLabel("New Treemap node value").fill("");
+  await assertAndClickBoardControl(page, addTreemap, "Treemap branch add");
+  await treemap.getByLabel("New Treemap node label").fill("Income");
+  await treemap.getByLabel("New Treemap node value").fill("3");
+  await assertAndClickBoardControl(page, addTreemap, "Treemap leaf add");
+  const addedTreemap = `treemap-beta
+  "Portfolio"
+    "Core": 8
+    "Growth": 4
+    "Holding"
+    "Income": 3`;
+  await ensureSourceFlyoutOpen(page);
+  await expect
+    .poll(() => canonicalSource(page), { message: "Treemap add canonical source", timeout: 15_000 })
+    .toBe(addedTreemap);
+  await closeFlyout(page, "source");
+  const income = treemapForm(treemap, ["Portfolio", "Income"]);
+  await income
+    .getByLabel(`${treemapControlLabel(["Portfolio", "Income"])} label`)
+    .fill("Dividend");
+  await assertAndClickBoardControl(
+    page,
+    income.getByRole("button", { name: "Save", exact: true }),
+    "Treemap edit leaf",
+  );
+  const dividend = treemapForm(treemap, ["Portfolio", "Dividend"]);
+  await assertAndClickBoardControl(
+    page,
+    dividend.getByLabel(
+      `Move ${treemapControlLabel(["Portfolio", "Dividend"])} up`,
+    ),
+    "Treemap reorder subtree",
+  );
+  await dividend
+    .getByLabel(
+      `Move ${treemapControlLabel(["Portfolio", "Dividend"])} to parent`,
+    )
+    .selectOption({ label: '"Portfolio" / "Holding"' });
+  const holding = treemapForm(treemap, ["Portfolio", "Holding"]);
+  await expect(holding.getByText("Delete subtree (2 nodes)", { exact: true })).toBeVisible();
+  await assertAndClickBoardControl(
+    page,
+    holding.getByLabel(
+      `Delete ${treemapControlLabel(["Portfolio", "Holding"])} subtree containing 2 nodes`,
+    ),
+    "Treemap delete subtree",
+  );
+  await ensureSourceFlyoutOpen(page);
+  await expect
+    .poll(() => canonicalSource(page), { message: "Treemap delete canonical source", timeout: 15_000 })
+    .toBe(TREEMAP_DIAGRAM_FIXTURE);
+  await closeFlyout(page, "source");
+  const undoCanvas = await focusCurrentDiagramCanvas(page, "Treemap undo");
+  await undoCanvas.press("ControlOrMeta+z");
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { message: "Treemap undo canonical source", timeout: 15_000 })
+    .toBe(`treemap-beta
+  "Portfolio"
+    "Core": 8
+    "Growth": 4
+    "Holding"
+      "Dividend": 3`);
+  await closeFlyout(page, "source");
+  const advancedTreemap = 'treemap-beta\n  "Root":::important\n    "Leaf": 1';
+  await replaceSource(page, advancedTreemap);
+  await waitForSource(page, advancedTreemap);
+  await expect
+    .poll(() => page.getByTestId("diagram-mode").textContent(), {
+      timeout: 15_000,
+      message: "Treemap advanced family fallback mode",
+    })
+    .toBe("Treemap · source only");
+  await closeFlyout(page, "source");
+  await expect(treemap).toHaveCount(0);
+
+  const omittedVenn = `venn-beta
+  set A
+  set B
+  union A, B`;
+  await replaceSource(page, omittedVenn);
+  await waitForSource(page, omittedVenn);
+  await waitForSemanticMode(page, "Venn · editable · form");
+  await closeFlyout(page, "source");
+  const omittedVennPanel = page.getByTestId("venn-editor-controls");
+  const omittedOverlap = omittedVennPanel.getByRole("form", {
+    name: "Venn overlap A and B",
+    exact: true,
+  });
+  await expect(omittedVennPanel.getByLabel("Venn set A value")).toHaveValue("10");
+  await expect(omittedOverlap.getByLabel("Venn overlap A and B value")).toHaveValue("2.5");
+  await omittedOverlap.getByLabel("Venn overlap A and B label").fill("Default overlap");
+  await assertAndClickBoardControl(
+    page,
+    omittedOverlap.getByRole("button", { name: "Save", exact: true }),
+    "Venn omitted-size label-only edit",
+  );
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { message: "Venn omitted-value canonical source", timeout: 15_000 })
+    .toBe(`venn-beta
+  set A
+  set B
+  union A, B["Default overlap"]`);
+  await closeFlyout(page, "source");
+
+  await replaceSource(page, VENN_DIAGRAM_FIXTURE);
+  await waitForSource(page, VENN_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, "Venn · editable · form");
+  await closeFlyout(page, "source");
+  const venn = page.getByTestId("venn-editor-controls");
+  const addSubset = venn.getByRole("button", {
+    name: "Add subset",
+    exact: true,
+  });
+  await assertTouchTarget(page, addSubset, "Venn authored-set control");
+  await venn.getByLabel("New Venn set id").fill("C");
+  await venn.getByLabel("New Venn subset value").fill("4");
+  await assertAndClickBoardControl(page, addSubset, "Venn add authored set");
+  const setC = venn.getByRole("form", { name: "Venn set C", exact: true });
+  await setC.getByLabel("Venn set C label").fill("Gamma");
+  await assertAndClickBoardControl(
+    page,
+    setC.getByRole("button", { name: "Save", exact: true }),
+    "Venn edit authored set",
+  );
+  await setC.getByRole("textbox", { name: "Rename Venn set C", exact: true }).fill("GammaSet");
+  await assertAndClickBoardControl(
+    page,
+    setC.getByRole("button", { name: "Save rename Venn set C", exact: true }),
+    "Venn atomic set rename",
+  );
+  await expectThemeStableDiagramAndPanelGeometry(page, venn, 'venn', 'Venn semantic panel');
+  await venn
+    .getByLabel("New Venn overlap sets")
+    .selectOption(["A", "GammaSet"]);
+  await venn.getByLabel("New Venn subset value").fill("not-a-number");
+  await assertAndClickBoardControl(
+    page,
+    addSubset,
+    "Venn invalid overlap value",
+  );
+  await expect(venn.getByRole("alert")).toContainText("number");
+  await expect(venn.getByLabel("New Venn subset value")).toHaveValue(
+    "not-a-number",
+  );
+  await venn.getByLabel("New Venn subset value").fill("1");
+  await assertAndClickBoardControl(page, addSubset, "Venn overlap recovery");
+  await expect(venn.getByRole("alert")).toHaveCount(0);
+  const overlap = venn.getByRole("form", {
+    name: "Venn overlap A and GammaSet",
+    exact: true,
+  });
+  await assertAndClickBoardControl(
+    page,
+    overlap.getByLabel("Move Venn overlap A and GammaSet up"),
+    "Venn overlap reorder",
+  );
+  const addStyle = venn.getByRole("button", { name: "Add style", exact: true });
+  await venn.getByLabel("New Venn style target").selectOption("GammaSet");
+  await venn.getByLabel("New Venn style property").selectOption("fill");
+  await venn.getByLabel("New Venn style value").fill("#22c55e");
+  await assertAndClickBoardControl(
+    page,
+    addStyle,
+    "Venn whitelisted style add",
+  );
+  const style = venn.getByRole("form", {
+    name: "Venn style GammaSet",
+    exact: true,
+  });
+  await style.getByLabel("Venn style GammaSet property").selectOption("stroke");
+  await style.getByLabel("Venn style GammaSet value").fill("#166534");
+  await assertAndClickBoardControl(
+    page,
+    style.getByRole("button", { name: "Save", exact: true }),
+    "Venn whitelisted style edit",
+  );
+  await venn.getByLabel("New Venn style target").selectOption("A");
+  await venn.getByLabel("New Venn style property").selectOption("fill");
+  await venn.getByLabel("New Venn style value").fill("#60a5fa");
+  await assertAndClickBoardControl(
+    page,
+    addStyle,
+    "Venn second whitelisted style add",
+  );
+  const styleA = venn.getByRole("form", { name: "Venn style A", exact: true });
+  await assertAndClickBoardControl(
+    page,
+    styleA.getByLabel("Move Venn style A up"),
+    "Venn style reorder",
+  );
+  await assertAndClickBoardControl(
+    page,
+    style.getByLabel("Delete Venn style GammaSet"),
+    "Venn style delete",
+  );
+  await assertAndClickBoardControl(
+    page,
+    styleA.getByLabel("Delete Venn style A"),
+    "Venn second style delete",
+  );
+  await assertAndClickBoardControl(
+    page,
+    overlap.getByLabel("Delete Venn overlap A and GammaSet"),
+    "Venn overlap delete",
+  );
+  const vennAfterOverlapDelete = `venn-beta
+  set A ["Alpha"]: 8
+  set B ["Beta"]: 6
+  set GammaSet["Gamma"]: 4
+  union A, B ["Both"]: 2`;
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), {
+    message: "Venn post-overlap-delete canonical source",
+    timeout: 15_000,
+  }).toBe(vennAfterOverlapDelete);
+  const currentVenn = page.getByTestId("venn-editor-controls");
+  await currentVenn.waitFor({ state: "visible", timeout: 15_000 });
+  await expect(
+    currentVenn.getByRole("form", {
+      name: "Venn overlap A and GammaSet",
+      exact: true,
+    }),
+  ).toHaveCount(0, { timeout: 15_000 });
+  await currentVenn.waitFor({ state: "visible", timeout: 15_000 });
+  await closeFlyout(page, "source");
+  await waitForSemanticMode(page, "Venn · editable · form");
+  const reconciledVenn = page.getByTestId("venn-editor-controls");
+  await reconciledVenn.waitFor({ state: "visible", timeout: 15_000 });
+  const deleteGammaSet = reconciledVenn
+    .getByRole("form", { name: "Venn set GammaSet", exact: true })
+    .getByLabel("Delete Venn set GammaSet");
+  await assertAndClickBoardControl(
+    page,
+    deleteGammaSet,
+    "Venn authored set delete",
+  );
+  await ensureSourceFlyoutOpen(page);
+  await expect
+    .poll(() => canonicalSource(page), { message: "Venn mutation canonical source", timeout: 15_000 })
+    .toBe(VENN_DIAGRAM_FIXTURE);
+  await closeFlyout(page, "source");
+  const vennUndo = await focusCurrentDiagramCanvas(page, "Venn undo");
+  await vennUndo.press("ControlOrMeta+z");
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { message: "Venn undo canonical source", timeout: 15_000 })
+    .toBe(`venn-beta
+  set A ["Alpha"]: 8
+  set B ["Beta"]: 6
+  set GammaSet["Gamma"]: 4
+  union A, B ["Both"]: 2`);
+  await closeFlyout(page, "source");
+  await vennUndo.press("ControlOrMeta+Shift+z");
+  await ensureSourceFlyoutOpen(page);
+  await expect
+    .poll(() => canonicalSource(page), { message: "Venn redo canonical source", timeout: 15_000 })
+    .toBe(VENN_DIAGRAM_FIXTURE);
+  await closeFlyout(page, "source");
+  const advancedVenn = 'venn-beta\n  title Advanced\n  set A: 1';
+  await replaceSource(page, advancedVenn);
+  await waitForSource(page, advancedVenn);
+  await expect
+    .poll(() => page.getByTestId("diagram-mode").textContent(), {
+      timeout: 15_000,
+      message: "Venn advanced family fallback mode",
+    })
+    .toBe("Venn · source only");
+  await closeFlyout(page, "source");
+  await expect(venn).toHaveCount(0);
+  await expectRemoteTreemapVennDraftReconciliation(
+    page,
+    mcp,
+    mcpUrl,
+    baseUrl,
+    roomAccess,
+    sessionId,
+    "desktop",
+  );
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, advancedVenn);
+  await waitForCanvas(page, 'generic');
+  await expect(page.getByTestId('diagram-mode')).toHaveText('Venn · source only');
+  await closeFlyout(page, 'source');
+  assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS));
+  await expect.poll(() => canvasTransform(page), {
+    message: 'Treemap/Venn original-tab camera restoration',
+    timeout: 15_000,
+  }).toBe(transformBefore);
+  assert(
+    (await page.locator(".react-flow__node").count()) === 0,
+    "Treemap/Venn semantic forms exposed the generic React Flow editor.",
+  );
+}
+
+async function assertAndClickBoardControl(
+  page: Page,
+  target: Locator,
+  label: string,
+): Promise<void> {
   await scrollErControlIntoView(target);
   await assertHitTarget(page, target, label);
   await verifiedClick(page, target, label);
@@ -2363,9 +3064,12 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   await expect(topmostObject).not.toHaveAttribute('data-orphaned', 'true');
   await replaceSource(page, '');
   await waitForSource(page, '');
+  const deleteOverlay = page.getByRole('button', { name: 'Delete overlay', exact: true });
   while (await objects.count() > 0) {
-    await verifiedClick(page, objects.last(), 'select overlay for scenario cleanup');
-    await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete overlay during scenario cleanup');
+    if (!await deleteOverlay.isEnabled()) {
+      await verifiedClick(page, objects.last(), 'select overlay for scenario cleanup');
+    }
+    await verifiedClick(page, deleteOverlay, 'delete overlay during scenario cleanup');
   }
   await expect(objects).toHaveCount(0);
   await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), 'close overlay tools after scenario');
@@ -3426,7 +4130,17 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
 
 const PHONE_CONTEXT_OPTIONS = { deviceScaleFactor: 1, hasTouch: true, isMobile: true } as const;
 
-async function expectResponsiveNumericPanel(page: Page, label: 'mobile-390' | 'mobile-320'): Promise<void> {
+async function expectResponsiveNumericPanel(
+  page: Page,
+  label: "mobile-390" | "mobile-320",
+  mcp: ModernMcpClient,
+  mcpUrl: string,
+  baseUrl: string,
+  roomAccess: RoomAccess,
+  sessionId: string,
+  diagramName: string,
+): Promise<void> {
+  await resetFixedWorkspaceOrigin(page, label);
   const source = `pie showData
   title Responsive allocation
   "One" : 1
@@ -3437,25 +4151,143 @@ async function expectResponsiveNumericPanel(page: Page, label: 'mobile-390' | 'm
   "Six" : 6
   "Seven" : 7
   "Eight" : 8`;
-  await replaceSource(page, source); await waitForSource(page, source); await waitForSemanticMode(page, 'Pie · editable · form'); await closeFlyout(page, 'source');
-  const panel = page.getByTestId('pie-editor-controls'); await panel.waitFor({ state: 'visible', timeout: 15_000 }); await assertContainedInViewport(page, panel, `${label} Pie semantic panel`);
-  const geometry = await panel.evaluate((element) => { const panelBounds = element.getBoundingClientRect(); const canvasBounds = element.closest('[data-testid="diagram-canvas"]')?.getBoundingClientRect(); return { bottom: panelBounds.bottom, canvasBottom: canvasBounds?.bottom ?? -1, canvasTop: canvasBounds?.top ?? -1, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, top: panelBounds.top }; });
-  assert(geometry.top >= geometry.canvasTop - 0.5 && geometry.bottom <= geometry.canvasBottom + 0.5, `${label} Pie panel escaped the measured canvas bounds: ${JSON.stringify(geometry)}.`); assert(geometry.scrollHeight > geometry.clientHeight, `${label} Pie panel did not provide internal scrolling: ${JSON.stringify(geometry)}.`);
-  const overlayToggle = page.getByRole('button', { name: 'Overlay tools', exact: true }); await assertTouchTarget(page, overlayToggle, `${label} closed overlay toggle above numeric panel`);
-  const add = panel.getByRole('button', { name: 'Add slice', exact: true }); const input = panel.getByLabel('New Pie slice value'); const showData = panel.getByLabel('Pie show data'); await scrollErControlIntoView(showData); await assertTouchTarget(page, showData, `${label} Pie show-data checkbox`); await scrollErControlIntoView(add); await assertTouchTarget(page, add, `${label} Pie add-slice control`); await scrollErControlIntoView(input); await assertTouchTarget(page, input, `${label} Pie numeric input`); await assertTouchTarget(page, overlayToggle, `${label} closed overlay toggle after numeric panel scroll`);
-  const [toggleBounds, inputBounds, canvasBounds] = await Promise.all([overlayToggle.boundingBox(), input.boundingBox(), page.getByTestId('diagram-canvas').boundingBox()]);
-  assert(toggleBounds && inputBounds && canvasBounds, `${label} needs overlay toggle, Pie input, and canvas bounds.`);
-  assert(toggleBounds.y >= canvasBounds.y + 6 && toggleBounds.y <= canvasBounds.y + 12,
-    `${label} closed overlay toggle did not use the reserved top inset: ${JSON.stringify({ canvasBounds, toggleBounds })}.`);
-  assert(toggleBounds.x + toggleBounds.width <= inputBounds.x || inputBounds.x + inputBounds.width <= toggleBounds.x
-    || toggleBounds.y + toggleBounds.height <= inputBounds.y || inputBounds.y + inputBounds.height <= toggleBounds.y,
-  `${label} closed overlay toggle overlaps the centered Pie input: ${JSON.stringify({ inputBounds, toggleBounds })}.`);
-  await input.fill('-1'); await assertAndClickBoardControl(page, add, `${label} invalid Pie mutation control`); const mutationBanner = page.getByTestId('mutation-error-banner'); await mutationBanner.waitFor({ state: 'visible', timeout: 15_000 }); await assertClosedOverlayToggleBesideError(page, mutationBanner, `${label} mutation-error coexistence`); await input.fill('1'); await assertAndClickBoardControl(page, add, `${label} valid Pie mutation control`); await mutationBanner.waitFor({ state: 'detached', timeout: 15_000 });
-  const lastDelete = panel.getByLabel('Delete Pie slice Eight'); await scrollErControlIntoView(lastDelete); await assertTouchTarget(page, lastDelete, `${label} Pie scrolled delete control`); await lastDelete.focus(); assert(await lastDelete.evaluate((element) => document.activeElement === element), `${label} Pie scrolled control was not keyboard focusable.`);
-  const keyboardSource = 'pie\n  title Keyboard source\n  "Saved" : 5'; const editor = await ensureSourceFlyoutOpen(page); await editor.click(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('Backspace');
+  await replaceSource(page, source);
+  await waitForSource(page, source);
+  await waitForSemanticMode(page, "Pie · editable · form");
+  await closeFlyout(page, "source");
+  const panel = page.getByTestId("pie-editor-controls");
+  await panel.waitFor({ state: "visible", timeout: 15_000 });
+  await assertContainedInViewport(page, panel, `${label} Pie semantic panel`);
+  const geometry = await panel.evaluate((element) => {
+    const panelBounds = element.getBoundingClientRect();
+    const canvasBounds = element
+      .closest('[data-testid="diagram-canvas"]')
+      ?.getBoundingClientRect();
+    return {
+      bottom: panelBounds.bottom,
+      canvasBottom: canvasBounds?.bottom ?? -1,
+      canvasTop: canvasBounds?.top ?? -1,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      top: panelBounds.top,
+    };
+  });
+  assert(
+    geometry.top >= geometry.canvasTop - 0.5 &&
+      geometry.bottom <= geometry.canvasBottom + 0.5,
+    `${label} Pie panel escaped the measured canvas bounds: ${JSON.stringify(geometry)}.`,
+  );
+  assert(
+    geometry.scrollHeight > geometry.clientHeight,
+    `${label} Pie panel did not provide internal scrolling: ${JSON.stringify(geometry)}.`,
+  );
+  const overlayToggle = page.getByRole("button", {
+    name: "Overlay tools",
+    exact: true,
+  });
+  await assertTouchTarget(
+    page,
+    overlayToggle,
+    `${label} closed overlay toggle above numeric panel`,
+  );
+  const add = panel.getByRole("button", { name: "Add slice", exact: true });
+  const input = panel.getByLabel("New Pie slice value");
+  const showData = panel.getByLabel("Pie show data");
+  await scrollErControlIntoView(showData);
+  await assertTouchTarget(page, showData, `${label} Pie show-data checkbox`);
+  await scrollErControlIntoView(add);
+  await assertTouchTarget(page, add, `${label} Pie add-slice control`);
+  await scrollErControlIntoView(input);
+  await assertTouchTarget(page, input, `${label} Pie numeric input`);
+  await assertTouchTarget(
+    page,
+    overlayToggle,
+    `${label} closed overlay toggle after numeric panel scroll`,
+  );
+  const [toggleBounds, inputBounds, canvasBounds] = await Promise.all([
+    overlayToggle.boundingBox(),
+    input.boundingBox(),
+    page.getByTestId("diagram-canvas").boundingBox(),
+  ]);
+  assert(
+    toggleBounds && inputBounds && canvasBounds,
+    `${label} needs overlay toggle, Pie input, and canvas bounds.`,
+  );
+  assert(
+    toggleBounds.y >= canvasBounds.y + 6 &&
+      toggleBounds.y <= canvasBounds.y + 12,
+    `${label} closed overlay toggle did not use the reserved top inset: ${JSON.stringify({ canvasBounds, toggleBounds })}.`,
+  );
+  assert(
+    toggleBounds.x + toggleBounds.width <= inputBounds.x ||
+      inputBounds.x + inputBounds.width <= toggleBounds.x ||
+      toggleBounds.y + toggleBounds.height <= inputBounds.y ||
+      inputBounds.y + inputBounds.height <= toggleBounds.y,
+    `${label} closed overlay toggle overlaps the centered Pie input: ${JSON.stringify({ inputBounds, toggleBounds })}.`,
+  );
+  await input.fill("-1");
+  await assertAndClickBoardControl(
+    page,
+    add,
+    `${label} invalid Pie mutation control`,
+  );
+  const mutationBanner = page.getByTestId("mutation-error-banner");
+  await mutationBanner.waitFor({ state: "visible", timeout: 15_000 });
+  await assertClosedOverlayToggleBesideError(
+    page,
+    mutationBanner,
+    `${label} mutation-error coexistence`,
+  );
+  await input.fill("1");
+  await assertAndClickBoardControl(
+    page,
+    add,
+    `${label} valid Pie mutation control`,
+  );
+  await mutationBanner.waitFor({ state: "detached", timeout: 15_000 });
+  const lastDelete = panel.getByLabel("Delete Pie slice Eight");
+  await scrollErControlIntoView(lastDelete);
+  await assertTouchTarget(
+    page,
+    lastDelete,
+    `${label} Pie scrolled delete control`,
+  );
+  await lastDelete.focus();
+  assert(
+    await lastDelete.evaluate((element) => document.activeElement === element),
+    `${label} Pie scrolled control was not keyboard focusable.`,
+  );
+  const keyboardSource = 'pie\n  title Keyboard source\n  "Saved" : 5';
+  const editor = await ensureSourceFlyoutOpen(page);
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press("Backspace");
   // Synthetic insertText can make y-codemirror reconcile awareness widget DOM into the document.
-  await page.keyboard.type('pie'); await page.keyboard.press('Enter'); await page.keyboard.type('  title Keyboard source'); await page.keyboard.press('Enter'); await page.keyboard.type('"Saved" : 5'); await waitForSource(page, keyboardSource); await closeFlyout(page, 'source'); await waitForSemanticMode(page, 'Pie · editable · form');
-  await replaceSource(page, RADAR_DIAGRAM_FIXTURE); await waitForSource(page, RADAR_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Radar · editable · form'); await closeFlyout(page, 'source'); const radarPanel = page.getByTestId('radar-editor-controls'); await assertContainedInViewport(page, radarPanel, `${label} Radar semantic panel`); const showLegend = radarPanel.getByLabel('Radar show legend'); await scrollErControlIntoView(showLegend); await assertTouchTarget(page, showLegend, `${label} Radar show-legend checkbox`);
+  await page.keyboard.type("pie");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("  title Keyboard source");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type('"Saved" : 5');
+  await waitForSource(page, keyboardSource);
+  await closeFlyout(page, "source");
+  await waitForSemanticMode(page, "Pie · editable · form");
+  await replaceSource(page, RADAR_DIAGRAM_FIXTURE);
+  await waitForSource(page, RADAR_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, "Radar · editable · form");
+  await closeFlyout(page, "source");
+  const radarPanel = page.getByTestId("radar-editor-controls");
+  await assertContainedInViewport(
+    page,
+    radarPanel,
+    `${label} Radar semantic panel`,
+  );
+  const showLegend = radarPanel.getByLabel("Radar show legend");
+  await scrollErControlIntoView(showLegend);
+  await assertTouchTarget(
+    page,
+    showLegend,
+    `${label} Radar show-legend checkbox`,
+  );
   const responsiveSankey = `sankey-beta
 A,B,1
 B,C,1
@@ -3465,10 +4297,57 @@ E,F,1
 F,G,1
 G,H,1
 H,I,1`;
-  await replaceSource(page, responsiveSankey); await waitForSource(page, responsiveSankey); await waitForSemanticMode(page, 'Sankey · editable · form'); await closeFlyout(page, 'source');
-  const sankeyPanel = page.getByTestId('sankey-editor-controls'); await assertContainedInViewport(page, sankeyPanel, `${label} Sankey semantic panel`);
-  const sankeyGeometry = await sankeyPanel.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight })); assert(sankeyGeometry.scrollHeight > sankeyGeometry.clientHeight, `${label} Sankey panel did not provide internal scrolling: ${JSON.stringify(sankeyGeometry)}.`);
-  const addSankey = sankeyPanel.getByRole('button', { name: 'Add link', exact: true }); const sankeyWeight = sankeyPanel.getByLabel('New Sankey link weight'); await scrollErControlIntoView(addSankey); await assertTouchTarget(page, addSankey, `${label} Sankey add-link control`); await sankeyPanel.getByLabel('New Sankey link source').fill('I'); await sankeyPanel.getByLabel('New Sankey link target').fill('J'); await sankeyWeight.focus(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('Backspace'); await page.keyboard.type('0'); await assertAndClickBoardControl(page, addSankey, `${label} invalid Sankey weight`); const sankeyBanner = page.getByTestId('mutation-error-banner'); await sankeyBanner.waitFor({ state: 'visible', timeout: 15_000 }); await assertClosedOverlayToggleBesideError(page, sankeyBanner, `${label} Sankey mutation-error coexistence`); await expect(sankeyWeight).toHaveValue('0'); await sankeyWeight.fill('1'); await assertAndClickBoardControl(page, addSankey, `${label} valid Sankey recovery`); await sankeyBanner.waitFor({ state: 'detached', timeout: 15_000 });
+  await replaceSource(page, responsiveSankey);
+  await waitForSource(page, responsiveSankey);
+  await waitForSemanticMode(page, "Sankey · editable · form");
+  await closeFlyout(page, "source");
+  const sankeyPanel = page.getByTestId("sankey-editor-controls");
+  await assertContainedInViewport(
+    page,
+    sankeyPanel,
+    `${label} Sankey semantic panel`,
+  );
+  const sankeyGeometry = await sankeyPanel.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  assert(
+    sankeyGeometry.scrollHeight > sankeyGeometry.clientHeight,
+    `${label} Sankey panel did not provide internal scrolling: ${JSON.stringify(sankeyGeometry)}.`,
+  );
+  const addSankey = sankeyPanel.getByRole("button", {
+    name: "Add link",
+    exact: true,
+  });
+  const sankeyWeight = sankeyPanel.getByLabel("New Sankey link weight");
+  await scrollErControlIntoView(addSankey);
+  await assertTouchTarget(page, addSankey, `${label} Sankey add-link control`);
+  await sankeyPanel.getByLabel("New Sankey link source").fill("I");
+  await sankeyPanel.getByLabel("New Sankey link target").fill("J");
+  await sankeyWeight.focus();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("0");
+  await assertAndClickBoardControl(
+    page,
+    addSankey,
+    `${label} invalid Sankey weight`,
+  );
+  const sankeyBanner = page.getByTestId("mutation-error-banner");
+  await sankeyBanner.waitFor({ state: "visible", timeout: 15_000 });
+  await assertClosedOverlayToggleBesideError(
+    page,
+    sankeyBanner,
+    `${label} Sankey mutation-error coexistence`,
+  );
+  await expect(sankeyWeight).toHaveValue("0");
+  await sankeyWeight.fill("1");
+  await assertAndClickBoardControl(
+    page,
+    addSankey,
+    `${label} valid Sankey recovery`,
+  );
+  await sankeyBanner.waitFor({ state: "detached", timeout: 15_000 });
   const responsivePacket = `packet-beta
   0: "Bit 0"
   1: "Bit 1"
@@ -3478,19 +4357,413 @@ H,I,1`;
   5: "Bit 5"
   6: "Bit 6"
   7: "Bit 7"`;
-  await replaceSource(page, responsivePacket); await waitForSource(page, responsivePacket); await waitForSemanticMode(page, 'Packet · editable · form'); await closeFlyout(page, 'source');
-  const packetPanel = page.getByTestId('packet-editor-controls'); await assertContainedInViewport(page, packetPanel, `${label} Packet semantic panel`); const packetGeometry = await packetPanel.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight })); assert(packetGeometry.scrollHeight > packetGeometry.clientHeight, `${label} Packet panel did not provide internal scrolling: ${JSON.stringify(packetGeometry)}.`);
-  const addPacket = packetPanel.getByRole('button', { name: 'Add field', exact: true }); await scrollErControlIntoView(addPacket); await assertTouchTarget(page, addPacket, `${label} Packet add-field control`); const firstPacket = packetPanel.getByRole('form', { name: 'Packet field Bit 0 bits 0-0', exact: true }); const firstWidth = firstPacket.getByLabel('Packet field Bit 0 bits 0-0 width'); await scrollErControlIntoView(firstWidth); await assertTouchTarget(page, firstWidth, `${label} Packet width control`); await firstWidth.fill('2'); await assertAndClickBoardControl(page, firstPacket.getByRole('button', { name: 'Save', exact: true }), `${label} Packet overlap rejection`); const packetBanner = page.getByTestId('mutation-error-banner'); await packetBanner.waitFor({ state: 'visible', timeout: 15_000 }); await assertClosedOverlayToggleBesideError(page, packetBanner, `${label} Packet mutation-error coexistence`); await expect(firstWidth).toHaveValue('2'); await firstWidth.fill('1'); await firstPacket.getByLabel('Packet field Bit 0 bits 0-0 label').fill('Version'); await assertAndClickBoardControl(page, firstPacket.getByRole('button', { name: 'Save', exact: true }), `${label} Packet valid recovery`); await packetBanner.waitFor({ state: 'detached', timeout: 15_000 }); const lastPacketDelete = packetPanel.getByLabel('Delete Packet field Bit 7 bits 7-7'); await scrollErControlIntoView(lastPacketDelete); await assertTouchTarget(page, lastPacketDelete, `${label} Packet scrolled delete control`);
-  await replaceSource(page, CYNEFIN_DIAGRAM_FIXTURE); await waitForSource(page, CYNEFIN_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Cynefin · editable · form'); await closeFlyout(page, 'source');
-  const cynefinPanel = page.getByTestId('cynefin-editor-controls'); await assertContainedInViewport(page, cynefinPanel, `${label} Cynefin semantic panel`); const cynefinGeometry = await cynefinPanel.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight })); assert(cynefinGeometry.scrollHeight > cynefinGeometry.clientHeight, `${label} Cynefin panel did not provide internal scrolling: ${JSON.stringify(cynefinGeometry)}.`);
-  const cynefinItemLabel = cynefinPanel.getByLabel('New Cynefin item label'); await scrollErControlIntoView(cynefinItemLabel); await assertTouchTarget(page, cynefinItemLabel, `${label} Cynefin item input`); await cynefinItemLabel.focus(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('Backspace'); await page.keyboard.type('Mobile item'); await expect(cynefinItemLabel).toHaveValue('Mobile item');
-  const addCynefinTransition = cynefinPanel.getByRole('button', { name: 'Add transition', exact: true }); await scrollErControlIntoView(addCynefinTransition); await assertTouchTarget(page, addCynefinTransition, `${label} Cynefin add-transition control`); const cynefinTransitionLabel = cynefinPanel.getByLabel('New Cynefin transition label'); await cynefinTransitionLabel.focus(); await page.keyboard.type('Mobile transition'); await cynefinPanel.getByLabel('New Cynefin transition target').selectOption('complex'); await assertAndClickBoardControl(page, addCynefinTransition, `${label} Cynefin self-loop rejection`); const cynefinBanner = page.getByTestId('mutation-error-banner'); await cynefinBanner.waitFor({ state: 'visible', timeout: 15_000 }); await assertClosedOverlayToggleBesideError(page, cynefinBanner, `${label} Cynefin mutation-error coexistence`); await expect(cynefinTransitionLabel).toHaveValue('Mobile transition'); await cynefinPanel.getByLabel('New Cynefin transition target').selectOption('clear'); await assertAndClickBoardControl(page, addCynefinTransition, `${label} Cynefin valid recovery`); await cynefinBanner.waitFor({ state: 'detached', timeout: 15_000 }); const mobileTransitionDelete = cynefinPanel.getByLabel('Delete Cynefin transition Complex to Clear Mobile transition'); await scrollErControlIntoView(mobileTransitionDelete); await assertTouchTarget(page, mobileTransitionDelete, `${label} Cynefin scrolled delete control`); await assertTouchTarget(page, overlayToggle, `${label} closed overlay toggle after Cynefin panel scroll`);
-  await replaceSource(page, FLOWCHART_FIXTURE); await waitForSource(page, FLOWCHART_FIXTURE); await closeFlyout(page, 'source'); await waitForCanvas(page, 'flowchart');
+  await replaceSource(page, responsivePacket);
+  await waitForSource(page, responsivePacket);
+  await waitForSemanticMode(page, "Packet · editable · form");
+  await closeFlyout(page, "source");
+  const packetPanel = page.getByTestId("packet-editor-controls");
+  await assertContainedInViewport(
+    page,
+    packetPanel,
+    `${label} Packet semantic panel`,
+  );
+  const packetGeometry = await packetPanel.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  assert(
+    packetGeometry.scrollHeight > packetGeometry.clientHeight,
+    `${label} Packet panel did not provide internal scrolling: ${JSON.stringify(packetGeometry)}.`,
+  );
+  const addPacket = packetPanel.getByRole("button", {
+    name: "Add field",
+    exact: true,
+  });
+  await scrollErControlIntoView(addPacket);
+  await assertTouchTarget(page, addPacket, `${label} Packet add-field control`);
+  const firstPacket = packetPanel.getByRole("form", {
+    name: "Packet field Bit 0 bits 0-0",
+    exact: true,
+  });
+  const firstWidth = firstPacket.getByLabel(
+    "Packet field Bit 0 bits 0-0 width",
+  );
+  await scrollErControlIntoView(firstWidth);
+  await assertTouchTarget(page, firstWidth, `${label} Packet width control`);
+  await firstWidth.fill("2");
+  await assertAndClickBoardControl(
+    page,
+    firstPacket.getByRole("button", { name: "Save", exact: true }),
+    `${label} Packet overlap rejection`,
+  );
+  const packetBanner = page.getByTestId("mutation-error-banner");
+  await packetBanner.waitFor({ state: "visible", timeout: 15_000 });
+  await assertClosedOverlayToggleBesideError(
+    page,
+    packetBanner,
+    `${label} Packet mutation-error coexistence`,
+  );
+  await expect(firstWidth).toHaveValue("2");
+  await firstWidth.fill("1");
+  await firstPacket
+    .getByLabel("Packet field Bit 0 bits 0-0 label")
+    .fill("Version");
+  await assertAndClickBoardControl(
+    page,
+    firstPacket.getByRole("button", { name: "Save", exact: true }),
+    `${label} Packet valid recovery`,
+  );
+  await packetBanner.waitFor({ state: "detached", timeout: 15_000 });
+  const lastPacketDelete = packetPanel.getByLabel(
+    "Delete Packet field Bit 7 bits 7-7",
+  );
+  await scrollErControlIntoView(lastPacketDelete);
+  await assertTouchTarget(
+    page,
+    lastPacketDelete,
+    `${label} Packet scrolled delete control`,
+  );
+  await replaceSource(page, CYNEFIN_DIAGRAM_FIXTURE);
+  await waitForSource(page, CYNEFIN_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, "Cynefin · editable · form");
+  await closeFlyout(page, "source");
+  const cynefinPanel = page.getByTestId("cynefin-editor-controls");
+  await assertContainedInViewport(
+    page,
+    cynefinPanel,
+    `${label} Cynefin semantic panel`,
+  );
+  const cynefinGeometry = await cynefinPanel.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  assert(
+    cynefinGeometry.scrollHeight > cynefinGeometry.clientHeight,
+    `${label} Cynefin panel did not provide internal scrolling: ${JSON.stringify(cynefinGeometry)}.`,
+  );
+  const cynefinItemLabel = cynefinPanel.getByLabel("New Cynefin item label");
+  await scrollErControlIntoView(cynefinItemLabel);
+  await assertTouchTarget(
+    page,
+    cynefinItemLabel,
+    `${label} Cynefin item input`,
+  );
+  await cynefinItemLabel.focus();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("Mobile item");
+  await expect(cynefinItemLabel).toHaveValue("Mobile item");
+  const addCynefinTransition = cynefinPanel.getByRole("button", {
+    name: "Add transition",
+    exact: true,
+  });
+  await scrollErControlIntoView(addCynefinTransition);
+  await assertTouchTarget(
+    page,
+    addCynefinTransition,
+    `${label} Cynefin add-transition control`,
+  );
+  const cynefinTransitionLabel = cynefinPanel.getByLabel(
+    "New Cynefin transition label",
+  );
+  await cynefinTransitionLabel.focus();
+  await page.keyboard.type("Mobile transition");
+  await cynefinPanel
+    .getByLabel("New Cynefin transition target")
+    .selectOption("complex");
+  await assertAndClickBoardControl(
+    page,
+    addCynefinTransition,
+    `${label} Cynefin self-loop rejection`,
+  );
+  const cynefinBanner = page.getByTestId("mutation-error-banner");
+  await cynefinBanner.waitFor({ state: "visible", timeout: 15_000 });
+  await assertClosedOverlayToggleBesideError(
+    page,
+    cynefinBanner,
+    `${label} Cynefin mutation-error coexistence`,
+  );
+  await expect(cynefinTransitionLabel).toHaveValue("Mobile transition");
+  await cynefinPanel
+    .getByLabel("New Cynefin transition target")
+    .selectOption("clear");
+  await assertAndClickBoardControl(
+    page,
+    addCynefinTransition,
+    `${label} Cynefin valid recovery`,
+  );
+  await cynefinBanner.waitFor({ state: "detached", timeout: 15_000 });
+  const mobileTransitionDelete = cynefinPanel.getByLabel(
+    "Delete Cynefin transition Complex to Clear Mobile transition",
+  );
+  await scrollErControlIntoView(mobileTransitionDelete);
+  await assertTouchTarget(
+    page,
+    mobileTransitionDelete,
+    `${label} Cynefin scrolled delete control`,
+  );
+  await assertTouchTarget(
+    page,
+    overlayToggle,
+    `${label} closed overlay toggle after Cynefin panel scroll`,
+  );
+  await resetFixedWorkspaceOrigin(page, `${label} Treemap`);
+  const responsiveTreemap = `treemap-beta\n  "Portfolio"\n${Array.from({ length: 10 }, (_, index) => `    "Leaf ${index}": ${index + 1}`).join("\n")}`;
+  await replaceSource(page, responsiveTreemap);
+  await waitForSource(page, responsiveTreemap);
+  await waitForSemanticMode(page, "Treemap · editable · form");
+  await closeFlyout(page, "source");
+  const treemapPanel = page.getByTestId("treemap-editor-controls");
+  await treemapPanel.waitFor({ state: "visible", timeout: 15_000 });
+  await resetFixedWorkspaceOrigin(page, `${label} Treemap visible panel`);
+  await assertContainedInViewport(
+    page,
+    treemapPanel,
+    `${label} Treemap semantic panel`,
+  );
+  const treemapGeometry = await treemapPanel.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  assert(
+    treemapGeometry.scrollHeight > treemapGeometry.clientHeight,
+    `${label} Treemap panel did not provide internal scrolling: ${JSON.stringify(treemapGeometry)}.`,
+  );
+  const treemapAdd = treemapPanel.getByRole("button", {
+    name: "Add node",
+    exact: true,
+  });
+  await scrollErControlIntoView(treemapAdd);
+  await assertTouchTarget(
+    page,
+    treemapAdd,
+    `${label} Treemap add-node control`,
+  );
+  await treemapAdd.focus();
+  assert(
+    await treemapAdd.evaluate((element) => document.activeElement === element),
+    `${label} Treemap add node was not keyboard focusable.`,
+  );
+  const lastTreemapDelete = treemapForm(treemapPanel, [
+    "Portfolio",
+    "Leaf 9",
+  ]).getByLabel(
+    `Delete ${treemapControlLabel(["Portfolio", "Leaf 9"])} subtree containing 1 node`,
+  );
+  await scrollErControlIntoView(lastTreemapDelete);
+  await assertTouchTarget(
+    page,
+    lastTreemapDelete,
+    `${label} Treemap scrolled-last delete control`,
+  );
+  await treemapPanel.getByLabel("New Treemap node label").fill("Mobile");
+  await treemapPanel.getByLabel("New Treemap node value").fill("11");
+  await assertAndClickBoardControl(
+    page,
+    treemapAdd,
+    `${label} Treemap real mutation`,
+  );
+  const treemapAdded = `${responsiveTreemap}\n    "Mobile": 11`;
+  await ensureSourceFlyoutOpen(page);
+  await expect
+    .poll(() => canonicalSource(page), { timeout: 15_000 })
+    .toBe(treemapAdded);
+  await closeFlyout(page, "source");
+  const leafZero = treemapForm(treemapPanel, ["Portfolio", "Leaf 0"]);
+  const leafZeroValue = leafZero.getByLabel(
+    `${treemapControlLabel(["Portfolio", "Leaf 0"])} value`,
+  );
+  await scrollErControlIntoView(leafZeroValue);
+  await leafZeroValue.fill("-1");
+  await assertAndClickBoardControl(
+    page,
+    leafZero.getByRole("button", { name: "Save", exact: true }),
+    `${label} Treemap invalid numeric no-write`,
+  );
+  const treemapError = treemapPanel.getByRole("alert");
+  const responsiveTreemapBanner = page.getByTestId("mutation-error-banner");
+  await expect(treemapError).toHaveText(
+    "Treemap values must be finite numbers greater than zero.",
+  );
+  await expect(responsiveTreemapBanner).toContainText(
+    "Treemap values must be finite numbers greater than zero.",
+  );
+  await assertClosedOverlayToggleBesideError(
+    page,
+    responsiveTreemapBanner,
+    `${label} Treemap mutation-error coexistence`,
+  );
+  await expect(leafZeroValue).toHaveValue("-1");
+  await ensureSourceFlyoutOpen(page);
+  await expect
+    .poll(() => canonicalSource(page), { timeout: 15_000 })
+    .toBe(treemapAdded);
+  await closeFlyout(page, "source");
+  await leafZeroValue.fill("1");
+  await assertAndClickBoardControl(
+    page,
+    leafZero.getByRole("button", { name: "Save", exact: true }),
+    `${label} Treemap recovery`,
+  );
+  await expect(treemapError).toHaveCount(0);
+  await expect(responsiveTreemapBanner).toHaveCount(0);
+  const treemapUndo = await focusCurrentDiagramCanvas(
+    page,
+    `${label} Treemap undo`,
+  );
+  await treemapUndo.press("ControlOrMeta+z");
+  await ensureSourceFlyoutOpen(page);
+  await expect
+    .poll(() => canonicalSource(page), { timeout: 15_000 })
+    .toBe(responsiveTreemap);
+  await closeFlyout(page, "source");
+  const advancedTreemap =
+    'treemap-beta\n  "Root":::important\n    "Leaf": 1';
+  await replaceSource(page, advancedTreemap);
+  await waitForSource(page, advancedTreemap);
+  await expect
+    .poll(() => page.getByTestId("diagram-mode").textContent(), {
+      timeout: 15_000,
+    })
+    .toBe("Treemap · source only");
+  await closeFlyout(page, "source");
+  await expect(treemapPanel).toHaveCount(0);
+  await resetFixedWorkspaceOrigin(page, `${label} Venn`);
+  const responsiveVenn = `venn-beta\n${["A", "B", "C", "D", "E", "F"].map((name, index) => `  set ${name}: ${index + 2}`).join("\n")}\n  union A, B: 1\n  union C, D: 1\n  union E, F: 1`;
+  await replaceSource(page, responsiveVenn);
+  await waitForSource(page, responsiveVenn);
+  await waitForSemanticMode(page, "Venn · editable · form");
+  await closeFlyout(page, "source");
+  const vennPanel = page.getByTestId("venn-editor-controls");
+  await vennPanel.waitFor({ state: "visible", timeout: 15_000 });
+  await resetFixedWorkspaceOrigin(page, `${label} Venn visible panel`);
+  await assertContainedInViewport(
+    page,
+    vennPanel,
+    `${label} Venn semantic panel`,
+  );
+  const vennGeometry = await vennPanel.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  assert(
+    vennGeometry.scrollHeight > vennGeometry.clientHeight,
+    `${label} Venn panel did not provide internal scrolling: ${JSON.stringify(vennGeometry)}.`,
+  );
+  const vennAdd = vennPanel.getByRole("button", {
+    name: "Add subset",
+    exact: true,
+  });
+  await scrollErControlIntoView(vennAdd);
+  await assertTouchTarget(page, vennAdd, `${label} Venn authored-set control`);
+  await vennAdd.focus();
+  assert(
+    await vennAdd.evaluate((element) => document.activeElement === element),
+    `${label} Venn add subset was not keyboard focusable.`,
+  );
+  const lastVennDelete = vennPanel
+    .getByRole("form", { name: "Venn overlap E and F", exact: true })
+    .getByLabel("Delete Venn overlap E and F");
+  await scrollErControlIntoView(lastVennDelete);
+  await assertTouchTarget(
+    page,
+    lastVennDelete,
+    `${label} Venn scrolled-last delete control`,
+  );
+  await vennPanel.getByLabel("New Venn set id").fill("G");
+  await vennPanel.getByLabel("New Venn subset value").fill("8");
+  await assertAndClickBoardControl(
+    page,
+    vennAdd,
+    `${label} Venn real authored-set mutation`,
+  );
+  const vennAdded = responsiveVenn.replace(
+    "  union A, B: 1",
+    "  set G: 8\n  union A, B: 1",
+  );
+  await ensureSourceFlyoutOpen(page);
+  await expect
+    .poll(() => canonicalSource(page), { timeout: 15_000 })
+    .toBe(vennAdded);
+  await closeFlyout(page, "source");
+  await vennPanel.getByLabel("New Venn set id").fill("H");
+  const newVennValue = vennPanel.getByLabel("New Venn subset value");
+  await newVennValue.fill("-1");
+  await assertAndClickBoardControl(
+    page,
+    vennAdd,
+    `${label} Venn invalid numeric no-write`,
+  );
+  const vennError = vennPanel.getByRole("alert");
+  const responsiveVennBanner = page.getByTestId("mutation-error-banner");
+  await expect(vennError).toHaveText(
+    "Venn base set values must be finite numbers greater than zero.",
+  );
+  await expect(responsiveVennBanner).toContainText(
+    "Venn base set values must be finite numbers greater than zero.",
+  );
+  await assertClosedOverlayToggleBesideError(
+    page,
+    responsiveVennBanner,
+    `${label} Venn mutation-error coexistence`,
+  );
+  await expect(newVennValue).toHaveValue("-1");
+  await ensureSourceFlyoutOpen(page);
+  await expect
+    .poll(() => canonicalSource(page), { timeout: 15_000 })
+    .toBe(vennAdded);
+  await closeFlyout(page, "source");
+  await newVennValue.fill("9");
+  await assertAndClickBoardControl(page, vennAdd, `${label} Venn recovery`);
+  await expect(vennError).toHaveCount(0);
+  await expect(responsiveVennBanner).toHaveCount(0);
+  const vennUndo = await focusCurrentDiagramCanvas(page, `${label} Venn undo`);
+  await vennUndo.press("ControlOrMeta+z");
+  await vennUndo.press("ControlOrMeta+z");
+  await ensureSourceFlyoutOpen(page);
+  await expect
+    .poll(() => canonicalSource(page), { timeout: 15_000 })
+    .toBe(responsiveVenn);
+  await closeFlyout(page, "source");
+  const advancedVenn = "venn-beta\n  title Advanced\n  set A: 1";
+  await replaceSource(page, advancedVenn);
+  await waitForSource(page, advancedVenn);
+  await expect
+    .poll(() => page.getByTestId("diagram-mode").textContent(), {
+      timeout: 15_000,
+    })
+    .toBe("Venn · source only");
+  await closeFlyout(page, "source");
+  await expect(vennPanel).toHaveCount(0);
+  await assertTouchTarget(
+    page,
+    overlayToggle,
+    `${label} closed overlay toggle after Treemap/Venn panel scroll`,
+  );
+  await expectRemoteTreemapVennDraftReconciliation(
+    page,
+    mcp,
+    mcpUrl,
+    baseUrl,
+    roomAccess,
+    sessionId,
+    label,
+  );
+  await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
+  await closeFlyout(page, "source");
+  await waitForCanvas(page, "flowchart");
 }
 
 async function waitForPhoneLayout(page: Page): Promise<void> {
   await page.evaluate(async () => {
-    await new Promise<void>((resolve) => { requestAnimationFrame(() => { requestAnimationFrame(() => { resolve(); }); }); });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    });
   });
 }
 
@@ -3693,13 +4966,16 @@ async function assertMobileErrorBannerScrollability(page: Page, label: string): 
 async function assertClosedOverlayToggleBesideError(page: Page, banner: Locator, label: string): Promise<void> {
   const toggle = page.getByRole('button', { name: 'Overlay tools', exact: true });
   await assertTouchTarget(page, toggle, `${label} closed overlay toggle`);
+  await assertContainedInViewport(page, toggle, `${label} closed overlay toggle`);
   await assertContainedInViewport(page, banner, `${label} banner`);
   const [toggleBounds, bannerBounds, canvasBounds] = await Promise.all([
     toggle.boundingBox(), banner.boundingBox(), page.getByTestId('diagram-canvas').boundingBox(),
   ]);
   assert(toggleBounds && bannerBounds && canvasBounds, `${label} needs toggle, banner, and canvas bounds.`);
-  assert(toggleBounds.y >= canvasBounds.y + 6 && toggleBounds.y <= canvasBounds.y + 12,
-    `${label} toggle left the reserved top inset: ${JSON.stringify({ canvasBounds, toggleBounds })}.`);
+  if ((page.viewportSize()?.width ?? Number.POSITIVE_INFINITY) <= 420) {
+    assert(toggleBounds.y >= canvasBounds.y + 6 && toggleBounds.y <= canvasBounds.y + 12,
+      `${label} toggle left the reserved top inset: ${JSON.stringify({ canvasBounds, toggleBounds })}.`);
+  }
   assert(toggleBounds.x + toggleBounds.width <= bannerBounds.x || bannerBounds.x + bannerBounds.width <= toggleBounds.x
     || toggleBounds.y + toggleBounds.height <= bannerBounds.y || bannerBounds.y + bannerBounds.height <= toggleBounds.y,
   `${label} toggle overlaps its error banner: ${JSON.stringify({ bannerBounds, toggleBounds })}.`);
@@ -4777,6 +6053,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'Sankey and Packet forms expose CSV-safe weighted links, atomic node renames, contiguous reflow, recovery, and advanced-source fallback');
       await expectCynefinSemanticEditor(page);
       record(results, 'Cynefin form exposes fixed-domain item and transition lifecycles, deterministic boundaries, recovery, undo/redo, and advanced-source fallback');
+      await expectTreemapAndVennSemanticEditors(page, mcp, mcpUrl, baseUrl, roomAccess, sessionId);
+      record(results, 'Treemap and Venn forms expose collision-safe subtree controls, authored defaults, exact errors, MCP-isolated remote drafts, deterministic themes, and source-only fallback');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');
@@ -4827,8 +6105,8 @@ async function validateWorkspaceUx(): Promise<void> {
           await expectPhoneLiveCodingWorkspace(responsivePage, label, diagramName, mobilePinchResiduals);
           record(results, `${label} touch viewport, tabs, flyouts, camera, final-state overflow, screenshots, and canvas controls`);
           if (label === 'mobile-390' || label === 'mobile-320') {
-            await expectResponsiveNumericPanel(responsivePage, label);
-            record(results, `${label} numeric semantic panel containment, scrolling, 44px controls, focus, and keyboard source editing`);
+            await expectResponsiveNumericPanel(responsivePage, label, mcp, mcpUrl, baseUrl, roomAccess, sessionId, diagramName);
+            record(results, `${label} Treemap/Venn exact source, rejection isolation, undo, MCP remote drafts, source-only fallback, scrolled-last 44px targets, and overlay coexistence`);
           }
         }
         await expectNoDevelopmentIndicator(responsivePage);

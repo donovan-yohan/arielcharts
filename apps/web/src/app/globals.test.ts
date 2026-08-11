@@ -71,3 +71,11 @@ describe('narrow sequence controls', () => {
     expect(mobileCss).toMatch(/\.canvas-sequence-editor:not\(\.is-centered\) > form,[^}]*\{\s*pointer-events:\s*auto;/u);
   });
 });
+
+describe('narrow hierarchy controls', () => {
+  it('keeps only Treemap and Venn source-form panels bounded, scrollable, and touch-sized', () => {
+    expect(narrowCanvasCss).toMatch(/\.canvas-treemap-venn-editor\s*\{[^}]*left:\s*8px !important;[^}]*max-height:\s*calc\(100% - 84px\) !important;[^}]*overflow-y:\s*auto !important;[^}]*overscroll-behavior:\s*contain;[^}]*touch-action:\s*pan-y;/u);
+    expect(narrowCanvasCss).toMatch(/\.canvas-treemap-venn-editor input,[^}]*\.canvas-treemap-venn-editor select,[^}]*\.canvas-treemap-venn-editor button\s*\{[^}]*min-height:\s*44px;[^}]*min-width:\s*44px;/u);
+    expect(narrowCanvasCss).not.toMatch(/\.canvas-hierarchy-editor\s*\{/u);
+  });
+});

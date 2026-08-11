@@ -11,6 +11,7 @@ import { getDirtyDraftFields, reconcileCanonicalDraft } from '../lib/canonical-d
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
 const workspaceSource = readFileSync(new URL('./session-workspace.tsx', import.meta.url), 'utf8');
 const e2eWorkspaceSupportSource = readFileSync(new URL('../../../../e2e/support/workspace.ts', import.meta.url), 'utf8');
+const e2eYjsSessionSource = readFileSync(new URL('../../../../e2e/support/yjs-session.ts', import.meta.url), 'utf8');
 const workspaceE2eSource = readFileSync(new URL('../../../../e2e-workspace-ux-validate.ts', import.meta.url), 'utf8');
 
 describe('canvas cursor callback lifecycle', () => {
@@ -93,7 +94,7 @@ describe('new semantic families', () => {
     expect(canvasSource).toMatch(/XySeriesForm[^]*?useCanonicalDraft\(canonical\)/u);
     expect(canvasSource).toMatch(/RadarCurveForm[^]*?useCanonicalDraft\(canonical\)/u);
     expect(canvasSource).toMatch(/function parseSemanticNumber[^]*?Number\.isFinite/u);
-    expect(canvasSource).toMatch(/function runNumericForm[^]*?action\(\) === false[^]*?return false/u);
+    expect(canvasSource).toMatch(/function runSemanticForm[^]*?const result = action\(\)[^]*?!result\.applied[^]*?setError\(result\.error/u);
     expect(canvasSource).toMatch(/PieSliceForm[^]*?if \(runNumericForm[^]*?resetDraft\(\)/u);
     expect(canvasSource).toMatch(/RadarOptionsForm[^]*?graticule: value\.graticule \?\? 'circle'[^]*?showLegend: value\.showLegend \?\? true/u);
     expect(canvasSource).toMatch(/max: draft\.maxPresent \? parseSemanticNumber[^]*?: undefined/u);
@@ -114,7 +115,7 @@ describe('new semantic families', () => {
     expect(e2eWorkspaceSupportSource).not.toContain('.diagram-canvas-svg svg');
     expect(workspaceE2eSource).toContain('.diagram-canvas-svg > svg');
     expect(workspaceE2eSource).not.toContain('.diagram-canvas-svg svg');
-    expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Pie show data[^]*?keyboard\.press\('Backspace'\);[^]*?keyboard\.type\('pie'\);[^]*?keyboard\.press\('Enter'\);[^]*?keyboard\.type\('\s\stitle Keyboard source'\);[^]*?Radar show legend/u);
+    expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Pie show data[^]*?keyboard\.press\(["']Backspace["']\);[^]*?keyboard\.type\(["']pie["']\);[^]*?keyboard\.press\(["']Enter["']\);[^]*?keyboard\.type\(["']\s\stitle Keyboard source["']\);[^]*?Radar show legend/u);
   });
 
   it('keeps Sankey and Packet source-backed with stable identities, dirty-draft recovery, and 44px bounded controls', () => {
@@ -138,7 +139,7 @@ describe('new semantic families', () => {
     expect(workspaceSource).toMatch(/onRenameSankeyNode[^]*?mutateCanvasSource/u);
     expect(workspaceSource).toMatch(/onAddPacketField[^]*?mutateCanvasSource/u);
     expect(workspaceSource).toMatch(/onEditPacketField[^]*?mutateCanvasSource/u);
-    expect(workspaceSource).toMatch(/const nextText = mutate\(previousText\);\s*setMutationError\(null\);\s*if \(nextText === previousText\) return true;/u);
+    expect(workspaceSource).toMatch(/const nextText = mutate\(previousText\);\s*setMutationError\(null\);\s*if \(nextText === previousText\) return \{ applied: true \};/u);
     const sourceBackedForms = canvasSource.slice(canvasSource.indexOf('function SankeyEditorControls'), canvasSource.indexOf('function PieEditorControls'));
     expect(sourceBackedForms).not.toMatch(/ReactFlow|svgContainer|mermaidPresentation/u);
     expect(workspaceE2eSource).toMatch(/function expectFlowSemanticEditors[^]*?Archive, "cold"[^]*?Hub, "central"[^]*?expectedSankey[^]*?Sankey link A to B weight 1 \(1 of 2\)[^]*?Packet overlap rejection[^]*?Packet exact no-op recovery control[^]*?expectedPacket[^]*?Packet field Reserved bits 0-3 \(1 of 2\)[^]*?toBeDisabled[^]*?react-flow__node/u);
@@ -164,7 +165,7 @@ describe('new semantic families', () => {
     expect(canvasSource).toMatch(/isCynefin && !readOnly && cynefinDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
     expect(workspaceSource).toMatch(/cynefin: \{ seed: 55 \}/u);
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'cynefin'\)/u);
-    expect(workspaceSource).toMatch(/if \(nextText === previousText\) return true;\s*undoManagerRef\.current\?\.stopCapturing\(\);\s*collaboration\.doc\.transact[^]*?collaborationOrigins\.visual\);\s*undoManagerRef\.current\?\.stopCapturing\(\);/u);
+    expect(workspaceSource).toMatch(/if \(nextText === previousText\) return \{ applied: true \};\s*undoManagerRef\.current\?\.stopCapturing\(\);\s*collaboration\.doc\.transact[^]*?collaborationOrigins\.visual\);\s*undoManagerRef\.current\?\.stopCapturing\(\);/u);
     for (const action of ['AddCynefinItem', 'EditCynefinItem', 'DeleteCynefinItem', 'MoveCynefinItem', 'AddCynefinTransition', 'EditCynefinTransition', 'DeleteCynefinTransition', 'MoveCynefinTransition']) {
       expect(workspaceSource).toMatch(new RegExp(`on${action}[^]*?mutateCanvasSource`, 'u'));
     }
@@ -175,6 +176,64 @@ describe('new semantic families', () => {
     expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Cynefin panel did not provide internal scrolling[^]*?Mobile transition[^]*?Cynefin mutation-error coexistence[^]*?closed overlay toggle after Cynefin panel scroll/u);
     expect(workspaceE2eSource).toContain(".diagram-canvas-svg > svg");
 
+  });
+
+  it('keeps Treemap and Venn controls source-backed, current-preview gated, and safe for remote form drafts', () => {
+    expect(canvasSource).toContain('data-testid="treemap-editor-controls"');
+    expect(canvasSource).toContain('data-testid="venn-editor-controls"');
+    expect(canvasSource).toMatch(/isTreemap && !readOnly && treemapDiagram[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
+    expect(canvasSource).toMatch(/isVenn && !readOnly && vennDiagram[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
+    expect(canvasSource).toMatch(/TreemapNodeForm[^]*?getTreemapNodeIdentity\(node, allNodes\)[^]*?occurrenceCount === 1/u);
+    expect(canvasSource).toMatch(/VennSubsetForm[^]*?getVennSubsetIdentity\(item, all\)[^]*?occurrenceCount === 1/u);
+    expect(canvasSource).toMatch(/VennStyleForm[^]*?getVennStyleIdentity\(item, all\)[^]*?occurrenceCount === 1/u);
+    expect(canvasSource).toMatch(/useSemanticRenderIdentityKeys[^]*?if \(!sourceRepresentable\)[^]*?draftCacheRef\.current\.clear/u);
+    expect(canvasSource).toMatch(/useSemanticRenderIdentityKeys[^]*?if \(records === null\)[^]*?draftCache: draftCacheRef\.current, keys: new Map/u);
+    expect(canvasSource).toMatch(/treemapDiagram\?\.nodes \?\? null[^]*?vennDiagram\?\.subsets \?\? null[^]*?vennDiagram\?\.styles \?\? null/u);
+    expect(canvasSource).toMatch(/treemapRenderIdentityKeys = useSemanticRenderIdentityKeys[^]*?\[node\.label, node\.value\][^]*?\[\.\.\.node\.ancestorLabels, node\.label\]/u);
+    expect(canvasSource).toMatch(/treemapPathKey[^]*?node\.opaqueId \?\? JSON\.stringify/u);
+    expect(canvasSource).toMatch(/treemapPathLabel[^]*?JSON\.stringify\(segment\)/u);
+    expect(canvasSource).toMatch(/const peers = allNodes\.filter[^]*?peerIndex === peers\.length - 1/u);
+    expect(canvasSource).toMatch(/Delete \$\{label\} subtree containing \$\{descendants\.length \+ 1\}/u);
+    expect(canvasSource).toMatch(/TreemapNodeForm[^]*?parseSemanticNumber\(valueDraft\.value, 'Treemap value'\)/u);
+    expect(canvasSource).toMatch(/VennSubsetForm[^]*?parseSemanticNumber\(valueDraft\.value, 'Venn subset value'\)/u);
+    expect(canvasSource).toMatch(/valueDraft\.value !== String\(item\.value\)[^]*?patch\.value = parseSemanticNumber/u);
+    expect(canvasSource).toMatch(/usePersistentCanonicalDraft\(\{ value: item\.sets\.length === 1[^]*?\$\{renderKey\}:rename/u);
+    expect(canvasSource).toMatch(/subset\.sets\.length === 1[^]*?A Venn overlap requires at least two authored sets/u);
+    expect(canvasSource).toMatch(/New Venn overlap sets[^]*?const sets = \[\.\.\.event\.currentTarget\.selectedOptions\][^]*?setSubset\(\(current\) => \(\{ \.\.\.current, sets \}\)\)/u);
+    expect(canvasSource).toMatch(/VennSubsetForm[^]*?const sets = \[\.\.\.event\.currentTarget\.selectedOptions\][^]*?updateDraft\(\(current\) => \(\{ \.\.\.current, sets \}\)\)/u);
+    expect(canvasSource).not.toMatch(/(setSubset|updateDraft)\(\(current\) => \(\{[^}]*event\.currentTarget\.selectedOptions/u);
+    expect(canvasSource).toMatch(/const peers = all\.filter[^]*?peerIndex === peers\.length - 1/u);
+    expect(canvasSource).toMatch(/VENN_STYLE_PROPERTIES = \['color', 'fill', 'fill-opacity', 'opacity', 'stroke', 'stroke-opacity', 'stroke-width'\]/u);
+    expect(canvasSource).toMatch(/New Venn style target[^]*?diagram\.subsets\.map/u);
+    expect(canvasSource).toMatch(/VennStyleForm[^]*?targets: VennSubset\[\][^]*?\$\{label\} target/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'treemap'\)/u);
+    expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'venn'\)/u);
+    for (const action of ['AddTreemapNode', 'EditTreemapNode', 'DeleteTreemapNode', 'MoveTreemapNode', 'ReparentTreemapNode', 'AddVennSubset', 'EditVennSubset', 'DeleteVennSubset', 'MoveVennSubset', 'RenameVennSet', 'AddVennStyle', 'EditVennStyle', 'DeleteVennStyle', 'MoveVennStyle']) expect(workspaceSource).toMatch(new RegExp(`on${action}[^]*?mutateCanvasSourceDetailed`, 'u'));
+    expect(workspaceSource).toMatch(/mutateCanvasSourceDetailed[^]*?setMutationError\(message\)[^]*?\{ applied: false, error: message \}/u);
+    expect(canvasSource).toMatch(/initialCamera\?: CanvasCameraState[^]*?hasAutoFitInitialRenderRef = useRef\(initialCamera !== undefined\)[^]*?useState<ViewportState>\(initialCamera \?\?/u);
+    expect(workspaceSource).toMatch(/diagramCameraSessionRef = useRef\(\{ cameras: new Map<string, CanvasCameraState>\(\), sessionId \}\)[^]*?sessionId !== sessionId[^]*?handleCanvasCameraChange[^]*?diagramCameraSessionRef\.current\.cameras\.set\(activeDiagramId, camera\)[^]*?presenterFollow\.onCameraChange\(camera\)/u);
+    expect(workspaceSource).toMatch(/initialCamera=\{activeDiagramId \? diagramCameraSessionRef\.current\.cameras\.get\(activeDiagramId\) : undefined\}[^]*?onCameraChange=\{handleCanvasCameraChange\}/u);
+    expect(workspaceE2eSource).toMatch(/function expectTreemapAndVennSemanticEditors[^]*?Treemap branch add[^]*?Treemap edit leaf[^]*?Treemap reorder subtree[^]*?Treemap delete subtree[^]*?Treemap · source only[^]*?Venn omitted-size label-only edit[^]*?Venn atomic set rename[^]*?Venn whitelisted style add[^]*?Venn style delete[^]*?Venn · source only/u);
+    expect(workspaceE2eSource).toMatch(/Venn overlap delete[^]*?vennAfterOverlapDelete[^]*?Venn post-overlap-delete canonical source[^]*?currentVenn\.waitFor[^]*?Venn overlap A and GammaSet[^]*?toHaveCount\(0[^]*?waitForSemanticMode\(page, "Venn · editable · form"\)[^]*?reconciledVenn\.waitFor[^]*?deleteGammaSet[^]*?Venn authored set delete/u);
+    expect(workspaceE2eSource).toMatch(/advancedTreemap = 'treemap-beta\\n  "Root":::important\\n    "Leaf": 1'[^]*?waitForSource\(page, advancedTreemap\)[^]*?Treemap · source only[^]*?expect\(treemap\)\.toHaveCount\(0\)/u);
+    expect(workspaceE2eSource).toMatch(/advancedVenn = 'venn-beta\\n  title Advanced\\n  set A: 1'[^]*?waitForSource\(page, advancedVenn\)[^]*?Venn · source only[^]*?expect\(venn\)\.toHaveCount\(0\)/u);
+    expect(workspaceE2eSource).toMatch(/function expectRemoteTreemapVennDraftReconciliation[^]*?const returnDiagramName = await activeTabName\(page\)[^]*?remote Treemap ancestor rename[^]*?Dirty descendant[^]*?rejected one-set Venn overlap[^]*?remote Venn clean rename[^]*?Dirty set rename/u);
+    expect(workspaceE2eSource).toMatch(/writeMcpSourceAndAssertRemoteIsolation[^]*?trackDiagramSnapshot\(diagramId\)[^]*?remote undo isolation/u);
+    expect(e2eYjsSessionSource).toMatch(/function readYjsDiagramSnapshot[^]*?activity: snapshot\.activity\.filter\(\(event\) => event\.diagramId === diagramId\)[^]*?trackYjsDiagramSnapshot/u);
+    expect(workspaceE2eSource).toMatch(/originalASave[^]*?scrollErControlIntoView\(originalASave\)[^]*?deleteSetA[^]*?scrollErControlIntoView\(deleteSetA\)[^]*?saveSetA[^]*?scrollErControlIntoView\(saveSetA\)[^]*?addSubset[^]*?scrollErControlIntoView\(addSubset\)/u);
+    expect(workspaceE2eSource).toMatch(/expectRemoteTreemapVennDraftReconciliation[^]*?waitForSource\(page, advancedVenn\)[^]*?waitForCanvas\(page, 'generic'\)[^]*?Venn · source only/u);
+    expect(workspaceE2eSource).toMatch(/Treemap\/Venn original-tab camera restoration[^]*?toBe\(transformBefore\)/u);
+    expect(workspaceE2eSource).toMatch(/function mermaidThemeEvidence[^]*?viewBox[^]*?geometryFingerprint[^]*?fillColors[^]*?textColors/u);
+    expect(workspaceE2eSource).toMatch(/function expectThemeStableDiagramAndPanelGeometry[^]*?\.diagram-canvas-svg > svg[^]*?issue-55-\$\{family\}-light[^]*?geometryFingerprint[^]*?issue-55-\$\{family\}-dark[^]*?geometryFingerprint/u);
+    expect(workspaceE2eSource).toMatch(/expectThemeStableDiagramAndPanelGeometry\(page, treemap, 'treemap'[^]*?expectThemeStableDiagramAndPanelGeometry\(page, venn, 'venn'/u);
+    expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Treemap semantic panel[^]*?Treemap scrolled-last delete control[^]*?Venn semantic panel[^]*?Venn scrolled-last delete control[^]*?expectRemoteTreemapVennDraftReconciliation/u);
+    expect(workspaceE2eSource).toMatch(/function resetFixedWorkspaceOrigin[^]*?requestAnimationFrame[^]*?requestAnimationFrame[^]*?window\.scrollTo\(0, 0\)[^]*?semantic-panel acceptance did not begin at the fixed workspace origin[^]*?toBe\(0\)/u);
+    expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?resetFixedWorkspaceOrigin\(page, label\)[^]*?resetFixedWorkspaceOrigin\(page, `\$\{label\} Treemap`\)[^]*?responsiveTreemap[^]*?resetFixedWorkspaceOrigin\(page, `\$\{label\} Venn`\)[^]*?responsiveVenn/u);
+    expect(workspaceE2eSource).toMatch(/Treemap · editable · form[^]*?closeFlyout\(page, "source"\)[^]*?treemapPanel\.waitFor[^]*?resetFixedWorkspaceOrigin\(page, `\$\{label\} Treemap visible panel`\)[^]*?Treemap semantic panel/u);
+    expect(workspaceE2eSource).toMatch(/Venn · editable · form[^]*?closeFlyout\(page, "source"\)[^]*?vennPanel\.waitFor[^]*?resetFixedWorkspaceOrigin\(page, `\$\{label\} Venn visible panel`\)[^]*?Venn semantic panel/u);
+    expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?advancedTreemap =[^]*?"Root":::important[^]*?Treemap · source only[^]*?advancedVenn = "venn-beta\\n  title Advanced\\n  set A: 1"[^]*?Venn · source only/u);
+    expect(workspaceE2eSource).toMatch(/function scrollErControlIntoView[^]*?scrollIntoView[^]*?window\.scrollTo\(0, 0\)/u);
+    expect(workspaceE2eSource).toMatch(/function assertClosedOverlayToggleBesideError[^]*?assertTouchTarget[^]*?assertContainedInViewport\(page, toggle[^]*?viewportSize\(\)\?\.width[^]*?<= 420[^]*?toggle overlaps its error banner/u);
   });
 
   it('keeps unique Packet rows mounted across preceding-width shifts and withholds ambiguous repeated controls', () => {

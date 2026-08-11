@@ -675,8 +675,9 @@ async function expectBlankCanvasClickClearsSelection(page: Page): Promise<void> 
 async function closeWorkspaceSettings(page: Page): Promise<void> {
   const dialog = page.getByTestId(SETTINGS_DIALOG_TEST_ID);
   const closeButton = dialog.getByRole('button', { name: 'Close', exact: true });
-  await verifiedClick(page, closeButton, 'workspace settings Close');
-  await dialog.waitFor({ state: 'detached', timeout: 15_000 });
+  await expectWorkspaceSettingsDetached(page, 'close-button', async () => {
+    await verifiedClick(page, closeButton, 'workspace settings Close');
+  });
   const trigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
   await expect(trigger).toHaveAttribute('aria-expanded', 'false', { timeout: 5_000 });
   await waitForFocusedLocator(page, trigger, 'Closing workspace settings');
@@ -688,16 +689,15 @@ async function readWorkspaceSettingsCloseDiagnostics(page: Page): Promise<unknow
     const form = dialog?.querySelector<HTMLFormElement>('form') ?? null;
     const submit = form?.querySelector<HTMLButtonElement>('button[type="submit"]') ?? null;
     const active = document.activeElement;
-    const describeElement = (element: Element | null) => element ? {
-      id: element.id || null,
-      tag: element.tagName.toLowerCase(),
-      testId: element.getAttribute('data-testid'),
-      text: (element.textContent ?? '').trim().slice(0, 120),
-    } : null;
     const rect = dialog?.getBoundingClientRect();
     const style = dialog ? window.getComputedStyle(dialog) : null;
     return {
-      activeElement: describeElement(active instanceof Element ? active : null),
+      activeElement: active instanceof Element ? {
+        id: active.id || null,
+        tag: active.tagName.toLowerCase(),
+        testId: active.getAttribute('data-testid'),
+        text: (active.textContent ?? '').trim().slice(0, 120),
+      } : null,
       dialogCount: document.querySelectorAll('[data-testid="workspace-settings-dialog"]').length,
       dialogVisible: !!dialog && style?.display !== 'none' && style?.visibility !== 'hidden'
         && !!rect && rect.width > 0 && rect.height > 0,
@@ -2224,36 +2224,56 @@ async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: st
   });
 
   const backwardBoundary = await openWorkspaceSettings(page);
-  await backwardBoundary.getByRole('button', { name: 'Close', exact: true }).press('Shift+Tab');
-  await backwardBoundary.waitFor({ state: 'detached', timeout: 15_000 });
+  await waitForFocusedLocator(
+    page,
+    backwardBoundary.getByRole('textbox', { name: 'Display name', exact: true }),
+    'Settling settings autofocus before backward boundary',
+  );
+  const backwardBoundaryClose = backwardBoundary.getByRole('button', { name: 'Close', exact: true });
+  await backwardBoundaryClose.focus();
+  await waitForFocusedLocator(page, backwardBoundaryClose, 'Selecting the first settings tab stop');
+  await expectWorkspaceSettingsDetached(page, 'backward-focus-boundary', async () => {
+    await page.keyboard.press('Shift+Tab');
+  });
   assert(await page.evaluate(() => !document.querySelector('[data-testid="workspace-settings-dialog"]')?.contains(document.activeElement)),
     'Shift+Tab at the start of settings trapped focus in the dialog.');
 
   const forwardBoundary = await openWorkspaceSettings(page);
+  await waitForFocusedLocator(
+    page,
+    forwardBoundary.getByRole('textbox', { name: 'Display name', exact: true }),
+    'Settling settings autofocus before forward boundary',
+  );
   const checkedTheme = forwardBoundary.locator('input[type="radio"]:checked');
-  await checkedTheme.press('Tab');
-  await forwardBoundary.waitFor({ state: 'detached', timeout: 15_000 });
+  await checkedTheme.focus();
+  await waitForFocusedLocator(page, checkedTheme, 'Selecting the final settings tab stop');
+  await expectWorkspaceSettingsDetached(page, 'forward-focus-boundary', async () => {
+    await page.keyboard.press('Tab');
+  });
   assert(await page.evaluate(() => !document.querySelector('[data-testid="workspace-settings-dialog"]')?.contains(document.activeElement)),
     'Tab at the end of settings trapped focus in the dialog.');
 
   await openWorkspaceSettings(page);
-  await page.locator('.workspace-logo').click();
-  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await expectWorkspaceSettingsDetached(page, 'outside-close-from-logo', async () => {
+    await page.locator('.workspace-logo').click();
+  });
   await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Outside-closing settings from inert page chrome');
 
   await openWorkspaceSettings(page);
   const mainTab = page.getByRole('tab', { name: 'Main', exact: true });
-  await verifiedClick(page, mainTab, 'selecting a tab outside settings');
-  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await expectWorkspaceSettingsDetached(page, 'outside-close-from-tab', async () => {
+    await verifiedClick(page, mainTab, 'selecting a tab outside settings');
+  });
   await waitForFocusedLocator(page, mainTab, 'Selecting a tab outside settings');
   assert(await trigger.evaluate((element) => document.activeElement !== element),
     'Opening an interactive control outside settings had its focus stolen by the settings trigger.');
 
   const canvas = page.getByRole('application', { name: 'Interactive diagram canvas', exact: true });
   await openWorkspaceSettings(page);
-  await canvas.focus();
-  await canvas.click({ position: { x: 4, y: 4 } });
-  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await expectWorkspaceSettingsDetached(page, 'outside-close-from-canvas', async () => {
+    await canvas.focus();
+    await canvas.click({ position: { x: 4, y: 4 } });
+  });
   await waitForFocusedLocator(page, canvas, 'Closing settings from the interactive canvas');
   assert(await trigger.evaluate((element) => document.activeElement !== element),
     'Closing settings from the interactive canvas had its focus stolen by the settings trigger.');

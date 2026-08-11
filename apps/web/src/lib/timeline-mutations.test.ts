@@ -58,6 +58,13 @@ describe('timeline source mutations', () => {
     const snapshot = getTimelineDiagramSnapshot(SOURCE);
     expect(moveTimelineEvent(SOURCE, getTimelineEventIdentity(snapshot.events[1]!, 1, snapshot.events), 'up')).toContain('2024 : First release\n       : Started');
   });
+  it('keeps line terminators in place while reordering continuation events', () => {
+    for (const ending of ['\n', '\r\n', '\r']) {
+      const source = `timeline LR${ending}  2024${ending}    : First${ending}    : Second`;
+      const events = getTimelineDiagramSnapshot(source).events;
+      expect(moveTimelineEvent(source, getTimelineEventIdentity(events[1]!, 1, events), 'up')).toBe(`timeline LR${ending}  2024${ending}    : Second${ending}    : First`);
+    }
+  });
   it('keeps the period and remaining continuation event when deleting a swapped inline event', () => {
     const snapshot = getTimelineDiagramSnapshot(SOURCE);
     const swapped = moveTimelineEvent(SOURCE, getTimelineEventIdentity(snapshot.events[1]!, 1, snapshot.events), 'up');
@@ -90,6 +97,19 @@ describe('timeline source mutations', () => {
     const topLevel = moveTimelinePeriod(moved, '2024', '');
     expect(topLevel.indexOf('  2024 : Started')).toBeLessThan(topLevel.indexOf('  section Foundations'));
     expect(getTimelineDiagramSnapshot(topLevel).periods.find((period) => period.label === '2024')).toEqual({ label: '2024', section: '' });
+    const added = addTimelinePeriod(SOURCE, { label: '2023', section: '' });
+    expect(added.indexOf('  2023')).toBeLessThan(added.indexOf('  section Foundations'));
+  });
+  it('moves an inline event to another selected period without erasing its old period or continuation events', () => {
+    const source = 'timeline LR\n  section One\n  2024 : Started\n    : Continued\n  section Two\n  2025';
+    const events = getTimelineDiagramSnapshot(source).events;
+    const moved = editTimelineEvent(source, getTimelineEventIdentity(events[0]!, 0, events), { period: '2025', section: 'Two', text: 'Moved' });
+    expect(moved).toContain('  2024\n    : Continued');
+    expect(moved).toContain('  2025\n    : Moved');
+    expect(getTimelineDiagramSnapshot(moved).events).toEqual(expect.arrayContaining([
+      { section: 'One', period: '2024', text: 'Continued' },
+      { section: 'Two', period: '2025', text: 'Moved' },
+    ]));
   });
   it('reorders Timeline section blocks without joining lines when the source has no final newline', () => {
     const source = 'timeline LR\r\n  section Foundations\r\n  2024 : Started\r\n  section Delivery';

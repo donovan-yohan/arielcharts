@@ -63,6 +63,19 @@ describe('journey source mutations', () => {
     const moved = moveJourneyTask(source, getJourneyTaskIdentity(tasks[2]!, 2, tasks), 'up');
     expect(moved.indexOf('Return: 4')).toBeLessThan(moved.indexOf('Pay: 2'));
   });
+  it('keeps line terminators in place while reordering tasks and placing top-level tasks before sections', () => {
+    for (const ending of ['\n', '\r\n', '\r']) {
+      const source = `journey${ending}  First: 1: Customer${ending}  Second: 2: Customer`;
+      const tasks = getJourneyDiagramSnapshot(source).tasks;
+      expect(moveJourneyTask(source, getJourneyTaskIdentity(tasks[1]!, 1, tasks), 'up')).toBe(`journey${ending}  Second: 2: Customer${ending}  First: 1: Customer`);
+    }
+    const source = 'journey\n  section Product\n  Browse: 5: Customer';
+    const added = addJourneyTask(source, { section: '', text: 'Top level', score: 3, actors: ['Customer'] });
+    expect(added.indexOf('Top level: 3: Customer')).toBeLessThan(added.indexOf('section Product'));
+    const tasks = getJourneyDiagramSnapshot(source).tasks;
+    const moved = editJourneyTask(source, getJourneyTaskIdentity(tasks[0]!, 0, tasks), { section: '' });
+    expect(moved.indexOf('Browse: 5: Customer')).toBeLessThan(moved.indexOf('section Product'));
+  });
   it('reorders section blocks with no final newline while retaining task boundaries', () => {
     const source = 'journey\r\n  section Product\r\n  Browse: 5: Customer\r\n  section Help';
     const moved = moveJourneySection(source, 'Help', 'up');

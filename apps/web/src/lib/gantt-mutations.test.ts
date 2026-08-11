@@ -75,6 +75,19 @@ describe('gantt source mutations', () => {
     expect(moveGanttTask(source, getGanttTaskIdentity(tasks[2]!, 2, tasks), 'up')).toContain('Test : test, 2026-01-03, 1d\n  Ship');
     expect(() => moveGanttTask(SOURCE, getGanttTaskIdentity(tasks[1]!, 1, getGanttDiagramSnapshot(SOURCE).tasks), 'up')).toThrow('dependent');
   });
+  it('keeps line terminators in place while reordering tasks and placing top-level tasks before sections', () => {
+    for (const ending of ['\n', '\r\n', '\r']) {
+      const source = `gantt${ending}  dateFormat YYYY-MM-DD${ending}  First : first, 2026-01-01, 1d${ending}  Second : second, 2026-01-02, 1d`;
+      const tasks = getGanttDiagramSnapshot(source).tasks;
+      expect(moveGanttTask(source, getGanttTaskIdentity(tasks[1]!, 1, tasks), 'up')).toBe(`gantt${ending}  dateFormat YYYY-MM-DD${ending}  Second : second, 2026-01-02, 1d${ending}  First : first, 2026-01-01, 1d`);
+    }
+    const source = 'gantt\n  dateFormat YYYY-MM-DD\n  section Build\n  Design : design, 2026-01-01, 1d';
+    const added = addGanttTask(source, { section: '', text: 'Top', statuses: [], id: 'top', start: '2026-01-02', end: '1d' });
+    expect(added.indexOf('Top : top')).toBeLessThan(added.indexOf('section Build'));
+    const tasks = getGanttDiagramSnapshot(source).tasks;
+    const moved = editGanttTask(source, getGanttTaskIdentity(tasks[0]!, 0, tasks), { section: '' });
+    expect(moved.indexOf('Design : design')).toBeLessThan(moved.indexOf('section Build'));
+  });
   it('reorders Gantt section blocks without joining lines when the source has no final newline', () => {
     const source = 'gantt\r\n  dateFormat YYYY-MM-DD\r\n  section Build\r\n  Design : design, 2026-01-01, 1d\r\n  section Release';
     const moved = moveGanttSection(source, 'Release', 'up');

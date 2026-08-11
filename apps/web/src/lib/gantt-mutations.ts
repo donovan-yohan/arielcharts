@@ -41,9 +41,8 @@ export function addGanttTask(source: string, task: GanttTask): string {
     return candidate;
   }
   const parsed = requireGantt(source); assertTask(parsed, next);
-  if (!next.section) return append(source, `  ${formatTask(next)}`);
-  const section = findSection(parsed, next.section); const following = parsed.sections.find((candidate) => candidate.line.start > section.line.start); const offset = following?.line.start ?? source.length; const prefix = source.slice(0, offset); const ending = lineEnding(source);
-  return `${prefix}${prefix && !/(?:\r\n|\n|\r)$/.test(prefix) ? ending : ''}${indent(section.line)}${formatTask(next)}${ending}${source.slice(offset)}`;
+  const section = next.section ? findSection(parsed, next.section) : null; const following = section ? parsed.sections.find((candidate) => candidate.line.start > section.line.start) : parsed.sections[0]; const offset = following?.line.start ?? source.length; const prefix = source.slice(0, offset); const ending = lineEnding(source);
+  return `${prefix}${prefix && !/(?:\r\n|\n|\r)$/.test(prefix) ? ending : ''}${section ? indent(section.line) : '  '}${formatTask(next)}${ending}${source.slice(offset)}`;
 }
 export function getGanttTaskIdentity(task: GanttTask, index: number, tasks: readonly GanttTask[] = []): GanttTaskIdentity { return { ...task, statuses: [...task.statuses], index, occurrenceCount: tasks.length ? tasks.filter((candidate) => sameTask(candidate, task)).length : 1 }; }
 export function resolveGanttTaskIndex(tasks: readonly GanttTask[], identity: GanttTaskIdentity): number { if (identity.occurrenceCount !== 1) throw stale(); const matches = tasks.map((task, index) => ({ index, task })).filter(({ task }) => sameTask(task, identity)); if (matches.length !== 1 || !matches[0]) throw stale(); return matches[0].index; }
@@ -133,7 +132,8 @@ function lineEnding(source: string): string { return source.includes('\r\n') ? '
 function append(source: string, value: string): string { const ending = lineEnding(source); return `${source}${source && !/(?:\r\n|\n|\r)$/.test(source) ? ending : ''}${value}`; }
 function replaceLine(source: string, line: Line, value: string): string { return `${source.slice(0, line.start)}${value}${line.raw.slice(line.text.length)}${source.slice(line.end)}`; }
 function deleteLines(source: string, lines: readonly Line[]): string { return [...lines].sort((left, right) => right.start - left.start).reduce((next, line) => `${next.slice(0, line.start)}${next.slice(line.end)}`, source); }
-function swapLines(source: string, left: Line, right: Line): string { const first = left.start < right.start ? left : right; const second = first === left ? right : left; return `${source.slice(0, first.start)}${second.raw}${source.slice(first.end, second.start)}${first.raw}${source.slice(second.end)}`; }
+function swapLines(source: string, left: Line, right: Line): string { const first = left.start < right.start ? left : right; const second = first === left ? right : left; return `${source.slice(0, first.start)}${second.text}${terminator(first)}${source.slice(first.end, second.start)}${first.text}${terminator(second)}${source.slice(second.end)}`; }
+function terminator(line: Line): string { return line.raw.slice(line.text.length); }
 function swapSectionBlocks(source: string, sections: readonly SectionRecord[], firstIndex: number): string {
   const first = sections[firstIndex]; const second = sections[firstIndex + 1];
   if (!first || !second) return source;

@@ -45,13 +45,12 @@ export function addJourneyTask(source: string, task: JourneyTask): string {
   if (!source.trim()) return `journey\n  ${formatTask(next)}`;
   const parsed = requireJourney(source);
   if (next.section && !parsed.sections.some((section) => section.label === next.section)) throw new Error(`Journey section ${next.section} no longer exists.`);
-  if (!next.section) return append(source, `  ${formatTask(next)}`);
-  const section = findSection(parsed, next.section);
-  const nextSection = parsed.sections.find((candidate) => candidate.line.start > section.line.start);
+  const section = next.section ? findSection(parsed, next.section) : null;
+  const nextSection = section ? parsed.sections.find((candidate) => candidate.line.start > section.line.start) : parsed.sections[0];
   const offset = nextSection?.line.start ?? source.length;
   const ending = lineEnding(source);
   const prefix = source.slice(0, offset);
-  const insertion = `${prefix && !/(?:\r\n|\n|\r)$/.test(prefix) ? ending : ''}${indent(section.line)}${formatTask(next)}${ending}`;
+  const insertion = `${prefix && !/(?:\r\n|\n|\r)$/.test(prefix) ? ending : ''}${section ? indent(section.line) : '  '}${formatTask(next)}${ending}`;
   return `${source.slice(0, offset)}${insertion}${source.slice(offset)}`;
 }
 export function getJourneyTaskIdentity(task: JourneyTask, index: number, tasks: readonly JourneyTask[] = []): JourneyTaskIdentity {
@@ -108,7 +107,8 @@ function lineEnding(source: string): string { return source.includes('\r\n') ? '
 function append(source: string, value: string): string { const ending = lineEnding(source); return `${source}${source && !/(?:\r\n|\n|\r)$/.test(source) ? ending : ''}${value}`; }
 function replaceLine(source: string, line: Line, value: string): string { return `${source.slice(0, line.start)}${value}${line.raw.slice(line.text.length)}${source.slice(line.end)}`; }
 function deleteLines(source: string, lines: readonly Line[]): string { return [...lines].sort((left, right) => right.start - left.start).reduce((next, line) => `${next.slice(0, line.start)}${next.slice(line.end)}`, source); }
-function swapLines(source: string, left: Line, right: Line): string { const first = left.start < right.start ? left : right; const second = first === left ? right : left; return `${source.slice(0, first.start)}${second.raw}${source.slice(first.end, second.start)}${first.raw}${source.slice(second.end)}`; }
+function swapLines(source: string, left: Line, right: Line): string { const first = left.start < right.start ? left : right; const second = first === left ? right : left; return `${source.slice(0, first.start)}${second.text}${terminator(first)}${source.slice(first.end, second.start)}${first.text}${terminator(second)}${source.slice(second.end)}`; }
+function terminator(line: Line): string { return line.raw.slice(line.text.length); }
 function swapSectionBlocks(source: string, sections: readonly SectionRecord[], firstIndex: number): string {
   const first = sections[firstIndex]; const second = sections[firstIndex + 1];
   if (!first || !second) return source;

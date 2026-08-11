@@ -90,6 +90,9 @@ import { getArchitectureAlignmentIdentity, getArchitectureEdgeIdentity, type Arc
 import { getC4RelationshipIdentity, type C4Boundary, type C4DiagramSnapshot, type C4Element, type C4Relationship, type C4RelationshipIdentity } from '../lib/c4-mutations';
 import { getBlockLinkIdentity, type BlockComposite, type BlockDiagramSnapshot, type BlockLink, type BlockLinkIdentity, type BlockNode } from '../lib/block-mutations';
 import { getSwimlaneHandoffIdentity, type Swimlane, type SwimlaneDiagramSnapshot, type SwimlaneHandoff, type SwimlaneHandoffIdentity, type SwimlaneNode } from '../lib/swimlane-mutations';
+import { getJourneyTaskIdentity, type JourneyDiagramSnapshot, type JourneyTask, type JourneyTaskIdentity } from '../lib/journey-mutations';
+import { getGanttTaskIdentity, type GanttDiagramSnapshot, type GanttTask, type GanttTaskIdentity } from '../lib/gantt-mutations';
+import { getTimelineEventIdentity, type TimelineDiagramSnapshot, type TimelineDirection, type TimelineEvent, type TimelineEventIdentity, type TimelinePeriod } from '../lib/timeline-mutations';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
@@ -110,6 +113,9 @@ export interface DiagramCanvasProps {
   isC4?: boolean;
   isBlock?: boolean;
   isSwimlane?: boolean;
+  isJourney?: boolean;
+  isGantt?: boolean;
+  isTimeline?: boolean;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
@@ -126,6 +132,9 @@ export interface DiagramCanvasProps {
   c4Diagram?: C4DiagramSnapshot | null;
   blockDiagram?: BlockDiagramSnapshot | null;
   swimlaneDiagram?: SwimlaneDiagramSnapshot | null;
+  journeyDiagram?: JourneyDiagramSnapshot | null;
+  ganttDiagram?: GanttDiagramSnapshot | null;
+  timelineDiagram?: TimelineDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
@@ -234,6 +243,35 @@ export interface DiagramCanvasProps {
   onAddSwimlaneHandoff?: (value: SwimlaneHandoff) => void;
   onEditSwimlaneHandoff?: (identity: SwimlaneHandoffIdentity, value: Partial<SwimlaneHandoff>) => void;
   onDeleteSwimlaneHandoff?: (identity: SwimlaneHandoffIdentity) => void;
+  onAddJourneySection?: (value: { label: string }) => void;
+  onDeleteJourneySection?: (label: string) => void;
+  onEditJourneySection?: (label: string, value: { label?: string }) => void;
+  onMoveJourneySection?: (label: string, direction: 'up' | 'down') => void;
+  onAddJourneyTask?: (value: JourneyTask) => void;
+  onEditJourneyTask?: (identity: JourneyTaskIdentity, value: Partial<JourneyTask>) => void;
+  onDeleteJourneyTask?: (identity: JourneyTaskIdentity) => void;
+  onMoveJourneyTask?: (identity: JourneyTaskIdentity, direction: 'up' | 'down') => void;
+  onAddGanttSection?: (value: { label: string }) => void;
+  onDeleteGanttSection?: (label: string) => void;
+  onEditGanttSection?: (label: string, value: { label?: string }) => void;
+  onMoveGanttSection?: (label: string, direction: 'up' | 'down') => void;
+  onAddGanttTask?: (value: GanttTask) => void;
+  onEditGanttTask?: (identity: GanttTaskIdentity, value: Partial<GanttTask>) => void;
+  onDeleteGanttTask?: (identity: GanttTaskIdentity) => void;
+  onMoveGanttTask?: (identity: GanttTaskIdentity, direction: 'up' | 'down') => void;
+  onAddTimelineSection?: (value: { label: string }) => void;
+  onDeleteTimelineSection?: (label: string) => void;
+  onEditTimelineSection?: (label: string, value: { label?: string }) => void;
+  onMoveTimelineSection?: (label: string, direction: 'up' | 'down') => void;
+  onAddTimelinePeriod?: (value: { label: string; section: string }) => void;
+  onEditTimelinePeriod?: (label: string, value: Partial<TimelinePeriod>) => void;
+  onMoveTimelinePeriod?: (label: string, section: string) => void;
+  onDeleteTimelinePeriod?: (label: string) => void;
+  onAddTimelineEvent?: (value: TimelineEvent) => void;
+  onEditTimelineEvent?: (identity: TimelineEventIdentity, value: Partial<TimelineEvent>) => void;
+  onDeleteTimelineEvent?: (identity: TimelineEventIdentity) => void;
+  onMoveTimelineEvent?: (identity: TimelineEventIdentity, direction: 'up' | 'down') => void;
+  onSetTimelineDirection?: (value: TimelineDirection) => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
@@ -639,6 +677,35 @@ export function DiagramCanvas({
   onAddSwimlaneHandoff,
   onEditSwimlaneHandoff,
   onDeleteSwimlaneHandoff,
+  onAddJourneySection,
+  onDeleteJourneySection,
+  onEditJourneySection,
+  onMoveJourneySection,
+  onAddJourneyTask,
+  onEditJourneyTask,
+  onDeleteJourneyTask,
+  onMoveJourneyTask,
+  onAddGanttSection,
+  onDeleteGanttSection,
+  onEditGanttSection,
+  onMoveGanttSection,
+  onAddGanttTask,
+  onEditGanttTask,
+  onDeleteGanttTask,
+  onMoveGanttTask,
+  onAddTimelineSection,
+  onDeleteTimelineSection,
+  onEditTimelineSection,
+  onMoveTimelineSection,
+  onAddTimelinePeriod,
+  onEditTimelinePeriod,
+  onMoveTimelinePeriod,
+  onDeleteTimelinePeriod,
+  onAddTimelineEvent,
+  onEditTimelineEvent,
+  onDeleteTimelineEvent,
+  onMoveTimelineEvent,
+  onSetTimelineDirection,
   onAddConnectedNode,
   onCanvasCursorChange,
   onChangeNodeShape,
@@ -680,6 +747,12 @@ export function DiagramCanvas({
   isC4 = false,
   isBlock = false,
   isSwimlane = false,
+  isJourney = false,
+  isGantt = false,
+  isTimeline = false,
+  journeyDiagram = null,
+  ganttDiagram = null,
+  timelineDiagram = null,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -3278,6 +3351,9 @@ export function DiagramCanvas({
         {isC4 && !readOnly && c4Diagram ? <><C4EditorControls bottom={erEditorBottom} diagram={c4Diagram} onAddBoundary={onAddC4Boundary} onAddElement={onAddC4Element} onAddRelationship={onAddC4Relationship} onDeleteBoundary={onDeleteC4Boundary} onDeleteElement={onDeleteC4Element} onDeleteRelationship={onDeleteC4Relationship} onEditBoundary={onEditC4Boundary} onEditElement={onEditC4Element} onEditRelationship={onEditC4Relationship} placement={pairedSemanticPanelPlacement?.editor} /><C4ContainmentControls bottom={erEditorBottom} boundaries={c4Diagram.boundaries} elements={c4Diagram.elements} onMoveBoundary={onMoveC4Boundary} onMoveElement={onMoveC4Element} placement={pairedSemanticPanelPlacement?.containment} /></> : null}
         {isBlock && !readOnly && blockDiagram ? <><BlockEditorControls bottom={erEditorBottom} diagram={blockDiagram} onAddComposite={onAddBlockComposite} onAddLink={onAddBlockLink} onAddNode={onAddBlockNode} onDeleteComposite={onDeleteBlockComposite} onDeleteLink={onDeleteBlockLink} onDeleteNode={onDeleteBlockNode} onEditComposite={onEditBlockComposite} onEditLink={onEditBlockLink} onEditNode={onEditBlockNode} onSetColumns={onSetBlockColumns} placement={pairedSemanticPanelPlacement?.editor} /><BlockContainmentControls bottom={erEditorBottom} composites={blockDiagram.composites} nodes={blockDiagram.nodes} onMoveComposite={onMoveBlockComposite} onMoveNode={onMoveBlockNode} placement={pairedSemanticPanelPlacement?.containment} /></> : null}
         {isSwimlane && !readOnly && swimlaneDiagram ? <SwimlaneEditorControls bottom={erEditorBottom} diagram={swimlaneDiagram} onAddHandoff={onAddSwimlaneHandoff} onAddLane={onAddSwimlane} onAddNode={onAddSwimlaneNode} onDeleteHandoff={onDeleteSwimlaneHandoff} onDeleteLane={onDeleteSwimlane} onDeleteNode={onDeleteSwimlaneNode} onEditHandoff={onEditSwimlaneHandoff} onEditLane={onEditSwimlane} onEditNode={onEditSwimlaneNode} onMoveNode={onMoveSwimlaneNode} /> : null}
+        {isJourney && !readOnly && journeyDiagram ? <JourneyEditorControls bottom={erEditorBottom} diagram={journeyDiagram} onAddSection={onAddJourneySection} onAddTask={onAddJourneyTask} onDeleteSection={onDeleteJourneySection} onDeleteTask={onDeleteJourneyTask} onEditSection={onEditJourneySection} onEditTask={onEditJourneyTask} onMoveSection={onMoveJourneySection} onMoveTask={onMoveJourneyTask} /> : null}
+        {isGantt && !readOnly && ganttDiagram ? <GanttEditorControls bottom={erEditorBottom} diagram={ganttDiagram} onAddSection={onAddGanttSection} onAddTask={onAddGanttTask} onDeleteSection={onDeleteGanttSection} onDeleteTask={onDeleteGanttTask} onEditSection={onEditGanttSection} onEditTask={onEditGanttTask} onMoveSection={onMoveGanttSection} onMoveTask={onMoveGanttTask} /> : null}
+        {isTimeline && !readOnly && timelineDiagram ? <TimelineEditorControls bottom={erEditorBottom} diagram={timelineDiagram} onAddEvent={onAddTimelineEvent} onAddPeriod={onAddTimelinePeriod} onAddSection={onAddTimelineSection} onDeleteEvent={onDeleteTimelineEvent} onDeletePeriod={onDeleteTimelinePeriod} onDeleteSection={onDeleteTimelineSection} onEditEvent={onEditTimelineEvent} onEditPeriod={onEditTimelinePeriod} onEditSection={onEditTimelineSection} onMoveEvent={onMoveTimelineEvent} onMovePeriod={onMoveTimelinePeriod} onMoveSection={onMoveTimelineSection} onSetDirection={onSetTimelineDirection} /> : null}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
@@ -4192,6 +4268,164 @@ const SEMANTIC_PANEL_STYLE: CSSProperties = {
   maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12,
   width: 'min(400px, calc(100% - 24px))', zIndex: 7,
 };
+
+function JourneyEditorControls({ bottom, diagram, onAddSection, onAddTask, onDeleteSection, onDeleteTask, onEditSection, onEditTask, onMoveSection, onMoveTask }: { bottom: number; diagram: JourneyDiagramSnapshot; onAddSection?: (value: { label: string }) => void; onAddTask?: (value: JourneyTask) => void; onDeleteSection?: (label: string) => void; onDeleteTask?: (identity: JourneyTaskIdentity) => void; onEditSection?: (label: string, value: { label?: string }) => void; onEditTask?: (identity: JourneyTaskIdentity, value: Partial<JourneyTask>) => void; onMoveSection?: (label: string, direction: 'up' | 'down') => void; onMoveTask?: (identity: JourneyTaskIdentity, direction: 'up' | 'down') => void }) {
+  const [section, setSection] = useState('Section');
+  const [task, setTask] = useState<JourneyTask>({ actors: ['Customer'], score: 3, section: diagram.sections[0]?.label ?? '', text: 'Task' });
+  useEffect(() => {
+    setTask((current) => ({ ...current, section: diagram.sections.some((item) => item.label === current.section) ? current.section : diagram.sections[0]?.label ?? '' }));
+  }, [diagram.sections]);
+  return <aside className="canvas-semantic-editor canvas-journey-editor" data-canvas-pan-exclusion="true" data-testid="journey-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
+    <strong>User journey</strong>
+    <form onSubmit={(event) => { event.preventDefault(); onAddSection?.({ label: section }); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}>
+      <input aria-label="New journey section" onChange={(event) => setSection(event.target.value)} value={section} />
+      <button type="submit">Add section</button>
+    </form>
+    <form onSubmit={(event) => { event.preventDefault(); onAddTask?.(task); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+      <select aria-label="New journey task section" onChange={(event) => setTask((current) => ({ ...current, section: event.target.value }))} value={task.section}>
+        <option value="">No section</option>{diagram.sections.map((item) => <option key={item.label}>{item.label}</option>)}
+      </select>
+      <input aria-label="New journey task" onChange={(event) => setTask((current) => ({ ...current, text: event.target.value }))} value={task.text} />
+      <input aria-label="New journey score" max="5" min="1" onChange={(event) => setTask((current) => ({ ...current, score: Number(event.target.value) }))} type="number" value={task.score} />
+      <input aria-label="New journey actors" onChange={(event) => setTask((current) => ({ ...current, actors: event.target.value.split(',').map((actor) => actor.trim()).filter(Boolean) }))} value={task.actors.join(', ')} />
+      <button type="submit">Add task</button>
+    </form>
+    {diagram.sections.map((item) => <SectionForm family="Journey" item={item} key={item.label} onDelete={onDeleteSection} onSave={onEditSection} onMove={onMoveSection} />)}
+    {diagram.tasks.map((item, index) => <JourneyTaskForm identity={getJourneyTaskIdentity(item, index, diagram.tasks)} key={`${index}:${item.text}`} onDelete={onDeleteTask} onMove={onMoveTask} onSave={onEditTask} task={item} />)}
+  </aside>;
+}
+function JourneyTaskForm({ identity, onDelete, onMove, onSave, task }: { identity: JourneyTaskIdentity; onDelete?: (identity: JourneyTaskIdentity) => void; onMove?: (identity: JourneyTaskIdentity, direction: 'up' | 'down') => void; onSave?: (identity: JourneyTaskIdentity, value: Partial<JourneyTask>) => void; task: JourneyTask }) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(task);
+  return <form aria-label={`Journey task ${task.text}`} onSubmit={(event) => { event.preventDefault(); onSave?.(identity, draft); resetDraft(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+    <input aria-label={`Journey task ${task.text} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />
+    <input aria-label={`Journey task ${task.text} score`} max="5" min="1" onChange={(event) => updateDraft((current) => ({ ...current, score: Number(event.target.value) }))} type="number" value={draft.score} />
+    <input aria-label={`Journey task ${task.text} actors`} onChange={(event) => updateDraft((current) => ({ ...current, actors: event.target.value.split(',').map((actor) => actor.trim()).filter(Boolean) }))} value={draft.actors.join(', ')} />
+    <button type="submit">Save</button>
+    <button aria-label={`Move journey task ${task.text} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</button>
+    <button aria-label={`Move journey task ${task.text} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</button>
+    <button aria-label={`Delete journey task ${task.text}`} onClick={() => onDelete?.(identity)} type="button">Delete</button>
+  </form>;
+}
+
+function GanttEditorControls({ bottom, diagram, onAddSection, onAddTask, onDeleteSection, onDeleteTask, onEditSection, onEditTask, onMoveSection, onMoveTask }: { bottom: number; diagram: GanttDiagramSnapshot; onAddSection?: (value: { label: string }) => void; onAddTask?: (value: GanttTask) => void; onDeleteSection?: (label: string) => void; onDeleteTask?: (identity: GanttTaskIdentity) => void; onEditSection?: (label: string, value: { label?: string }) => void; onEditTask?: (identity: GanttTaskIdentity, value: Partial<GanttTask>) => void; onMoveSection?: (label: string, direction: 'up' | 'down') => void; onMoveTask?: (identity: GanttTaskIdentity, direction: 'up' | 'down') => void }) {
+  const [section, setSection] = useState('Section');
+  const [task, setTask] = useState<GanttTask>({ end: '1d', id: 'task', section: diagram.sections[0]?.label ?? '', start: '2026-01-01', statuses: [], text: 'Task' });
+  useEffect(() => {
+    setTask((current) => ({ ...current, section: diagram.sections.some((item) => item.label === current.section) ? current.section : diagram.sections[0]?.label ?? '' }));
+  }, [diagram.sections]);
+  return <aside className="canvas-semantic-editor canvas-gantt-editor" data-canvas-pan-exclusion="true" data-testid="gantt-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
+    <strong>Gantt</strong>
+    <form onSubmit={(event) => { event.preventDefault(); onAddSection?.({ label: section }); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}>
+      <input aria-label="New Gantt section" onChange={(event) => setSection(event.target.value)} value={section} />
+      <button type="submit">Add section</button>
+    </form>
+    <form onSubmit={(event) => { event.preventDefault(); onAddTask?.(task); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+      <select aria-label="New Gantt task section" onChange={(event) => setTask((current) => ({ ...current, section: event.target.value }))} value={task.section}>
+        <option value="">No section</option>{diagram.sections.map((item) => <option key={item.label}>{item.label}</option>)}
+      </select>
+      <input aria-label="New Gantt task" onChange={(event) => setTask((current) => ({ ...current, text: event.target.value }))} value={task.text} />
+      <input aria-label="New Gantt task id" onChange={(event) => setTask((current) => ({ ...current, id: event.target.value }))} value={task.id} />
+      <input aria-label="New Gantt start or dependency" onChange={(event) => setTask((current) => ({ ...current, start: event.target.value }))} value={task.start} />
+      <input aria-label="New Gantt end or duration" onChange={(event) => setTask((current) => ({ ...current, end: event.target.value }))} value={task.end} />
+      <GanttStatusControls ariaPrefix="New Gantt task status" statuses={task.statuses} onChange={(statuses) => setTask((current) => ({ ...current, statuses }))} />
+      <button type="submit">Add task</button>
+    </form>
+    {diagram.sections.map((item) => <SectionForm family="Gantt" item={item} key={item.label} onDelete={onDeleteSection} onSave={onEditSection} onMove={onMoveSection} />)}
+    {diagram.tasks.map((item, index) => <GanttTaskForm identity={getGanttTaskIdentity(item, index, diagram.tasks)} key={item.id} onDelete={onDeleteTask} onMove={onMoveTask} onSave={onEditTask} sections={diagram.sections.map((entry) => entry.label)} task={item} />)}
+  </aside>;
+}
+
+function GanttTaskForm({ identity, onDelete, onMove, onSave, sections, task }: { identity: GanttTaskIdentity; onDelete?: (identity: GanttTaskIdentity) => void; onMove?: (identity: GanttTaskIdentity, direction: 'up' | 'down') => void; onSave?: (identity: GanttTaskIdentity, value: Partial<GanttTask>) => void; sections: string[]; task: GanttTask }) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(task);
+  return <form aria-label={`Gantt task ${task.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(identity, draft); resetDraft(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+    <select aria-label={`Gantt task ${task.id} section`} onChange={(event) => updateDraft((current) => ({ ...current, section: event.target.value }))} value={draft.section}>
+      <option value="">No section</option>{sections.map((section) => <option key={section}>{section}</option>)}
+    </select>
+    <input aria-label={`Gantt task ${task.id} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />
+    <input aria-label={`Gantt task ${task.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} />
+    <input aria-label={`Gantt task ${task.id} start or dependency`} onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} value={draft.start} />
+    <input aria-label={`Gantt task ${task.id} end or duration`} onChange={(event) => updateDraft((current) => ({ ...current, end: event.target.value }))} value={draft.end} />
+    <GanttStatusControls ariaPrefix={`Gantt task ${task.id} status`} statuses={draft.statuses} onChange={(statuses) => updateDraft((current) => ({ ...current, statuses }))} />
+    <button type="submit">Save</button>
+    <button aria-label={`Move Gantt task ${task.id} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</button>
+    <button aria-label={`Move Gantt task ${task.id} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</button>
+    <button aria-label={`Delete Gantt task ${task.id}`} onClick={() => onDelete?.(identity)} type="button">Delete</button>
+  </form>;
+}
+
+function GanttStatusControls({ ariaPrefix, onChange, statuses }: { ariaPrefix: string; onChange: (statuses: GanttTask['statuses']) => void; statuses: GanttTask['statuses'] }) {
+  const options: GanttTask['statuses'][number][] = ['active', 'done', 'crit', 'milestone'];
+  return <>{options.map((status) => <label key={status}>
+    <input aria-label={`${ariaPrefix} ${status}`} checked={statuses.includes(status)} onChange={(event) => onChange(event.target.checked ? [...statuses, status] : statuses.filter((candidate) => candidate !== status))} type="checkbox" />
+    {status}
+  </label>)}</>;
+}
+
+function TimelineEditorControls({ bottom, diagram, onAddEvent, onAddPeriod, onAddSection, onDeleteEvent, onDeletePeriod, onDeleteSection, onEditEvent, onEditPeriod, onEditSection, onMoveEvent, onMovePeriod, onMoveSection, onSetDirection }: { bottom: number; diagram: TimelineDiagramSnapshot; onAddEvent?: (value: TimelineEvent) => void; onAddPeriod?: (value: TimelinePeriod) => void; onAddSection?: (value: { label: string }) => void; onDeleteEvent?: (identity: TimelineEventIdentity) => void; onDeletePeriod?: (label: string) => void; onDeleteSection?: (label: string) => void; onEditEvent?: (identity: TimelineEventIdentity, value: Partial<TimelineEvent>) => void; onEditPeriod?: (label: string, value: Partial<TimelinePeriod>) => void; onEditSection?: (label: string, value: { label?: string }) => void; onMoveEvent?: (identity: TimelineEventIdentity, direction: 'up' | 'down') => void; onMovePeriod?: (label: string, section: string) => void; onMoveSection?: (label: string, direction: 'up' | 'down') => void; onSetDirection?: (value: TimelineDirection) => void }) {
+  const [section, setSection] = useState('Section');
+  const [period, setPeriod] = useState<TimelinePeriod>({ label: '2026', section: diagram.sections[0]?.label ?? '' });
+  const [event, setEvent] = useState<TimelineEvent>({ period: diagram.periods[0]?.label ?? '', section: diagram.periods[0]?.section ?? '', text: 'Event' });
+  useEffect(() => {
+    setPeriod((current) => ({ ...current, section: diagram.sections.some((item) => item.label === current.section) ? current.section : diagram.sections[0]?.label ?? '' }));
+    setEvent((current) => {
+      const selected = diagram.periods.find((item) => item.label === current.period) ?? diagram.periods[0];
+      return selected ? { ...current, period: selected.label, section: selected.section } : { ...current, period: '', section: '' };
+    });
+  }, [diagram.periods, diagram.sections]);
+  return <aside className="canvas-semantic-editor canvas-timeline-editor" data-canvas-pan-exclusion="true" data-testid="timeline-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
+    <strong>Timeline</strong>
+    <label>Direction <select aria-label="Timeline direction" onChange={(event) => onSetDirection?.(event.target.value as TimelineDirection)} value={diagram.direction}><option>LR</option><option>TD</option></select></label>
+    <form onSubmit={(event) => { event.preventDefault(); onAddSection?.({ label: section }); }}>
+      <input aria-label="New timeline section" onChange={(event) => setSection(event.target.value)} value={section} />
+      <button type="submit">Add section</button>
+    </form>
+    <form onSubmit={(event) => { event.preventDefault(); onAddPeriod?.(period); }}>
+      <input aria-label="New timeline period label" onChange={(event) => setPeriod((current) => ({ ...current, label: event.target.value }))} value={period.label} />
+      <select aria-label="New timeline period section" onChange={(event) => setPeriod((current) => ({ ...current, section: event.target.value }))} value={period.section}>
+        <option value="">Top level</option>{diagram.sections.map((item) => <option key={item.label}>{item.label}</option>)}
+      </select>
+      <button type="submit">Add period</button>
+    </form>
+    <form onSubmit={(submitEvent) => { submitEvent.preventDefault(); onAddEvent?.(event); }}>
+      <select aria-label="New timeline event period" onChange={(changeEvent) => setEvent((current) => {
+        const selected = diagram.periods.find((item) => item.label === changeEvent.target.value);
+        return selected ? { ...current, period: selected.label, section: selected.section } : current;
+      })} value={event.period}>
+        {diagram.periods.map((item) => <option key={item.label} value={item.label}>{item.label}</option>)}
+      </select>
+      <input aria-label="New timeline event" onChange={(changeEvent) => setEvent((current) => ({ ...current, text: changeEvent.target.value }))} value={event.text} />
+      <button type="submit">Add event</button>
+    </form>
+    {diagram.sections.map((item) => <SectionForm family="Timeline" item={item} key={item.label} onDelete={onDeleteSection} onMove={onMoveSection} onSave={onEditSection} />)}
+    {diagram.periods.map((item) => <TimelinePeriodForm key={item.label} onDelete={onDeletePeriod} onEdit={onEditPeriod} onMove={onMovePeriod} period={item} sections={diagram.sections.map((section) => section.label)} />)}
+    {diagram.events.map((item, index) => <TimelineEventForm identity={getTimelineEventIdentity(item, index, diagram.events)} key={`${index}:${item.text}`} onDelete={onDeleteEvent} onMove={onMoveEvent} onSave={onEditEvent} event={item} />)}
+  </aside>;
+}
+
+function TimelinePeriodForm({ onDelete, onEdit, onMove, period, sections }: { onDelete?: (label: string) => void; onEdit?: (label: string, value: Partial<TimelinePeriod>) => void; onMove?: (label: string, section: string) => void; period: TimelinePeriod; sections: string[] }) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(period);
+  return <form aria-label={`Timeline period ${period.label}`} onSubmit={(event) => { event.preventDefault(); onEdit?.(period.label, draft); resetDraft(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+    <input aria-label={`Timeline period ${period.label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} />
+    <select aria-label={`Timeline period ${period.label} destination`} onChange={(event) => updateDraft((current) => ({ ...current, section: event.target.value }))} value={draft.section}>
+      <option value="">Top level</option>{sections.map((section) => <option key={section}>{section}</option>)}
+    </select>
+    <button type="submit">Save</button>
+    <button aria-label={`Move timeline period ${period.label} to top level`} onClick={() => onMove?.(period.label, '')} type="button">Top level</button>
+    <button aria-label={`Delete timeline period ${period.label}`} onClick={() => onDelete?.(period.label)} type="button">Delete</button>
+  </form>;
+}
+
+function TimelineEventForm({ event, identity, onDelete, onMove, onSave }: { event: TimelineEvent; identity: TimelineEventIdentity; onDelete?: (identity: TimelineEventIdentity) => void; onMove?: (identity: TimelineEventIdentity, direction: 'up' | 'down') => void; onSave?: (identity: TimelineEventIdentity, value: Partial<TimelineEvent>) => void }) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(event);
+  return <form aria-label={`Timeline event ${event.text}`} onSubmit={(event) => { event.preventDefault(); onSave?.(identity, draft); resetDraft(); }}>
+    <input aria-label={`Timeline event ${event.text} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />
+    <button type="submit">Save</button>
+    <button aria-label={`Move timeline event ${event.text} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</button>
+    <button aria-label={`Move timeline event ${event.text} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</button>
+    <button aria-label={`Delete timeline event ${event.text}`} onClick={() => onDelete?.(identity)} type="button">Delete</button>
+  </form>;
+}
+function SectionForm({ family, item, onDelete, onMove, onSave }: { family: string; item: { label: string }; onDelete?: (label: string) => void; onMove?: (label: string, direction: 'up' | 'down') => void; onSave?: (label: string, value: { label?: string }) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(item); return <form aria-label={`${family} section ${item.label}`} onSubmit={(event) => { event.preventDefault(); onSave?.(item.label, draft); resetDraft(); }}><input aria-label={`${family} section ${item.label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><button type="submit">Save</button><button aria-label={`Move ${family} section ${item.label} up`} onClick={() => onMove?.(item.label, 'up')} type="button">↑</button><button aria-label={`Move ${family} section ${item.label} down`} onClick={() => onMove?.(item.label, 'down')} type="button">↓</button><button aria-label={`Delete ${family} section ${item.label}`} onClick={() => onDelete?.(item.label)} type="button">Delete</button></form>; }
 
 function ClassEditorControls({
   bottom, diagram, onAddAnnotation, onAddClass, onAddMember, onAddRelationship, onDeleteAnnotation, onDeleteClass,

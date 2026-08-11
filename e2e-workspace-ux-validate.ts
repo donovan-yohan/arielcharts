@@ -159,6 +159,16 @@ const SWIMLANE_DIAGRAM_FIXTURE = `swimlane-beta LR
     answer[Answer]
   end
   request --> answer`;
+const JOURNEY_DIAGRAM_FIXTURE = `journey
+  section Product
+  Browse: 5: Customer`;
+const GANTT_DIAGRAM_FIXTURE = `gantt
+  dateFormat YYYY-MM-DD
+  section Build
+  Design : design, 2026-01-01, 1d`;
+const TIMELINE_DIAGRAM_FIXTURE = `timeline LR
+  section Delivery
+  2026 : Started`;
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
@@ -1131,6 +1141,122 @@ async function expectRelationshipArchitectureEditors(page: Page): Promise<void> 
   await expect(page.getByTestId('swimlane-editor-controls')).toHaveCount(0);
   assertAnchorsStable(before, await snapshotAnchors(page, ANCHORS));
   assert(await canvasTransform(page) === beforeTransform, 'Relationship/architecture semantic forms changed the generic Mermaid camera transform.');
+}
+
+async function expectTemporalSemanticEditors(page: Page): Promise<void> {
+  await replaceSource(page, JOURNEY_DIAGRAM_FIXTURE);
+  await waitForSource(page, JOURNEY_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'User journey · editable · form');
+  await closeFlyout(page, 'source');
+  const journey = page.getByTestId('journey-editor-controls');
+  await journey.getByLabel('New journey section').fill('Support');
+  await verifiedClick(page, journey.getByRole('button', { name: 'Add section', exact: true }), 'Journey add section control');
+  const support = journey.getByRole('form', { name: 'Journey section Support', exact: true });
+  await support.getByLabel('Journey section Support label').fill('Help');
+  await verifiedClick(page, support.getByRole('button', { name: 'Save', exact: true }), 'Journey edit section control');
+  await verifiedClick(page, journey.getByLabel('Move Journey section Help up'), 'Journey reorder section control');
+  await verifiedClick(page, journey.getByLabel('Delete Journey section Help'), 'Journey delete section control');
+  const addJourney = journey.getByRole('button', { name: 'Add task', exact: true });
+  await scrollErControlIntoView(addJourney);
+  await assertHitTarget(page, addJourney, 'Journey add task control');
+  await verifiedClick(page, addJourney, 'Journey add task control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('Task: 3: Customer');
+  await closeFlyout(page, 'source');
+  const browse = journey.getByRole('form', { name: 'Journey task Browse', exact: true });
+  await expect(browse).toBeVisible({ timeout: 15_000 });
+  await browse.getByLabel('Journey task Browse text').fill('Explore');
+  await verifiedClick(page, browse.getByRole('button', { name: 'Save', exact: true }), 'Journey edit task control');
+  await verifiedClick(page, journey.getByLabel('Move journey task Task up'), 'Journey reorder task control');
+  await verifiedClick(page, journey.getByLabel('Delete journey task Task'), 'Journey delete task control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('Explore: 5: Customer');
+  await closeFlyout(page, 'source');
+  await replaceSource(page, 'journey\n  Task: 6: Customer');
+  await waitForSource(page, 'journey\n  Task: 6: Customer');
+  await expect(page.getByTestId('journey-editor-controls')).toHaveCount(0);
+
+  await replaceSource(page, GANTT_DIAGRAM_FIXTURE);
+  await waitForSource(page, GANTT_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Gantt · editable · form');
+  await closeFlyout(page, 'source');
+  const gantt = page.getByTestId('gantt-editor-controls');
+  await gantt.getByLabel('New Gantt section').fill('Release');
+  await verifiedClick(page, gantt.getByRole('button', { name: 'Add section', exact: true }), 'Gantt add section control');
+  const release = gantt.getByRole('form', { name: 'Gantt section Release', exact: true });
+  await release.getByLabel('Gantt section Release label').fill('Launch');
+  await verifiedClick(page, release.getByRole('button', { name: 'Save', exact: true }), 'Gantt edit section control');
+  await verifiedClick(page, gantt.getByLabel('Move Gantt section Launch up'), 'Gantt reorder section control');
+  await verifiedClick(page, gantt.getByLabel('Delete Gantt section Launch'), 'Gantt delete section control');
+  await expect(gantt.getByLabel('New Gantt task section')).toHaveValue('Build');
+  await gantt.getByLabel('New Gantt task section').selectOption('Build');
+  await gantt.getByLabel('New Gantt end or duration').fill('0d');
+  await gantt.getByLabel('New Gantt task status milestone').check();
+  const addGantt = gantt.getByRole('button', { name: 'Add task', exact: true });
+  await scrollErControlIntoView(addGantt);
+  await assertHitTarget(page, addGantt, 'Gantt add task control');
+  await verifiedClick(page, addGantt, 'Gantt add task control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('Task : milestone, task, 2026-01-01, 0d');
+  await closeFlyout(page, 'source');
+  const design = gantt.getByRole('form', { name: 'Gantt task design', exact: true });
+  await design.getByLabel('Gantt task design text').fill('Design review');
+  await verifiedClick(page, design.getByRole('button', { name: 'Save', exact: true }), 'Gantt edit task control');
+  await verifiedClick(page, gantt.getByLabel('Move Gantt task task up'), 'Gantt reorder task control');
+  await verifiedClick(page, gantt.getByLabel('Delete Gantt task task'), 'Gantt delete task control');
+  await replaceSource(page, 'gantt\n  dateFormat DD-MM-YYYY\n  Task : task, 01-01-2026, 1d');
+  await waitForSource(page, 'gantt\n  dateFormat DD-MM-YYYY\n  Task : task, 01-01-2026, 1d');
+  await expect(page.getByTestId('gantt-editor-controls')).toHaveCount(0);
+
+  await replaceSource(page, TIMELINE_DIAGRAM_FIXTURE);
+  await waitForSource(page, TIMELINE_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Timeline · editable · form');
+  await closeFlyout(page, 'source');
+  const timeline = page.getByTestId('timeline-editor-controls');
+  await timeline.getByLabel('New timeline period label', { exact: true }).fill('2027');
+  await timeline.getByLabel('New timeline period section').selectOption('Delivery');
+  await verifiedClick(page, timeline.getByRole('button', { name: 'Add period', exact: true }), 'Timeline add period control');
+  await timeline.getByLabel('New timeline event period').selectOption('2027');
+  await verifiedClick(page, timeline.getByRole('button', { name: 'Add event', exact: true }), 'Timeline selected-period add event control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('  2027\n    : Event');
+  await closeFlyout(page, 'source');
+  const addedPeriod = timeline.getByRole('form', { name: 'Timeline period 2027', exact: true });
+  await addedPeriod.getByLabel('Timeline period 2027 label').fill('Future');
+  await addedPeriod.getByLabel('Timeline period 2027 destination').selectOption('');
+  await verifiedClick(page, addedPeriod.getByRole('button', { name: 'Save', exact: true }), 'Timeline edit and destination control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toMatch(/timeline LR\n  Future\n    : Event\n  section Delivery/);
+  await closeFlyout(page, 'source');
+  await verifiedClick(page, timeline.getByLabel('Delete timeline period Future'), 'Timeline delete period control');
+  await expect(timeline.getByLabel('New timeline event period')).toHaveValue('2026');
+  const addTimeline = timeline.getByRole('button', { name: 'Add event', exact: true });
+  await scrollErControlIntoView(addTimeline);
+  await assertHitTarget(page, addTimeline, 'Timeline add event control');
+  await verifiedClick(page, addTimeline, 'Timeline add event control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain(': Event');
+  await closeFlyout(page, 'source');
+  const started = timeline.getByRole('form', { name: 'Timeline event Started', exact: true });
+  await started.getByLabel('Timeline event Started text').fill('Launched');
+  await verifiedClick(page, started.getByRole('button', { name: 'Save', exact: true }), 'Timeline edit event control');
+  const inlinePeriod = timeline.getByRole('form', { name: 'Timeline period 2026', exact: true });
+  await inlinePeriod.getByLabel('Timeline period 2026 label').fill('2025');
+  await inlinePeriod.getByLabel('Timeline period 2026 destination').selectOption('');
+  const saveInlinePeriod = inlinePeriod.getByRole('button', { name: 'Save', exact: true });
+  await assertHitTarget(page, saveInlinePeriod, 'Timeline inline period rename and move control');
+  await verifiedClick(page, saveInlinePeriod, 'Timeline inline period rename and move control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toMatch(/timeline LR\n  2025 : Launched\n    : Event\n  section Delivery/);
+  await closeFlyout(page, 'source');
+  await verifiedClick(page, timeline.getByLabel('Move timeline event Event up'), 'Timeline reorder event control');
+  await verifiedClick(page, timeline.getByLabel('Delete timeline event Event'), 'Timeline delete event control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toMatch(/timeline LR\n  2025\n    : Launched\n  section Delivery/);
+  await closeFlyout(page, 'source');
+  await replaceSource(page, 'timeline\n  accTitle: advanced');
+  await waitForSource(page, 'timeline\n  accTitle: advanced');
+  await expect(page.getByTestId('timeline-editor-controls')).toHaveCount(0);
 }
 
 async function waitForSemanticMode(page: Page, mode: string): Promise<void> {
@@ -3506,6 +3632,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'ER semantic form has hit-tested entity controls, source-safe writes, stable anchors, and no generic graph editor');
       await expectRelationshipArchitectureEditors(page);
       record(results, 'Class, State, and Requirement semantic forms expose hit-tested source-safe controls, preserve anchors/camera, and fail closed for nested state');
+      await expectTemporalSemanticEditors(page);
+      record(results, 'Journey, Gantt, and Timeline semantic forms expose hit-tested source-backed controls and fail closed for advanced source');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');

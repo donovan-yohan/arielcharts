@@ -8,13 +8,16 @@ import { isSwimlaneSourceRepresentable } from './swimlane-mutations';
 import { isRequirementSourceRepresentable } from './requirement-mutations';
 import { isSequenceSourceRepresentable } from './sequence-mutations';
 import { isStateSourceRepresentable } from './state-mutations';
+import { isJourneySourceRepresentable } from './journey-mutations';
+import { isGanttSourceRepresentable } from './gantt-mutations';
+import { isTimelineSourceRepresentable } from './timeline-mutations';
 
 /** The installed Mermaid detector registry this catalog was audited against. */
 export const MERMAID_CAPABILITY_CATALOG_VERSION = '11.16.1';
 
 export type DiagramKind = 'flowchart' | 'sequence' | 'er' | 'generic';
 export type DiagramEditingMode = 'canvas' | 'semantic-form' | 'source-only' | 'unavailable-plugin';
-export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'source-only' | 'unavailable-plugin';
+export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'source-only' | 'unavailable-plugin';
 export type MermaidDiagramFamilyId = typeof MERMAID_DIAGRAM_FAMILIES[number]['id'];
 
 export interface MermaidDiagramFamily {
@@ -222,6 +225,13 @@ const SWIMLANE_ADAPTER: DiagramSourceModelAdapter = {
   },
   getRepresentability: (source) => isSwimlaneSourceRepresentable(source) ? { representable: true } : { representable: false, reason: 'unsupported-syntax' },
 };
+const JOURNEY_OPERATIONS = new Set(['add-section', 'edit-section', 'delete-section', 'move-section', 'add-task', 'edit-task', 'delete-task', 'move-task']);
+const GANTT_OPERATIONS = new Set(['add-section', 'edit-section', 'delete-section', 'move-section', 'add-task', 'edit-task', 'delete-task', 'move-task']);
+const TIMELINE_OPERATIONS = new Set(['set-direction', 'add-section', 'edit-section', 'delete-section', 'move-section', 'add-period', 'edit-period', 'delete-period', 'move-period', 'add-event', 'edit-event', 'delete-event', 'move-event']);
+function strictAdapter(id: DiagramAdapterId, operations: ReadonlySet<string>, representable: (source: string) => boolean): DiagramSourceModelAdapter { return { id, getOperationResult(source, operation) { return !representable(source) ? { supported: false, reason: 'unrepresentable' } : operations.has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' }; }, getRepresentability: (source) => representable(source) ? { representable: true } : { representable: false, reason: 'unsupported-syntax' } }; }
+const JOURNEY_ADAPTER = strictAdapter('journey', JOURNEY_OPERATIONS, isJourneySourceRepresentable);
+const GANTT_ADAPTER = strictAdapter('gantt', GANTT_OPERATIONS, isGanttSourceRepresentable);
+const TIMELINE_ADAPTER = strictAdapter('timeline', TIMELINE_OPERATIONS, isTimelineSourceRepresentable);
 
 /**
  * Every built-in visual Mermaid family in 11.16.1. Aliases, renderer variants,
@@ -237,10 +247,10 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'entity-relationship', label: 'Entity relationship', parserTypes: ['er'], editingMode: 'semantic-form', adapter: 'er' },
   { id: 'event-modeling', label: 'Event modeling', parserTypes: ['eventmodeling'] },
   { id: 'flowchart', label: 'Flowchart', parserTypes: ['flowchart', 'flowchart-v2', 'flowchart-elk'], editingMode: 'canvas', adapter: 'flowchart' },
-  { id: 'gantt', label: 'Gantt', parserTypes: ['gantt'] },
+  { id: 'gantt', label: 'Gantt', parserTypes: ['gantt'], editingMode: 'semantic-form', adapter: 'gantt' },
   { id: 'gitgraph', label: 'Gitgraph', parserTypes: ['gitGraph'] },
   { id: 'ishikawa', label: 'Ishikawa', parserTypes: ['ishikawa'] },
-  { id: 'journey', label: 'User journey', parserTypes: ['journey'] },
+  { id: 'journey', label: 'User journey', parserTypes: ['journey'], editingMode: 'semantic-form', adapter: 'journey' },
   { id: 'kanban', label: 'Kanban', parserTypes: ['kanban'] },
   { id: 'mindmap', label: 'Mindmap', parserTypes: ['mindmap'] },
   { id: 'packet', label: 'Packet', parserTypes: ['packet'] },
@@ -253,7 +263,7 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'sequence', label: 'Sequence', parserTypes: ['sequence'], editingMode: 'semantic-form', adapter: 'sequence' },
   { id: 'state', label: 'State', parserTypes: ['state', 'stateDiagram'], editingMode: 'semantic-form', adapter: 'state' },
   { id: 'swimlane', label: 'Swimlane', parserTypes: ['swimlane'], editingMode: 'semantic-form', adapter: 'swimlane' },
-  { id: 'timeline', label: 'Timeline', parserTypes: ['timeline'] },
+  { id: 'timeline', label: 'Timeline', parserTypes: ['timeline'], editingMode: 'semantic-form', adapter: 'timeline' },
   { id: 'tree-view', label: 'Tree view', parserTypes: ['treeView'] },
   { id: 'treemap', label: 'Treemap', parserTypes: ['treemap'] },
   { id: 'venn', label: 'Venn', parserTypes: ['venn'] },
@@ -316,6 +326,9 @@ export function getDiagramSourceModelAdapter(capability: DiagramCapability | nul
     case 'block': return BLOCK_ADAPTER;
     case 'c4': return C4_ADAPTER;
     case 'swimlane': return SWIMLANE_ADAPTER;
+    case 'journey': return JOURNEY_ADAPTER;
+    case 'gantt': return GANTT_ADAPTER;
+    case 'timeline': return TIMELINE_ADAPTER;
     case 'unavailable-plugin': return UNAVAILABLE_PLUGIN_ADAPTER;
     default: return SOURCE_ONLY_ADAPTER;
   }

@@ -103,6 +103,9 @@ import {
 import { addC4Boundary, addC4Element, addC4Relationship, deleteC4Boundary, deleteC4Element, deleteC4Relationship, editC4Boundary, editC4Element, editC4Relationship, getC4DiagramSnapshot, moveC4Boundary, moveC4Element } from '../lib/c4-mutations';
 import { addBlockComposite, addBlockLink, addBlockNode, deleteBlockComposite, deleteBlockLink, deleteBlockNode, editBlockComposite, editBlockLink, editBlockNode, getBlockDiagramSnapshot, moveBlockComposite, moveBlockNode, setBlockColumns } from '../lib/block-mutations';
 import { addSwimlane, addSwimlaneHandoff, addSwimlaneNode, deleteSwimlane, deleteSwimlaneHandoff, deleteSwimlaneNode, editSwimlane, editSwimlaneHandoff, editSwimlaneNode, getSwimlaneDiagramSnapshot, moveSwimlaneNode } from '../lib/swimlane-mutations';
+import { addJourneySection, addJourneyTask, deleteJourneySection, deleteJourneyTask, editJourneySection, editJourneyTask, getJourneyDiagramSnapshot, moveJourneySection, moveJourneyTask } from '../lib/journey-mutations';
+import { addGanttSection, addGanttTask, deleteGanttSection, deleteGanttTask, editGanttSection, editGanttTask, getGanttDiagramSnapshot, moveGanttSection, moveGanttTask } from '../lib/gantt-mutations';
+import { addTimelineEvent, addTimelinePeriod, addTimelineSection, deleteTimelineEvent, deleteTimelinePeriod, deleteTimelineSection, editTimelineEvent, editTimelinePeriod, editTimelineSection, getTimelineDiagramSnapshot, moveTimelineEvent, moveTimelinePeriod, moveTimelineSection, setTimelineDirection } from '../lib/timeline-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -1719,6 +1722,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isC4 = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'c4');
   const isBlock = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'block');
   const isSwimlane = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'swimlane');
+  const isJourney = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'journey');
+  const isGantt = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'gantt');
+  const isTimeline = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'timeline');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1745,6 +1751,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const c4Diagram = useMemo(() => isC4 ? getC4DiagramSnapshot(renderedMermaidText) : null, [isC4, renderedMermaidText]);
   const blockDiagram = useMemo(() => isBlock ? getBlockDiagramSnapshot(renderedMermaidText) : null, [isBlock, renderedMermaidText]);
   const swimlaneDiagram = useMemo(() => isSwimlane ? getSwimlaneDiagramSnapshot(renderedMermaidText) : null, [isSwimlane, renderedMermaidText]);
+  const journeyDiagram = useMemo(() => isJourney ? getJourneyDiagramSnapshot(renderedMermaidText) : null, [isJourney, renderedMermaidText]);
+  const ganttDiagram = useMemo(() => isGantt ? getGanttDiagramSnapshot(renderedMermaidText) : null, [isGantt, renderedMermaidText]);
+  const timelineDiagram = useMemo(() => isTimeline ? getTimelineDiagramSnapshot(renderedMermaidText) : null, [isTimeline, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2201,6 +2210,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             blockDiagram={blockDiagram}
             isSwimlane={isSwimlane}
             swimlaneDiagram={swimlaneDiagram}
+            isJourney={isJourney}
+            journeyDiagram={journeyDiagram}
+            isGantt={isGantt}
+            ganttDiagram={ganttDiagram}
+            isTimeline={isTimeline}
+            timelineDiagram={timelineDiagram}
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
@@ -2386,6 +2401,35 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onAddSwimlaneHandoff={(value) => { mutateCanvasSource((source) => addSwimlaneHandoff(source, value), 'Added a swimlane handoff'); }}
             onEditSwimlaneHandoff={(identity, value) => { mutateCanvasSource((source) => editSwimlaneHandoff(source, identity, value), 'Edited a swimlane handoff'); }}
             onDeleteSwimlaneHandoff={(identity) => { mutateCanvasSource((source) => deleteSwimlaneHandoff(source, identity), 'Deleted a swimlane handoff'); }}
+            onAddJourneySection={(value) => { mutateCanvasSource((source) => addJourneySection(source, value), 'Added a journey section'); }}
+            onDeleteJourneySection={(label) => { mutateCanvasSource((source) => deleteJourneySection(source, label), 'Deleted a journey section'); }}
+            onEditJourneySection={(label, value) => { mutateCanvasSource((source) => editJourneySection(source, label, value), 'Edited a journey section'); }}
+            onMoveJourneySection={(label, direction) => { mutateCanvasSource((source) => moveJourneySection(source, label, direction), 'Reordered journey sections'); }}
+            onAddJourneyTask={(value) => { mutateCanvasSource((source) => addJourneyTask(source, value), 'Added a journey task'); }}
+            onEditJourneyTask={(identity, value) => { mutateCanvasSource((source) => editJourneyTask(source, identity, value), 'Edited a journey task'); }}
+            onDeleteJourneyTask={(identity) => { mutateCanvasSource((source) => deleteJourneyTask(source, identity), 'Deleted a journey task'); }}
+            onMoveJourneyTask={(identity, direction) => { mutateCanvasSource((source) => moveJourneyTask(source, identity, direction), 'Reordered journey tasks'); }}
+            onAddGanttSection={(value) => { mutateCanvasSource((source) => addGanttSection(source, value), 'Added a Gantt section'); }}
+            onDeleteGanttSection={(label) => { mutateCanvasSource((source) => deleteGanttSection(source, label), 'Deleted a Gantt section'); }}
+            onEditGanttSection={(label, value) => { mutateCanvasSource((source) => editGanttSection(source, label, value), 'Edited a Gantt section'); }}
+            onMoveGanttSection={(label, direction) => { mutateCanvasSource((source) => moveGanttSection(source, label, direction), 'Reordered Gantt sections'); }}
+            onAddGanttTask={(value) => { mutateCanvasSource((source) => addGanttTask(source, value), 'Added a Gantt task'); }}
+            onEditGanttTask={(identity, value) => { mutateCanvasSource((source) => editGanttTask(source, identity, value), 'Edited a Gantt task'); }}
+            onDeleteGanttTask={(identity) => { mutateCanvasSource((source) => deleteGanttTask(source, identity), 'Deleted a Gantt task'); }}
+            onMoveGanttTask={(identity, direction) => { mutateCanvasSource((source) => moveGanttTask(source, identity, direction), 'Reordered Gantt tasks'); }}
+            onAddTimelineSection={(value) => { mutateCanvasSource((source) => addTimelineSection(source, value), 'Added a timeline section'); }}
+            onDeleteTimelineSection={(label) => { mutateCanvasSource((source) => deleteTimelineSection(source, label), 'Deleted a timeline section'); }}
+            onEditTimelineSection={(label, value) => { mutateCanvasSource((source) => editTimelineSection(source, label, value), 'Edited a timeline section'); }}
+            onMoveTimelineSection={(label, direction) => { mutateCanvasSource((source) => moveTimelineSection(source, label, direction), 'Reordered timeline sections'); }}
+            onAddTimelinePeriod={(value) => { mutateCanvasSource((source) => addTimelinePeriod(source, value), 'Added a timeline period'); }}
+            onEditTimelinePeriod={(label, value) => { mutateCanvasSource((source) => editTimelinePeriod(source, label, value), 'Edited a timeline period'); }}
+            onMoveTimelinePeriod={(label, section) => { mutateCanvasSource((source) => moveTimelinePeriod(source, label, section), 'Moved a timeline period'); }}
+            onDeleteTimelinePeriod={(label) => { mutateCanvasSource((source) => deleteTimelinePeriod(source, label), 'Deleted a timeline period'); }}
+            onAddTimelineEvent={(value) => { mutateCanvasSource((source) => addTimelineEvent(source, value), 'Added a timeline event'); }}
+            onEditTimelineEvent={(identity, value) => { mutateCanvasSource((source) => editTimelineEvent(source, identity, value), 'Edited a timeline event'); }}
+            onDeleteTimelineEvent={(identity) => { mutateCanvasSource((source) => deleteTimelineEvent(source, identity), 'Deleted a timeline event'); }}
+            onMoveTimelineEvent={(identity, direction) => { mutateCanvasSource((source) => moveTimelineEvent(source, identity, direction), 'Reordered timeline events'); }}
+            onSetTimelineDirection={(value) => { mutateCanvasSource((source) => setTimelineDirection(source, value), 'Updated timeline direction'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onChangeNodeShape={(nodeId, shape) => {

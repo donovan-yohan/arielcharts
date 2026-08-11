@@ -18,13 +18,17 @@ import { isMindmapSourceRepresentable } from './mindmap-mutations';
 import { isTreeViewSourceRepresentable } from './treeview-mutations';
 import { isIshikawaSourceRepresentable } from './ishikawa-mutations';
 import { isRailroadSourceRepresentable } from './railroad-mutations';
+import { isPieSourceRepresentable } from './pie-mutations';
+import { isQuadrantSourceRepresentable } from './quadrant-mutations';
+import { isXyChartSourceRepresentable } from './xychart-mutations';
+import { isRadarSourceRepresentable } from './radar-mutations';
 
 /** The installed Mermaid detector registry this catalog was audited against. */
 export const MERMAID_CAPABILITY_CATALOG_VERSION = '11.16.1';
 
 export type DiagramKind = 'flowchart' | 'sequence' | 'er' | 'generic';
 export type DiagramEditingMode = 'canvas' | 'semantic-form' | 'source-only' | 'unavailable-plugin';
-export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'mindmap' | 'tree-view' | 'ishikawa' | 'railroad' | 'source-only' | 'unavailable-plugin';
+export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'mindmap' | 'tree-view' | 'ishikawa' | 'railroad' | 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'source-only' | 'unavailable-plugin';
 export type MermaidDiagramFamilyId = typeof MERMAID_DIAGRAM_FAMILIES[number]['id'];
 
 export interface MermaidDiagramFamily {
@@ -242,6 +246,10 @@ const MINDMAP_OPERATIONS = new Set(['add-node', 'edit-node', 'delete-node', 'mov
 const TREE_VIEW_OPERATIONS = new Set(['add-node', 'edit-node', 'delete-node', 'move-node', 'reparent-node']);
 const ISHIKAWA_OPERATIONS = new Set(['set-effect', 'add-cause', 'edit-cause', 'delete-cause', 'move-cause', 'reparent-cause']);
 const RAILROAD_OPERATIONS = new Set(['add-rule', 'edit-rule', 'delete-rule', 'move-rule', 'rename-rule']);
+const PIE_OPERATIONS = new Set(['set-title', 'set-show-data', 'add-slice', 'edit-slice', 'delete-slice', 'move-slice']);
+const QUADRANT_OPERATIONS = new Set(['set-title', 'set-axis', 'set-quadrant-label', 'add-point', 'edit-point', 'delete-point', 'move-point']);
+const XY_CHART_OPERATIONS = new Set(['set-title', 'set-orientation', 'edit-axis', 'add-series', 'edit-series', 'delete-series', 'move-series']);
+const RADAR_OPERATIONS = new Set(['set-title', 'edit-options', 'add-axis', 'edit-axis', 'delete-axis', 'move-axis', 'add-curve', 'edit-curve', 'delete-curve', 'move-curve']);
 function strictAdapter(id: DiagramAdapterId, operations: ReadonlySet<string>, representable: (source: string) => boolean): DiagramSourceModelAdapter { return { id, getOperationResult(source, operation) { return !representable(source) ? { supported: false, reason: 'unrepresentable' } : operations.has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' }; }, getRepresentability: (source) => representable(source) ? { representable: true } : { representable: false, reason: 'unsupported-syntax' } }; }
 const JOURNEY_ADAPTER = strictAdapter('journey', JOURNEY_OPERATIONS, isJourneySourceRepresentable);
 const GANTT_ADAPTER = strictAdapter('gantt', GANTT_OPERATIONS, isGanttSourceRepresentable);
@@ -253,6 +261,10 @@ const MINDMAP_ADAPTER = strictAdapter('mindmap', MINDMAP_OPERATIONS, isMindmapSo
 const TREE_VIEW_ADAPTER = strictAdapter('tree-view', TREE_VIEW_OPERATIONS, isTreeViewSourceRepresentable);
 const ISHIKAWA_ADAPTER = strictAdapter('ishikawa', ISHIKAWA_OPERATIONS, isIshikawaSourceRepresentable);
 const RAILROAD_ADAPTER = strictAdapter('railroad', RAILROAD_OPERATIONS, isRailroadSourceRepresentable);
+const PIE_ADAPTER = strictAdapter('pie', PIE_OPERATIONS, isPieSourceRepresentable);
+const QUADRANT_ADAPTER = strictAdapter('quadrant', QUADRANT_OPERATIONS, isQuadrantSourceRepresentable);
+const XY_CHART_ADAPTER = strictAdapter('xy-chart', XY_CHART_OPERATIONS, isXyChartSourceRepresentable);
+const RADAR_ADAPTER = strictAdapter('radar', RADAR_OPERATIONS, isRadarSourceRepresentable);
 
 /**
  * Every built-in visual Mermaid family in 11.16.1. Aliases, renderer variants,
@@ -275,9 +287,9 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'kanban', label: 'Kanban', parserTypes: ['kanban'], editingMode: 'semantic-form', adapter: 'kanban' },
   { id: 'mindmap', label: 'Mindmap', parserTypes: ['mindmap'], editingMode: 'semantic-form', adapter: 'mindmap' },
   { id: 'packet', label: 'Packet', parserTypes: ['packet'] },
-  { id: 'pie', label: 'Pie', parserTypes: ['pie'] },
-  { id: 'quadrant', label: 'Quadrant chart', parserTypes: ['quadrantChart'] },
-  { id: 'radar', label: 'Radar', parserTypes: ['radar'] },
+  { id: 'pie', label: 'Pie', parserTypes: ['pie'], editingMode: 'semantic-form', adapter: 'pie' },
+  { id: 'quadrant', label: 'Quadrant chart', parserTypes: ['quadrantChart'], editingMode: 'semantic-form', adapter: 'quadrant' },
+  { id: 'radar', label: 'Radar', parserTypes: ['radar'], editingMode: 'semantic-form', adapter: 'radar' },
   { id: 'railroad', label: 'Railroad', parserTypes: ['railroad', 'railroadEbnf', 'railroadAbnf', 'railroadPeg'], editingMode: 'semantic-form', adapter: 'railroad' },
   { id: 'requirement', label: 'Requirement', parserTypes: ['requirement'], editingMode: 'semantic-form', adapter: 'requirement' },
   { id: 'sankey', label: 'Sankey', parserTypes: ['sankey'] },
@@ -289,7 +301,7 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'treemap', label: 'Treemap', parserTypes: ['treemap'] },
   { id: 'venn', label: 'Venn', parserTypes: ['venn'] },
   { id: 'wardley', label: 'Wardley', parserTypes: ['wardley'] },
-  { id: 'xy-chart', label: 'XY chart', parserTypes: ['xychart'] },
+  { id: 'xy-chart', label: 'XY chart', parserTypes: ['xychart'], editingMode: 'semantic-form', adapter: 'xy-chart' },
 ] as const satisfies readonly MermaidDiagramFamily[];
 
 /** ZenUML is intentionally catalogued separately because it needs an external Mermaid plugin. */
@@ -357,6 +369,10 @@ export function getDiagramSourceModelAdapter(capability: DiagramCapability | nul
     case 'tree-view': return TREE_VIEW_ADAPTER;
     case 'ishikawa': return ISHIKAWA_ADAPTER;
     case 'railroad': return RAILROAD_ADAPTER;
+    case 'pie': return PIE_ADAPTER;
+    case 'quadrant': return QUADRANT_ADAPTER;
+    case 'xy-chart': return XY_CHART_ADAPTER;
+    case 'radar': return RADAR_ADAPTER;
     case 'unavailable-plugin': return UNAVAILABLE_PLUGIN_ADAPTER;
     default: return SOURCE_ONLY_ADAPTER;
   }

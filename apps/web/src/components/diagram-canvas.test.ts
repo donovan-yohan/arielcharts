@@ -9,6 +9,8 @@ import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_
 
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
 const workspaceSource = readFileSync(new URL('./session-workspace.tsx', import.meta.url), 'utf8');
+const e2eWorkspaceSupportSource = readFileSync(new URL('../../../../e2e/support/workspace.ts', import.meta.url), 'utf8');
+const workspaceE2eSource = readFileSync(new URL('../../../../e2e-workspace-ux-validate.ts', import.meta.url), 'utf8');
 
 describe('canvas cursor callback lifecycle', () => {
   it('withdraws cursor and editing presence only on true canvas unmount and keeps preview gating behind a stable publisher ref', () => {
@@ -51,9 +53,11 @@ describe('new semantic families', () => {
     expect(canvasSource).toMatch(/TreeViewNodeForm[^]*?useCanonicalDraft\(node\)/u);
     expect(canvasSource).toMatch(/IshikawaCauseForm[^]*?useCanonicalDraft\(cause\)/u);
     expect(canvasSource).toMatch(/const HIERARCHY_CONTROL_STYLE: CSSProperties = \{ minHeight: 44, minWidth: 44 \}/u);
-    expect(canvasSource).toMatch(/function getMeasuredSemanticPanelMaxHeight\(viewport: ViewportRect, bottom: number\): number \{ return Math\.max\(44, Math\.min\(SEMANTIC_PANEL_MAX_HEIGHT, viewport\.height - bottom - SEMANTIC_PANEL_TOP_INSET\)\); \}/u);
-    expect(canvasSource).toMatch(/const hierarchyPanelMaxHeight = getMeasuredSemanticPanelMaxHeight\(canvasViewport, erEditorBottom\);/u);
-    expect(canvasSource).toMatch(/MindmapEditorControls bottom=\{erEditorBottom\}[^]*?maxHeight=\{hierarchyPanelMaxHeight\}/u);
+    expect(canvasSource).toMatch(/function getMeasuredSemanticPanelPlacement\(canvas: \{ height: number \}, viewport: ViewportRect, requestedBottom: number\)/u);
+    expect(canvasSource).toMatch(/const top = Math\.max\(0, viewport\.y\) \+ SEMANTIC_PANEL_TOP_INSET;/u);
+    expect(canvasSource).toMatch(/const bottom = Math\.min\(Math\.max\(0, requestedBottom\), Math\.max\(0, canvas\.height - top - 44\)\);/u);
+    expect(canvasSource).toMatch(/const semanticPanelPlacement = getMeasuredSemanticPanelPlacement\(canvasSize, canvasViewport, erEditorBottom\);/u);
+    expect(canvasSource).toMatch(/MindmapEditorControls bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
     expect(canvasSource).toMatch(/function hierarchyPath[^]*?join\(' \/ '\)/u);
     expect(canvasSource).toMatch(/function isInvalidHierarchyParent[^]*?candidateAncestors\.length >= nodePath\.length/u);
     expect(canvasSource).toMatch(/canvas-hierarchy-editor[^]*?New Mindmap parent[^]*?hierarchyPath\(item\)/u);
@@ -76,7 +80,36 @@ describe('new semantic families', () => {
     expect(canvasSource).toMatch(/onRename\?\.\(identity, draft\.name\)/u);
     expect(canvasSource).toMatch(/onMove\?\.\(identity, 'up'\)/u);
     expect(canvasSource).toMatch(/onDelete\?\.\(identity\)/u);
-    expect(canvasSource).toMatch(/isRailroad && !readOnly && railroadDiagram \? <RailroadEditorControls[^]*?maxHeight=\{hierarchyPanelMaxHeight\}/u);
+    expect(canvasSource).toMatch(/isRailroad && !readOnly && railroadDiagram \? <RailroadEditorControls[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
+  });
+
+  it('keeps numeric families source-backed, bounded, canonical, and independently validated', () => {
+    for (const id of ['pie', 'quadrant', 'xychart', 'radar']) expect(canvasSource).toContain(`data-testid="${id}-editor-controls"`);
+    expect(canvasSource).toMatch(/canvas-numeric-editor[^]*?maxHeight/u);
+    expect(canvasSource).toMatch(/PieSliceForm[^]*?value: String\(item\.value\)[^]*?useCanonicalDraft\(canonical\)/u);
+    expect(canvasSource).toMatch(/QuadrantPointForm[^]*?x: String\(item\.x\)[^]*?y: String\(item\.y\)[^]*?useCanonicalDraft\(canonical\)/u);
+    expect(canvasSource).toMatch(/QuadrantLabelForm[^]*?useCanonicalDraft\(\{ value: value \?\? '' \}\)/u);
+    expect(canvasSource).toMatch(/XySeriesForm[^]*?useCanonicalDraft\(canonical\)/u);
+    expect(canvasSource).toMatch(/RadarCurveForm[^]*?useCanonicalDraft\(canonical\)/u);
+    expect(canvasSource).toMatch(/function parseSemanticNumber[^]*?Number\.isFinite/u);
+    expect(canvasSource).toMatch(/function runNumericForm[^]*?action\(\) === false[^]*?return false/u);
+    expect(canvasSource).toMatch(/PieSliceForm[^]*?if \(runNumericForm[^]*?resetDraft\(\)/u);
+    expect(canvasSource).toMatch(/RadarOptionsForm[^]*?graticule: value\.graticule \?\? 'circle'[^]*?showLegend: value\.showLegend \?\? true/u);
+    expect(canvasSource).toMatch(/max: draft\.maxPresent \? parseSemanticNumber[^]*?: undefined/u);
+    expect(canvasSource).toMatch(/aria-label="Radar set maximum"[^]*?maxPresent: event\.target\.checked/u);
+    expect(canvasSource).toMatch(/aria-label="Pie show data"[^]*?style=\{HIERARCHY_CONTROL_STYLE\}/u);
+    expect(canvasSource).toMatch(/aria-label="Radar show legend"[^]*?style=\{HIERARCHY_CONTROL_STYLE\}/u);
+    expect(canvasSource).toMatch(/NumericEditorError[^]*?role="alert"/u);
+    expect(canvasSource).toMatch(/isPie && !readOnly && pieDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
+    expect(canvasSource).toMatch(/isRadar && !readOnly && radarDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
+    expect(workspaceSource).toMatch(/onAddPieSlice[^]*?mutateCanvasSource/u);
+    expect(workspaceSource).toMatch(/onAddQuadrantPoint[^]*?mutateCanvasSource/u);
+    expect(workspaceSource).toMatch(/onAddXySeries[^]*?mutateCanvasSource/u);
+    expect(workspaceSource).toMatch(/onAddRadarCurve[^]*?mutateCanvasSource/u);
+    expect(e2eWorkspaceSupportSource).toMatch(/codeMirrorContent\.cmView\?\.rootView\?\.view\?\.state\?\.doc/u);
+    expect(e2eWorkspaceSupportSource).toMatch(/return documentState\.toString\(\);/u);
+    expect(e2eWorkspaceSupportSource).not.toMatch(/locator\('\.cm-line'\)\.evaluateAll/u);
+    expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?Pie show data[^]*?keyboard\.press\('Backspace'\);[^]*?keyboard\.type\('pie'\);[^]*?keyboard\.press\('Enter'\);[^]*?keyboard\.type\('\s\stitle Keyboard source'\);[^]*?Radar show legend/u);
   });
 });
 

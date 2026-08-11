@@ -8,6 +8,8 @@ const narrowCanvasCss = css.slice(css.indexOf('@media (max-width: 420px)'));
 describe('mobile workspace CSS contracts', () => {
   it('reserves a non-overlapping lane for overlay tools beside narrow canvas controls', () => {
     expect(narrowCanvasCss).toMatch(/\.overlay-tools-toggle\s*\{[^}]*bottom:\s*auto\s*!important;[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);/u);
+    expect(narrowCanvasCss).toMatch(/\.overlay-tools-toggle\[aria-expanded="false"\]\s*\{[^}]*top:\s*8px;[^}]*transform:\s*none;[^}]*width:\s*104px;/u);
+    expect(narrowCanvasCss).toMatch(/\.workspace-diagram-pane:has\(\.overlay-tools-toggle\[aria-expanded="false"\]\) > \.error-banner\s*\{[^}]*left:\s*128px;[^}]*right:\s*12px;[^}]*transform:\s*none;[^}]*width:\s*auto;/u);
     expect(narrowCanvasCss).toMatch(/\.overlay-scene-controls\s*\{[^}]*bottom:\s*8px;[^}]*display:\s*grid\s*!important;[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*max-height:\s*calc\(100% - 16px\);[^}]*overflow-y:\s*auto;/u);
     expect(narrowCanvasCss).toMatch(/\.overlay-scene-controls button\s*\{[^}]*min-height:\s*44px;[^}]*min-width:\s*44px;/u);
   });

@@ -1328,6 +1328,19 @@ code {
     transform: translateY(-50%);
   }
 
+  .overlay-tools-toggle[aria-expanded="false"] {
+    top: 8px;
+    transform: none;
+    width: 104px;
+  }
+
+  .workspace-diagram-pane:has(.overlay-tools-toggle[aria-expanded="false"]) > .error-banner {
+    left: 128px;
+    right: 12px;
+    transform: none;
+    width: auto;
+  }
+
   .overlay-scene-controls {
     bottom: 8px;
     box-sizing: border-box;

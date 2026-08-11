@@ -78,6 +78,17 @@ describe('DiagramPreviewRegistry', () => {
     expect(canUseSemanticFamilyControls(railroadPreview.source, railroadPreview, 'railroad')).toBe(true);
     expect(canUseSemanticFamilyControls('railroad-beta\n  start = optional(terminal("x"));', { ...railroadPreview, source: 'railroad-beta\n  start = optional(terminal("x"));' }, 'railroad')).toBe(false);
     expect(canUseSemanticFamilyControls('mindmap\n  Root\n    Child:::inline', { ...mindmapPreview, source: 'mindmap\n  Root\n    Child:::inline' }, 'mindmap')).toBe(false);
+    const numericPreviews: DiagramPreview[] = [
+      { capability: { adapter: 'pie', diagramType: 'pie', kind: 'generic' }, diagramId: 'pie', flowchartSnapshot: null, source: 'pie\n  "A" : 1', svg: '<svg />' },
+      { capability: { adapter: 'quadrant', diagramType: 'quadrantChart', kind: 'generic' }, diagramId: 'quadrant', flowchartSnapshot: null, source: 'quadrantChart\n  A: [0.5, 0.5]', svg: '<svg />' },
+      { capability: { adapter: 'xy-chart', diagramType: 'xychart', kind: 'generic' }, diagramId: 'xy', flowchartSnapshot: null, source: 'xychart-beta\n  x-axis ["A", "B"]\n  y-axis 0 --> 3\n  line [1, 2]', svg: '<svg />' },
+      { capability: { adapter: 'radar', diagramType: 'radar', kind: 'generic' }, diagramId: 'radar', flowchartSnapshot: null, source: 'radar-beta\n  axis a\n  axis b\n  axis c\n  curve one { 1, 2, 3 }', svg: '<svg />' },
+    ];
+    for (const preview of numericPreviews) {
+      expect(canUseSemanticFamilyControls(preview.source, preview, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar')).toBe(true);
+      expect(canUseSemanticFamilyControls(`${preview.source}\n  unsupported syntax`, { ...preview, source: `${preview.source}\n  unsupported syntax` }, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar')).toBe(false);
+      expect(canUseSemanticFamilyControls(`${preview.source}\n`, preview, preview.capability.adapter as 'pie' | 'quadrant' | 'xy-chart' | 'radar')).toBe(false);
+    }
   });
 
   it('isolates last-known-good previews by stable diagram id', () => {

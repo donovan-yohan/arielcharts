@@ -20,6 +20,10 @@ import { addMindmapNode } from './mindmap-mutations';
 import { addTreeViewNode } from './treeview-mutations';
 import { addIshikawaCause } from './ishikawa-mutations';
 import { addRailroadRule } from './railroad-mutations';
+import { addPieSlice } from './pie-mutations';
+import { addQuadrantPoint } from './quadrant-mutations';
+import { addXySeries } from './xychart-mutations';
+import { addRadarCurve } from './radar-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -140,6 +144,10 @@ describe('collaboration transaction origins', () => {
     ['tree view', 'treeView-beta\n  Root', (source: string) => addTreeViewNode(source, { classes: [], directory: false, label: 'child.txt', quoted: false }, { node: { classes: [], directory: false, label: 'Root', quoted: false, sourceStyle: 'indent' }, occurrenceCount: 1 })],
     ['ishikawa', 'ishikawa-beta\n  Effect', (source: string) => addIshikawaCause(source, { label: 'Cause', parent: null })],
     ['railroad', 'railroad-ebnf-beta', (source: string) => addRailroadRule(source, { definition: '"x"', name: 'start' })],
+    ['pie', 'pie', (source: string) => addPieSlice(source, { label: 'A', value: 1 })],
+    ['quadrant', 'quadrantChart', (source: string) => addQuadrantPoint(source, { label: 'A', styles: {}, x: 0.5, y: 0.5 })],
+    ['XY chart', 'xychart-beta\n  x-axis ["A", "B"]\n  y-axis 0 --> 3', (source: string) => addXySeries(source, { kind: 'line', values: [1, 2] })],
+    ['radar', 'radar-beta\n  axis a\n  axis b\n  axis c', (source: string) => addRadarCurve(source, { name: 'one', values: [1, 2, 3] })],
   ])('keeps %s semantic form mutations in the local visual undo stack', (_family, initial, mutate) => {
     const doc = new Y.Doc();
     const source = doc.getText('semantic-source');

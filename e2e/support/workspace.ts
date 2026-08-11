@@ -86,11 +86,16 @@ export async function replaceSource(page: Page, source: string): Promise<void> {
 }
 
 export async function canonicalSource(page: Page): Promise<string> {
-  return page.locator('.cm-line').evaluateAll((lines) => lines.map((line) => {
-    const copy = line.cloneNode(true) as HTMLElement;
-    copy.querySelectorAll('[contenteditable="false"], .cm-widgetBuffer').forEach((node) => node.remove());
-    return (copy.textContent ?? '').replaceAll('\u2060', '');
-  }).join('\n'));
+  return page.locator('.cm-content').evaluate((content) => {
+    const codeMirrorContent = content as HTMLElement & {
+      cmView?: { rootView?: { view?: { state?: { doc?: { toString(): string } } } } };
+    };
+    const documentState = codeMirrorContent.cmView?.rootView?.view?.state?.doc;
+    if (!documentState || typeof documentState.toString !== 'function') {
+      throw new Error('CodeMirror document state is unavailable from the editor content view.');
+    }
+    return documentState.toString();
+  });
 }
 
 export async function waitForSource(page: Page, expected: string): Promise<void> {

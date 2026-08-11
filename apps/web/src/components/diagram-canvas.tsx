@@ -103,6 +103,10 @@ import { getTreeViewNodeIdentity, type TreeViewDiagramSnapshot, type TreeViewNod
 import { getIshikawaCauseIdentity, type IshikawaCause, type IshikawaCauseIdentity, type IshikawaCauseInput, type IshikawaDiagramSnapshot } from '../lib/ishikawa-mutations';
 import { getRailroadRuleIdentity, type RailroadDiagramSnapshot, type RailroadRule, type RailroadRuleIdentity } from '../lib/railroad-mutations';
 import { OverlayCanvasLayer, type OverlayCanvasLayerProps } from './overlay-canvas-layer';
+import { getPieSliceIdentity, type PieDiagramSnapshot, type PieSlice, type PieSliceIdentity } from '../lib/pie-mutations';
+import { getQuadrantPointIdentity, type QuadrantAxis, type QuadrantAxisName, type QuadrantDiagramSnapshot, type QuadrantNumber, type QuadrantPoint, type QuadrantPointIdentity } from '../lib/quadrant-mutations';
+import { getXySeriesIdentity, type XyAxis, type XyChartDiagramSnapshot, type XyChartOrientation, type XySeries, type XySeriesIdentity } from '../lib/xychart-mutations';
+import { getRadarAxisIdentity, getRadarCurveIdentity, type RadarAxis, type RadarAxisIdentity, type RadarCurve, type RadarCurveIdentity, type RadarDiagramSnapshot, type RadarOptions } from '../lib/radar-mutations';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
@@ -133,6 +137,10 @@ export interface DiagramCanvasProps {
   isTreeView?: boolean;
   isIshikawa?: boolean;
   isRailroad?: boolean;
+  isPie?: boolean;
+  isQuadrant?: boolean;
+  isXyChart?: boolean;
+  isRadar?: boolean;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
@@ -160,6 +168,10 @@ export interface DiagramCanvasProps {
   treeViewDiagram?: TreeViewDiagramSnapshot | null;
   ishikawaDiagram?: IshikawaDiagramSnapshot | null;
   railroadDiagram?: RailroadDiagramSnapshot | null;
+  pieDiagram?: PieDiagramSnapshot | null;
+  quadrantDiagram?: QuadrantDiagramSnapshot | null;
+  xyChartDiagram?: XyChartDiagramSnapshot | null;
+  radarDiagram?: RadarDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
@@ -348,6 +360,36 @@ export interface DiagramCanvasProps {
   onRenameRailroadRule?: (identity: RailroadRuleIdentity, name: string) => void;
   onDeleteRailroadRule?: (identity: RailroadRuleIdentity) => void;
   onMoveRailroadRule?: (identity: RailroadRuleIdentity, direction: 'up' | 'down') => void;
+  onEditPieTitle?: (title: string | null) => void;
+  onSetPieShowData?: (showData: boolean) => void;
+  onAddPieSlice?: (value: PieSlice) => boolean | void;
+  onEditPieSlice?: (identity: PieSliceIdentity, value: Partial<PieSlice>) => boolean | void;
+  onDeletePieSlice?: (identity: PieSliceIdentity) => void;
+  onMovePieSlice?: (identity: PieSliceIdentity, direction: 'up' | 'down') => void;
+  onEditQuadrantTitle?: (title: string | null) => void;
+  onSetQuadrantAxis?: (axis: QuadrantAxisName, value: QuadrantAxis | null) => void;
+  onSetQuadrantLabel?: (quadrant: QuadrantNumber, label: string | null) => void;
+  onAddQuadrantPoint?: (value: QuadrantPoint) => boolean | void;
+  onEditQuadrantPoint?: (identity: QuadrantPointIdentity, value: Partial<QuadrantPoint>) => boolean | void;
+  onDeleteQuadrantPoint?: (identity: QuadrantPointIdentity) => void;
+  onMoveQuadrantPoint?: (identity: QuadrantPointIdentity, direction: 'up' | 'down') => void;
+  onEditXyTitle?: (title?: string) => void;
+  onSetXyOrientation?: (orientation?: XyChartOrientation) => void;
+  onEditXyAxis?: (axis: 'x' | 'y', value: XyAxis) => boolean | void;
+  onAddXySeries?: (value: XySeries) => boolean | void;
+  onEditXySeries?: (identity: XySeriesIdentity, value: Partial<XySeries>) => boolean | void;
+  onDeleteXySeries?: (identity: XySeriesIdentity) => void;
+  onMoveXySeries?: (identity: XySeriesIdentity, direction: 'up' | 'down') => void;
+  onEditRadarTitle?: (title?: string) => void;
+  onEditRadarOptions?: (value: Partial<RadarOptions>) => boolean | void;
+  onAddRadarAxis?: (value: RadarAxis, curveValues?: readonly number[]) => boolean | void;
+  onEditRadarAxis?: (identity: RadarAxisIdentity, value: Partial<RadarAxis>) => void;
+  onDeleteRadarAxis?: (identity: RadarAxisIdentity) => void;
+  onMoveRadarAxis?: (identity: RadarAxisIdentity, direction: 'up' | 'down') => void;
+  onAddRadarCurve?: (value: RadarCurve) => boolean | void;
+  onEditRadarCurve?: (identity: RadarCurveIdentity, value: Partial<RadarCurve>) => boolean | void;
+  onDeleteRadarCurve?: (identity: RadarCurveIdentity) => void;
+  onMoveRadarCurve?: (identity: RadarCurveIdentity, direction: 'up' | 'down') => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onLaserChange?: (value: { active: boolean; point?: CanvasWorldPoint }) => void;
@@ -831,6 +873,41 @@ export function DiagramCanvas({
   onDeleteIshikawaCause,
   onMoveIshikawaCause,
   onReparentIshikawaCause,
+  onAddRailroadRule,
+  onEditRailroadRule,
+  onRenameRailroadRule,
+  onDeleteRailroadRule,
+  onMoveRailroadRule,
+  onEditPieTitle,
+  onSetPieShowData,
+  onAddPieSlice,
+  onEditPieSlice,
+  onDeletePieSlice,
+  onMovePieSlice,
+  onEditQuadrantTitle,
+  onSetQuadrantAxis,
+  onSetQuadrantLabel,
+  onAddQuadrantPoint,
+  onEditQuadrantPoint,
+  onDeleteQuadrantPoint,
+  onMoveQuadrantPoint,
+  onEditXyTitle,
+  onSetXyOrientation,
+  onEditXyAxis,
+  onAddXySeries,
+  onEditXySeries,
+  onDeleteXySeries,
+  onMoveXySeries,
+  onEditRadarTitle,
+  onEditRadarOptions,
+  onAddRadarAxis,
+  onEditRadarAxis,
+  onDeleteRadarAxis,
+  onMoveRadarAxis,
+  onAddRadarCurve,
+  onEditRadarCurve,
+  onDeleteRadarCurve,
+  onMoveRadarCurve,
   onAddConnectedNode,
   onCanvasCursorChange,
   onLaserChange,
@@ -885,6 +962,10 @@ export function DiagramCanvas({
   isTreeView = false,
   isIshikawa = false,
   isRailroad = false,
+  isPie = false,
+  isQuadrant = false,
+  isXyChart = false,
+  isRadar = false,
   journeyDiagram = null,
   ganttDiagram = null,
   timelineDiagram = null,
@@ -895,12 +976,11 @@ export function DiagramCanvas({
   treeViewDiagram = null,
   ishikawaDiagram = null,
   railroadDiagram = null,
-  onAddRailroadRule,
-  onEditRailroadRule,
-  onRenameRailroadRule,
-  onDeleteRailroadRule,
-  onMoveRailroadRule,
   overlay,
+  pieDiagram = null,
+  quadrantDiagram = null,
+  xyChartDiagram = null,
+  radarDiagram = null,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -1362,7 +1442,7 @@ export function DiagramCanvas({
     canvasViewportMeasured,
   );
   const erEditorBottom = canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP;
-  const hierarchyPanelMaxHeight = getMeasuredSemanticPanelMaxHeight(canvasViewport, erEditorBottom);
+  const semanticPanelPlacement = getMeasuredSemanticPanelPlacement(canvasSize, canvasViewport, erEditorBottom);
   const pairedSemanticPanelPlacement = useMemo(
     () => canvasViewportMeasured ? getPairedSemanticPanelPlacement(canvasSize, canvasViewport, erEditorBottom) : null,
     [canvasSize, canvasViewport, canvasViewportMeasured, erEditorBottom],
@@ -3566,10 +3646,14 @@ export function DiagramCanvas({
         {isGitGraph && !readOnly && gitGraphDiagram ? <GitGraphEditorControls bottom={erEditorBottom} diagram={gitGraphDiagram} onAddBranch={onAddGitGraphBranch} onAddCheckout={onAddGitGraphCheckout} onAddCherryPick={onAddGitGraphCherryPick} onAddCommit={onAddGitGraphCommit} onAddMerge={onAddGitGraphMerge} onDelete={onDeleteGitGraphOperation} onEditBranch={onEditGitGraphBranch} onEditCheckout={onEditGitGraphCheckout} onEditCherryPick={onEditGitGraphCherryPick} onEditCommit={onEditGitGraphCommit} onEditMerge={onEditGitGraphMerge} onMove={onMoveGitGraphOperation} /> : null}
         {isEventModeling && !readOnly && eventModelingDiagram ? <EventModelingEditorControls bottom={erEditorBottom} diagram={eventModelingDiagram} onAddData={onAddEventModelingData} onAddEntity={onAddEventModelingEntity} onAddTimeframe={onAddEventModelingTimeframe} onDeleteData={onDeleteEventModelingData} onDeleteEntity={onDeleteEventModelingEntity} onDeleteTimeframe={onDeleteEventModelingTimeframe} onEditData={onEditEventModelingData} onEditTimeframe={onEditEventModelingTimeframe} onMoveTimeframe={onMoveEventModelingTimeframe} onRenameEntity={onRenameEventModelingEntity} /> : null}
         {isKanban && !readOnly && kanbanDiagram ? <KanbanEditorControls bottom={erEditorBottom} diagram={kanbanDiagram} onAddCard={onAddKanbanCard} onAddColumn={onAddKanbanColumn} onDeleteCard={onDeleteKanbanCard} onDeleteColumn={onDeleteKanbanColumn} onEditCard={onEditKanbanCard} onEditColumn={onEditKanbanColumn} onMoveCard={onMoveKanbanCard} /> : null}
-        {isMindmap && !readOnly && mindmapDiagram ? <MindmapEditorControls bottom={erEditorBottom} diagram={mindmapDiagram} maxHeight={hierarchyPanelMaxHeight} onAdd={onAddMindmapNode} onDelete={onDeleteMindmapNode} onEdit={onEditMindmapNode} onMove={onMoveMindmapNode} onReparent={onReparentMindmapNode} /> : null}
-        {isTreeView && !readOnly && treeViewDiagram ? <TreeViewEditorControls bottom={erEditorBottom} diagram={treeViewDiagram} maxHeight={hierarchyPanelMaxHeight} onAdd={onAddTreeViewNode} onDelete={onDeleteTreeViewNode} onEdit={onEditTreeViewNode} onMove={onMoveTreeViewNode} onReparent={onReparentTreeViewNode} /> : null}
-        {isIshikawa && !readOnly && ishikawaDiagram ? <IshikawaEditorControls bottom={erEditorBottom} diagram={ishikawaDiagram} maxHeight={hierarchyPanelMaxHeight} onAdd={onAddIshikawaCause} onDelete={onDeleteIshikawaCause} onEdit={onEditIshikawaCause} onEditEffect={onEditIshikawaEffect ?? onSetIshikawaEffect} onMove={onMoveIshikawaCause} onReparent={onReparentIshikawaCause} /> : null}
-        {isRailroad && !readOnly && railroadDiagram ? <RailroadEditorControls bottom={erEditorBottom} diagram={railroadDiagram} maxHeight={hierarchyPanelMaxHeight} onAdd={onAddRailroadRule} onDelete={onDeleteRailroadRule} onEdit={onEditRailroadRule} onMove={onMoveRailroadRule} onRename={onRenameRailroadRule} /> : null}
+        {isMindmap && !readOnly && mindmapDiagram ? <MindmapEditorControls bottom={semanticPanelPlacement.bottom} diagram={mindmapDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddMindmapNode} onDelete={onDeleteMindmapNode} onEdit={onEditMindmapNode} onMove={onMoveMindmapNode} onReparent={onReparentMindmapNode} /> : null}
+        {isTreeView && !readOnly && treeViewDiagram ? <TreeViewEditorControls bottom={semanticPanelPlacement.bottom} diagram={treeViewDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddTreeViewNode} onDelete={onDeleteTreeViewNode} onEdit={onEditTreeViewNode} onMove={onMoveTreeViewNode} onReparent={onReparentTreeViewNode} /> : null}
+        {isIshikawa && !readOnly && ishikawaDiagram ? <IshikawaEditorControls bottom={semanticPanelPlacement.bottom} diagram={ishikawaDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddIshikawaCause} onDelete={onDeleteIshikawaCause} onEdit={onEditIshikawaCause} onEditEffect={onEditIshikawaEffect ?? onSetIshikawaEffect} onMove={onMoveIshikawaCause} onReparent={onReparentIshikawaCause} /> : null}
+        {isRailroad && !readOnly && railroadDiagram ? <RailroadEditorControls bottom={semanticPanelPlacement.bottom} diagram={railroadDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddRailroadRule} onDelete={onDeleteRailroadRule} onEdit={onEditRailroadRule} onMove={onMoveRailroadRule} onRename={onRenameRailroadRule} /> : null}
+        {isPie && !readOnly && pieDiagram ? <PieEditorControls bottom={semanticPanelPlacement.bottom} diagram={pieDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddPieSlice} onDelete={onDeletePieSlice} onEdit={onEditPieSlice} onMove={onMovePieSlice} onSetShowData={onSetPieShowData} onSetTitle={onEditPieTitle} /> : null}
+        {isQuadrant && !readOnly && quadrantDiagram ? <QuadrantEditorControls bottom={semanticPanelPlacement.bottom} diagram={quadrantDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddQuadrantPoint} onDelete={onDeleteQuadrantPoint} onEdit={onEditQuadrantPoint} onMove={onMoveQuadrantPoint} onSetAxis={onSetQuadrantAxis} onSetLabel={onSetQuadrantLabel} onSetTitle={onEditQuadrantTitle} /> : null}
+        {isXyChart && !readOnly && xyChartDiagram ? <XyChartEditorControls bottom={semanticPanelPlacement.bottom} diagram={xyChartDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddXySeries} onDelete={onDeleteXySeries} onEdit={onEditXySeries} onEditAxis={onEditXyAxis} onMove={onMoveXySeries} onSetOrientation={onSetXyOrientation} onSetTitle={onEditXyTitle} /> : null}
+        {isRadar && !readOnly && radarDiagram ? <RadarEditorControls bottom={semanticPanelPlacement.bottom} diagram={radarDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAddAxis={onAddRadarAxis} onAddCurve={onAddRadarCurve} onDeleteAxis={onDeleteRadarAxis} onDeleteCurve={onDeleteRadarCurve} onEditAxis={onEditRadarAxis} onEditCurve={onEditRadarCurve} onEditOptions={onEditRadarOptions} onMoveAxis={onMoveRadarAxis} onMoveCurve={onMoveRadarCurve} onSetTitle={onEditRadarTitle} /> : null}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
@@ -4492,7 +4576,14 @@ const SEMANTIC_PANEL_STYLE: CSSProperties = {
 const HIERARCHY_CONTROL_STYLE: CSSProperties = { minHeight: 44, minWidth: 44 };
 const SEMANTIC_PANEL_TOP_INSET = 56;
 const SEMANTIC_PANEL_MAX_HEIGHT = 480;
-function getMeasuredSemanticPanelMaxHeight(viewport: ViewportRect, bottom: number): number { return Math.max(44, Math.min(SEMANTIC_PANEL_MAX_HEIGHT, viewport.height - bottom - SEMANTIC_PANEL_TOP_INSET)); }
+function getMeasuredSemanticPanelPlacement(canvas: { height: number }, viewport: ViewportRect, requestedBottom: number): { bottom: number; maxHeight: number } {
+  const top = Math.max(0, viewport.y) + SEMANTIC_PANEL_TOP_INSET;
+  const bottom = Math.min(Math.max(0, requestedBottom), Math.max(0, canvas.height - top - 44));
+  return {
+    bottom,
+    maxHeight: Math.max(44, Math.min(SEMANTIC_PANEL_MAX_HEIGHT, canvas.height - top - bottom)),
+  };
+}
 
 function JourneyEditorControls({ bottom, diagram, onAddSection, onAddTask, onDeleteSection, onDeleteTask, onEditSection, onEditTask, onMoveSection, onMoveTask }: { bottom: number; diagram: JourneyDiagramSnapshot; onAddSection?: (value: { label: string }) => void; onAddTask?: (value: JourneyTask) => void; onDeleteSection?: (label: string) => void; onDeleteTask?: (identity: JourneyTaskIdentity) => void; onEditSection?: (label: string, value: { label?: string }) => void; onEditTask?: (identity: JourneyTaskIdentity, value: Partial<JourneyTask>) => void; onMoveSection?: (label: string, direction: 'up' | 'down') => void; onMoveTask?: (identity: JourneyTaskIdentity, direction: 'up' | 'down') => void }) {
   const [section, setSection] = useState('Section');
@@ -4800,6 +4891,206 @@ function RailroadRuleForm({ notation, onDelete, onEdit, onMove, onRename, rule, 
       <button aria-label={`Delete Railroad production ${rule.name}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
     </div>
   </form>;
+}
+
+function parseSemanticNumber(value: string, label: string): number {
+  const parsed = Number(value.trim());
+  if (!value.trim() || !Number.isFinite(parsed)) throw new Error(`${label} must be a finite number.`);
+  return parsed;
+}
+
+function parseSemanticNumberList(value: string, label: string): number[] {
+  const parts = value.split(',').map((part) => part.trim());
+  if (!parts.length || parts.some((part) => !part)) throw new Error(`${label} must be a comma-separated list of finite numbers.`);
+  return parts.map((part) => parseSemanticNumber(part, label));
+}
+
+function runNumericForm(setError: (value: string | null) => void, action: () => boolean | void): boolean {
+  try {
+    if (action() === false) { setError('The diagram update could not be applied.'); return false; }
+    setError(null); return true;
+  } catch (error) { setError(error instanceof Error ? error.message : 'The numeric values are invalid.'); return false; }
+}
+
+function NumericEditorError({ error }: { error: string | null }) {
+  return error ? <small className="semantic-editor-error" role="alert">{error}</small> : null;
+}
+
+function PieEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onSetShowData, onSetTitle }: {
+  bottom: number; diagram: PieDiagramSnapshot; maxHeight: number;
+  onAdd?: (value: PieSlice) => boolean | void; onDelete?: (identity: PieSliceIdentity) => void;
+  onEdit?: (identity: PieSliceIdentity, value: Partial<PieSlice>) => boolean | void;
+  onMove?: (identity: PieSliceIdentity, direction: 'up' | 'down') => void;
+  onSetShowData?: (value: boolean) => void; onSetTitle?: (title: string | null) => void;
+}) {
+  const { draft: titleDraft, updateDraft: updateTitleDraft } = useCanonicalDraft({ value: diagram.title ?? '' });
+  const [slice, setSlice] = useState({ label: 'Slice', value: '1' });
+  const [error, setError] = useState<string | null>(null);
+  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="pie-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+    <strong>Pie</strong>
+    <form aria-label="Pie options" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() ? titleDraft.value : null); }}>
+      <input aria-label="Pie title" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={titleDraft.value} />
+      <label><input aria-label="Pie show data" checked={diagram.showData} onChange={(event) => onSetShowData?.(event.target.checked)} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Show values</label>
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Save Pie options</button>
+    </form>
+    <form aria-label="New Pie slice" onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAdd?.({ label: slice.label, value: parseSemanticNumber(slice.value, 'Pie slice value') })); }}>
+      <input aria-label="New Pie slice label" onChange={(event) => setSlice((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={slice.label} />
+      <input aria-label="New Pie slice value" inputMode="decimal" onChange={(event) => setSlice((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={slice.value} />
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add slice</button>
+    </form>
+    <NumericEditorError error={error} />
+    {diagram.slices.map((item) => <PieSliceForm item={item} items={diagram.slices} key={`${item.label}:${item.value}`} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} />)}
+  </aside>;
+}
+
+function PieSliceForm({ item, items, onDelete, onEdit, onError, onMove }: { item: PieSlice; items: PieSlice[]; onDelete?: (identity: PieSliceIdentity) => void; onEdit?: (identity: PieSliceIdentity, value: Partial<PieSlice>) => boolean | void; onError: (value: string | null) => void; onMove?: (identity: PieSliceIdentity, direction: 'up' | 'down') => void }) {
+  const canonical = { label: item.label, value: String(item.value) }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const identity = getPieSliceIdentity(item, items); const label = `Pie slice ${item.label}`;
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { label: draft.label, value: parseSemanticNumber(draft.value, 'Pie slice value') }))) resetDraft(); }}>
+    <input aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
+    <input aria-label={`${label} value`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.value} />
+    <button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>
+    <button aria-label={`Move Pie slice ${item.label} up`} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
+    <button aria-label={`Move Pie slice ${item.label} down`} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
+    <button aria-label={`Delete Pie slice ${item.label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
+  </form>;
+}
+
+function QuadrantEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onSetAxis, onSetLabel, onSetTitle }: {
+  bottom: number; diagram: QuadrantDiagramSnapshot; maxHeight: number;
+  onAdd?: (value: QuadrantPoint) => boolean | void; onDelete?: (identity: QuadrantPointIdentity) => void;
+  onEdit?: (identity: QuadrantPointIdentity, value: Partial<QuadrantPoint>) => boolean | void;
+  onMove?: (identity: QuadrantPointIdentity, direction: 'up' | 'down') => void;
+  onSetAxis?: (axis: QuadrantAxisName, value: QuadrantAxis | null) => void;
+  onSetLabel?: (quadrant: QuadrantNumber, label: string | null) => void; onSetTitle?: (title: string | null) => void;
+}) {
+  const { draft: titleDraft, updateDraft: updateTitleDraft } = useCanonicalDraft({ value: diagram.title ?? '' }); const [point, setPoint] = useState({ label: 'Point', x: '0.5', y: '0.5' }); const [error, setError] = useState<string | null>(null);
+  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="quadrant-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+    <strong>Quadrant chart</strong>
+    <form aria-label="Quadrant title" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() ? titleDraft.value : null); }}><input aria-label="Quadrant title text" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={titleDraft.value} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save title</button></form>
+    {(['x', 'y'] as const).map((axis) => <QuadrantAxisForm axis={axis} key={axis} onSave={onSetAxis} value={diagram.axes[axis]} />)}
+    {([1, 2, 3, 4] as const).map((quadrant) => <QuadrantLabelForm key={quadrant} onSave={onSetLabel} quadrant={quadrant} value={diagram.quadrants[quadrant]} />)}
+    <form aria-label="New Quadrant point" onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAdd?.({ label: point.label, styles: {}, x: parseSemanticNumber(point.x, 'Quadrant x coordinate'), y: parseSemanticNumber(point.y, 'Quadrant y coordinate') })); }}>
+      <input aria-label="New Quadrant point label" onChange={(event) => setPoint((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={point.label} />
+      <input aria-label="New Quadrant point x" inputMode="decimal" onChange={(event) => setPoint((current) => ({ ...current, x: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={point.x} />
+      <input aria-label="New Quadrant point y" inputMode="decimal" onChange={(event) => setPoint((current) => ({ ...current, y: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={point.y} />
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add point</button>
+    </form>
+    <NumericEditorError error={error} />
+    {diagram.points.map((item) => <QuadrantPointForm item={item} items={diagram.points} key={`${item.label}:${item.x}:${item.y}`} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} />)}
+  </aside>;
+}
+
+function QuadrantAxisForm({ axis, onSave, value }: { axis: QuadrantAxisName; onSave?: (axis: QuadrantAxisName, value: QuadrantAxis | null) => void; value: QuadrantAxis | null }) {
+  const canonical = value ?? { start: '', end: '' }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const prefix = `Quadrant ${axis}-axis`;
+  return <form aria-label={prefix} onSubmit={(event) => { event.preventDefault(); onSave?.(axis, draft.start.trim() || draft.end.trim() ? draft : null); resetDraft(); }}><input aria-label={`${prefix} start`} onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.start} /><input aria-label={`${prefix} end`} onChange={(event) => updateDraft((current) => ({ ...current, end: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.end} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save {axis}-axis</button></form>;
+}
+
+function QuadrantLabelForm({ onSave, quadrant, value }: { onSave?: (quadrant: QuadrantNumber, value: string | null) => void; quadrant: QuadrantNumber; value: string | null }) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft({ value: value ?? '' });
+  return <form aria-label={`Quadrant ${quadrant} label`} onSubmit={(event) => { event.preventDefault(); onSave?.(quadrant, draft.value.trim() ? draft.value : null); resetDraft(); }}><input aria-label={`Quadrant ${quadrant} label text`} onChange={(event) => updateDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.value} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save quadrant {quadrant}</button></form>;
+}
+
+function QuadrantPointForm({ item, items, onDelete, onEdit, onError, onMove }: { item: QuadrantPoint; items: QuadrantPoint[]; onDelete?: (identity: QuadrantPointIdentity) => void; onEdit?: (identity: QuadrantPointIdentity, value: Partial<QuadrantPoint>) => boolean | void; onError: (value: string | null) => void; onMove?: (identity: QuadrantPointIdentity, direction: 'up' | 'down') => void }) {
+  const canonical = { label: item.label, x: String(item.x), y: String(item.y), radius: item.styles.radius === undefined ? '' : String(item.styles.radius), color: item.styles.color ?? '', strokeColor: item.styles.strokeColor ?? '', strokeWidth: item.styles.strokeWidth ?? '' }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const identity = getQuadrantPointIdentity(item, items); const label = `Quadrant point ${item.label}`;
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { label: draft.label, x: parseSemanticNumber(draft.x, 'Quadrant x coordinate'), y: parseSemanticNumber(draft.y, 'Quadrant y coordinate'), styles: { ...(draft.radius.trim() ? { radius: parseSemanticNumber(draft.radius, 'Quadrant point radius') } : {}), ...(draft.color.trim() ? { color: draft.color } : {}), ...(draft.strokeColor.trim() ? { strokeColor: draft.strokeColor } : {}), ...(draft.strokeWidth.trim() ? { strokeWidth: draft.strokeWidth } : {}) } }))) resetDraft(); }}>
+    <input aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
+    <input aria-label={`${label} x`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, x: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.x} />
+    <input aria-label={`${label} y`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, y: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.y} />
+    <input aria-label={`${label} radius`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, radius: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.radius} />
+    <input aria-label={`${label} color`} onChange={(event) => updateDraft((current) => ({ ...current, color: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.color} />
+    <input aria-label={`${label} stroke color`} onChange={(event) => updateDraft((current) => ({ ...current, strokeColor: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.strokeColor} />
+    <input aria-label={`${label} stroke width`} onChange={(event) => updateDraft((current) => ({ ...current, strokeWidth: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.strokeWidth} />
+    <button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move Quadrant point ${item.label} up`} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move Quadrant point ${item.label} down`} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete Quadrant point ${item.label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
+  </form>;
+}
+
+function XyChartEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onEditAxis, onMove, onSetOrientation, onSetTitle }: {
+  bottom: number; diagram: XyChartDiagramSnapshot; maxHeight: number; onAdd?: (value: XySeries) => boolean | void;
+  onDelete?: (identity: XySeriesIdentity) => void; onEdit?: (identity: XySeriesIdentity, value: Partial<XySeries>) => boolean | void;
+  onEditAxis?: (axis: 'x' | 'y', value: XyAxis) => boolean | void; onMove?: (identity: XySeriesIdentity, direction: 'up' | 'down') => void;
+  onSetOrientation?: (value?: XyChartOrientation) => void; onSetTitle?: (value?: string) => void;
+}) {
+  const { draft: titleDraft, updateDraft: updateTitleDraft } = useCanonicalDraft({ value: diagram.title ?? '' }); const { draft: series, updateDraft: updateSeries } = useCanonicalDraft({ kind: 'line' as XySeries['kind'], label: 'Series', values: diagram.xAxis.labels?.map(() => '1').join(', ') ?? '1, 2' }); const [error, setError] = useState<string | null>(null);
+  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="xychart-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+    <strong>XY chart</strong>
+    <form aria-label="XY chart options" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() || undefined); }}><input aria-label="XY chart title" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={titleDraft.value} /><select aria-label="XY chart orientation" onChange={(event) => onSetOrientation?.(event.target.value ? event.target.value as XyChartOrientation : undefined)} style={HIERARCHY_CONTROL_STYLE} value={diagram.orientation ?? ''}><option value="">Default</option><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save XY options</button></form>
+    <XyAxisForm axis="x" onError={setError} onSave={onEditAxis} value={diagram.xAxis} /><XyAxisForm axis="y" onError={setError} onSave={onEditAxis} value={diagram.yAxis} />
+    <form aria-label="New XY series" onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAdd?.({ kind: series.kind, label: series.label || undefined, values: parseSemanticNumberList(series.values, 'XY series values') })); }}><select aria-label="New XY series kind" onChange={(event) => updateSeries((current) => ({ ...current, kind: event.target.value as XySeries['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={series.kind}><option value="line">Line</option><option value="bar">Bar</option></select><input aria-label="New XY series label" onChange={(event) => updateSeries((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={series.label} /><input aria-label="New XY series values" onChange={(event) => updateSeries((current) => ({ ...current, values: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={series.values} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add series</button></form>
+    <NumericEditorError error={error} />
+    {diagram.series.map((item) => <XySeriesForm item={item} items={diagram.series} key={`${item.kind}:${item.label}:${item.values.join(',')}`} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} />)}
+  </aside>;
+}
+
+function XyAxisForm({ axis, onError, onSave, value }: { axis: 'x' | 'y'; onError: (value: string | null) => void; onSave?: (axis: 'x' | 'y', value: XyAxis) => boolean | void; value: XyAxis }) {
+  const canonical = { label: value.label ?? '', mode: value.labels ? 'labels' : 'range', data: value.labels?.join(', ') ?? value.range?.join(', ') ?? '' }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const prefix = `XY ${axis}-axis`;
+  return <form aria-label={prefix} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => { const next = draft.mode === 'labels' ? { label: draft.label || undefined, labels: draft.data.split(',').map((part) => part.trim()).filter(Boolean) } : { label: draft.label || undefined, range: parseSemanticNumberList(draft.data, `${prefix} range`) as [number, number] }; return onSave?.(axis, next); })) resetDraft(); }}><input aria-label={`${prefix} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />{axis === 'x' ? <select aria-label={`${prefix} mode`} onChange={(event) => updateDraft((current) => ({ ...current, mode: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.mode}><option value="labels">Labels</option><option value="range">Range</option></select> : null}<input aria-label={`${prefix} values`} onChange={(event) => updateDraft((current) => ({ ...current, data: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.data} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save {axis}-axis</button></form>;
+}
+
+function XySeriesForm({ item, items, onDelete, onEdit, onError, onMove }: { item: XySeries; items: XySeries[]; onDelete?: (identity: XySeriesIdentity) => void; onEdit?: (identity: XySeriesIdentity, value: Partial<XySeries>) => boolean | void; onError: (value: string | null) => void; onMove?: (identity: XySeriesIdentity, direction: 'up' | 'down') => void }) {
+  const canonical = { ...item, label: item.label ?? '', valuesText: item.values.join(', ') }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const identity = getXySeriesIdentity(item, items); const label = `XY series ${item.label ?? item.kind}`;
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { kind: draft.kind, label: draft.label || undefined, values: parseSemanticNumberList(draft.valuesText, 'XY series values') }))) resetDraft(); }}><select aria-label={`${label} kind`} onChange={(event) => updateDraft((current) => ({ ...current, kind: event.target.value as XySeries['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={draft.kind}><option value="line">Line</option><option value="bar">Bar</option></select><input aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} /><input aria-label={`${label} values`} onChange={(event) => updateDraft((current) => ({ ...current, valuesText: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.valuesText} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ${label} up`} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+}
+
+function RadarEditorControls({ bottom, diagram, maxHeight, onAddAxis, onAddCurve, onDeleteAxis, onDeleteCurve, onEditAxis, onEditCurve, onEditOptions, onMoveAxis, onMoveCurve, onSetTitle }: {
+  bottom: number; diagram: RadarDiagramSnapshot; maxHeight: number; onAddAxis?: (value: RadarAxis, curveValues?: readonly number[]) => boolean | void; onAddCurve?: (value: RadarCurve) => boolean | void;
+  onDeleteAxis?: (identity: RadarAxisIdentity) => void; onDeleteCurve?: (identity: RadarCurveIdentity) => void; onEditAxis?: (identity: RadarAxisIdentity, value: Partial<RadarAxis>) => void;
+  onEditCurve?: (identity: RadarCurveIdentity, value: Partial<RadarCurve>) => boolean | void; onEditOptions?: (value: Partial<RadarOptions>) => boolean | void;
+  onMoveAxis?: (identity: RadarAxisIdentity, direction: 'up' | 'down') => void; onMoveCurve?: (identity: RadarCurveIdentity, direction: 'up' | 'down') => void; onSetTitle?: (value?: string) => void;
+}) {
+  const { draft: titleDraft, updateDraft: updateTitleDraft } = useCanonicalDraft({ value: diagram.title ?? '' }); const { draft: axis, updateDraft: updateAxis } = useCanonicalDraft({ name: 'axis', label: 'Axis', values: diagram.curves.map(() => '1').join(', ') }); const { draft: curve, updateDraft: updateCurve } = useCanonicalDraft({ name: 'curve', label: 'Curve', values: diagram.axes.map(() => '1').join(', ') }); const [error, setError] = useState<string | null>(null);
+  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="radar-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+    <strong>Radar</strong><form aria-label="Radar title" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() || undefined); }}><input aria-label="Radar title text" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={titleDraft.value} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save title</button></form>
+    <RadarOptionsForm onError={setError} onSave={onEditOptions} value={diagram.options} />
+    <form aria-label="New Radar axis" onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAddAxis?.({ name: axis.name, label: axis.label || undefined }, diagram.curves.length ? parseSemanticNumberList(axis.values, 'Radar axis curve values') : undefined)); }}><input aria-label="New Radar axis name" onChange={(event) => updateAxis((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={axis.name} /><input aria-label="New Radar axis label" onChange={(event) => updateAxis((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={axis.label} />{diagram.curves.length ? <input aria-label="New Radar axis curve values" onChange={(event) => updateAxis((current) => ({ ...current, values: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={axis.values} /> : null}<button style={HIERARCHY_CONTROL_STYLE} type="submit">Add axis</button></form>
+    <form aria-label="New Radar curve" onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAddCurve?.({ name: curve.name, label: curve.label || undefined, values: parseSemanticNumberList(curve.values, 'Radar curve values') })); }}><input aria-label="New Radar curve name" onChange={(event) => updateCurve((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={curve.name} /><input aria-label="New Radar curve label" onChange={(event) => updateCurve((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={curve.label} /><input aria-label="New Radar curve values" onChange={(event) => updateCurve((current) => ({ ...current, values: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={curve.values} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add curve</button></form>
+    <NumericEditorError error={error} />
+    {diagram.axes.map((item) => <RadarAxisForm item={item} items={diagram.axes} key={item.name} onDelete={onDeleteAxis} onEdit={onEditAxis} onMove={onMoveAxis} />)}
+    {diagram.curves.map((item) => <RadarCurveForm item={item} items={diagram.curves} key={item.name} onDelete={onDeleteCurve} onEdit={onEditCurve} onError={setError} onMove={onMoveCurve} />)}
+  </aside>;
+}
+
+function RadarOptionsForm({ onError, onSave, value }: { onError: (value: string | null) => void; onSave?: (value: Partial<RadarOptions>) => boolean | void; value: RadarOptions }) {
+  const canonical = {
+    graticule: value.graticule ?? 'circle', graticulePresent: value.graticule !== undefined,
+    max: value.max === undefined ? '' : String(value.max), maxPresent: value.max !== undefined,
+    min: String(value.min ?? 0), minPresent: value.min !== undefined,
+    showLegend: value.showLegend ?? true, showLegendPresent: value.showLegend !== undefined,
+    ticks: String(value.ticks ?? 5), ticksPresent: value.ticks !== undefined,
+  };
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical);
+  return <form aria-label="Radar options" onSubmit={(event) => {
+    event.preventDefault();
+    const succeeded = runNumericForm(onError, () => onSave?.({
+      graticule: draft.graticulePresent ? draft.graticule as RadarOptions['graticule'] : undefined,
+      max: draft.maxPresent ? parseSemanticNumber(draft.max, 'Radar max') : undefined,
+      min: draft.minPresent ? parseSemanticNumber(draft.min, 'Radar min') : undefined,
+      showLegend: draft.showLegendPresent ? draft.showLegend : undefined,
+      ticks: draft.ticksPresent ? parseSemanticNumber(draft.ticks, 'Radar ticks') : undefined,
+    }));
+    if (succeeded) resetDraft();
+  }}>
+    <label><input aria-label="Radar set minimum" checked={draft.minPresent} onChange={(event) => updateDraft((current) => ({ ...current, minPresent: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Set minimum</label>
+    <input aria-label="Radar minimum" disabled={!draft.minPresent} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, min: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.min} />
+    <label><input aria-label="Radar set maximum" checked={draft.maxPresent} onChange={(event) => updateDraft((current) => ({ ...current, maxPresent: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Set maximum</label>
+    <input aria-label="Radar maximum" disabled={!draft.maxPresent} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, max: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.max} />
+    <label><input aria-label="Radar set ticks" checked={draft.ticksPresent} onChange={(event) => updateDraft((current) => ({ ...current, ticksPresent: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Set ticks</label>
+    <input aria-label="Radar ticks" disabled={!draft.ticksPresent} inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, ticks: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.ticks} />
+    <label><input aria-label="Radar set graticule" checked={draft.graticulePresent} onChange={(event) => updateDraft((current) => ({ ...current, graticulePresent: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Set graticule</label>
+    <select aria-label="Radar graticule" disabled={!draft.graticulePresent} onChange={(event) => updateDraft((current) => ({ ...current, graticule: event.target.value as NonNullable<RadarOptions['graticule']> }))} style={HIERARCHY_CONTROL_STYLE} value={draft.graticule}><option value="circle">Circle</option><option value="polygon">Polygon</option></select>
+    <label><input aria-label="Radar set show legend" checked={draft.showLegendPresent} onChange={(event) => updateDraft((current) => ({ ...current, showLegendPresent: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Set legend visibility</label>
+    <label><input aria-label="Radar show legend" checked={draft.showLegend} disabled={!draft.showLegendPresent} onChange={(event) => updateDraft((current) => ({ ...current, showLegend: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Show legend</label>
+    <button style={HIERARCHY_CONTROL_STYLE} type="submit">Save Radar options</button>
+  </form>;
+}
+
+function RadarAxisForm({ item, items, onDelete, onEdit, onMove }: { item: RadarAxis; items: RadarAxis[]; onDelete?: (identity: RadarAxisIdentity) => void; onEdit?: (identity: RadarAxisIdentity, value: Partial<RadarAxis>) => void; onMove?: (identity: RadarAxisIdentity, direction: 'up' | 'down') => void }) {
+  const canonical = { ...item, label: item.label ?? '' }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const identity = getRadarAxisIdentity(item, items); const label = `Radar axis ${item.name}`;
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); onEdit?.(identity, { name: draft.name, label: draft.label || undefined }); resetDraft(); }}><input aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.name} /><input aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move Radar axis ${item.name} up`} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move Radar axis ${item.name} down`} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete Radar axis ${item.name}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+}
+
+function RadarCurveForm({ item, items, onDelete, onEdit, onError, onMove }: { item: RadarCurve; items: RadarCurve[]; onDelete?: (identity: RadarCurveIdentity) => void; onEdit?: (identity: RadarCurveIdentity, value: Partial<RadarCurve>) => boolean | void; onError: (value: string | null) => void; onMove?: (identity: RadarCurveIdentity, direction: 'up' | 'down') => void }) {
+  const canonical = { ...item, label: item.label ?? '', valuesText: item.values.join(', ') }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const identity = getRadarCurveIdentity(item, items); const label = `Radar curve ${item.name}`;
+  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { name: draft.name, label: draft.label || undefined, values: parseSemanticNumberList(draft.valuesText, 'Radar curve values') }))) resetDraft(); }}><input aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.name} /><input aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} /><input aria-label={`${label} values`} onChange={(event) => updateDraft((current) => ({ ...current, valuesText: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.valuesText} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move Radar curve ${item.name} up`} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move Radar curve ${item.name} down`} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete Radar curve ${item.name}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
 }
 
 function SectionForm({ family, item, onDelete, onMove, onSave }: { family: string; item: { label: string }; onDelete?: (label: string) => void; onMove?: (label: string, direction: 'up' | 'down') => void; onSave?: (label: string, value: { label?: string }) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(item); return <form aria-label={`${family} section ${item.label}`} onSubmit={(event) => { event.preventDefault(); onSave?.(item.label, draft); resetDraft(); }}><input aria-label={`${family} section ${item.label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><button type="submit">Save</button><button aria-label={`Move ${family} section ${item.label} up`} onClick={() => onMove?.(item.label, 'up')} type="button">↑</button><button aria-label={`Move ${family} section ${item.label} down`} onClick={() => onMove?.(item.label, 'down')} type="button">↓</button><button aria-label={`Delete ${family} section ${item.label}`} onClick={() => onDelete?.(item.label)} type="button">Delete</button></form>; }

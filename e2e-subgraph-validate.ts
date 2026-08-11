@@ -24,6 +24,146 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+const SUBGRAPH_HEADER_KEY_PROBE = '__arielchartsSubgraphHeaderKeyProbe';
+
+type SubgraphHeaderKeyProbe = {
+  event: {
+    activeAriaLabel: string | null;
+    activeTestId: string | null;
+    code: string;
+    currentHeaderActive: boolean;
+    currentHeaderConnected: boolean;
+    isTrusted: boolean;
+    key: string;
+    targetAriaLabel: string | null;
+    targetTestId: string | null;
+  } | null;
+  keyboardEvent: KeyboardEvent | null;
+  listener: EventListenerObject;
+};
+
+async function pressCurrentSubgraphHeaderKey(
+  page: Page,
+  headerTestId: string,
+  key: 'Enter' | 'Space',
+  label: string,
+): Promise<void> {
+  await page.evaluate('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+  const header = page.getByTestId(headerTestId);
+  await header.waitFor({ state: 'visible', timeout: 5_000 });
+  const candidate = await header.elementHandle();
+  assert(candidate, `${label} current header has no element handle.`);
+  await candidate.evaluate((element) => { (element as HTMLElement).focus(); });
+  await page.evaluate('new Promise((resolve) => requestAnimationFrame(resolve))');
+  const focusState = await page.evaluate(({ currentCandidate, testId }) => {
+    const currentHeader = document.querySelector(`[data-testid="${CSS.escape(testId)}"]`);
+    const activeElement = document.activeElement;
+    return {
+      activeAriaLabel: activeElement?.getAttribute('aria-label') ?? null,
+      activeRole: activeElement?.getAttribute('role') ?? null,
+      activeTestId: activeElement?.getAttribute('data-testid') ?? null,
+      currentHeaderConnected: currentHeader?.isConnected ?? false,
+      currentHeaderIsActive: activeElement === currentHeader,
+      currentHeaderIsCandidate: currentHeader === currentCandidate,
+    };
+  }, { currentCandidate: candidate, testId: headerTestId });
+  assert(
+    focusState.currentHeaderConnected
+      && focusState.currentHeaderIsActive
+      && focusState.currentHeaderIsCandidate,
+    `${label} current header did not remain mounted and focused across the render boundary: ${JSON.stringify(focusState)}.`,
+  );
+
+  const expectedCode = key === 'Space' ? 'Space' : 'Enter';
+  await page.evaluate(`(() => {
+    const probeKey = ${JSON.stringify(SUBGRAPH_HEADER_KEY_PROBE)};
+    const expectedCode = ${JSON.stringify(expectedCode)};
+    const headerTestId = ${JSON.stringify(headerTestId)};
+    if (window[probeKey]) throw new Error('A subgraph header key probe is already armed.');
+    const state = { event: null, keyboardEvent: null, listener: null };
+    state.listener = {
+      handleEvent(event) {
+        if (!(event instanceof KeyboardEvent) || event.code !== expectedCode) return;
+        state.keyboardEvent = event;
+        const target = event.target instanceof Element ? event.target : null;
+        const activeElement = document.activeElement;
+        const currentHeader = document.querySelector('[data-testid="' + CSS.escape(headerTestId) + '"]');
+        state.event = {
+          activeAriaLabel: activeElement?.getAttribute('aria-label') ?? null,
+          activeTestId: activeElement?.getAttribute('data-testid') ?? null,
+          code: event.code,
+          currentHeaderActive: activeElement === currentHeader,
+          currentHeaderConnected: currentHeader?.isConnected ?? false,
+          isTrusted: event.isTrusted,
+          key: event.key,
+          targetAriaLabel: target?.getAttribute('aria-label') ?? null,
+          targetTestId: target?.getAttribute('data-testid') ?? null,
+        };
+      },
+    };
+    window[probeKey] = state;
+    window.addEventListener('keydown', state.listener, true);
+  })()`);
+
+  try {
+    await page.getByTestId(headerTestId).press(key);
+    const probe = await page.evaluate((probeKey) => {
+      const host = window as typeof window & Record<string, SubgraphHeaderKeyProbe | undefined>;
+      const state = host[probeKey];
+      if (!state) return null;
+      window.removeEventListener('keydown', state.listener, true);
+      delete host[probeKey];
+      return { claimed: state.keyboardEvent?.defaultPrevented ?? null, event: state.event };
+    }, SUBGRAPH_HEADER_KEY_PROBE);
+    assert(
+      probe?.claimed === true
+        && probe.event?.isTrusted === true
+        && probe.event.currentHeaderActive
+        && probe.event.currentHeaderConnected
+        && probe.event.targetTestId === headerTestId
+        && probe.event.code === expectedCode,
+      `${label} was not claimed by the current focused header: ${JSON.stringify(probe)}.`,
+    );
+  } finally {
+    await page.evaluate((probeKey) => {
+      const host = window as typeof window & Record<string, SubgraphHeaderKeyProbe | undefined>;
+      const state = host[probeKey];
+      if (!state) return;
+      window.removeEventListener('keydown', state.listener, true);
+      delete host[probeKey];
+    }, SUBGRAPH_HEADER_KEY_PROBE);
+  }
+}
+
+async function expectInnerSectionKeyboardSelection(page: Page, label: string): Promise<void> {
+  try {
+    await page.waitForFunction(() => {
+      const selected = document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected');
+      const toolbarCount = document.querySelectorAll('[data-testid="canvas-subgraph-toolbar"]').length;
+      const editCount = document.querySelectorAll('[data-testid="canvas-action-edit-section-label"]').length;
+      return selected === 'true' && toolbarCount === 1 && editCount === 1;
+    }, undefined, { timeout: 5_000 });
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => {
+      const activeElement = document.activeElement;
+      return {
+        activeElement: activeElement ? {
+          tagName: activeElement.tagName,
+          testId: activeElement.getAttribute('data-testid'),
+          role: activeElement.getAttribute('role'),
+          ariaLabel: activeElement.getAttribute('aria-label'),
+        } : null,
+        selected: document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected'),
+        toolbarCount: document.querySelectorAll('[data-testid="canvas-subgraph-toolbar"]').length,
+        editCount: document.querySelectorAll('[data-testid="canvas-action-edit-section-label"]').length,
+      };
+    });
+    throw new Error(`${label} did not select the inner section with its edit toolbar: ${JSON.stringify(diagnostics)}`, {
+      cause: error,
+    });
+  }
+}
+
 async function readSource(page: Page): Promise<string> {
   return page.locator('.cm-line').allTextContents().then((lines) => lines.join('\n'));
 }
@@ -147,59 +287,8 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
       document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'false'
       && !document.querySelector('[data-testid="canvas-subgraph-toolbar"]')
     ), undefined, { timeout: 5_000 });
-    try {
-      await page.waitForFunction(() => {
-        const header = document.querySelector('[data-testid="canvas-subgraph-header-inner"]');
-        if (!(header instanceof HTMLElement)) return false;
-        header.focus();
-        return document.activeElement === header;
-      }, undefined, { timeout: 5_000 });
-    } catch (error) {
-      const diagnostics = await page.evaluate(() => {
-        const header = document.querySelector('[data-testid="canvas-subgraph-header-inner"]');
-        const activeElement = document.activeElement;
-        return {
-          headerPresent: header !== null,
-          headerTagName: header?.tagName ?? null,
-          activeElement: activeElement ? {
-            tagName: activeElement.tagName,
-            testId: activeElement.getAttribute('data-testid'),
-            role: activeElement.getAttribute('role'),
-            ariaLabel: activeElement.getAttribute('aria-label'),
-          } : null,
-        };
-      });
-      throw new Error(`Inner section header did not receive focus before Enter selection: ${JSON.stringify(diagnostics)}`, {
-        cause: error,
-      });
-    }
-    await page.keyboard.press('Enter');
-    try {
-      await page.waitForFunction(() => {
-        const selected = document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected');
-        const toolbarCount = document.querySelectorAll('[data-testid="canvas-subgraph-toolbar"]').length;
-        const editCount = document.querySelectorAll('[data-testid="canvas-action-edit-section-label"]').length;
-        return selected === 'true' && toolbarCount === 1 && editCount === 1;
-      }, undefined, { timeout: 5_000 });
-    } catch (error) {
-      const diagnostics = await page.evaluate(() => {
-        const activeElement = document.activeElement;
-        return {
-          activeElement: activeElement ? {
-            tagName: activeElement.tagName,
-            testId: activeElement.getAttribute('data-testid'),
-            role: activeElement.getAttribute('role'),
-            ariaLabel: activeElement.getAttribute('aria-label'),
-          } : null,
-          selected: document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected'),
-          toolbarCount: document.querySelectorAll('[data-testid="canvas-subgraph-toolbar"]').length,
-          editCount: document.querySelectorAll('[data-testid="canvas-action-edit-section-label"]').length,
-        };
-      });
-      throw new Error(`Enter did not select the inner section with its edit toolbar: ${JSON.stringify(diagnostics)}`, {
-        cause: error,
-      });
-    }
+    await pressCurrentSubgraphHeaderKey(page, 'canvas-subgraph-header-inner', 'Enter', 'Enter');
+    await expectInnerSectionKeyboardSelection(page, 'Enter');
     const enterSelected = await innerSection.getAttribute('data-selected') === 'true';
     const enterToolbarVisible = await page.getByTestId('canvas-subgraph-toolbar').isVisible();
     await innerHeader.press('Escape');
@@ -207,12 +296,8 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
       document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'false'
       && !document.querySelector('[data-testid="canvas-subgraph-toolbar"]')
     ), undefined, { timeout: 5_000 });
-    await innerHeader.press('Space');
-    await page.waitForFunction(() => (
-      document.querySelector('[data-testid="canvas-subgraph-inner"]')?.getAttribute('data-selected') === 'true'
-      && document.querySelector('[data-testid="canvas-subgraph-toolbar"]')
-      && document.querySelector('[data-testid="canvas-action-edit-section-label"]')
-    ), undefined, { timeout: 5_000 });
+    await pressCurrentSubgraphHeaderKey(page, 'canvas-subgraph-header-inner', 'Space', 'Space');
+    await expectInnerSectionKeyboardSelection(page, 'Space');
     const spaceSelected = await innerSection.getAttribute('data-selected') === 'true';
     const spaceToolbarVisible = await page.getByTestId('canvas-subgraph-toolbar').isVisible();
 
@@ -305,10 +390,19 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
     await ensureSourceClosed(page);
     const implicitHeader = page.getByRole('button', { name: 'Select section ImplicitSection', exact: true });
     await implicitHeader.waitFor({ state: 'visible', timeout: 15_000 });
-    await implicitHeader.focus();
-    await page.keyboard.press('Enter');
-    assert(await page.getByTestId('canvas-subgraph-ImplicitSection').getAttribute('data-selected') === 'true',
-      'Implicit-title section was not selectable from its keyboard-accessible header.');
+    await pressCurrentSubgraphHeaderKey(page, 'canvas-subgraph-header-ImplicitSection', 'Enter', 'Implicit-title Enter');
+    try {
+      await page.waitForFunction(() => (
+        document.querySelector('[data-testid="canvas-subgraph-ImplicitSection"]')?.getAttribute('data-selected') === 'true'
+      ), undefined, { timeout: 5_000 });
+    } catch (error) {
+      const diagnostics = await page.evaluate(() => ({
+        activeAriaLabel: document.activeElement?.getAttribute('aria-label') ?? null,
+        activeTestId: document.activeElement?.getAttribute('data-testid') ?? null,
+        selected: document.querySelector('[data-testid="canvas-subgraph-ImplicitSection"]')?.getAttribute('data-selected') ?? null,
+      }));
+      throw new Error(`Implicit-title Enter did not select the current section header: ${JSON.stringify(diagnostics)}.`, { cause: error });
+    }
     assert(await page.getByRole('button', { name: 'Edit section label', exact: true }).count() === 0,
       'Implicit-title section incorrectly exposed an ambiguous rename action.');
     const implicitNode = page.locator('.react-flow__node[data-id="A"]');

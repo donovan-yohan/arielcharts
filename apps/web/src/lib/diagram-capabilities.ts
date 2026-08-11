@@ -24,13 +24,14 @@ import { isXyChartSourceRepresentable } from './xychart-mutations';
 import { isRadarSourceRepresentable } from './radar-mutations';
 import { isSankeySourceRepresentable } from './sankey-mutations';
 import { isPacketSourceRepresentable } from './packet-mutations';
+import { isCynefinSourceRepresentable } from './cynefin-mutations';
 
 /** The installed Mermaid detector registry this catalog was audited against. */
 export const MERMAID_CAPABILITY_CATALOG_VERSION = '11.16.1';
 
 export type DiagramKind = 'flowchart' | 'sequence' | 'er' | 'generic';
 export type DiagramEditingMode = 'canvas' | 'semantic-form' | 'source-only' | 'unavailable-plugin';
-export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'mindmap' | 'tree-view' | 'ishikawa' | 'railroad' | 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'source-only' | 'unavailable-plugin';
+export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'mindmap' | 'tree-view' | 'ishikawa' | 'railroad' | 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'source-only' | 'unavailable-plugin';
 export type MermaidDiagramFamilyId = typeof MERMAID_DIAGRAM_FAMILIES[number]['id'];
 
 export interface MermaidDiagramFamily {
@@ -254,6 +255,7 @@ const XY_CHART_OPERATIONS = new Set(['set-title', 'set-orientation', 'edit-axis'
 const RADAR_OPERATIONS = new Set(['set-title', 'edit-options', 'add-axis', 'edit-axis', 'delete-axis', 'move-axis', 'add-curve', 'edit-curve', 'delete-curve', 'move-curve']);
 const SANKEY_OPERATIONS = new Set(['add-link', 'edit-link', 'delete-link', 'move-link', 'rename-node']);
 const PACKET_OPERATIONS = new Set(['add-field', 'edit-field', 'delete-field', 'move-field']);
+const CYNEFIN_OPERATIONS = new Set(['add-item', 'edit-item', 'delete-item', 'move-item', 'add-transition', 'edit-transition', 'delete-transition', 'move-transition']);
 function strictAdapter(id: DiagramAdapterId, operations: ReadonlySet<string>, representable: (source: string) => boolean): DiagramSourceModelAdapter { return { id, getOperationResult(source, operation) { return !representable(source) ? { supported: false, reason: 'unrepresentable' } : operations.has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' }; }, getRepresentability: (source) => representable(source) ? { representable: true } : { representable: false, reason: 'unsupported-syntax' } }; }
 const JOURNEY_ADAPTER = strictAdapter('journey', JOURNEY_OPERATIONS, isJourneySourceRepresentable);
 const GANTT_ADAPTER = strictAdapter('gantt', GANTT_OPERATIONS, isGanttSourceRepresentable);
@@ -271,6 +273,7 @@ const XY_CHART_ADAPTER = strictAdapter('xy-chart', XY_CHART_OPERATIONS, isXyChar
 const RADAR_ADAPTER = strictAdapter('radar', RADAR_OPERATIONS, isRadarSourceRepresentable);
 const SANKEY_ADAPTER = strictAdapter('sankey', SANKEY_OPERATIONS, isSankeySourceRepresentable);
 const PACKET_ADAPTER = strictAdapter('packet', PACKET_OPERATIONS, isPacketSourceRepresentable);
+const CYNEFIN_ADAPTER = strictAdapter('cynefin', CYNEFIN_OPERATIONS, isCynefinSourceRepresentable);
 
 /**
  * Every built-in visual Mermaid family in 11.16.1. Aliases, renderer variants,
@@ -282,7 +285,7 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'block', label: 'Block', parserTypes: ['block'], editingMode: 'semantic-form', adapter: 'block' },
   { id: 'c4', label: 'C4', parserTypes: ['c4'], editingMode: 'semantic-form', adapter: 'c4' },
   { id: 'class', label: 'Class', parserTypes: ['class', 'classDiagram'], editingMode: 'semantic-form', adapter: 'class' },
-  { id: 'cynefin', label: 'Cynefin', parserTypes: ['cynefin'] },
+  { id: 'cynefin', label: 'Cynefin', parserTypes: ['cynefin'], editingMode: 'semantic-form', adapter: 'cynefin' },
   { id: 'entity-relationship', label: 'Entity relationship', parserTypes: ['er'], editingMode: 'semantic-form', adapter: 'er' },
   { id: 'event-modeling', label: 'Event modeling', parserTypes: ['eventmodeling'], editingMode: 'semantic-form', adapter: 'event-modeling' },
   { id: 'flowchart', label: 'Flowchart', parserTypes: ['flowchart', 'flowchart-v2', 'flowchart-elk'], editingMode: 'canvas', adapter: 'flowchart' },
@@ -381,6 +384,7 @@ export function getDiagramSourceModelAdapter(capability: DiagramCapability | nul
     case 'radar': return RADAR_ADAPTER;
     case 'sankey': return SANKEY_ADAPTER;
     case 'packet': return PACKET_ADAPTER;
+    case 'cynefin': return CYNEFIN_ADAPTER;
     case 'unavailable-plugin': return UNAVAILABLE_PLUGIN_ADAPTER;
     default: return SOURCE_ONLY_ADAPTER;
   }

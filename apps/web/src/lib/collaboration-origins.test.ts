@@ -26,6 +26,7 @@ import { addXySeries } from './xychart-mutations';
 import { addRadarCurve } from './radar-mutations';
 import { addSankeyLink } from './sankey-mutations';
 import { addPacketField } from './packet-mutations';
+import { addCynefinItem } from './cynefin-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -152,6 +153,7 @@ describe('collaboration transaction origins', () => {
     ['radar', 'radar-beta\n  axis a\n  axis b\n  axis c', (source: string) => addRadarCurve(source, { name: 'one', values: [1, 2, 3] })],
     ['Sankey', 'sankey-beta\nSource,Target,1', (source: string) => addSankeyLink(source, { source: 'Target', target: 'Done', value: 2 })],
     ['Packet', 'packet-beta\n  0-7: "Header"', (source: string) => addPacketField(source, { end: 15, label: 'Body', start: 8 })],
+    ['Cynefin', 'cynefin-beta\n  complex\n    "Emergent"', (source: string) => addCynefinItem(source, { domain: 'complex', label: 'Probe' })],
   ])('keeps %s semantic form mutations in the local visual undo stack', (_family, initial, mutate) => {
     const doc = new Y.Doc();
     const source = doc.getText('semantic-source');

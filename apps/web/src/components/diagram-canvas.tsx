@@ -109,6 +109,8 @@ import { getXySeriesIdentity, type XyAxis, type XyChartDiagramSnapshot, type XyC
 import { getRadarAxisIdentity, getRadarCurveIdentity, type RadarAxis, type RadarAxisIdentity, type RadarCurve, type RadarCurveIdentity, type RadarDiagramSnapshot, type RadarOptions } from '../lib/radar-mutations';
 import { getSankeyLinkIdentity, getSankeyNodeIdentity, type SankeyDiagramSnapshot, type SankeyLink, type SankeyLinkIdentity, type SankeyNodeIdentity } from '../lib/sankey-mutations';
 import { getPacketFieldIdentity, type PacketDiagramSnapshot, type PacketField, type PacketFieldIdentity } from '../lib/packet-mutations';
+import { CYNEFIN_DOMAIN_NAMES, getCynefinItemIdentity, getCynefinTransitionIdentity, isCynefinSourceRepresentable, type CynefinDiagramSnapshot, type CynefinDomainName, type CynefinItem, type CynefinItemIdentity, type CynefinTransition, type CynefinTransitionIdentity } from '../lib/cynefin-mutations';
+import { reconcileCynefinItemRenderIdentities, reconcileCynefinTransitionRenderIdentities, type CynefinRenderIdentityState } from '../lib/cynefin-render-identities';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
@@ -145,6 +147,7 @@ export interface DiagramCanvasProps {
   isRadar?: boolean;
   isSankey?: boolean;
   isPacket?: boolean;
+  isCynefin?: boolean;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
@@ -178,6 +181,7 @@ export interface DiagramCanvasProps {
   radarDiagram?: RadarDiagramSnapshot | null;
   sankeyDiagram?: SankeyDiagramSnapshot | null;
   packetDiagram?: PacketDiagramSnapshot | null;
+  cynefinDiagram?: CynefinDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
@@ -405,6 +409,14 @@ export interface DiagramCanvasProps {
   onEditPacketField?: (identity: PacketFieldIdentity, value: Partial<PacketField>) => boolean | void;
   onDeletePacketField?: (identity: PacketFieldIdentity) => void;
   onMovePacketField?: (identity: PacketFieldIdentity, direction: 'up' | 'down') => void;
+  onAddCynefinItem?: (value: CynefinItem) => boolean | void;
+  onEditCynefinItem?: (identity: CynefinItemIdentity, value: Partial<CynefinItem>) => boolean | void;
+  onDeleteCynefinItem?: (identity: CynefinItemIdentity) => void;
+  onMoveCynefinItem?: (identity: CynefinItemIdentity, domain: CynefinDomainName, targetIndex: number) => void;
+  onAddCynefinTransition?: (value: CynefinTransition) => boolean | void;
+  onEditCynefinTransition?: (identity: CynefinTransitionIdentity, value: Partial<CynefinTransition>) => boolean | void;
+  onDeleteCynefinTransition?: (identity: CynefinTransitionIdentity) => void;
+  onMoveCynefinTransition?: (identity: CynefinTransitionIdentity, direction: 'up' | 'down') => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onCameraChange?: (camera: CanvasCameraState) => void;
@@ -937,6 +949,14 @@ export function DiagramCanvas({
   onEditPacketField,
   onDeletePacketField,
   onMovePacketField,
+  onAddCynefinItem,
+  onEditCynefinItem,
+  onDeleteCynefinItem,
+  onMoveCynefinItem,
+  onAddCynefinTransition,
+  onEditCynefinTransition,
+  onDeleteCynefinTransition,
+  onMoveCynefinTransition,
   onAddConnectedNode,
   onCanvasCursorChange,
   onCameraChange,
@@ -1000,6 +1020,7 @@ export function DiagramCanvas({
   isRadar = false,
   isSankey = false,
   isPacket = false,
+  isCynefin = false,
   journeyDiagram = null,
   ganttDiagram = null,
   timelineDiagram = null,
@@ -1017,6 +1038,7 @@ export function DiagramCanvas({
   radarDiagram = null,
   sankeyDiagram = null,
   packetDiagram = null,
+  cynefinDiagram = null,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -1100,6 +1122,10 @@ export function DiagramCanvas({
   const onCanvasCursorChangeRef = useRef(onCanvasCursorChange);
   const onNodeEditingChangeRef = useRef(onNodeEditingChange);
   const activeLaserPointerRef = useRef<number | null>(null);
+  const cynefinRenderIdentityKeys = useCynefinRenderIdentityKeys(
+    cynefinDiagram,
+    isCynefinSourceRepresentable(mermaidSource ?? ''),
+  );
   onRenderSettledRef.current = onRenderSettled;
   onCanvasCursorChangeRef.current = onCanvasCursorChange;
   onNodeEditingChangeRef.current = onNodeEditingChange;
@@ -3711,6 +3737,7 @@ export function DiagramCanvas({
         {isRadar && !readOnly && radarDiagram ? <RadarEditorControls bottom={semanticPanelPlacement.bottom} diagram={radarDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAddAxis={onAddRadarAxis} onAddCurve={onAddRadarCurve} onDeleteAxis={onDeleteRadarAxis} onDeleteCurve={onDeleteRadarCurve} onEditAxis={onEditRadarAxis} onEditCurve={onEditRadarCurve} onEditOptions={onEditRadarOptions} onMoveAxis={onMoveRadarAxis} onMoveCurve={onMoveRadarCurve} onSetTitle={onEditRadarTitle} /> : null}
         {isSankey && !readOnly && sankeyDiagram ? <SankeyEditorControls bottom={semanticPanelPlacement.bottom} diagram={sankeyDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddSankeyLink} onDelete={onDeleteSankeyLink} onEdit={onEditSankeyLink} onMove={onMoveSankeyLink} onRenameNode={onRenameSankeyNode} /> : null}
         {isPacket && !readOnly && packetDiagram ? <PacketEditorControls bottom={semanticPanelPlacement.bottom} diagram={packetDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddPacketField} onDelete={onDeletePacketField} onEdit={onEditPacketField} onMove={onMovePacketField} /> : null}
+        {isCynefin && !readOnly && cynefinDiagram ? <CynefinEditorControls bottom={semanticPanelPlacement.bottom} diagram={cynefinDiagram} itemDraftCache={cynefinRenderIdentityKeys.itemDraftCache} itemKeys={cynefinRenderIdentityKeys.itemKeys} maxHeight={semanticPanelPlacement.maxHeight} onAddItem={onAddCynefinItem} onAddTransition={onAddCynefinTransition} onDeleteItem={onDeleteCynefinItem} onDeleteTransition={onDeleteCynefinTransition} onEditItem={onEditCynefinItem} onEditTransition={onEditCynefinTransition} onMoveItem={onMoveCynefinItem} onMoveTransition={onMoveCynefinTransition} transitionDraftCache={cynefinRenderIdentityKeys.transitionDraftCache} transitionKeys={cynefinRenderIdentityKeys.transitionKeys} /> : null}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
@@ -5143,6 +5170,222 @@ function PacketFieldForm({ field, fields, index, onDelete, onEdit, onError, onMo
   </form>;
 }
 
+function CynefinDomainSelect({ disabled = false, label, onChange, value }: {
+  disabled?: boolean;
+  label: string;
+  onChange: (value: CynefinDomainName) => void;
+  value: CynefinDomainName;
+}) {
+  return <select aria-label={label} disabled={disabled} onChange={(event) => onChange(event.target.value as CynefinDomainName)} style={HIERARCHY_CONTROL_STYLE} value={value}>
+    {CYNEFIN_DOMAIN_NAMES.map((domain) => <option key={domain} value={domain}>{formatCynefinDomain(domain)}</option>)}
+  </select>;
+}
+
+function formatCynefinDomain(domain: CynefinDomainName): string {
+  return `${domain[0]?.toUpperCase() ?? ''}${domain.slice(1)}`;
+}
+
+type PersistentCanonicalDraftCache<T extends object> = Map<string, { canonical: T; draft: T }>;
+
+function useCynefinRenderIdentityKeys(diagram: CynefinDiagramSnapshot | null, sourceRepresentable: boolean) {
+  const itemStateRef = useRef<CynefinRenderIdentityState<CynefinItem> | null>(null);
+  const transitionStateRef = useRef<CynefinRenderIdentityState<CynefinTransition> | null>(null);
+  const itemDraftCacheRef = useRef<PersistentCanonicalDraftCache<CynefinItem>>(new Map());
+  const transitionDraftCacheRef = useRef<PersistentCanonicalDraftCache<CynefinTransition>>(new Map());
+  if (!diagram) {
+    if (!sourceRepresentable) {
+      itemStateRef.current = null;
+      transitionStateRef.current = null;
+      itemDraftCacheRef.current.clear();
+      transitionDraftCacheRef.current.clear();
+    }
+    return {
+      itemDraftCache: itemDraftCacheRef.current,
+      itemKeys: new Map<CynefinItem, string>(),
+      transitionDraftCache: transitionDraftCacheRef.current,
+      transitionKeys: new Map<CynefinTransition, string>(),
+    };
+  }
+  const items = diagram.domains.flatMap((domain) => domain.items);
+  const itemState = reconcileCynefinItemRenderIdentities(itemStateRef.current, items);
+  const transitionState = reconcileCynefinTransitionRenderIdentities(transitionStateRef.current, diagram.transitions);
+  itemStateRef.current = itemState;
+  transitionStateRef.current = transitionState;
+  const itemKeys = new Map(itemState.entries.map((entry) => [entry.record, entry.renderKey]));
+  const transitionKeys = new Map(transitionState.entries.map((entry) => [entry.record, entry.renderKey]));
+  const activeItemKeys = new Set(itemKeys.values());
+  const activeTransitionKeys = new Set(transitionKeys.values());
+  for (const key of itemDraftCacheRef.current.keys()) {
+    if (!activeItemKeys.has(key)) itemDraftCacheRef.current.delete(key);
+  }
+  for (const key of transitionDraftCacheRef.current.keys()) {
+    if (!activeTransitionKeys.has(key)) transitionDraftCacheRef.current.delete(key);
+  }
+  return {
+    itemDraftCache: itemDraftCacheRef.current,
+    itemKeys,
+    transitionDraftCache: transitionDraftCacheRef.current,
+    transitionKeys,
+  };
+}
+
+function CynefinEditorControls({
+  bottom,
+  diagram,
+  itemDraftCache,
+  itemKeys,
+  maxHeight,
+  onAddItem,
+  onAddTransition,
+  onDeleteItem,
+  onDeleteTransition,
+  onEditItem,
+  onEditTransition,
+  onMoveItem,
+  onMoveTransition,
+  transitionDraftCache,
+  transitionKeys,
+}: {
+  bottom: number;
+  diagram: CynefinDiagramSnapshot;
+  itemDraftCache: PersistentCanonicalDraftCache<CynefinItem>;
+  itemKeys: Map<CynefinItem, string>;
+  maxHeight: number;
+  onAddItem?: (value: CynefinItem) => boolean | void;
+  onAddTransition?: (value: CynefinTransition) => boolean | void;
+  onDeleteItem?: (identity: CynefinItemIdentity) => void;
+  onDeleteTransition?: (identity: CynefinTransitionIdentity) => void;
+  onEditItem?: (identity: CynefinItemIdentity, value: Partial<CynefinItem>) => boolean | void;
+  onEditTransition?: (identity: CynefinTransitionIdentity, value: Partial<CynefinTransition>) => boolean | void;
+  onMoveItem?: (identity: CynefinItemIdentity, domain: CynefinDomainName, targetIndex: number) => void;
+  onMoveTransition?: (identity: CynefinTransitionIdentity, direction: 'up' | 'down') => void;
+  transitionDraftCache: PersistentCanonicalDraftCache<CynefinTransition>;
+  transitionKeys: Map<CynefinTransition, string>;
+}) {
+  const { draft: newItem, resetDraft: resetNewItem, updateDraft: updateNewItem } = useCanonicalDraft<CynefinItem>({
+    domain: 'complex',
+    label: 'Item',
+  });
+  const { draft: newTransition, resetDraft: resetNewTransition, updateDraft: updateNewTransition } = useCanonicalDraft<CynefinTransition>({
+    from: 'complex',
+    label: null,
+    to: 'complicated',
+  });
+  const allItems = diagram.domains.flatMap((domain) => domain.items);
+
+  return <aside
+    aria-label="Cynefin editor"
+    className="canvas-semantic-editor canvas-hierarchy-editor"
+    data-canvas-pan-exclusion="true"
+    data-testid="cynefin-editor-controls"
+    style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}
+  >
+    <strong>Cynefin</strong>
+    <form aria-label="New Cynefin item" onSubmit={(event) => {
+      event.preventDefault();
+      if (onAddItem?.(newItem) === true) resetNewItem();
+    }}>
+      <CynefinDomainSelect label="New Cynefin item domain" onChange={(domain) => updateNewItem((current) => ({ ...current, domain }))} value={newItem.domain} />
+      <input aria-label="New Cynefin item label" onChange={(event) => updateNewItem((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newItem.label} />
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add item</button>
+    </form>
+    {diagram.domains.map((domain) => <section aria-label={`Cynefin domain ${formatCynefinDomain(domain.name)}`} key={domain.name}>
+      <h3>{formatCynefinDomain(domain.name)}</h3>
+      {domain.items.map((item, index) => <CynefinItemForm
+        draftCache={itemDraftCache}
+        diagram={diagram}
+        index={index}
+        item={item}
+        key={itemKeys.get(item)}
+        onDelete={onDeleteItem}
+        onEdit={onEditItem}
+        onMove={onMoveItem}
+        renderKey={itemKeys.get(item)!}
+      />)}
+    </section>)}
+    <section aria-label="Cynefin transitions">
+      <h3>Transitions</h3>
+      <form aria-label="New Cynefin transition" onSubmit={(event) => {
+        event.preventDefault();
+        if (onAddTransition?.(newTransition) === true) resetNewTransition();
+      }}>
+        <CynefinDomainSelect label="New Cynefin transition source" onChange={(from) => updateNewTransition((current) => ({ ...current, from }))} value={newTransition.from} />
+        <CynefinDomainSelect label="New Cynefin transition target" onChange={(to) => updateNewTransition((current) => ({ ...current, to }))} value={newTransition.to} />
+        <input aria-label="New Cynefin transition label" onChange={(event) => updateNewTransition((current) => ({ ...current, label: event.target.value || null }))} style={HIERARCHY_CONTROL_STYLE} value={newTransition.label ?? ''} />
+        <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add transition</button>
+      </form>
+      {diagram.transitions.map((transition, index) => <CynefinTransitionForm
+        draftCache={transitionDraftCache}
+        index={index}
+        key={transitionKeys.get(transition)}
+        onDelete={onDeleteTransition}
+        onEdit={onEditTransition}
+        onMove={onMoveTransition}
+        renderKey={transitionKeys.get(transition)!}
+        transition={transition}
+        transitions={diagram.transitions}
+      />)}
+    </section>
+  </aside>;
+}
+
+function CynefinItemForm({ diagram, draftCache, index, item, onDelete, onEdit, onMove, renderKey }: {
+  diagram: CynefinDiagramSnapshot;
+  draftCache: PersistentCanonicalDraftCache<CynefinItem>;
+  index: number;
+  item: CynefinItem;
+  onDelete?: (identity: CynefinItemIdentity) => void;
+  onEdit?: (identity: CynefinItemIdentity, value: Partial<CynefinItem>) => boolean | void;
+  onMove?: (identity: CynefinItemIdentity, domain: CynefinDomainName, targetIndex: number) => void;
+  renderKey: string;
+}) {
+  const allItems = diagram.domains.flatMap((domain) => domain.items);
+  const identity = getCynefinItemIdentity(item, allItems);
+  const safe = identity.occurrenceCount === 1;
+  const peers = diagram.domains.find((domain) => domain.name === item.domain)?.items ?? [];
+  const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(item, renderKey, draftCache);
+  const label = `Cynefin item ${formatCynefinDomain(item.domain)} ${item.label}`;
+  return <form aria-label={label} onSubmit={(event) => {
+    event.preventDefault();
+    if (safe && onEdit?.(identity, draft) === true) resetDraft();
+  }}>
+    <input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
+    <CynefinDomainSelect disabled={!safe} label={`${label} domain`} onChange={(domain) => updateDraft((current) => ({ ...current, domain }))} value={draft.domain} />
+    <button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>
+    <button aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => onMove?.(identity, item.domain, index - 1)} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
+    <button aria-label={`Move ${label} down`} disabled={!safe || index === peers.length - 1} onClick={() => onMove?.(identity, item.domain, index + 1)} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
+    <button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
+  </form>;
+}
+
+function CynefinTransitionForm({ draftCache, index, onDelete, onEdit, onMove, renderKey, transition, transitions }: {
+  draftCache: PersistentCanonicalDraftCache<CynefinTransition>;
+  index: number;
+  onDelete?: (identity: CynefinTransitionIdentity) => void;
+  onEdit?: (identity: CynefinTransitionIdentity, value: Partial<CynefinTransition>) => boolean | void;
+  onMove?: (identity: CynefinTransitionIdentity, direction: 'up' | 'down') => void;
+  renderKey: string;
+  transition: CynefinTransition;
+  transitions: CynefinTransition[];
+}) {
+  const identity = getCynefinTransitionIdentity(transition, transitions);
+  const safe = identity.occurrenceCount === 1;
+  const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(transition, renderKey, draftCache);
+  const label = `Cynefin transition ${formatCynefinDomain(transition.from)} to ${formatCynefinDomain(transition.to)}${transition.label ? ` ${transition.label}` : ''}`;
+  return <form aria-label={label} onSubmit={(event) => {
+    event.preventDefault();
+    if (safe && onEdit?.(identity, { ...draft, label: draft.label || null }) === true) resetDraft();
+  }}>
+    <CynefinDomainSelect disabled={!safe} label={`${label} source`} onChange={(from) => updateDraft((current) => ({ ...current, from }))} value={draft.from} />
+    <CynefinDomainSelect disabled={!safe} label={`${label} target`} onChange={(to) => updateDraft((current) => ({ ...current, to }))} value={draft.to} />
+    <input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value || null }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label ?? ''} />
+    <button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>
+    <button aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
+    <button aria-label={`Move ${label} down`} disabled={!safe || index === transitions.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
+    <button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
+  </form>;
+}
+
 function PieEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onSetShowData, onSetTitle }: {
   bottom: number; diagram: PieDiagramSnapshot; maxHeight: number;
   onAdd?: (value: PieSlice) => boolean | void; onDelete?: (identity: PieSliceIdentity) => void;
@@ -5441,6 +5684,47 @@ function useCanonicalDraft<T extends object>(canonical: T) {
   const resetDraft = useCallback(() => {
     setDraft(canonicalRef.current);
   }, []);
+  return { draft, resetDraft, updateDraft };
+}
+
+function usePersistentCanonicalDraft<T extends object>(
+  canonical: T,
+  renderKey: string,
+  cache: PersistentCanonicalDraftCache<T>,
+) {
+  const cached = cache.get(renderKey);
+  const initial = cached
+    ? reconcileCanonicalDraft(canonical, cached.draft, getDirtyDraftFields(cached.draft, cached.canonical))
+    : canonical;
+  const canonicalRef = useRef(canonical);
+  const [draft, setDraft] = useState(initial);
+  const initializedRef = useRef(false);
+  if (!initializedRef.current) {
+    cache.set(renderKey, { canonical, draft });
+    initializedRef.current = true;
+  }
+  useEffect(() => {
+    if (sameCanonicalDraft(canonicalRef.current, canonical)) return;
+    const previousCanonical = canonicalRef.current;
+    canonicalRef.current = canonical;
+    setDraft((current) => {
+      const next = reconcileCanonicalDraft(canonical, current, getDirtyDraftFields(current, previousCanonical));
+      cache.set(renderKey, { canonical, draft: next });
+      return sameCanonicalDraft(current, next) ? current : next;
+    });
+  }, [cache, canonical, renderKey]);
+  const updateDraft = useCallback((update: (current: T) => T) => {
+    setDraft((current) => {
+      const next = update(current);
+      cache.set(renderKey, { canonical: canonicalRef.current, draft: next });
+      return next;
+    });
+  }, [cache, renderKey]);
+  const resetDraft = useCallback(() => {
+    const next = canonicalRef.current;
+    cache.set(renderKey, { canonical: next, draft: next });
+    setDraft(next);
+  }, [cache, renderKey]);
   return { draft, resetDraft, updateDraft };
 }
 

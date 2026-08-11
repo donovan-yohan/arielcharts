@@ -59,6 +59,9 @@ describe('DiagramPreviewRegistry', () => {
     expect(canUseSemanticFamilyControls(requirementPreview.source, requirementPreview, 'requirement')).toBe(true);
     expect(canUseSemanticFamilyControls('stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }', { ...statePreview, source: 'stateDiagram-v2\n  state Parent {\n    [*] --> Child\n  }' }, 'state')).toBe(false);
     expect(canUseSemanticFamilyControls(classPreview.source, classPreview, 'state')).toBe(false);
+    const timelinePreview: DiagramPreview = { capability: { adapter: 'timeline', diagramType: 'timeline', kind: 'generic' }, diagramId: 'timeline', flowchartSnapshot: null, source: 'timeline\n  2026 : Started', svg: '<svg />' };
+    expect(canUseSemanticFamilyControls(timelinePreview.source, timelinePreview, 'timeline')).toBe(true);
+    expect(canUseSemanticFamilyControls('timeline\n  accTitle: advanced', { ...timelinePreview, source: 'timeline\n  accTitle: advanced' }, 'timeline')).toBe(false);
   });
 
   it('isolates last-known-good previews by stable diagram id', () => {

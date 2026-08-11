@@ -10,6 +10,9 @@ import { editArchitectureService } from './architecture-mutations';
 import { addC4Element } from './c4-mutations';
 import { addBlockNode } from './block-mutations';
 import { addSwimlaneNode } from './swimlane-mutations';
+import { addJourneyTask } from './journey-mutations';
+import { addGanttTask } from './gantt-mutations';
+import { addTimelineEvent } from './timeline-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -120,6 +123,9 @@ describe('collaboration transaction origins', () => {
     ['c4', 'C4Context\n  Person(user, "User")', (source: string) => addC4Element(source, { id: 'system', kind: 'System', label: 'System' })],
     ['block', 'block-beta\n  api["API"]', (source: string) => addBlockNode(source, { id: 'worker', label: 'Worker', span: 1 })],
     ['swimlane', 'swimlane-beta\n  subgraph team [Team]\n  end', (source: string) => addSwimlaneNode(source, { id: 'work', label: 'Work', laneId: 'team' })],
+    ['journey', 'journey\n  section Product', (source: string) => addJourneyTask(source, { actors: ['Customer'], score: 5, section: 'Product', text: 'Browse' })],
+    ['gantt', 'gantt\n  dateFormat YYYY-MM-DD', (source: string) => addGanttTask(source, { end: '1d', id: 'build', section: '', start: '2026-01-01', statuses: [], text: 'Build' })],
+    ['timeline', 'timeline\n  2026', (source: string) => addTimelineEvent(source, { period: '2026', section: '', text: 'Started' })],
   ])('keeps %s semantic form mutations in the local visual undo stack', (_family, initial, mutate) => {
     const doc = new Y.Doc();
     const source = doc.getText('semantic-source');

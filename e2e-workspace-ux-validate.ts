@@ -785,11 +785,15 @@ async function closeThemeSettingsWithEscape(
 ): Promise<void> {
   const dialog = page.getByTestId(SETTINGS_DIALOG_TEST_ID);
   const label = preference[0]?.toUpperCase() + preference.slice(1);
-  const radio = dialog.getByRole('radio', { name: new RegExp(`^${label}(?:\\s|$)`, 'u') });
+  const radio = dialog.getByRole('radio', { checked: true, name: new RegExp(`^${label}(?:\\s|$)`, 'u') });
+  await expect(radio).toBeChecked();
+  await radio.focus();
+  await expect(radio).toBeFocused();
   await beginWorkspaceSettingsTransitionTrace(page);
   try {
-    await radio.press('Escape');
-    await dialog.waitFor({ state: 'detached', timeout: 15_000 });
+    await expectWorkspaceSettingsDetached(page, `close-${preference}-theme-with-escape`, async () => {
+      await page.keyboard.press('Escape');
+    });
     const trigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
     await expect(trigger).toHaveAttribute('aria-expanded', 'false', { timeout: 5_000 });
     await waitForFocusedLocator(page, trigger, `Closing ${preference} theme settings with Escape`);

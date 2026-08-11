@@ -3,10 +3,13 @@ import * as Y from 'yjs';
 import {
   adaptOverlaySceneToViewport,
   addOverlayObject,
+  beginOverlayTextComposition,
+  commitOverlayTextComposition,
   copyOverlayObjects,
   createOverlayLocalState,
   createOverlayUndoManager,
   deleteOverlayObjects,
+  editOverlayText,
   getOverlayScene,
   pasteOverlayObjects,
   readOverlayScene,
@@ -26,6 +29,64 @@ function object(id: string, orderKey = 'm') {
 }
 
 describe('overlay scene', () => {
+  it('converges same-note character edits and keeps undo peer-local', () => {
+    const left = new Y.Doc();
+    addOverlayObject(left, 'main', { ...object('note'), kind: 'annotation.sticky', body: 'start' });
+    const right = new Y.Doc();
+    Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
+    const leftUndo = createOverlayUndoManager(left, 'main');
+    const rightUndo = createOverlayUndoManager(right, 'main');
+    editOverlayText(left, 'main', 'note', 0, 0, 'left ');
+    editOverlayText(right, 'main', 'note', 5, 0, ' right');
+    const leftDelta = Y.encodeStateAsUpdate(left, Y.encodeStateVector(right));
+    const rightDelta = Y.encodeStateAsUpdate(right, Y.encodeStateVector(left));
+    Y.applyUpdate(left, rightDelta);
+    Y.applyUpdate(right, leftDelta);
+    expect(readOverlayScene(left, 'main').objects[0]?.body).toBe(readOverlayScene(right, 'main').objects[0]?.body);
+    expect(readOverlayScene(left, 'main').objects[0]?.body).toContain('left ');
+    expect(readOverlayScene(left, 'main').objects[0]?.body).toContain(' right');
+    leftUndo.undo();
+    expect(readOverlayScene(left, 'main').objects[0]?.body).not.toContain('left ');
+    expect(readOverlayScene(left, 'main').objects[0]?.body).toContain(' right');
+    leftUndo.destroy(); rightUndo.destroy();
+  });
+
+  it('keeps an IME draft local and preserves a same-note remote insertion at commit', () => {
+    const left = new Y.Doc(); addOverlayObject(left, 'main', { ...object('note'), kind: 'annotation.text', body: 'start' });
+    const right = new Y.Doc(); Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
+    const composition = beginOverlayTextComposition(left, 'main', 'note');
+    const localDraft = 'start漢';
+    editOverlayText(right, 'main', 'note', 2, 0, '[peer]');
+    Y.applyUpdate(left, Y.encodeStateAsUpdate(right, Y.encodeStateVector(left)));
+    expect(composition.base).toBe('start');
+    expect(localDraft).toBe('start漢');
+    expect(readOverlayScene(left, 'main').objects[0]?.body).toContain('[peer]');
+    commitOverlayTextComposition(left, 'main', 'note', composition, localDraft);
+    Y.applyUpdate(right, Y.encodeStateAsUpdate(left, Y.encodeStateVector(right)));
+    expect(readOverlayScene(left, 'main').objects[0]?.body).toBe(readOverlayScene(right, 'main').objects[0]?.body);
+    expect(readOverlayScene(left, 'main').objects[0]?.body).toContain('[peer]');
+    expect(readOverlayScene(left, 'main').objects[0]?.body).toContain('漢');
+  });
+
+  it('rejects whole-string overflow and invalid incremental ranges', () => {
+    const doc = new Y.Doc();
+    addOverlayObject(doc, 'main', { ...object('note'), kind: 'annotation.text', body: '' });
+    expect(() => editOverlayText(doc, 'main', 'note', 1, 0, 'x')).toThrow(/Invalid/u);
+    expect(() => editOverlayText(doc, 'main', 'note', 0, 0, 'x'.repeat(2_049))).toThrow(/operation is too large/u);
+    expect(readOverlayScene(doc, 'main').objects[0]?.body).toBe('');
+  });
+
+  it('keeps Mermaid source byte-identical through annotation lifecycle', () => {
+    const doc = new Y.Doc();
+    const source = new Y.Text('sequenceDiagram\n  Alice->>Bob: hello  ');
+    doc.getMap<unknown>('diagrams').set('main', new Y.Map([['mermaid', source]]));
+    const before = source.toString();
+    addOverlayObject(doc, 'main', { ...object('note'), kind: 'annotation.sticky', body: 'review' });
+    editOverlayText(doc, 'main', 'note', 6, 0, ' me');
+    updateOverlayObject(doc, 'main', 'note', { geometry: { x: 30, y: 40, width: 220, height: 120, rotation: 0 } });
+    deleteOverlayObjects(doc, 'main', ['note']);
+    expect(source.toString()).toBe(before);
+  });
   it('converges concurrent inserts, field updates, reorder, and delete with deterministic order', () => {
     const left = new Y.Doc();
     getOverlayScene(left, 'main', true);

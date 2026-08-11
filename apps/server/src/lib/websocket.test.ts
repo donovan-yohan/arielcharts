@@ -81,6 +81,25 @@ function readNodePosition(doc: Y.Doc, id: string): unknown {
   return positions.get(id);
 }
 
+function overlayBody(doc: Y.Doc, id = 'note'): Y.Text {
+  const scene = doc.getMap<Y.Map<unknown>>('overlays').get('main');
+  const objects = scene?.get('objects');
+  const body = objects instanceof Y.Map ? (objects.get(id) as Y.Map<unknown> | undefined)?.get('body') : undefined;
+  if (!(body instanceof Y.Text)) throw new Error('Expected annotation body.');
+  return body;
+}
+
+function addAnnotation(doc: Y.Doc): void {
+  const scene = doc.getMap<Y.Map<unknown>>('overlays').get('main');
+  const objects = scene?.get('objects');
+  if (!(objects instanceof Y.Map)) throw new Error('Expected main overlay scene.');
+  const note = new Y.Map<unknown>();
+  note.set('kind', 'annotation.text'); note.set('version', 1); note.set('order_key', 'a');
+  note.set('geometry', { x: 0, y: 0, width: 100, height: 40, rotation: 0 });
+  note.set('style', {}); note.set('metadata', {}); note.set('payload', {});
+  objects.set('note', note); note.set('body', new Y.Text());
+}
+
 async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 5_000): Promise<void> {
   const startedAt = Date.now();
 
@@ -96,8 +115,7 @@ async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 5_000)
   await assertion();
 }
 
-async function openClient(port: number, sessionId: string, cookie: string) {
-  const doc = new Y.Doc();
+async function openClient(port: number, sessionId: string, cookie: string, doc = new Y.Doc()) {
   const awareness = new Awareness(doc);
   awareness.setLocalState(null);
   let awarenessMessageCount = 0;
@@ -304,6 +322,41 @@ describe('SessionWebSocketServer', () => {
 
     await reopenedWriter.close();
     await reopenedReader.close();
+  }, 15_000);
+
+  it('fans an authoritative repaired offline annotation merge to stale sender, healthy peer, server, and reload', async () => {
+    const sessionId = 'abc123de';
+    const initialLeft = await openClient(port, sessionId, roomCookie);
+    const initialRight = await openClient(port, sessionId, roomCookie);
+    await waitFor(() => { expect(readMermaidText(initialLeft.doc)).toBe(''); expect(readMermaidText(initialRight.doc)).toBe(''); });
+    const beforeNote = Y.encodeStateVector(initialLeft.doc);
+    addAnnotation(initialLeft.doc);
+    initialLeft.syncUpdate(Y.encodeStateAsUpdate(initialLeft.doc, beforeNote));
+    await waitFor(() => expect(overlayBody(initialRight.doc).toString()).toBe(''));
+    await initialLeft.close(); await initialRight.close();
+
+    overlayBody(initialLeft.doc).insert(0, 'L'.repeat(5_000));
+    overlayBody(initialRight.doc).insert(0, 'R'.repeat(5_000));
+    const healthy = await openClient(port, sessionId, roomCookie, initialLeft.doc);
+    await waitFor(async () => expect(overlayBody((await app.manager.getOrCreateSession(sessionId)).doc).toString()).toHaveLength(5_000));
+    const healthyMessagesBeforeRepair = healthy.documentMessageCount;
+    const laterSender = await openClient(port, sessionId, roomCookie, initialRight.doc);
+    await waitFor(async () => {
+      const serverText = overlayBody((await app.manager.getOrCreateSession(sessionId)).doc).toString();
+      expect(Buffer.byteLength(serverText, 'utf8')).toBe(8_192);
+      expect(overlayBody(healthy.doc).toString()).toBe(serverText);
+      expect(overlayBody(laterSender.doc).toString()).toBe(serverText);
+    });
+    expect(healthy.documentMessageCount - healthyMessagesBeforeRepair).toBeLessThanOrEqual(2);
+    await healthy.close(); await laterSender.close();
+    const session = await app.manager.getOrCreateSession(sessionId);
+    await app.manager.cleanupExpiredSessions({ ttlMs: 0, diskTtlMs: Infinity, now: session.lastAccessedAt + 1 });
+    const reload = await openClient(port, sessionId, roomCookie);
+    await waitFor(() => {
+      expect(Buffer.byteLength(overlayBody(reload.doc).toString(), 'utf8')).toBe(8_192);
+      expect(overlayBody(reload.doc).toString()).toBe(overlayBody(initialLeft.doc).toString());
+    });
+    await reload.close();
   }, 15_000);
 
   it('rejects malformed and oversized SyncStep2 updates before live state, peer fan-out, or persistence', async () => {

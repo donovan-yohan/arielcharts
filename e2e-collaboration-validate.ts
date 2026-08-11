@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { chromium, type Browser, type Locator, type Page } from '@playwright/test';
+import { chromium, expect, type Browser, type Locator, type Page } from '@playwright/test';
 import { WebSocket as NodeWebSocket } from 'ws';
 import {
   assertNoPageErrors,
@@ -76,6 +76,54 @@ async function closeSourceFlyout(page: Page): Promise<void> {
     await toggle.click();
     await page.getByTestId('source-flyout').waitFor({ state: 'detached', timeout: 15_000 });
   }
+}
+
+async function expectCollaborativeAnnotations(pageA: Page, pageB: Page): Promise<void> {
+  const sourceA = await canonicalPageSource(pageA); const sourceB = await canonicalPageSource(pageB);
+  await Promise.all([
+    verifiedOverlayClick(pageA, 'Overlay tools'),
+    verifiedOverlayClick(pageB, 'Overlay tools'),
+  ]);
+  await verifiedOverlayClick(pageA, 'Add overlay');
+  const notesA = pageA.locator('textarea[aria-label="Free text contents"]');
+  const notesB = pageB.locator('textarea[aria-label="Free text contents"]');
+  await Promise.all([notesA.first().waitFor({ state: 'visible' }), notesB.first().waitFor({ state: 'visible' })]);
+  await Promise.all([verifiedOverlayClick(pageA, 'Close overlay tools'), verifiedOverlayClick(pageB, 'Close overlay tools')]);
+  await notesA.first().fill('shared');
+  await expect(notesB.first()).toHaveValue('shared');
+  await notesA.first().dispatchEvent('compositionstart');
+  await notesA.first().evaluate((element, value) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    setter?.call(element, value); element.dispatchEvent(new InputEvent('input', { bubbles: true, data: '漢', inputType: 'insertCompositionText', isComposing: true }));
+  }, 'shared漢');
+  await notesB.first().press('Home'); await notesB.first().pressSequentially('peer ');
+  await notesA.first().dispatchEvent('compositionend', { data: '漢' });
+  await expect.poll(async () => notesA.first().inputValue()).toContain('peer ');
+  await expect.poll(async () => notesB.first().inputValue()).toContain('漢');
+  await verifiedOverlayClick(pageB, 'Overlay tools'); await verifiedOverlayClick(pageB, 'Add sticky note'); await verifiedOverlayClick(pageB, 'Close overlay tools');
+  const stickyA = pageA.locator('textarea[aria-label="Sticky note contents"]');
+  const stickyB = pageB.locator('textarea[aria-label="Sticky note contents"]');
+  await Promise.all([stickyA.waitFor({ state: 'visible' }), stickyB.waitFor({ state: 'visible' })]);
+  await stickyB.fill('different note'); await expect(stickyA).toHaveValue('different note');
+  const afterSourceA = await canonicalPageSource(pageA); const afterSourceB = await canonicalPageSource(pageB);
+  assert(afterSourceA === sourceA && afterSourceB === sourceB && sourceA === sourceB,
+    `Collaborative annotation edits changed byte-identical Mermaid source: ${JSON.stringify({ sourceA, sourceB, afterSourceA, afterSourceB })}`);
+}
+
+async function verifiedOverlayClick(page: Page, name: string): Promise<void> {
+  const button = page.getByRole('button', { name, exact: true });
+  await button.scrollIntoViewIfNeeded(); await button.click();
+}
+
+async function canonicalPageSource(page: Page): Promise<string> {
+  const editor = await ensureSourceFlyoutOpen(page);
+  const value = await editor.evaluate((element) => [...element.querySelectorAll('.cm-line')].map((line) => {
+    const copy = line.cloneNode(true) as HTMLElement;
+    copy.querySelectorAll('.cm-ySelectionCaret, .cm-widgetBuffer').forEach((widget) => { widget.remove(); });
+    return copy.textContent ?? '';
+  }).join('\n'));
+  await closeSourceFlyout(page);
+  return value;
 }
 
 async function replaceSource(page: Page, source: string): Promise<void> {
@@ -520,6 +568,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await closeSourceFlyout(pageB);
     await closeSourceFlyout(pageA);
     await Promise.all([waitForFlowchart(pageA), waitForFlowchart(pageB)]);
+    await expectCollaborativeAnnotations(pageA, pageB);
 
     const pageAParticipantName = await getInternalParticipantName(pageA);
     const pageARemoteCursor = remoteCursorForParticipant(pageB, pageAParticipantName);

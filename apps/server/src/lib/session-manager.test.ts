@@ -36,11 +36,11 @@ function deferred() {
   return { promise, resolve };
 }
 
-function setOverlayObject(doc: Y.Doc, diagramId: string, id: string, text: string): void {
+function setOverlayObject(doc: Y.Doc, diagramId: string, id: string, text: string, kind = 'foundation.card'): void {
   const scene = doc.getMap<Y.Map<unknown>>('overlays').get(diagramId)!;
   const objects = scene.get('objects') as Y.Map<Y.Map<unknown>>;
   const object = new Y.Map<unknown>();
-  object.set('kind', 'foundation.card');
+  object.set('kind', kind);
   object.set('version', 1);
   object.set('order_key', id);
   object.set('geometry', { x: 10, y: 20, width: 100, height: 40, rotation: 0 });
@@ -48,6 +48,9 @@ function setOverlayObject(doc: Y.Doc, diagramId: string, id: string, text: strin
   object.set('metadata', {});
   object.set('payload', { text });
   objects.set(id, object);
+  if (kind === 'annotation.text' || kind === 'annotation.sticky') {
+    const body = new Y.Text(); object.set('body', body); body.insert(0, text);
+  }
 }
 
 describe('SessionManager multi-diagram persistence and invariants', () => {
@@ -338,6 +341,27 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     expect((await manager.readDiagram('abc123de', 'main')).diagram).toEqual(sourceBefore);
     await expect(manager.restoreOverlayRevision('abc123de', 'main', history.revisions[0]!.revision_id, changed.revision, { name: 'Ada', type: 'human' }))
       .resolves.toMatchObject({ status: 'stale' });
+  });
+
+  it('snapshots and restores annotation Y.Text bodies without changing Mermaid source', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const sourceBefore = (await manager.readDiagram('abc123de', 'main')).diagram;
+    state.doc.transact(() => setOverlayObject(state.doc, 'main', 'annotation', 'first body', 'annotation.sticky'));
+    await manager.persistSession(state);
+    const first = await manager.readOverlayScene('abc123de', 'main');
+    expect(first.scene.objects[0]).toMatchObject({ kind: 'annotation.sticky', body: 'first body' });
+    const raw = ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('annotation')!.get('body')) as Y.Text;
+    raw.insert(raw.length, ' changed');
+    await manager.persistSession(state);
+    const current = await manager.readOverlayScene('abc123de', 'main');
+    const target = (await manager.listOverlayHistory('abc123de', 'main')).revisions.find(({ result_revision }) => result_revision === first.revision)!;
+    await expect(manager.restoreOverlayRevision('abc123de', 'main', target.revision_id, current.revision, { name: 'Ada', type: 'human' }))
+      .resolves.toMatchObject({ status: 'restored', scene: { objects: [{ body: 'first body' }] } });
+    const restoredBody = ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('annotation')!.get('body')) as Y.Text;
+    expect(restoredBody.toString()).toBe('first body');
+    expect((await manager.readDiagram('abc123de', 'main')).diagram).toEqual(sourceBefore);
+    await manager.close(); manager = resources.createManager();
+    await expect(manager.readOverlayScene('abc123de', 'main')).resolves.toMatchObject({ scene: { objects: [{ body: 'first body' }] } });
   });
 
   it('atomically erases a deleted diagram overlay scene and its private overlay history', async () => {

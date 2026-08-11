@@ -13,6 +13,7 @@ import type { SessionState, UpgradeContext } from './types.js';
 
 const MESSAGE_TYPE_SYNC = 0;
 const MESSAGE_TYPE_AWARENESS = 1;
+const NORMALIZED_REPAIR_ORIGIN = Symbol('normalized-overlay-repair');
 const MESSAGE_TYPE_QUERY_AWARENESS = 3;
 // Clients normally publish one owned state at a time. This still leaves room
 // for seven maximum-size states plus protocol overhead in a batched update.
@@ -456,7 +457,17 @@ export class SessionWebSocketServer {
           this.recordIngressRejection(admission.reason);
           return;
         }
-        Y.applyUpdate(session.doc, update, sender);
+        if (admission.normalizedUpdate) {
+          // Suppress observer-derived delta fan-out: the server may already
+          // own structs the stale sender lacks. Every socket instead receives
+          // the complete admitted repaired state exactly once.
+          Y.applyUpdate(session.doc, admission.normalizedUpdate, NORMALIZED_REPAIR_ORIGIN);
+          this.broadcast(session, encodeMessage(MESSAGE_TYPE_SYNC, (repairEncoder) => {
+            syncProtocol.writeUpdate(repairEncoder, admission.normalizedUpdate!);
+          }));
+        } else {
+          Y.applyUpdate(session.doc, update, sender);
+        }
         session.updatedAt = Date.now();
         await this.manager.persistSession(session);
         return;
@@ -574,6 +585,7 @@ export class SessionWebSocketServer {
 
     session.doc.on('update', (update: Uint8Array, origin: unknown) => {
       session.updatedAt = Date.now();
+      if (origin === NORMALIZED_REPAIR_ORIGIN) return;
       this.broadcast(session, encodeMessage(MESSAGE_TYPE_SYNC, (encoderInstance) => {
         syncProtocol.writeUpdate(encoderInstance, update);
       }), origin instanceof WebSocket ? origin : undefined);

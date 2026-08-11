@@ -239,6 +239,14 @@ const RADAR_DIAGRAM_FIXTURE = `radar-beta
   max 5
   showLegend true
   graticule polygon`;
+const SANKEY_DIAGRAM_FIXTURE = `sankey-beta
+Source,"Middle, ""quoted""",2
+"Middle, ""quoted""",Target,1.5
+Source,Target,0.5`;
+const PACKET_DIAGRAM_FIXTURE = `packet-beta
+  0-3: "Header"
+  4-7: "Flags"
+  8-15: "Payload"`;
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
@@ -1118,10 +1126,10 @@ async function expectErSemanticEditor(page: Page): Promise<void> {
   await replaceSource(page, unsupported);
   await waitForSource(page, unsupported);
   await waitForCanvas(page, 'generic');
-  const lastValidSvg = await page.locator('.diagram-canvas-svg svg').innerHTML();
+  const lastValidSvg = await page.locator('.diagram-canvas-svg > svg').innerHTML();
   await replaceSource(page, 'erDiagram\n  ACCOUNT ||--o{');
   await waitForInvalidPreview(page);
-  assert(await page.locator('.diagram-canvas-svg svg').innerHTML() === lastValidSvg,
+  assert(await page.locator('.diagram-canvas-svg > svg').innerHTML() === lastValidSvg,
     'Invalid ER source replaced the last valid SVG preview.');
 }
 
@@ -1131,7 +1139,7 @@ async function expectRelationshipArchitectureEditors(page: Page): Promise<void> 
 
   await replaceSource(page, CLASS_DIAGRAM_FIXTURE);
   await waitForSource(page, CLASS_DIAGRAM_FIXTURE);
-  await page.locator('.diagram-canvas-svg svg').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.locator('.diagram-canvas-svg > svg').waitFor({ state: 'visible', timeout: 15_000 });
   await page.waitForTimeout(300);
   await expect(page.getByTestId('diagram-mode')).toContainText('Class · editable · form');
   await page.getByTestId('class-editor-controls').waitFor({ state: 'visible', timeout: 15_000 });
@@ -1148,7 +1156,7 @@ async function expectRelationshipArchitectureEditors(page: Page): Promise<void> 
 
   await replaceSource(page, STATE_DIAGRAM_FIXTURE);
   await waitForSource(page, STATE_DIAGRAM_FIXTURE);
-  await page.locator('.diagram-canvas-svg svg').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.locator('.diagram-canvas-svg > svg').waitFor({ state: 'visible', timeout: 15_000 });
   await page.waitForTimeout(300);
   await expect(page.getByTestId('diagram-mode')).toContainText('State · editable · form');
   await page.getByTestId('state-editor-controls').waitFor({ state: 'visible', timeout: 15_000 });
@@ -1170,7 +1178,7 @@ async function expectRelationshipArchitectureEditors(page: Page): Promise<void> 
 
   await replaceSource(page, REQUIREMENT_DIAGRAM_FIXTURE);
   await waitForSource(page, REQUIREMENT_DIAGRAM_FIXTURE);
-  await page.locator('.diagram-canvas-svg svg').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.locator('.diagram-canvas-svg > svg').waitFor({ state: 'visible', timeout: 15_000 });
   await page.waitForTimeout(300);
   await expect(page.getByTestId('diagram-mode')).toContainText('Requirement · editable · form');
   await page.getByTestId('requirement-editor-controls').waitFor({ state: 'visible', timeout: 15_000 });
@@ -1186,7 +1194,7 @@ async function expectRelationshipArchitectureEditors(page: Page): Promise<void> 
   await expect(page.getByTestId('diagram-mode')).toContainText('Requirement · editable · form');
   await replaceSource(page, ARCHITECTURE_DIAGRAM_FIXTURE);
   await waitForSource(page, ARCHITECTURE_DIAGRAM_FIXTURE);
-  await page.locator('.diagram-canvas-svg svg').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.locator('.diagram-canvas-svg > svg').waitFor({ state: 'visible', timeout: 15_000 });
   await expect(page.getByTestId('diagram-mode')).toContainText('Architecture · editable · form');
   const architectureEditor = page.getByTestId('architecture-editor-controls');
   await architectureEditor.waitFor({ state: 'visible', timeout: 15_000 });
@@ -1655,6 +1663,121 @@ async function expectNumericSemanticEditors(page: Page): Promise<void> {
   const advancedRadar = 'radar-beta\n  axis A, B, C\n  curve one{1, 2, 3}'; await replaceSource(page, advancedRadar); await waitForSource(page, advancedRadar); await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('Radar · source only'); await closeFlyout(page, 'source'); await expect(radar).toHaveCount(0);
 
   await selectThemePreference(page, 'light'); assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS)); assert(await canvasTransform(page) === transformBefore, 'Numeric semantic forms changed the generic Mermaid camera transform.');
+}
+
+async function expectFlowSemanticEditors(page: Page): Promise<void> {
+  const anchorsBefore = await snapshotAnchors(page, ANCHORS);
+  const transformBefore = await canvasTransform(page);
+
+  await replaceSource(page, SANKEY_DIAGRAM_FIXTURE);
+  await waitForSource(page, SANKEY_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Sankey · editable · form');
+  await closeFlyout(page, 'source');
+  const sankey = page.getByTestId('sankey-editor-controls');
+  const addSankey = sankey.getByRole('button', { name: 'Add link', exact: true });
+  await scrollErControlIntoView(addSankey);
+  await assertTouchTarget(page, addSankey, 'Sankey add-link control');
+  await sankey.getByLabel('New Sankey link source').fill('Target');
+  await sankey.getByLabel('New Sankey link target').fill('Archive, "cold"');
+  await sankey.getByLabel('New Sankey link weight').fill('4');
+  await assertAndClickBoardControl(page, addSankey, 'Sankey add-link control');
+  const archive = sankey.getByRole('form', { name: 'Sankey link Target to Archive, "cold" weight 4', exact: true });
+  await archive.getByLabel('Sankey link Target to Archive, "cold" weight 4 target').fill('Archive, "deep"');
+  await archive.getByLabel('Sankey link Target to Archive, "cold" weight 4 weight').fill('4.25');
+  await assertAndClickBoardControl(page, archive.getByRole('button', { name: 'Save', exact: true }), 'Sankey edit-link control');
+  const deepArchive = sankey.getByRole('form', { name: 'Sankey link Target to Archive, "deep" weight 4.25', exact: true });
+  await assertAndClickBoardControl(page, deepArchive.getByLabel('Move Sankey link Target to Archive, "deep" weight 4.25 up'), 'Sankey reorder-link control');
+  const middle = sankey.getByRole('form', { name: 'Sankey node Middle, "quoted"', exact: true });
+  await middle.getByLabel('Sankey node Middle, "quoted" label').fill('Hub, "central"');
+  await assertAndClickBoardControl(page, middle.getByRole('button', { name: 'Rename', exact: true }), 'Sankey atomic node-rename control');
+  await assertAndClickBoardControl(page, sankey.getByLabel('Delete Sankey link Source to Target weight 0.5'), 'Sankey delete-link control');
+  const expectedSankey = `sankey-beta
+Source,"Hub, ""central""",2
+"Hub, ""central""",Target,1.5
+Target,"Archive, ""deep""",4.25`;
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedSankey);
+  await closeFlyout(page, 'source');
+  const parallelSankey = 'sankey-beta\nA,B,1\nA,B,2';
+  await replaceSource(page, parallelSankey);
+  await waitForSource(page, parallelSankey);
+  await waitForSemanticMode(page, 'Sankey · editable · form');
+  await closeFlyout(page, 'source');
+  const parallelEditor = page.getByTestId('sankey-editor-controls');
+  await expect(parallelEditor.getByRole('form', { name: 'Sankey link A to B weight 1 (1 of 2)', exact: true })).toBeVisible();
+  await expect(parallelEditor.getByRole('form', { name: 'Sankey link A to B weight 2 (2 of 2)', exact: true })).toBeVisible();
+  const advancedSankey = 'sankey\nA,B,1';
+  await replaceSource(page, advancedSankey);
+  await waitForSource(page, advancedSankey);
+  await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('Sankey · source only');
+  await closeFlyout(page, 'source');
+  await expect(sankey).toHaveCount(0);
+
+  await replaceSource(page, PACKET_DIAGRAM_FIXTURE);
+  await waitForSource(page, PACKET_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Packet · editable · form');
+  await closeFlyout(page, 'source');
+  const packet = page.getByTestId('packet-editor-controls');
+  const header = packet.getByRole('form', { name: 'Packet field Header bits 0-3', exact: true });
+  const headerWidth = header.getByLabel('Packet field Header bits 0-3 width');
+  await headerWidth.fill('5');
+  await assertAndClickBoardControl(page, header.getByRole('button', { name: 'Save', exact: true }), 'Packet overlap rejection control');
+  await expect(page.getByTestId('mutation-error-banner')).toContainText('contiguous');
+  await expect(headerWidth).toHaveValue('5');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(PACKET_DIAGRAM_FIXTURE);
+  await closeFlyout(page, 'source');
+  await headerWidth.fill('4');
+  await assertAndClickBoardControl(page, header.getByRole('button', { name: 'Save', exact: true }), 'Packet exact no-op recovery control');
+  await expect(page.getByTestId('mutation-error-banner')).toHaveCount(0);
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(PACKET_DIAGRAM_FIXTURE);
+  await closeFlyout(page, 'source');
+  await header.getByLabel('Packet field Header bits 0-3 label').fill('Main header');
+  await assertAndClickBoardControl(page, header.getByRole('button', { name: 'Save', exact: true }), 'Packet edit-field recovery control');
+  const addPacket = packet.getByRole('button', { name: 'Add field', exact: true });
+  await scrollErControlIntoView(addPacket);
+  await assertTouchTarget(page, addPacket, 'Packet add-field control');
+  await packet.getByLabel('New Packet field label').fill('Options');
+  await packet.getByLabel('New Packet field start').fill('16');
+  await packet.getByLabel('New Packet field width').fill('8');
+  await assertAndClickBoardControl(page, addPacket, 'Packet add-field control');
+  const flags = packet.getByRole('form', { name: 'Packet field Flags bits 4-7', exact: true });
+  await flags.getByLabel('Packet field Flags bits 4-7 label').fill('Control');
+  await assertAndClickBoardControl(page, flags.getByRole('button', { name: 'Save', exact: true }), 'Packet edit-field control');
+  await assertAndClickBoardControl(page, packet.getByLabel('Move Packet field Payload bits 8-15 up'), 'Packet reflow reorder control');
+  await assertAndClickBoardControl(page, packet.getByLabel('Delete Packet field Options bits 16-23'), 'Packet reflow delete control');
+  const expectedPacket = `packet-beta
+  0-3: "Main header"
+  4-11: "Payload"
+  12-15: "Control"`;
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedPacket);
+  await closeFlyout(page, 'source');
+  const repeatedPacket = 'packet-beta\n  0-3: "Reserved"\n  4-7: "Reserved"\n  8-15: "Payload"';
+  await replaceSource(page, repeatedPacket);
+  await waitForSource(page, repeatedPacket);
+  await waitForSemanticMode(page, 'Packet · editable · form');
+  await closeFlyout(page, 'source');
+  const repeatedEditor = page.getByTestId('packet-editor-controls');
+  for (const label of ['Packet field Reserved bits 0-3 (1 of 2)', 'Packet field Reserved bits 4-7 (2 of 2)']) {
+    const repeated = repeatedEditor.getByRole('form', { name: label, exact: true });
+    await expect(repeated.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+    await expect(repeated.getByLabel(`Delete ${label}`, { exact: true })).toBeDisabled();
+  }
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(repeatedPacket);
+  await closeFlyout(page, 'source');
+  const advancedPacket = 'packet-beta\n+4: "Relative"';
+  await replaceSource(page, advancedPacket);
+  await waitForSource(page, advancedPacket);
+  await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('Packet · source only');
+  await closeFlyout(page, 'source');
+  await expect(packet).toHaveCount(0);
+
+  assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS));
+  assert(await canvasTransform(page) === transformBefore, 'Sankey/Packet semantic forms changed the generic Mermaid camera transform.');
+  assert(await page.locator('.react-flow__node').count() === 0, 'Sankey/Packet semantic forms exposed the generic React Flow editor.');
 }
 
 async function assertAndClickBoardControl(page: Page, target: Locator, label: string): Promise<void> {
@@ -3003,6 +3126,31 @@ async function expectResponsiveNumericPanel(page: Page, label: 'mobile-390' | 'm
   // Synthetic insertText can make y-codemirror reconcile awareness widget DOM into the document.
   await page.keyboard.type('pie'); await page.keyboard.press('Enter'); await page.keyboard.type('  title Keyboard source'); await page.keyboard.press('Enter'); await page.keyboard.type('"Saved" : 5'); await waitForSource(page, keyboardSource); await closeFlyout(page, 'source'); await waitForSemanticMode(page, 'Pie · editable · form');
   await replaceSource(page, RADAR_DIAGRAM_FIXTURE); await waitForSource(page, RADAR_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Radar · editable · form'); await closeFlyout(page, 'source'); const radarPanel = page.getByTestId('radar-editor-controls'); await assertContainedInViewport(page, radarPanel, `${label} Radar semantic panel`); const showLegend = radarPanel.getByLabel('Radar show legend'); await scrollErControlIntoView(showLegend); await assertTouchTarget(page, showLegend, `${label} Radar show-legend checkbox`);
+  const responsiveSankey = `sankey-beta
+A,B,1
+B,C,1
+C,D,1
+D,E,1
+E,F,1
+F,G,1
+G,H,1
+H,I,1`;
+  await replaceSource(page, responsiveSankey); await waitForSource(page, responsiveSankey); await waitForSemanticMode(page, 'Sankey · editable · form'); await closeFlyout(page, 'source');
+  const sankeyPanel = page.getByTestId('sankey-editor-controls'); await assertContainedInViewport(page, sankeyPanel, `${label} Sankey semantic panel`);
+  const sankeyGeometry = await sankeyPanel.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight })); assert(sankeyGeometry.scrollHeight > sankeyGeometry.clientHeight, `${label} Sankey panel did not provide internal scrolling: ${JSON.stringify(sankeyGeometry)}.`);
+  const addSankey = sankeyPanel.getByRole('button', { name: 'Add link', exact: true }); const sankeyWeight = sankeyPanel.getByLabel('New Sankey link weight'); await scrollErControlIntoView(addSankey); await assertTouchTarget(page, addSankey, `${label} Sankey add-link control`); await sankeyPanel.getByLabel('New Sankey link source').fill('I'); await sankeyPanel.getByLabel('New Sankey link target').fill('J'); await sankeyWeight.focus(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('Backspace'); await page.keyboard.type('0'); await assertAndClickBoardControl(page, addSankey, `${label} invalid Sankey weight`); const sankeyBanner = page.getByTestId('mutation-error-banner'); await sankeyBanner.waitFor({ state: 'visible', timeout: 15_000 }); await assertClosedOverlayToggleBesideError(page, sankeyBanner, `${label} Sankey mutation-error coexistence`); await expect(sankeyWeight).toHaveValue('0'); await sankeyWeight.fill('1'); await assertAndClickBoardControl(page, addSankey, `${label} valid Sankey recovery`); await sankeyBanner.waitFor({ state: 'detached', timeout: 15_000 });
+  const responsivePacket = `packet-beta
+  0: "Bit 0"
+  1: "Bit 1"
+  2: "Bit 2"
+  3: "Bit 3"
+  4: "Bit 4"
+  5: "Bit 5"
+  6: "Bit 6"
+  7: "Bit 7"`;
+  await replaceSource(page, responsivePacket); await waitForSource(page, responsivePacket); await waitForSemanticMode(page, 'Packet · editable · form'); await closeFlyout(page, 'source');
+  const packetPanel = page.getByTestId('packet-editor-controls'); await assertContainedInViewport(page, packetPanel, `${label} Packet semantic panel`); const packetGeometry = await packetPanel.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight })); assert(packetGeometry.scrollHeight > packetGeometry.clientHeight, `${label} Packet panel did not provide internal scrolling: ${JSON.stringify(packetGeometry)}.`);
+  const addPacket = packetPanel.getByRole('button', { name: 'Add field', exact: true }); await scrollErControlIntoView(addPacket); await assertTouchTarget(page, addPacket, `${label} Packet add-field control`); const firstPacket = packetPanel.getByRole('form', { name: 'Packet field Bit 0 bits 0-0', exact: true }); const firstWidth = firstPacket.getByLabel('Packet field Bit 0 bits 0-0 width'); await scrollErControlIntoView(firstWidth); await assertTouchTarget(page, firstWidth, `${label} Packet width control`); await firstWidth.fill('2'); await assertAndClickBoardControl(page, firstPacket.getByRole('button', { name: 'Save', exact: true }), `${label} Packet overlap rejection`); const packetBanner = page.getByTestId('mutation-error-banner'); await packetBanner.waitFor({ state: 'visible', timeout: 15_000 }); await assertClosedOverlayToggleBesideError(page, packetBanner, `${label} Packet mutation-error coexistence`); await expect(firstWidth).toHaveValue('2'); await firstWidth.fill('1'); await firstPacket.getByLabel('Packet field Bit 0 bits 0-0 label').fill('Version'); await assertAndClickBoardControl(page, firstPacket.getByRole('button', { name: 'Save', exact: true }), `${label} Packet valid recovery`); await packetBanner.waitFor({ state: 'detached', timeout: 15_000 }); const lastPacketDelete = packetPanel.getByLabel('Delete Packet field Bit 7 bits 7-7'); await scrollErControlIntoView(lastPacketDelete); await assertTouchTarget(page, lastPacketDelete, `${label} Packet scrolled delete control`);
   await replaceSource(page, FLOWCHART_FIXTURE); await waitForSource(page, FLOWCHART_FIXTURE); await closeFlyout(page, 'source'); await waitForCanvas(page, 'flowchart');
 }
 
@@ -3941,7 +4089,7 @@ async function expectRevisionHistoryCollaboration(
     const sharedBeforePreview = observer.snapshot(target.id);
     const previewTracker = observer.trackSnapshot(target.id);
     const desktopAnchors = await snapshotAnchors(page, ANCHORS);
-    const currentSvgBeforePreview = await page.locator('.diagram-canvas-svg svg').innerHTML();
+    const currentSvgBeforePreview = await page.locator('.diagram-canvas-svg > svg').innerHTML();
 
     await ensureFlyout(page, 'activity');
     await assertCurrentHistoryCardEdges(page);
@@ -3949,7 +4097,7 @@ async function expectRevisionHistoryCollaboration(
     await historicalItem.waitFor({ state: 'visible', timeout: 15_000 });
     await verifiedClick(page, historicalItem.getByRole('button', { name: 'Preview', exact: true }), 'desktop immutable history preview');
     await page.getByTestId('history-preview-notice').waitFor({ state: 'visible', timeout: 15_000 });
-    await expect.poll(async () => page.locator('.diagram-canvas-svg svg').innerHTML(), {
+    await expect.poll(async () => page.locator('.diagram-canvas-svg > svg').innerHTML(), {
       message: 'History preview did not replace the live Mermaid SVG with the requested immutable revision.',
       timeout: 15_000,
     }).not.toBe(currentSvgBeforePreview);
@@ -4279,6 +4427,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'Railroad IR, EBNF, ABNF, and PEG forms expose source-backed production controls and fail closed for advanced grammar');
       await expectNumericSemanticEditors(page);
       record(results, 'Pie, Quadrant, XY, and Radar forms expose validated source-backed numeric controls and fail closed for advanced syntax');
+      await expectFlowSemanticEditors(page);
+      record(results, 'Sankey and Packet forms expose CSV-safe weighted links, atomic node renames, contiguous reflow, recovery, and advanced-source fallback');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');

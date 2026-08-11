@@ -107,6 +107,8 @@ import { getPieSliceIdentity, type PieDiagramSnapshot, type PieSlice, type PieSl
 import { getQuadrantPointIdentity, type QuadrantAxis, type QuadrantAxisName, type QuadrantDiagramSnapshot, type QuadrantNumber, type QuadrantPoint, type QuadrantPointIdentity } from '../lib/quadrant-mutations';
 import { getXySeriesIdentity, type XyAxis, type XyChartDiagramSnapshot, type XyChartOrientation, type XySeries, type XySeriesIdentity } from '../lib/xychart-mutations';
 import { getRadarAxisIdentity, getRadarCurveIdentity, type RadarAxis, type RadarAxisIdentity, type RadarCurve, type RadarCurveIdentity, type RadarDiagramSnapshot, type RadarOptions } from '../lib/radar-mutations';
+import { getSankeyLinkIdentity, getSankeyNodeIdentity, type SankeyDiagramSnapshot, type SankeyLink, type SankeyLinkIdentity, type SankeyNodeIdentity } from '../lib/sankey-mutations';
+import { getPacketFieldIdentity, type PacketDiagramSnapshot, type PacketField, type PacketFieldIdentity } from '../lib/packet-mutations';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
@@ -141,6 +143,8 @@ export interface DiagramCanvasProps {
   isQuadrant?: boolean;
   isXyChart?: boolean;
   isRadar?: boolean;
+  isSankey?: boolean;
+  isPacket?: boolean;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
   readOnly?: boolean;
@@ -172,6 +176,8 @@ export interface DiagramCanvasProps {
   quadrantDiagram?: QuadrantDiagramSnapshot | null;
   xyChartDiagram?: XyChartDiagramSnapshot | null;
   radarDiagram?: RadarDiagramSnapshot | null;
+  sankeyDiagram?: SankeyDiagramSnapshot | null;
+  packetDiagram?: PacketDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
@@ -390,6 +396,15 @@ export interface DiagramCanvasProps {
   onEditRadarCurve?: (identity: RadarCurveIdentity, value: Partial<RadarCurve>) => boolean | void;
   onDeleteRadarCurve?: (identity: RadarCurveIdentity) => void;
   onMoveRadarCurve?: (identity: RadarCurveIdentity, direction: 'up' | 'down') => void;
+  onAddSankeyLink?: (value: SankeyLink) => boolean | void;
+  onEditSankeyLink?: (identity: SankeyLinkIdentity, value: Partial<SankeyLink>) => boolean | void;
+  onDeleteSankeyLink?: (identity: SankeyLinkIdentity) => void;
+  onMoveSankeyLink?: (identity: SankeyLinkIdentity, direction: 'up' | 'down') => void;
+  onRenameSankeyNode?: (identity: SankeyNodeIdentity, label: string) => boolean | void;
+  onAddPacketField?: (value: PacketField) => boolean | void;
+  onEditPacketField?: (identity: PacketFieldIdentity, value: Partial<PacketField>) => boolean | void;
+  onDeletePacketField?: (identity: PacketFieldIdentity) => void;
+  onMovePacketField?: (identity: PacketFieldIdentity, direction: 'up' | 'down') => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onCameraChange?: (camera: CanvasCameraState) => void;
@@ -913,6 +928,15 @@ export function DiagramCanvas({
   onEditRadarCurve,
   onDeleteRadarCurve,
   onMoveRadarCurve,
+  onAddSankeyLink,
+  onEditSankeyLink,
+  onDeleteSankeyLink,
+  onMoveSankeyLink,
+  onRenameSankeyNode,
+  onAddPacketField,
+  onEditPacketField,
+  onDeletePacketField,
+  onMovePacketField,
   onAddConnectedNode,
   onCanvasCursorChange,
   onCameraChange,
@@ -974,6 +998,8 @@ export function DiagramCanvas({
   isQuadrant = false,
   isXyChart = false,
   isRadar = false,
+  isSankey = false,
+  isPacket = false,
   journeyDiagram = null,
   ganttDiagram = null,
   timelineDiagram = null,
@@ -989,6 +1015,8 @@ export function DiagramCanvas({
   quadrantDiagram = null,
   xyChartDiagram = null,
   radarDiagram = null,
+  sankeyDiagram = null,
+  packetDiagram = null,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -3681,6 +3709,8 @@ export function DiagramCanvas({
         {isQuadrant && !readOnly && quadrantDiagram ? <QuadrantEditorControls bottom={semanticPanelPlacement.bottom} diagram={quadrantDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddQuadrantPoint} onDelete={onDeleteQuadrantPoint} onEdit={onEditQuadrantPoint} onMove={onMoveQuadrantPoint} onSetAxis={onSetQuadrantAxis} onSetLabel={onSetQuadrantLabel} onSetTitle={onEditQuadrantTitle} /> : null}
         {isXyChart && !readOnly && xyChartDiagram ? <XyChartEditorControls bottom={semanticPanelPlacement.bottom} diagram={xyChartDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddXySeries} onDelete={onDeleteXySeries} onEdit={onEditXySeries} onEditAxis={onEditXyAxis} onMove={onMoveXySeries} onSetOrientation={onSetXyOrientation} onSetTitle={onEditXyTitle} /> : null}
         {isRadar && !readOnly && radarDiagram ? <RadarEditorControls bottom={semanticPanelPlacement.bottom} diagram={radarDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAddAxis={onAddRadarAxis} onAddCurve={onAddRadarCurve} onDeleteAxis={onDeleteRadarAxis} onDeleteCurve={onDeleteRadarCurve} onEditAxis={onEditRadarAxis} onEditCurve={onEditRadarCurve} onEditOptions={onEditRadarOptions} onMoveAxis={onMoveRadarAxis} onMoveCurve={onMoveRadarCurve} onSetTitle={onEditRadarTitle} /> : null}
+        {isSankey && !readOnly && sankeyDiagram ? <SankeyEditorControls bottom={semanticPanelPlacement.bottom} diagram={sankeyDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddSankeyLink} onDelete={onDeleteSankeyLink} onEdit={onEditSankeyLink} onMove={onMoveSankeyLink} onRenameNode={onRenameSankeyNode} /> : null}
+        {isPacket && !readOnly && packetDiagram ? <PacketEditorControls bottom={semanticPanelPlacement.bottom} diagram={packetDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddPacketField} onDelete={onDeletePacketField} onEdit={onEditPacketField} onMove={onMovePacketField} /> : null}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
@@ -4941,6 +4971,176 @@ function runNumericForm(setError: (value: string | null) => void, action: () => 
 
 function NumericEditorError({ error }: { error: string | null }) {
   return error ? <small className="semantic-editor-error" role="alert">{error}</small> : null;
+}
+
+function parsePacketInteger(value: string, label: string): number {
+  const parsed = parseSemanticNumber(value, label);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${label} must be a whole number.`);
+  return parsed;
+}
+
+export function getSankeyLinkControlLabel(item: SankeyLink, index: number, items: readonly SankeyLink[]): string {
+  const parallel = items.filter((candidate) => candidate.source === item.source && candidate.target === item.target);
+  const base = `Sankey link ${item.source} to ${item.target} weight ${item.value}`;
+  if (parallel.length === 1) return base;
+  const ordinal = items.slice(0, index + 1).filter((candidate) => candidate.source === item.source && candidate.target === item.target).length;
+  return `${base} (${ordinal} of ${parallel.length})`;
+}
+
+export function getPacketFieldFormKey(field: PacketField, fields: readonly PacketField[]): string {
+  const width = field.end - field.start + 1;
+  const ambiguous = fields.filter((candidate) => candidate.label === field.label && candidate.end - candidate.start + 1 === width).length > 1;
+  return `packet:${JSON.stringify([field.label, width])}${ambiguous ? `:${field.start}-${field.end}` : ''}`;
+}
+
+export function getPacketFieldControlLabel(field: PacketField, index: number, fields: readonly PacketField[]): string {
+  const width = field.end - field.start + 1;
+  const matches = fields.filter((candidate) => candidate.label === field.label && candidate.end - candidate.start + 1 === width);
+  const base = `Packet field ${field.label} bits ${field.start}-${field.end}`;
+  if (matches.length === 1) return base;
+  const ordinal = fields.slice(0, index + 1).filter((candidate) => candidate.label === field.label && candidate.end - candidate.start + 1 === width).length;
+  return `${base} (${ordinal} of ${matches.length})`;
+}
+
+function SankeyEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onRenameNode }: {
+  bottom: number; diagram: SankeyDiagramSnapshot; maxHeight: number;
+  onAdd?: (value: SankeyLink) => boolean | void;
+  onDelete?: (identity: SankeyLinkIdentity) => void;
+  onEdit?: (identity: SankeyLinkIdentity, value: Partial<SankeyLink>) => boolean | void;
+  onMove?: (identity: SankeyLinkIdentity, direction: 'up' | 'down') => void;
+  onRenameNode?: (identity: SankeyNodeIdentity, label: string) => boolean | void;
+}) {
+  const canonicalLink = {
+    source: diagram.nodes[0]?.label ?? 'Source',
+    target: diagram.nodes[1]?.label ?? diagram.nodes[0]?.label ?? 'Target',
+    value: '1',
+  };
+  const { draft, updateDraft } = useCanonicalDraft(canonicalLink);
+  const [error, setError] = useState<string | null>(null);
+  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="sankey-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+    <strong>Sankey</strong>
+    <form aria-label="New Sankey link" onSubmit={(event) => {
+      event.preventDefault();
+      runNumericForm(setError, () => onAdd?.({ source: draft.source, target: draft.target, value: parseSemanticNumber(draft.value, 'Sankey link weight') }));
+    }}>
+      <input aria-label="New Sankey link source" onChange={(event) => updateDraft((current) => ({ ...current, source: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.source} />
+      <input aria-label="New Sankey link target" onChange={(event) => updateDraft((current) => ({ ...current, target: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.target} />
+      <input aria-label="New Sankey link weight" inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.value} />
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add link</button>
+    </form>
+    <NumericEditorError error={error} />
+    {diagram.links.map((link, index) => <SankeyLinkForm index={index} item={link} items={diagram.links} key={`${link.source}:${link.target}:${link.value}`} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} />)}
+    <section aria-label="Sankey nodes">
+      <strong>Nodes</strong>
+      {diagram.nodes.map((node) => <SankeyNodeForm key={node.label} links={diagram.links} node={node} onError={setError} onRename={onRenameNode} />)}
+    </section>
+  </aside>;
+}
+
+function SankeyLinkForm({ index, item, items, onDelete, onEdit, onError, onMove }: {
+  index: number; item: SankeyLink; items: SankeyLink[];
+  onDelete?: (identity: SankeyLinkIdentity) => void;
+  onEdit?: (identity: SankeyLinkIdentity, value: Partial<SankeyLink>) => boolean | void;
+  onError: (value: string | null) => void;
+  onMove?: (identity: SankeyLinkIdentity, direction: 'up' | 'down') => void;
+}) {
+  const canonical = { source: item.source, target: item.target, value: String(item.value) };
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical);
+  const identity = getSankeyLinkIdentity(item, items);
+  const label = getSankeyLinkControlLabel(item, index, items);
+  return <form aria-label={label} onSubmit={(event) => {
+    event.preventDefault();
+    if (runNumericForm(onError, () => onEdit?.(identity, { source: draft.source, target: draft.target, value: parseSemanticNumber(draft.value, 'Sankey link weight') }))) resetDraft();
+  }}>
+    <input aria-label={`${label} source`} onChange={(event) => updateDraft((current) => ({ ...current, source: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.source} />
+    <input aria-label={`${label} target`} onChange={(event) => updateDraft((current) => ({ ...current, target: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.target} />
+    <input aria-label={`${label} weight`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.value} />
+    <button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>
+    <button aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
+    <button aria-label={`Move ${label} down`} disabled={index === items.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
+    <button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
+  </form>;
+}
+
+function SankeyNodeForm({ links, node, onError, onRename }: {
+  links: SankeyLink[]; node: SankeyDiagramSnapshot['nodes'][number];
+  onError: (value: string | null) => void;
+  onRename?: (identity: SankeyNodeIdentity, label: string) => boolean | void;
+}) {
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft({ label: node.label });
+  const identity = getSankeyNodeIdentity(node, links);
+  return <form aria-label={`Sankey node ${node.label}`} onSubmit={(event) => {
+    event.preventDefault();
+    if (runNumericForm(onError, () => onRename?.(identity, draft.label))) resetDraft();
+  }}>
+    <input aria-label={`Sankey node ${node.label} label`} onChange={(event) => updateDraft(() => ({ label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
+    <button style={HIERARCHY_CONTROL_STYLE} type="submit">Rename</button>
+  </form>;
+}
+
+function PacketEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove }: {
+  bottom: number; diagram: PacketDiagramSnapshot; maxHeight: number;
+  onAdd?: (value: PacketField) => boolean | void;
+  onDelete?: (identity: PacketFieldIdentity) => void;
+  onEdit?: (identity: PacketFieldIdentity, value: Partial<PacketField>) => boolean | void;
+  onMove?: (identity: PacketFieldIdentity, direction: 'up' | 'down') => void;
+}) {
+  const canonicalField = { label: 'Field', start: String((diagram.fields.at(-1)?.end ?? -1) + 1), width: '1' };
+  const { draft, updateDraft } = useCanonicalDraft(canonicalField);
+  const [error, setError] = useState<string | null>(null);
+  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="packet-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+    <strong>Packet</strong>
+    <form aria-label="New Packet field" onSubmit={(event) => {
+      event.preventDefault();
+      runNumericForm(setError, () => {
+        const start = parsePacketInteger(draft.start, 'Packet field start');
+        const width = parsePacketInteger(draft.width, 'Packet field width');
+        if (start < 0) throw new Error('Packet field start must be zero or greater.');
+        if (width < 1) throw new Error('Packet field width must be at least one.');
+        return onAdd?.({ end: start + width - 1, label: draft.label, start });
+      });
+    }}>
+      <input aria-label="New Packet field label" onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
+      <input aria-label="New Packet field start" inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.start} />
+      <input aria-label="New Packet field width" inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, width: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.width} />
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add field</button>
+    </form>
+    <NumericEditorError error={error} />
+    {diagram.fields.map((field, index) => <PacketFieldForm field={field} fields={diagram.fields} index={index} key={getPacketFieldFormKey(field, diagram.fields)} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} />)}
+  </aside>;
+}
+
+function PacketFieldForm({ field, fields, index, onDelete, onEdit, onError, onMove }: {
+  field: PacketField; fields: PacketField[]; index: number;
+  onDelete?: (identity: PacketFieldIdentity) => void;
+  onEdit?: (identity: PacketFieldIdentity, value: Partial<PacketField>) => boolean | void;
+  onError: (value: string | null) => void;
+  onMove?: (identity: PacketFieldIdentity, direction: 'up' | 'down') => void;
+}) {
+  const canonical = { label: field.label, start: String(field.start), width: String(field.end - field.start + 1) };
+  const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical);
+  const identity = getPacketFieldIdentity(field, fields);
+  const safe = identity.occurrenceCount === 1;
+  const label = getPacketFieldControlLabel(field, index, fields);
+  return <form aria-label={label} onSubmit={(event) => {
+    event.preventDefault();
+    if (!safe) return;
+    if (runNumericForm(onError, () => {
+      const start = parsePacketInteger(draft.start, 'Packet field start');
+      const width = parsePacketInteger(draft.width, 'Packet field width');
+      if (start < 0) throw new Error('Packet field start must be zero or greater.');
+      if (width < 1) throw new Error('Packet field width must be at least one.');
+      return onEdit?.(identity, { end: start + width - 1, label: draft.label, start });
+    })) resetDraft();
+  }}>
+    <input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
+    <input aria-label={`${label} start`} disabled={!safe} inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.start} />
+    <input aria-label={`${label} width`} disabled={!safe} inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, width: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.width} />
+    <button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>
+    <button aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
+    <button aria-label={`Move ${label} down`} disabled={!safe || index === fields.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
+    <button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
+  </form>;
 }
 
 function PieEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onSetShowData, onSetTitle }: {

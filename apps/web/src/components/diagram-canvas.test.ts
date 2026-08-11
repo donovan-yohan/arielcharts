@@ -127,9 +127,10 @@ describe('board semantic editor fields', () => {
   });
 
   it('uses structured Kanban metadata controls so punctuation remains value data', () => {
-    expect(canvasSource).toMatch(/metadata \$\{key\} key/u);
-    expect(canvasSource).toMatch(/new metadata key/u);
-    expect(canvasSource).not.toMatch(/event\.target\.value\.split\(','\)\.map\(\(item\)/u);
+    const form = canvasSource.slice(canvasSource.indexOf('function KanbanCardForm'), canvasSource.indexOf('function SectionForm'));
+    expect(form).toMatch(/metadata \$\{key\} key/u);
+    expect(form).toMatch(/new metadata key/u);
+    expect(form).not.toMatch(/event\.target\.value\.split\(','\)\.map\(\(item\)/u);
   });
 });
 

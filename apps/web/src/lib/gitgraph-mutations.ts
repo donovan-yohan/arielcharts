@@ -60,8 +60,12 @@ export function addGitGraphBranch(source: string, branch: GitGraphBranch): strin
 export function editGitGraphBranch(source: string, identity: GitGraphOperationIdentity, patch: Partial<GitGraphBranch>): string {
   const parsed = requireGitGraph(source); const record = findOperation(parsed, identity, 'branch'); const current = record.operation.value; const value = normalizeBranch({ ...current, ...patch });
   if (value.name !== current.name && branchNames(parsed).has(value.name)) throw new Error(`A branch named ${value.name} already exists.`);
-  let next = replaceLine(source, record.line, `${indent(record.line)}${formatBranch(value)}`);
-  if (value.name !== current.name) next = replaceBranchReferences(next, current.name, value.name);
+  const replacements = [{ line: record.line, value: `${indent(record.line)}${formatBranch(value)}` }, ...value.name === current.name ? [] : parsed.records.flatMap((item) => {
+    if (item.operation.kind === 'checkout' && item.operation.value.branch === current.name) return [{ line: item.line, value: `${indent(item.line)}${formatCheckout({ ...item.operation.value, branch: value.name })}` }];
+    if (item.operation.kind === 'merge' && item.operation.value.branch === current.name) return [{ line: item.line, value: `${indent(item.line)}${formatMerge({ ...item.operation.value, branch: value.name })}` }];
+    return [];
+  })];
+  const next = replaceLines(source, replacements);
   return requireGitGraph(next), next;
 }
 export function addGitGraphCheckout(source: string, checkout: GitGraphCheckout): string {
@@ -102,14 +106,16 @@ export function deleteGitGraphOperation(source: string, identity: GitGraphOperat
 }
 
 function parseGitGraph(source: string): Parsed | null {
-  const lines = splitLines(source); const headerIndex = firstStatement(lines); const header = lines[headerIndex]?.text.replace(/^\uFEFF/, '').match(HEADER); if (!header) return null;
-  const records: StatementRecord[] = [];
-  for (let index = headerIndex + 1; index < lines.length; index += 1) {
-    const line = lines[index]!; if (!line.text.trim() || ignorable(line.text)) continue;
-    const operation = parseOperation(line.text); if (!operation) return null; records.push({ line, operation });
-  }
-  const parsed = { ...(header[1] ? { direction: header[1].toUpperCase() as GitGraphDirection } : {}), records };
-  try { validateHistory(parsed); return parsed; } catch { return null; }
+  try {
+    const lines = splitLines(source); const headerIndex = firstStatement(lines); const header = lines[headerIndex]?.text.replace(/^\uFEFF/, '').match(HEADER); if (!header) return null;
+    const records: StatementRecord[] = [];
+    for (let index = headerIndex + 1; index < lines.length; index += 1) {
+      const line = lines[index]!; if (!line.text.trim() || ignorable(line.text)) continue;
+      const operation = parseOperation(line.text); if (!operation) return null; records.push({ line, operation });
+    }
+    const parsed = { ...(header[1] ? { direction: header[1].toUpperCase() as GitGraphDirection } : {}), records };
+    validateHistory(parsed); return parsed;
+  } catch { return null; }
 }
 function parseOperation(text: string): GitGraphOperation | null {
   let match = text.match(BRANCH); if (match) { const attrs = parseAttributes(match[2]!); if (!attrs || attrs.id || attrs.tag || attrs.type || attrs.parent || (attrs.order && !/^\d+$/.test(attrs.order))) return null; return { kind: 'branch', value: { name: normalizeName(unquote(match[1]!)), ...(attrs.order ? { order: Number(attrs.order) } : {}) } }; }
@@ -145,7 +151,6 @@ function formatMerge(value: GitGraphMerge): string { return `merge ${branchToken
 function formatCherryPick(value: GitGraphCherryPick): string { return `cherry-pick id: ${quote(value.id)}${value.parent ? ` parent: ${quote(value.parent)}` : ''}${value.tags.map((tag) => ` tag: ${quote(tag)}`).join('')}`; }
 function branchNames(parsed: Parsed): Set<string> { const names = new Set(['main']); for (const item of parsed.records) if (item.operation.kind === 'branch') names.add(item.operation.value.name); return names; }
 function commitIds(parsed: Parsed): Set<string> { const ids = new Set<string>(); for (const item of parsed.records) if ((item.operation.kind === 'commit' || item.operation.kind === 'merge') && item.operation.value.id) ids.add(item.operation.value.id); return ids; }
-function replaceBranchReferences(source: string, from: string, to: string): string { const parsed = requireGitGraph(source); const replacements = parsed.records.flatMap((record) => { if (record.operation.kind === 'checkout' && record.operation.value.branch === from) return [{ line: record.line, value: `${indent(record.line)}${formatCheckout({ ...record.operation.value, branch: to })}` }]; if (record.operation.kind === 'merge' && record.operation.value.branch === from) return [{ line: record.line, value: `${indent(record.line)}${formatMerge({ ...record.operation.value, branch: to })}` }]; return []; }); return replaceLines(source, replacements); }
 function asType(value: string): GitCommitType { const type = value.toUpperCase(); if (type !== 'NORMAL' && type !== 'REVERSE' && type !== 'HIGHLIGHT') throw new Error('Unsupported GitGraph commit type.'); return type; }
 function normalizeName(value: string): string { const name = value.trim(); if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(name) || /^(branch|checkout|switch|commit|merge|cherry-pick)$/i.test(name)) throw new Error('GitGraph branch names must be Mermaid-safe identifiers.'); return name; }
 function text(value: string, noun: string): string { const result = value.trim(); if (!result || /["\r\n]/.test(result)) throw new Error(`${noun} must be non-empty single-line text.`); return result; }

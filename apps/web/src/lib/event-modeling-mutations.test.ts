@@ -2,7 +2,7 @@
 
 import mermaid from 'mermaid';
 import { describe, expect, it } from 'vitest';
-import { addEventModelingDataBlock, addEventModelingTimeframe, editEventModelingDataBlock, getEventModelingDiagramSnapshot, isEventModelingSourceRepresentable, moveEventModelingTimeframe } from './event-modeling-mutations';
+import { addEventModelingDataBlock, addEventModelingTimeframe, editEventModelingDataBlock, editEventModelingTimeframe, getEventModelingDiagramSnapshot, isEventModelingSourceRepresentable, moveEventModelingTimeframe } from './event-modeling-mutations';
 
 const SOURCE = `%% source-owned payload\neventmodeling\n  entity Inventory.Stock\n  tf 01 ui Inventory.Stock\n  tf 02 cmd ReserveStock ->> 01 [[ReserveStock01]]\n  data ReserveStock01 \`json\`{\n    "sku": "A-1"\n}`;
 
@@ -40,5 +40,12 @@ describe('Event Modeling source mutations', () => {
     const edited = editEventModelingDataBlock(source, 'Payload', { name: 'Renamed', dataType: 'text' });
     expect(edited).toContain(`data Renamed \`text\`{\n${payload}}`);
     expect(edited.match(/\r\n|\n|\r/g)).toEqual(source.match(/\r\n|\n|\r/g));
+  });
+  it('renames timeframe indices and data blocks with original-document references atomically', () => {
+    const indexed = editEventModelingTimeframe(SOURCE, '01', { index: '03' });
+    expect(indexed).toContain('tf 02 cmd ReserveStock ->> 03 [[ReserveStock01]]');
+    const data = editEventModelingDataBlock(SOURCE, 'ReserveStock01', { name: 'ReserveData' });
+    expect(data).toContain('tf 02 cmd ReserveStock ->> 01 [[ReserveData]]');
+    expect(data).toContain('data ReserveData `json`{');
   });
 });

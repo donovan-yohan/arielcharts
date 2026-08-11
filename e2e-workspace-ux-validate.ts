@@ -1346,6 +1346,10 @@ async function expectBoardSemanticEditors(page: Page): Promise<void> {
   const order = eventModeling.getByRole('form', { name: 'Event Modeling entity Order', exact: true });
   await order.getByLabel('Event Modeling entity Order name', { exact: true }).fill('Sales.Order');
   await assertAndClickBoardControl(page, order.getByRole('button', { name: 'Save', exact: true }), 'Event Modeling rename entity control');
+  await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('entity Sales.Order');
+  await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('tf 01 cmd Sales.Order');
+  await closeFlyout(page, 'source');
   await replaceSource(page, 'eventmodeling\n  tf nope evt Start');
   await waitForSource(page, 'eventmodeling\n  tf nope evt Start');
   await expect(page.getByTestId('event-modeling-editor-controls')).toHaveCount(0);

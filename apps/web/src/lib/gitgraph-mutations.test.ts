@@ -2,7 +2,7 @@
 
 import mermaid from 'mermaid';
 import { describe, expect, it } from 'vitest';
-import { addGitGraphBranch, addGitGraphCherryPick, addGitGraphCommit, addGitGraphMerge, addGitGraphCheckout, deleteGitGraphOperation, editGitGraphCheckout, editGitGraphCommit, editGitGraphMerge, getGitGraphDiagramSnapshot, getGitGraphOperationIdentity, isGitGraphSourceRepresentable, moveGitGraphOperation } from './gitgraph-mutations';
+import { addGitGraphBranch, addGitGraphCherryPick, addGitGraphCommit, addGitGraphMerge, addGitGraphCheckout, deleteGitGraphOperation, editGitGraphBranch, editGitGraphCheckout, editGitGraphCommit, editGitGraphMerge, getGitGraphDiagramSnapshot, getGitGraphOperationIdentity, isGitGraphSourceRepresentable, moveGitGraphOperation } from './gitgraph-mutations';
 
 const SOURCE = `%% ordered history\ngitGraph LR:\n  commit id: "base"\n  branch feature order: 2\n  commit id: "feature" tag: "v1"\n  checkout main\n  commit id: "main"\n  merge feature id: "merge" type: HIGHLIGHT`;
 
@@ -20,6 +20,8 @@ describe('GitGraph source mutations', () => {
     expect(isGitGraphSourceRepresentable('gitGraph\n  commit id: "a"\n  merge main')).toBe(false);
     expect(isGitGraphSourceRepresentable('gitGraph\n  commit id: "a"\n  cherry-pick id: "a"')).toBe(false);
     expect(isGitGraphSourceRepresentable('gitGraph\n  commit id: "a"\n  commit id: "a"')).toBe(false);
+    expect(isGitGraphSourceRepresentable('gitGraph\n  commit type: GLOW')).toBe(false);
+    expect(isGitGraphSourceRepresentable('gitGraph\n  commit id: "a"\n  branch "unsafe branch"')).toBe(false);
     expect(() => addGitGraphMerge('gitGraph\n  commit', { branch: 'missing', tags: [] })).toThrow('representable');
   });
   it('validates cherry-pick source/parent semantics and ordered mutations', () => {
@@ -71,5 +73,14 @@ describe('GitGraph source mutations', () => {
     const mixed = 'gitGraph\r\n  commit id: "base"\n  commit id: "first"\r  commit id: "second"';
     const operations = getGitGraphDiagramSnapshot(mixed).operations;
     expect(moveGitGraphOperation(mixed, getGitGraphOperationIdentity(operations[2]!, operations), 'up').match(/\r\n|\n|\r/g)).toEqual(mixed.match(/\r\n|\n|\r/g));
+  });
+  it('renames a branch and all original-document references atomically', () => {
+    const source = `${SOURCE}\n  checkout feature`;
+    const operations = getGitGraphDiagramSnapshot(source).operations;
+    const renamed = editGitGraphBranch(source, getGitGraphOperationIdentity(operations[1]!, operations), { name: 'release' });
+    expect(renamed).toContain('branch release order: 2');
+    expect(renamed).toContain('merge release id: "merge"');
+    expect(renamed).toContain('checkout release');
+    expect(renamed).not.toContain('branch feature');
   });
 });

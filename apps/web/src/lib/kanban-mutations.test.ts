@@ -15,6 +15,10 @@ describe('Kanban source mutations', () => {
     expect(getKanbanDiagramSnapshot(SOURCE)).toEqual({ columns: [{ id: 'todo', title: 'Todo' }, { id: 'done', title: 'Done' }], cards: [{ id: 'design', title: 'Design', columnId: 'todo', metadata: { assigned: 'Ava', ticket: 'ARC-1' } }] });
     expect(addKanbanColumn(SOURCE, { id: 'review', title: 'Review' })).toContain('%% board comments persist');
   });
+  it('rejects requested ids already used by a column or card', () => {
+    expect(() => addKanbanColumn(SOURCE, { id: 'todo', title: 'Again' })).toThrow('already exists');
+    expect(() => addKanbanCard(SOURCE, { id: 'done', title: 'Duplicate', columnId: 'todo', metadata: {} })).toThrow('already exists');
+  });
   it('moves and edits cards via their declaration ranges', () => {
     const added = addKanbanCard(SOURCE, { id: 'ship', title: 'Ship it', columnId: 'todo', metadata: { priority: 'High' } });
     const moved = moveKanbanCard(added, 'ship', 'done', 0);
@@ -24,6 +28,11 @@ describe('Kanban source mutations', () => {
     const source = 'kanban\n  todo[Todo]\n    task[Task]@{ assigned: "Ava, Bea: owner", ticket: "ARC: 1, 2" }';
     const edited = editKanbanCard(source, 'task', { metadata: { assigned: 'Ava, Bea: owner', ticket: 'ARC: 1, 2' } });
     expect(getKanbanDiagramSnapshot(edited).cards[0]?.metadata).toEqual({ assigned: 'Ava, Bea: owner', ticket: 'ARC: 1, 2' });
+  });
+  it('round-trips object-prototype metadata keys and still rejects duplicates', () => {
+    const source = 'kanban\n  todo[Todo]\n    task[Task]@{ constructor: "Ctor", toString: "Text", valueOf: "Value" }';
+    expect(getKanbanDiagramSnapshot(source).cards[0]?.metadata).toEqual({ constructor: 'Ctor', toString: 'Text', valueOf: 'Value' });
+    expect(isKanbanSourceRepresentable('kanban\n  todo[Todo]\n    task[Task]@{ constructor: "One", constructor: "Two" }')).toBe(false);
   });
   it('keeps terminators positional when cards move across columns', () => {
     for (const ending of ['\n', '\r\n', '\r']) {

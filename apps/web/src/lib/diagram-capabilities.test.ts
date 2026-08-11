@@ -124,6 +124,10 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult(noteOnlySequence, 'add-message')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(timeline).getOperationResult('timeline\n  accTitle: advanced', 'add-event')).toEqual({ supported: false, reason: 'unrepresentable' });
     expect(getDiagramSourceModelAdapter(gitgraph).getOperationResult('gitGraph\n  checkout missing', 'add-branch')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(eventModeling).getOperationResult('eventmodeling\n  tf nope evt Order', 'add-timeframe')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(eventModeling).getOperationResult('eventmodeling\n  entity Order', 'unsupported')).toEqual({ supported: false, reason: 'unsupported-operation' });
+    expect(getDiagramSourceModelAdapter(kanban).getOperationResult('kanban\n  todo[', 'add-card')).toEqual({ supported: false, reason: 'unrepresentable' });
+    expect(getDiagramSourceModelAdapter(kanban).getOperationResult('kanban\n  todo[Todo]', 'unsupported')).toEqual({ supported: false, reason: 'unsupported-operation' });
   });
 
   it('exposes the existing canvas and semantic-form controls through the adapter contract', () => {

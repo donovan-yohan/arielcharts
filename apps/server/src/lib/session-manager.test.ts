@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createActivityEvent } from './activity.js';
+import { COLLABORATION_BUDGETS } from './document-admission.js';
 import type { ActivityEvent } from '@arielcharts/shared';
 import { SessionStore } from './persistence.js';
 import { SessionManager } from './session-manager.js';
@@ -71,6 +72,19 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     const write = await manager.writeDiagram('abc123de', 'main', 'timeline\n  now : request', firstRead.diagram.revision, activity('replaced'));
     await expect(manager.renameDiagram('abc123de', 'main', 'Requests', firstRead.diagram.revision, activity('renamed'))).rejects.toThrow('Stale diagram revision');
     await expect(manager.renameDiagram('abc123de', 'main', 'Requests', write.revision, activity('renamed'))).resolves.toMatchObject({ name: 'Requests' });
+  });
+
+  it('applies the durable source budget before MCP-owned mutations touch the live document', async () => {
+    await manager.getOrCreateSession('abc123de');
+    const current = await manager.readDiagram('abc123de', 'main');
+    await expect(manager.writeDiagram(
+      'abc123de',
+      'main',
+      'x'.repeat(COLLABORATION_BUDGETS.totalTextBytes + 1),
+      current.diagram.revision,
+      activity('replaced'),
+    )).rejects.toThrow('Mermaid source exceeds the collaborative document text budget');
+    await expect(manager.readDiagram('abc123de', 'main')).resolves.toMatchObject({ diagram: { mermaid_text: '' } });
   });
 
   it('enforces normalized unique names and prevents last-tab deletion', async () => {
@@ -146,6 +160,62 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     await expect(manager.getSession('abc123de')).resolves.toMatchObject({
       diagrams: [{ id: 'main', name: 'Main' }],
     });
+  });
+
+  it('refuses an oversized persisted update before constructing a live document', async () => {
+    await manager.close();
+    const store = new SessionStore(resources.dataDir);
+    await store.set({
+      id: 'abc123de',
+      title: 'Oversized',
+      activity: [],
+      participants: [],
+      encodedState: Buffer.alloc(COLLABORATION_BUDGETS.sessionStateBytes + 1, 1).toString('base64'),
+      updatedAt: 1,
+    });
+    await store.close();
+    manager = resources.createManager();
+
+    await expect(manager.getSession('abc123de')).rejects.toThrow('Persisted session rejected: document_state_too_large');
+  });
+
+  it('fails closed when persisted reserved roots have the wrong collection type', async () => {
+    await manager.close();
+    const malformed = new Y.Doc();
+    malformed.getMap('activity').set('not', 'an array');
+    const store = new SessionStore(resources.dataDir);
+    await store.set({
+      id: 'abc123de',
+      title: 'Malformed root',
+      activity: [],
+      participants: [],
+      encodedState: Buffer.from(Y.encodeStateAsUpdate(malformed)).toString('base64'),
+      updatedAt: 1,
+    });
+    await store.close();
+    manager = resources.createManager();
+
+    await expect(manager.getSession('abc123de')).rejects.toThrow('Persisted session rejected: invalid_reserved_root');
+  });
+
+  it('preserves a newer overlay scene unchanged across persisted reload', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    state.doc.transact(() => {
+      const scene = new Y.Map<unknown>();
+      scene.set('version', 2);
+      scene.set('objects', new Y.Map());
+      const opaque = new Y.Map<unknown>();
+      opaque.set('newer', true);
+      scene.set('opaque_newer_field', opaque);
+      state.doc.getMap<Y.Map<unknown>>('overlays').set('main', scene);
+    });
+    await manager.persistSession(state);
+    await manager.cleanupExpiredSessions({ ttlMs: 0, diskTtlMs: Infinity, now: state.lastAccessedAt + 1 });
+
+    const restored = await manager.getOrCreateSession('abc123de');
+    const scene = restored.doc.getMap<Y.Map<unknown>>('overlays').get('main');
+    expect(scene?.get('version')).toBe(2);
+    expect((scene?.get('opaque_newer_field') as Y.Map<unknown>).get('newer')).toBe(true);
   });
 
   it('repairs combined malformed structure, order, and duplicate names before snapshot and reload', async () => {

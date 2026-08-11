@@ -27,6 +27,14 @@ import {
   DIAGRAMS_KEY,
   PRESENCE_KEY,
 } from './constants.js';
+import {
+  COLLABORATION_BUDGETS,
+  createReservedRootDocument,
+  decodePersistedYjsState,
+  repairOverlayDocument,
+  validateDocumentState,
+  validateReservedRootTypes,
+} from './document-admission.js';
 import { SessionStore } from './persistence.js';
 import type { CleanupOptions, DiagramHistoryMetadata, HistoryPersistenceChange, RoomAccessRecord, SessionRecord, SessionSnapshot, SessionState } from './types.js';
 
@@ -237,6 +245,16 @@ function repairDiagramCatalog(doc: Y.Doc): boolean {
       diagram.set(DIAGRAM_NODE_POSITIONS_KEY, new Y.Map());
       repairedEntry = true;
     }
+    const positions = diagram.get(DIAGRAM_NODE_POSITIONS_KEY) as Y.Map<unknown>;
+    for (const [nodeId, rawPosition] of positions.entries()) {
+      const position = rawPosition as Partial<{ x: unknown; y: unknown }> | null;
+      if (!nodeId || !position || typeof position !== 'object'
+        || typeof position.x !== 'number' || !Number.isFinite(position.x)
+        || typeof position.y !== 'number' || !Number.isFinite(position.y)) {
+        positions.delete(nodeId);
+        repairedEntry = true;
+      }
+    }
   }
 
   const currentOrder = order.toArray();
@@ -311,12 +329,13 @@ function reconcileDiagramNames(doc: Y.Doc): boolean {
   return changed;
 }
 
-function repairCatalogAndNames(doc: Y.Doc): boolean {
+function repairDocument(doc: Y.Doc): boolean {
   let changed = false;
   doc.transact(() => {
     const catalogChanged = repairDiagramCatalog(doc);
     const namesChanged = reconcileDiagramNames(doc);
-    changed = catalogChanged || namesChanged;
+    const overlaysChanged = repairOverlayDocument(doc);
+    changed = catalogChanged || namesChanged || overlaysChanged;
   }, CATALOG_REPAIR_ORIGIN);
   return changed;
 }
@@ -565,28 +584,29 @@ export class SessionManager {
       return null;
     }
 
-    const doc = new Y.Doc();
-    Y.applyUpdate(doc, Buffer.from(persisted.encodedState, 'base64'));
-    const repaired = repairCatalogAndNames(doc);
-    const updatedAt = repaired ? Date.now() : persisted.updatedAt;
-    const snapshot = this.snapshotFromDoc({
-      id: persisted.id,
-      doc,
-      updatedAt,
-      participants: readParticipants(doc),
-    });
-    if (repaired) {
-      await this.runSessionPersistence(sessionId, () => this.store.set({
-        id: snapshot.id,
-        title: snapshot.title,
-        activity: snapshot.activity,
-        participants: snapshot.participants,
-        encodedState: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'),
+    const { doc, repaired } = this.documentFromPersistedRecord(persisted);
+    try {
+      const updatedAt = repaired ? Date.now() : persisted.updatedAt;
+      const snapshot = this.snapshotFromDoc({
+        id: persisted.id,
+        doc,
         updatedAt,
-      }));
+        participants: readParticipants(doc),
+      });
+      if (repaired) {
+        await this.runSessionPersistence(sessionId, () => this.store.set({
+          id: snapshot.id,
+          title: snapshot.title,
+          activity: snapshot.activity,
+          participants: snapshot.participants,
+          encodedState: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'),
+          updatedAt,
+        }));
+      }
+      return snapshot;
+    } finally {
+      doc.destroy();
     }
-    doc.destroy();
-    return snapshot;
   }
 
   async getSession(sessionId: string): Promise<{ session_id: string; diagrams: DiagramSummary[]; participants: Participant[]; revision: string }> {
@@ -673,6 +693,7 @@ export class SessionManager {
     if (!diagram) {
       throw new Error(`Diagram not found: ${diagramId}`);
     }
+    this.assertProjectedSourceBudget(session.doc, getMermaidText(diagram).toString(), target.mermaid_text);
 
     const restoreEvent: ActivityEvent = {
       ...event,
@@ -707,6 +728,7 @@ export class SessionManager {
   async createDiagram(sessionId: string, name: string, mermaidText: string, revision: string, event: ActivityEvent, participants?: Participant[]): Promise<Diagram> {
     const session = await this.requireSession(sessionId);
     this.assertRevision(session.doc, revision);
+    this.assertProjectedSourceBudget(session.doc, '', mermaidText, { creatingDiagram: true });
     const id = diagramId();
     const normalizedName = normalizeDiagramName(name);
     this.assertUniqueDiagramName(session.doc, normalizedName);
@@ -732,6 +754,7 @@ export class SessionManager {
       throw new Error(`Diagram not found: ${diagramId}`);
     }
     this.assertDiagramRevision(diagram, diagramId, revision);
+    this.assertProjectedSourceBudget(session.doc, getMermaidText(diagram).toString(), mermaidText);
     const nextName = name === undefined ? undefined : normalizeDiagramName(name);
     if (nextName !== undefined) {
       this.assertUniqueDiagramName(session.doc, nextName, diagramId);
@@ -870,9 +893,14 @@ export class SessionManager {
     if (!persisted && options.allowCreate === false) {
       throw new Error(`Session not found: ${sessionId}`);
     }
-    const doc = new Y.Doc();
-    if (persisted) Y.applyUpdate(doc, Buffer.from(persisted.encodedState, 'base64'));
-    const repairedOnLoad = repairCatalogAndNames(doc);
+    const loaded = persisted ? this.documentFromPersistedRecord(persisted) : { doc: createReservedRootDocument(), repaired: false };
+    const doc = loaded.doc;
+    const repairedOnLoad = repairDocument(doc) || loaded.repaired;
+    const admission = validateDocumentState(doc);
+    if (!admission.accepted) {
+      doc.destroy();
+      throw new Error(`Session document rejected: ${admission.reason}`);
+    }
     const awareness = new Awareness(doc);
     awareness.setLocalState(null);
     const now = Date.now();
@@ -888,7 +916,7 @@ export class SessionManager {
       if (transaction.origin === MANAGED_AWARENESS_ORIGIN || transaction.origin === CATALOG_REPAIR_ORIGIN) {
         return;
       }
-      repairCatalogAndNames(doc);
+      repairDocument(doc);
     });
     if (repairedOnLoad) {
       state.updatedAt = Date.now();
@@ -897,6 +925,30 @@ export class SessionManager {
       await this.persistSession(state, { recovery: true, initialRoomAccess: options.initialRoomAccess });
     }
     return state;
+  }
+
+  /** Builds and validates a detached persisted candidate before it becomes live. */
+  private documentFromPersistedRecord(record: SessionRecord): { doc: Y.Doc; repaired: boolean } {
+    const encoded = decodePersistedYjsState(record.encodedState);
+    if (!(encoded instanceof Uint8Array)) {
+      throw new Error(`Persisted session rejected: ${encoded.reason}`);
+    }
+    const doc = createReservedRootDocument();
+    try {
+      Y.applyUpdate(doc, new Uint8Array(encoded));
+      // Root collection identities are not repairable without changing the
+      // document contract. Refuse them before typed catalog repair executes.
+      const rootTypes = validateReservedRootTypes(doc);
+      if (!rootTypes.accepted) throw new Error(`Persisted session rejected: ${rootTypes.reason}`);
+      const repaired = repairDocument(doc);
+      const admission = validateDocumentState(doc);
+      if (!admission.accepted) throw new Error(`Persisted session rejected: ${admission.reason}`);
+      return { doc, repaired };
+    } catch (error) {
+      doc.destroy();
+      if (error instanceof Error && error.message.startsWith('Persisted session rejected:')) throw error;
+      throw new Error('Persisted session rejected: malformed_yjs_update');
+    }
   }
 
   private snapshot(session: SessionState): SessionSnapshot {
@@ -1054,6 +1106,25 @@ export class SessionManager {
       if (id !== exceptId && getDiagramName(diagramsMap(doc).get(id)!, id).toLocaleLowerCase() === normalized) {
         throw new Error(`Diagram name already exists: ${name}`);
       }
+    }
+  }
+
+  /** MCP and server-owned source writes use the same bounded durable envelope as raw Yjs ingress. */
+  private assertProjectedSourceBudget(
+    doc: Y.Doc,
+    previousSource: string,
+    nextSource: string,
+    options: { creatingDiagram?: boolean } = {},
+  ): void {
+    const nextBytes = Buffer.byteLength(nextSource, 'utf8');
+    if (nextBytes > COLLABORATION_BUDGETS.totalTextBytes) {
+      throw new Error('Mermaid source exceeds the collaborative document text budget.');
+    }
+    const currentBytes = Y.encodeStateAsUpdate(doc).byteLength;
+    const previousBytes = Buffer.byteLength(previousSource, 'utf8');
+    const structureAllowance = options.creatingDiagram ? 2_048 : 256;
+    if (currentBytes - previousBytes + nextBytes + structureAllowance > COLLABORATION_BUDGETS.sessionStateBytes) {
+      throw new Error('Mermaid source exceeds the collaborative document state budget.');
     }
   }
 

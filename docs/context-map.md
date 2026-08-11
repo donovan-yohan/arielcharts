@@ -18,9 +18,10 @@ canonical; the SVG and flowchart interaction model derive from it.
 | --- | --- | --- | --- |
 | Session catalog | Durable Yjs `diagrams` map plus `diagramOrder`; server repairs structure/order/names and retains at least one valid tab | `apps/server/src/lib/session-manager.ts`, `packages/shared/src/types.ts` | `apps/server/src/lib/session-manager.test.ts` |
 | Diagram content | Per-diagram `mermaid: Y.Text`, `name`, and `nodePositions: Y.Map`; shared source policy makes accepted source authoritative for durable layout membership | `packages/shared/src/source-layout.ts`, `session-manager.ts`, `apps/web/src/components/session-workspace.tsx`, `apps/web/src/lib/diagram-layout.ts` | `source-layout.test.ts`, `mcp.test.ts`, `diagram-layout.test.ts` |
-| Realtime | Yjs nested-document convergence plus socket-owned, filtered awareness | `apps/web/src/components/session-workspace.tsx`, `apps/server/src/lib/websocket.ts` | `apps/server/src/lib/websocket.test.ts`, `e2e-collaboration-validate.ts` (`pnpm test:e2e-collaboration`) |
+| Realtime ingress | Every framed message is per-socket frame/rate bounded by its sync, awareness, or control class; SyncStep2/update then enters a hydrated detached candidate. Reserved Yjs roots (catalog/order/activity/presence/overlays) and their bounded values must validate before live apply, fan-out, checkpoints, or persistence. Fixed content-free rejection counters make dropped input observable. | `apps/server/src/lib/websocket.ts`, `apps/server/src/lib/document-admission.ts` | `document-admission.test.ts`, `websocket.test.ts`, `e2e-collaboration-validate.ts` (`pnpm test:e2e-collaboration`) |
+| Overlay envelope | Durable `overlays` is a versioned, quota-bounded per-diagram envelope. v1 currently owns only scene/object containment budgets; #69 owns scene-object semantics. Newer versions remain opaque/read-only to this server and are never repaired away. | `apps/server/src/lib/constants.ts`, `apps/server/src/lib/document-admission.ts`, `session-manager.ts` | `document-admission.test.ts`, `session-manager.test.ts` |
 | Room access | `RoomAccessService` stores salted verifier/access-version records outside Yjs, signs browser cookies, rate-limits attempts, and authenticates all ingress before the manager. Only protected creation creates a session; rotation advances the version and terminates room sockets. | `apps/server/src/lib/room-access.ts`, `apps/server/src/index.ts`, `apps/web/src/components/room-gate.tsx` | `room-access.test.ts`, `index.test.ts`, `websocket.test.ts`, `pnpm test:e2e-collaboration` |
-| MCP writes | Modern-only HTTP tools require a room-scoped bearer and current server-derived revisions before mutation; the request-bound capability rejects cross-room inputs, while the shared mutation boundary lazily joins the authenticated agent without replacing its existing identity, then reconciles accepted source/layout in that same document transaction | `apps/server/src/lib/mcp-server.ts`, `apps/server/src/lib/mcp.ts`, `apps/server/src/lib/session-manager.ts` | `apps/server/src/lib/mcp.test.ts`, `apps/server/src/index.test.ts`, `pnpm test:e2e-collaboration` |
+| MCP writes | Modern-only HTTP tools require a room-scoped bearer and current server-derived revisions before mutation; the request-bound capability rejects cross-room inputs, while the shared mutation boundary rejects a projected source that would exceed the same durable document budget before it can mutate, then lazily joins the authenticated agent without replacing its existing identity and reconciles accepted source/layout in that transaction | `apps/server/src/lib/mcp-server.ts`, `apps/server/src/lib/mcp.ts`, `apps/server/src/lib/session-manager.ts` | `session-manager.test.ts`, `mcp.test.ts`, `index.test.ts`, `pnpm test:e2e-collaboration` |
 | Revision history | Server-private immutable per-diagram journal; each identity covers normalized name, source, and sorted finite layout. `SessionManager` alone reads, checkpoints, compacts, and copy-forwards restores | `apps/server/src/lib/persistence.ts`, `apps/server/src/lib/session-manager.ts`, `packages/shared/src/types.ts` | `session-manager.test.ts`, `mcp.test.ts`, `index.test.ts` |
 | Starter creation | Immutable shared starter registry resolves a selected template to ordinary Mermaid source before the existing browser or revision-checked MCP creation owner runs; template identity is never durable state | `packages/shared/src/starter-templates.ts`, `apps/server/src/lib/mcp.ts`, `apps/server/src/lib/mcp-server.ts` | `starter-templates.test.ts`, `mcp.test.ts`, `index.test.ts` |
 | Source editing and undo | Per-tab CodeMirror/Yjs binding; UndoManager tracks local-human origins only | `apps/web/src/components/session-workspace.tsx`, `apps/web/src/lib/collaboration-origins.ts` | `apps/web/src/lib/session.test.ts`, `apps/web/src/lib/collaboration-origins.test.ts` |
@@ -57,11 +58,13 @@ canonical; the SVG and flowchart interaction model derive from it.
    mounts. The cookie authorizes Yjs, diagram-history HTTP, and key rotation;
    failure reveals no room content.
 2. A browser with that cookie attaches a `WebsocketProvider` to
-   `/ws/:sessionId`; Yjs updates converge on the authoritative nested
-   document. The server repairs the
-   catalog, relays accepted updates, filters awareness, and serializes
-   per-session snapshot persistence. New browser activity ids create one
-   idempotent checkpoint from converged canonical state.
+   `/ws/:sessionId`; every framed message first consumes its bounded per-socket
+   sync, awareness, or control ingress allowance, and raw Yjs SyncStep2/update payloads then pass a
+   hydrated detached-candidate admission check. Only an accepted candidate can
+   apply to the authoritative nested document, trigger catalog/legacy-overlay
+   repair, relay, activity/checkpoints, or per-session snapshot persistence. New
+   browser activity ids create one idempotent checkpoint from converged
+   canonical state.
 3. The browser switches only its local active-tab binding. CodeMirror writes
    the active diagram's Y.Text; visual flowchart edits use `MutationQueue` so
    the latest source is parsed and minimally diffed before the Yjs write.
@@ -109,9 +112,13 @@ canonical; the SVG and flowchart interaction model derive from it.
   atomic snapshot/history/meta/retention/deletion batches, and baseline + 99
   retention avoid a WAL or second authority; larger rooms, histories, or
   high-frequency layout writes still need measured batching/fan-out policy.
-- Browser clients can make raw Yjs updates that bypass MCP command validation.
-  The authoritative server repairs structure/order/names and protects all
-  server command mutations with revision checks.
+- Browser clients can make raw Yjs updates that bypass MCP command validation,
+  but every decoded update is now admitted against a disposable current-state
+  candidate with byte, rate, structural, finite-number, and overlay-envelope
+  budgets before live fan-out or persistence. Legacy persisted documents are
+  repaired only in a detached load candidate; oversized or invalid records
+  fail closed. Durable scene-object behavior remains #69 work, not a generic
+  metadata channel.
 - The canonical production topology is
   `arielcharts.donovanyohan.com` (browser) plus
   `api.arielcharts.donovanyohan.com` (HTTP/WebSocket/MCP). Exact browser-origin

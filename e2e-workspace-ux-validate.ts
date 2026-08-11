@@ -659,6 +659,59 @@ async function closeWorkspaceSettings(page: Page): Promise<void> {
   await waitForFocusedLocator(page, trigger, 'Closing workspace settings');
 }
 
+async function readWorkspaceSettingsCloseDiagnostics(page: Page): Promise<unknown> {
+  return page.evaluate(() => {
+    const dialog = document.querySelector<HTMLElement>('[data-testid="workspace-settings-dialog"]');
+    const form = dialog?.querySelector<HTMLFormElement>('form') ?? null;
+    const submit = form?.querySelector<HTMLButtonElement>('button[type="submit"]') ?? null;
+    const active = document.activeElement;
+    const describeElement = (element: Element | null) => element ? {
+      id: element.id || null,
+      tag: element.tagName.toLowerCase(),
+      testId: element.getAttribute('data-testid'),
+      text: (element.textContent ?? '').trim().slice(0, 120),
+    } : null;
+    const rect = dialog?.getBoundingClientRect();
+    const style = dialog ? window.getComputedStyle(dialog) : null;
+    return {
+      activeElement: describeElement(active instanceof Element ? active : null),
+      dialogCount: document.querySelectorAll('[data-testid="workspace-settings-dialog"]').length,
+      dialogVisible: !!dialog && style?.display !== 'none' && style?.visibility !== 'hidden'
+        && !!rect && rect.width > 0 && rect.height > 0,
+      form: form ? { noValidate: form.noValidate, valid: form.checkValidity() } : null,
+      submit: submit ? { disabled: submit.disabled, type: submit.type } : null,
+      triggerExpanded: document.querySelector('[data-testid="workspace-settings-trigger"]')?.getAttribute('aria-expanded') ?? null,
+    };
+  });
+}
+
+async function expectWorkspaceSettingsDetached(
+  page: Page,
+  stage: string,
+  action: () => Promise<void>,
+): Promise<void> {
+  const browserErrors: string[] = [];
+  const recordBrowserError = (kind: 'console' | 'pageerror', message: string) => {
+    if (browserErrors.length < 8) browserErrors.push(`${kind}: ${message.slice(0, 500)}`);
+  };
+  const onConsole = (message: { text: () => string; type: () => string }) => {
+    if (message.type() === 'error') recordBrowserError('console', message.text());
+  };
+  const onPageError = (error: Error) => { recordBrowserError('pageerror', error.message); };
+  page.on('console', onConsole);
+  page.on('pageerror', onPageError);
+  try {
+    await action();
+    await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  } catch (error) {
+    const state = await readWorkspaceSettingsCloseDiagnostics(page).catch((diagnosticError) => ({ diagnosticError: describeError(diagnosticError) }));
+    throw new Error(`Workspace settings close failed at ${stage}: ${describeError(error)}; diagnostics=${JSON.stringify({ browserErrors, state })}`, { cause: error });
+  } finally {
+    page.off('console', onConsole);
+    page.off('pageerror', onPageError);
+  }
+}
+
 async function beginWorkspaceSettingsTransitionTrace(page: Page): Promise<void> {
   await page.evaluate(`(() => {
     const trace = [];
@@ -1940,16 +1993,18 @@ async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: st
   const originalName = await nameInput.inputValue();
   const savedName = 'Ariel UX E2E';
   await nameInput.fill(savedName);
-  await verifiedClick(page, dialog.getByRole('button', { name: 'Save name', exact: true }), 'settings save display name');
-  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await expectWorkspaceSettingsDetached(page, 'save-display-name', async () => {
+    await verifiedClick(page, dialog.getByRole('button', { name: 'Save name', exact: true }), 'settings save display name');
+  });
   await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Saving display name');
 
   const reopenedAfterSave = await openWorkspaceSettings(page);
   const savedInput = reopenedAfterSave.getByRole('textbox', { name: 'Display name', exact: true });
   assert(await savedInput.inputValue() === savedName, 'Saving display name did not retain the edited value.');
   await savedInput.fill('Discarded by cancel');
-  await verifiedClick(page, reopenedAfterSave.getByRole('button', { name: 'Cancel', exact: true }), 'settings cancel display name');
-  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await expectWorkspaceSettingsDetached(page, 'cancel-display-name', async () => {
+    await verifiedClick(page, reopenedAfterSave.getByRole('button', { name: 'Cancel', exact: true }), 'settings cancel display name');
+  });
 
   const reopenedAfterCancel = await openWorkspaceSettings(page);
   const escapedInput = reopenedAfterCancel.getByRole('textbox', { name: 'Display name', exact: true });
@@ -1965,8 +2020,9 @@ async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: st
     await expect(reopenedAfterCancel.getByTestId('workspace-agent-status')).not.toContainText('MCP agent working', { timeout: 15_000 });
   }
   await escapedInput.fill('Discarded by escape');
-  await page.keyboard.press('Escape');
-  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await expectWorkspaceSettingsDetached(page, 'escape-display-name', async () => {
+    await page.keyboard.press('Escape');
+  });
   await waitForFocusedTestId(page, SETTINGS_TRIGGER_TEST_ID, 'Closing settings with Escape');
 
   const reopenedAfterEscape = await openWorkspaceSettings(page);
@@ -1974,8 +2030,9 @@ async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: st
   await page.waitForFunction((expected) => (document.querySelector('#workspace-display-name') as HTMLInputElement | null)?.value === expected, savedName, { timeout: 5_000 });
   assert(await restoredInput.inputValue() === savedName, 'Escaping display-name edit changed the saved value.');
   await restoredInput.fill(originalName);
-  await verifiedClick(page, reopenedAfterEscape.getByRole('button', { name: 'Save name', exact: true }), 'restore display name after settings test');
-  await page.getByTestId(SETTINGS_DIALOG_TEST_ID).waitFor({ state: 'detached', timeout: 15_000 });
+  await expectWorkspaceSettingsDetached(page, 'restore-display-name', async () => {
+    await verifiedClick(page, reopenedAfterEscape.getByRole('button', { name: 'Save name', exact: true }), 'restore display name after settings test');
+  });
 
   const backwardBoundary = await openWorkspaceSettings(page);
   await backwardBoundary.getByRole('button', { name: 'Close', exact: true }).press('Shift+Tab');

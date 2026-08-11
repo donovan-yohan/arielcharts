@@ -73,7 +73,15 @@ export function addTimelineEvent(source: string, event: TimelineEvent): string {
 export function getTimelineEventIdentity(event: TimelineEvent, index: number, events: readonly TimelineEvent[] = []): TimelineEventIdentity { return { ...event, index, occurrenceCount: events.length ? events.filter((candidate) => sameEvent(candidate, event)).length : 1 }; }
 export function resolveTimelineEventIndex(events: readonly TimelineEvent[], identity: TimelineEventIdentity): number { if (identity.occurrenceCount !== 1) throw stale(); const matches = events.map((event, index) => ({ index, event })).filter(({ event }) => sameEvent(event, identity)); if (matches.length !== 1 || !matches[0]) throw stale(); return matches[0].index; }
 export function editTimelineEvent(source: string, identity: TimelineEventIdentity, patch: Partial<TimelineEvent>): string { const parsed = requireTimeline(source); const current = parsed.events[resolveTimelineEventIndex(parsed.events, identity)]; if (!current) throw stale(); const next = normalizeEvent({ ...current, ...patch }); if (next.period !== current.period) { const without = deleteLines(source, [current.line]); return addTimelineEvent(without, next); } if (next.section !== current.section) throw new Error('Timeline events must remain in their period section.'); const period = findPeriod(parsed, current.period); return current.line.start === period.line.start ? replaceLine(source, current.line, replaceEventText(current.line, next.text)) : replaceLine(source, current.line, `${indent(current.line)}: ${next.text}`); }
-export function deleteTimelineEvent(source: string, identity: TimelineEventIdentity): string { const parsed = requireTimeline(source); const event = parsed.events[resolveTimelineEventIndex(parsed.events, identity)]; if (!event) throw stale(); return deleteLines(source, [event.line]); }
+export function deleteTimelineEvent(source: string, identity: TimelineEventIdentity): string {
+  const parsed = requireTimeline(source);
+  const event = parsed.events[resolveTimelineEventIndex(parsed.events, identity)];
+  if (!event) throw stale();
+  const period = findPeriod(parsed, event.period);
+  return event.line.start === period.line.start
+    ? replaceLine(source, event.line, `${indent(period.line)}${period.label}`)
+    : deleteLines(source, [event.line]);
+}
 export function moveTimelineEvent(source: string, identity: TimelineEventIdentity, direction: 'up' | 'down'): string { const parsed = requireTimeline(source); const index = resolveTimelineEventIndex(parsed.events, identity); const event = parsed.events[index]; if (!event) throw stale(); const peers = parsed.events.filter((candidate) => candidate.period === event.period); const peerIndex = peers.findIndex((candidate) => candidate.line.start === event.line.start); const other = peers[peerIndex + (direction === 'up' ? -1 : 1)]; if (!other) return source; const period = findPeriod(parsed, event.period); return event.line.start === period.line.start || other.line.start === period.line.start ? swapEventTexts(source, event.line, event.text, other.line, other.text) : swapLines(source, event.line, other.line); }
 
 function parseTimeline(source: string): Parsed | null {

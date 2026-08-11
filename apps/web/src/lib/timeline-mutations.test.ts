@@ -6,6 +6,7 @@ import {
   addTimelineEvent,
   addTimelinePeriod,
   addTimelineSection,
+  deleteTimelineEvent,
   editTimelineEvent,
   editTimelinePeriod,
   getTimelineDiagramSnapshot,
@@ -56,6 +57,17 @@ describe('timeline source mutations', () => {
   it('reorders event source lines within their canonical period', () => {
     const snapshot = getTimelineDiagramSnapshot(SOURCE);
     expect(moveTimelineEvent(SOURCE, getTimelineEventIdentity(snapshot.events[1]!, 1, snapshot.events), 'up')).toContain('2024 : First release\n       : Started');
+  });
+  it('keeps the period and remaining continuation event when deleting a swapped inline event', () => {
+    const snapshot = getTimelineDiagramSnapshot(SOURCE);
+    const swapped = moveTimelineEvent(SOURCE, getTimelineEventIdentity(snapshot.events[1]!, 1, snapshot.events), 'up');
+    const swappedSnapshot = getTimelineDiagramSnapshot(swapped);
+    const deleted = deleteTimelineEvent(swapped, getTimelineEventIdentity(swappedSnapshot.events[0]!, 0, swappedSnapshot.events));
+    expect(deleted).toContain('  2024\n       : Started');
+    expect(getTimelineDiagramSnapshot(deleted)).toMatchObject({
+      periods: expect.arrayContaining([{ section: 'Foundations', label: '2024' }]),
+      events: expect.arrayContaining([{ section: 'Foundations', period: '2024', text: 'Started' }]),
+    });
   });
   it('edits an inline first event without erasing its source period', () => {
     const snapshot = getTimelineDiagramSnapshot(SOURCE);

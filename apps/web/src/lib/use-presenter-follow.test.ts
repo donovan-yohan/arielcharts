@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { readPresenterPeers, selectIncomingSpotlight } from './use-presenter-follow';
+import { PresenterAwarenessPublisher } from './presenter-awareness-publisher';
+import { bindPresenterPageLifecycle, readPresenterPeers, selectIncomingSpotlight } from './use-presenter-follow';
 
 describe('presenter awareness', () => {
   const user = { name: 'Presenter', color: '#123456', type: 'human' as const };
@@ -31,4 +32,37 @@ describe('presenter awareness', () => {
     expect(selectIncomingSpotlight(peers, new Set())?.clientId).toBe(9);
     expect(selectIncomingSpotlight(peers, new Set(['9:7']))?.clientId).toBe(2);
   });
+
+  it('clears presenter awareness synchronously at a non-persisted pagehide reload boundary', () => {
+    const sent: unknown[] = [];
+    const publisher = new PresenterAwarenessPublisher((state) => sent.push(state));
+    const target = new EventTarget();
+    const unbind = bindPresenterPageLifecycle(publisher, target as PageLifecycleTarget);
+    publisher.start('main', { panX: 1, panY: 2, zoom: 1 });
+    target.dispatchEvent(pageTransitionEvent('pagehide', false));
+    expect(sent.at(-1)).toBeNull();
+    unbind();
+  });
+
+  it('preserves the active publisher across a persisted BFCache pagehide', () => {
+    const sent: unknown[] = [];
+    const publisher = new PresenterAwarenessPublisher((state) => sent.push(state));
+    const target = new EventTarget();
+    const unbind = bindPresenterPageLifecycle(publisher, target as PageLifecycleTarget);
+    publisher.start('main', { panX: 1, panY: 2, zoom: 1 });
+    target.dispatchEvent(pageTransitionEvent('pagehide', true));
+    expect(sent.at(-1)).not.toBeNull();
+    target.dispatchEvent(pageTransitionEvent('pageshow', true));
+    publisher.spotlight();
+    expect(sent.at(-1)).toMatchObject({ spotlight_sequence: 1 });
+    unbind();
+  });
 });
+
+type PageLifecycleTarget = Parameters<typeof bindPresenterPageLifecycle>[1];
+
+function pageTransitionEvent(type: string, persisted: boolean): Event {
+  const event = new Event(type);
+  Object.defineProperty(event, 'persisted', { value: persisted });
+  return event;
+}

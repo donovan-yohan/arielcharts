@@ -13,6 +13,19 @@ type AwarenessLike = {
   setLocalStateField: (field: string, value: unknown) => void;
 };
 
+type PageLifecycleTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
+
+export function bindPresenterPageLifecycle(
+  publisher: PresenterAwarenessPublisher,
+  target: PageLifecycleTarget,
+): () => void {
+  const stopOnPageHide = (event: PageTransitionEvent) => {
+    if (!event.persisted) publisher.stop();
+  };
+  target.addEventListener('pagehide', stopOnPageHide);
+  return () => target.removeEventListener('pagehide', stopOnPageHide);
+}
+
 export interface PresenterPeer {
   clientId: number;
   participant: Participant;
@@ -78,11 +91,13 @@ export function usePresenterFollow(
     }
     const publisher = new PresenterAwarenessPublisher((state) => awareness.setLocalStateField('presenter', state));
     publisherRef.current = publisher;
+    const unbindPageLifecycle = bindPresenterPageLifecycle(publisher, window);
     const sync = () => setPeers(readPresenterPeers(awareness.getStates(), awareness.clientID));
     sync();
     awareness.on('change', sync);
     return () => {
       awareness.off('change', sync);
+      unbindPageLifecycle();
       publisher.destroy();
       if (publisherRef.current === publisher) publisherRef.current = null;
     };

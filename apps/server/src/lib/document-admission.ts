@@ -21,6 +21,7 @@ export const COLLABORATION_BUDGETS = {
   sessionStateBytes: 192 * 1024,
   diagramsPerSession: 64,
   objectsPerScene: 200,
+  layersPerScene: 32,
   textBytesPerObject: 16 * 1024,
   strokePointsPerObject: 2_048,
   totalTextBytes: 160 * 1024,
@@ -48,6 +49,7 @@ export type DocumentAdmission =
   | { accepted: false; reason: DocumentAdmissionReason };
 
 const OVERLAY_SCHEMA_VERSION = 1;
+const TEXT_SHAPE_KINDS = new Set(['shape.rectangle', 'shape.ellipse', 'shape.diamond', 'shape.line', 'shape.arrow']);
 const INK_MAX_POINTS = 512;
 const INK_MAX_SERIALIZED_BYTES = 48 * 1024;
 const INK_MAX_WORLD_COORDINATE = 1_000_000;
@@ -227,9 +229,29 @@ function validateOverlayObject(object: unknown): DocumentAdmissionReason | undef
     return 'invalid_overlay_schema';
   }
   if ((kind === 'annotation.text' || kind === 'annotation.sticky') && !isYText(body)) return 'invalid_overlay_schema';
+  if (TEXT_SHAPE_KINDS.has(kind as string) && !isYText(body)) return 'invalid_overlay_schema';
   if (isYText(body) && byteLength(body.toString()) > 8_192) return 'overlay_quota_exceeded';
   if (kind === 'ink.stroke' && !isValidInkStroke(object)) return 'invalid_overlay_schema';
+  if (!isValidOverlayKind(object)) return 'invalid_overlay_schema';
   return undefined;
+}
+
+function isValidOverlayKind(object: Y.Map<unknown>): boolean {
+  const kind = object.get('kind');
+  const version = object.get('version');
+  if (version !== 1 || typeof kind !== 'string') return false;
+  if (['foundation.card', 'annotation.text', 'annotation.sticky', 'ink.stroke'].includes(kind)) return true;
+  if (TEXT_SHAPE_KINDS.has(kind)) return object.get('body') instanceof Y.Text;
+  const payload = object.get('payload');
+  if (!isPlainRecord(payload)) return false;
+  if (kind === 'connector.overlay') return isBoundedIdentifier(payload.start_id) && isBoundedIdentifier(payload.end_id)
+    && isOverlayPoint(payload.start_fallback) && isOverlayPoint(payload.end_fallback);
+  if (kind === 'frame.section') return Array.isArray(payload.members) && payload.members.length <= COLLABORATION_BUDGETS.objectsPerScene
+    && payload.members.every(isBoundedIdentifier);
+  // Unknown v1 kinds remain opaque, bounded records. Admission must not turn a
+  // newer client's collaboration data into deletion; browser/history readers
+  // still fail closed instead of projecting or mutating that object.
+  return true;
 }
 
 function isOverlayPoint(value: unknown): boolean {
@@ -290,6 +312,21 @@ function isOverlayMetadata(value: unknown): boolean {
       || (typeof item === 'string' && byteLength(item) <= 2_048)));
 }
 
+function isOverlayLayer(value: unknown, id: string): boolean {
+  return isYMap(value) && value.get('id') === id && isBoundedIdentifier(id)
+    && typeof value.get('name') === 'string' && byteLength(value.get('name') as string) <= 2_048
+    && isBoundedIdentifier(value.get('order_key'))
+    && typeof value.get('visible') === 'boolean' && typeof value.get('locked') === 'boolean'
+    && typeof value.get('export') === 'boolean';
+}
+
+function createDefaultOverlayLayer(): Y.Map<unknown> {
+  const layer = new Y.Map<unknown>();
+  layer.set('id', 'default'); layer.set('name', 'Default'); layer.set('order_key', '0000000000000000');
+  layer.set('visible', true); layer.set('locked', false); layer.set('export', true);
+  return layer;
+}
+
 function countOverlayArrayItems(value: unknown, seen: Set<object>): number {
   if (isYMap(value)) {
     if (seen.has(value)) return 0;
@@ -334,6 +371,13 @@ function validateOverlays(doc: Y.Doc): DocumentAdmissionReason | undefined {
       if (typeof objectId !== 'string' || objectId.length === 0) return 'invalid_overlay_schema';
       const reason = validateOverlayObject(object);
       if (reason) return reason;
+    }
+    const layers = scene.get('layers');
+    if (layers !== undefined) {
+      if (!isYMap(layers) || layers.size > COLLABORATION_BUDGETS.layersPerScene) return 'overlay_quota_exceeded';
+      for (const [layerId, layer] of layers.entries()) {
+        if (typeof layerId !== 'string' || !isOverlayLayer(layer, layerId)) return 'invalid_overlay_schema';
+      }
     }
   }
   return undefined;
@@ -471,6 +515,22 @@ export function repairOverlayDocument(doc: Y.Doc): boolean {
     for (const [index, [objectId, object]] of objectEntries.entries()) {
       if (index >= COLLABORATION_BUDGETS.objectsPerScene || !objectId || validateOverlayObject(object)) {
         objects.delete(objectId);
+        changed = true;
+      }
+    }
+    const existingLayers = rawScene.get('layers');
+    const layers = isYMap(existingLayers) ? existingLayers : new Y.Map<unknown>();
+    if (!isYMap(existingLayers)) {
+      rawScene.set('layers', layers);
+      changed = true;
+    }
+    if (!layers.has('default')) {
+      layers.set('default', createDefaultOverlayLayer());
+      changed = true;
+    }
+    for (const [index, [layerId, layer]] of [...layers.entries()].sort(([left], [right]) => left.localeCompare(right)).entries()) {
+      if (index >= COLLABORATION_BUDGETS.layersPerScene || typeof layerId !== 'string' || !isOverlayLayer(layer, layerId)) {
+        layers.delete(layerId);
         changed = true;
       }
     }

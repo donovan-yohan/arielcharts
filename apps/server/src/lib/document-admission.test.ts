@@ -55,6 +55,30 @@ describe('document admission', () => {
     annotation.set('body', new Y.Text('x'.repeat(8_193)));
     expect(validateDocumentState(valid)).toEqual({ accepted: false, reason: 'overlay_quota_exceeded' });
   });
+  it('admits only bounded v1 shapes, connectors, frames, and layers', () => {
+    const doc = createReservedRootDocument(); const objects = new Y.Map<unknown>();
+    const shape = new Y.Map<unknown>();
+    shape.set('kind', 'shape.rectangle'); shape.set('version', 1); shape.set('order_key', 'a'); shape.set('geometry', { x: 0, y: 0, width: 100, height: 40, rotation: 0 }); shape.set('style', {}); shape.set('metadata', {}); shape.set('payload', { shape: 'rectangle' }); shape.set('body', new Y.Text('Label')); objects.set('shape', shape);
+    const connector = new Y.Map<unknown>();
+    connector.set('kind', 'connector.overlay'); connector.set('version', 1); connector.set('order_key', 'b'); connector.set('geometry', { x: 0, y: 0, width: 100, height: 0, rotation: 0 }); connector.set('style', {}); connector.set('metadata', {}); connector.set('payload', { start_id: 'shape', end_id: 'missing', start_fallback: { x: 0, y: 0 }, end_fallback: { x: 100, y: 0 } }); objects.set('connector', connector);
+    const frame = new Y.Map<unknown>();
+    frame.set('kind', 'frame.section'); frame.set('version', 1); frame.set('order_key', 'c'); frame.set('geometry', { x: 0, y: 0, width: 100, height: 80, rotation: 0 }); frame.set('style', {}); frame.set('metadata', {}); frame.set('payload', { members: ['shape'] }); objects.set('frame', frame);
+    setScene(doc, 'main', objects);
+    const scene = doc.getMap<Y.Map<unknown>>('overlays').get('main')!; const layers = new Y.Map<unknown>(); const defaultLayer = new Y.Map<unknown>(); defaultLayer.set('id', 'default'); defaultLayer.set('name', 'Default'); defaultLayer.set('order_key', 'a'); defaultLayer.set('visible', true); defaultLayer.set('locked', false); defaultLayer.set('export', true); layers.set('default', defaultLayer); scene.set('layers', layers);
+    expect(validateDocumentState(doc)).toEqual({ accepted: true });
+    connector.set('payload', { start_id: 'shape', end_id: 'missing' });
+    expect(validateDocumentState(doc)).toEqual({ accepted: false, reason: 'invalid_overlay_schema' });
+    connector.set('kind', 'shape.rectangle'); connector.set('payload', {}); connector.delete('body');
+    expect(validateDocumentState(doc)).toEqual({ accepted: false, reason: 'invalid_overlay_schema' });
+  });
+  it('repairs a legacy v1 scene with a usable deterministic default layer', () => {
+    const doc = createReservedRootDocument(); setScene(doc, 'main', new Y.Map<unknown>());
+    expect(repairOverlayDocument(doc)).toBe(true);
+    const scene = doc.getMap<Y.Map<unknown>>('overlays').get('main')!;
+    const layer = (scene.get('layers') as Y.Map<Y.Map<unknown>>).get('default')!;
+    expect(Object.fromEntries(layer.entries())).toEqual({ id: 'default', name: 'Default', order_key: '0000000000000000', visible: true, locked: false, export: true });
+    expect(validateDocumentState(doc)).toEqual({ accepted: true });
+  });
   it('accepts bounded immutable ink and rejects partial, oversized, or non-finite stroke payloads', () => {
     const doc = createReservedRootDocument(); const objects = new Y.Map<unknown>();
     const ink = new Y.Map<unknown>();

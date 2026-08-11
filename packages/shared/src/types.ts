@@ -154,10 +154,23 @@ export interface OverlayObjectRecord {
   body?: string;
 }
 
+/** A renderer-neutral overlay layer. Mermaid never reads this state. */
+export interface OverlayLayerRecord {
+  id: string;
+  name: string;
+  order_key: string;
+  visible: boolean;
+  locked: boolean;
+  /** Included only when a user explicitly chooses composite export. */
+  export: boolean;
+}
+
 export interface OverlaySceneSnapshot {
   version: number;
   diagram_id: string;
   objects: OverlayObjectRecord[];
+  /** Older v1 scenes without layers read as one visible default layer. */
+  layers?: OverlayLayerRecord[];
 }
 
 export interface ListOverlayHistoryOutput {

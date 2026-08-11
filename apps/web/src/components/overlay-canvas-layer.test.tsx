@@ -82,6 +82,47 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => root.unmount());
   });
 
+  it('exposes shape, connector, frame, layer, multi-select, and rotate controls as real hit targets', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const callbacks = { onAdd: vi.fn(), onAddShape: vi.fn(), onAddConnector: vi.fn(), onAddFrame: vi.fn(), onAddLayer: vi.fn(), onUpdateLayer: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onMoveMany: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn() };
+    const scene = { version: 1 as const, diagram_id: 'main', layers: [{ id: 'default', name: 'Default', order_key: 'a', visible: true, locked: false, export: true }], objects: [
+      { id: 'left', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 0, y: 0, width: 80, height: 40, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Left' },
+      { id: 'right', kind: 'shape.ellipse', version: 1, order_key: 'b', geometry: { x: 100, y: 0, width: 80, height: 40, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Right' },
+    ] };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" sessionId="abc123de" readOnly={false} scene={scene} semanticAnchors={new Map()} transform={{ x: 0, y: 0, zoom: 1 }} />));
+    const button = (label: string) => [...host.querySelectorAll('button')].find((item) => item.textContent === label) as HTMLButtonElement;
+    await act(async () => button('Overlay tools').click());
+    await act(async () => button('Rectangle').click());
+    expect(callbacks.onAddShape).toHaveBeenCalledWith(expect.any(Object), 'shape.rectangle');
+    const listButton = (prefix: string) => [...host.querySelectorAll('aside[aria-label="ArielCharts overlay list"] button')].find((item) => item.textContent?.startsWith(prefix)) as HTMLButtonElement;
+    await act(async () => {
+      listButton('shape.rectangle: Left').click();
+      listButton('shape.ellipse: Right').dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    });
+    await act(async () => button('Connect selection').click());
+    expect(callbacks.onAddConnector).toHaveBeenCalledWith('left', 'right');
+    await act(async () => button('Frame selection').click());
+    expect(callbacks.onAddFrame).toHaveBeenCalledWith(expect.any(Object), ['left', 'right']);
+    await act(async () => listButton('shape.rectangle: Left').click());
+    expect(button('Connect selection').disabled).toBe(true);
+    await act(async () => button('Rotate 15°').click());
+    expect(callbacks.onUpdate).toHaveBeenCalledWith('left', expect.objectContaining({ geometry: expect.objectContaining({ rotation: 15 }) }));
+    await act(async () => button('Lock').click());
+    expect(callbacks.onUpdateLayer).toHaveBeenCalledWith('default', { locked: true });
+    await act(async () => root.unmount());
+  });
+
+  it('keeps locked layer content selectable but not editable through visible controls', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn() };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" sessionId="abc123de" readOnly={false} scene={{ version: 1, diagram_id: 'main', layers: [{ id: 'locked', name: 'Locked', order_key: 'a', visible: true, locked: true, export: true }], objects: [{ id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', layer: 'locked', geometry: { x: 0, y: 0, width: 80, height: 40, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Locked' }] }} semanticAnchors={new Map()} transform={{ x: 0, y: 0, zoom: 1 }} />));
+    await act(async () => (host.querySelector('[data-testid="overlay-object-shape"]') as HTMLElement).click());
+    await act(async () => ([...host.querySelectorAll('button')].find((item) => item.textContent === 'Overlay tools') as HTMLButtonElement).click());
+    expect((host.querySelector('textarea') as HTMLTextAreaElement).readOnly).toBe(true);
+    expect(([...host.querySelectorAll('button')].find((item) => item.textContent === 'Move right') as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => root.unmount());
+  });
+
   it('fails newer scenes closed in the visible owner', async () => {
     const host = document.createElement('div');
     document.body.append(host);

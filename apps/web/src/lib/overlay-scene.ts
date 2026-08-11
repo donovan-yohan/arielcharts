@@ -1,6 +1,7 @@
 import {
   OVERLAY_SCENE_SCHEMA_VERSION,
   type OverlayGeometry,
+  type OverlayLayerRecord,
   type OverlayMetadata,
   type OverlayObjectRecord,
   type OverlaySceneSnapshot,
@@ -16,6 +17,7 @@ export const overlayOrigins = {
 export interface OverlaySceneHandle {
   scene: Y.Map<unknown>;
   objects: Y.Map<Y.Map<unknown>>;
+  layers: Y.Map<Y.Map<unknown>> | null;
   writable: boolean;
 }
 
@@ -35,9 +37,27 @@ const MAX_METADATA_KEY_BYTES = 128;
 const MAX_METADATA_STRING_BYTES = 2_048;
 export const MAX_OVERLAY_TEXT_BYTES = 8_192;
 const MAX_TEXT_INSERT_BYTES = 2_048;
+const MAX_OVERLAY_LAYERS = 32;
+const DEFAULT_LAYER_ID = 'default';
 const TEXT_OPERATION_WINDOW_MS = 10_000;
 const TEXT_OPERATIONS_PER_WINDOW = 120;
 const textOperationWindows = new WeakMap<Y.Doc, { startedAt: number; count: number }>();
+
+export const overlayKinds = [
+  'foundation.card', 'annotation.text', 'annotation.sticky', 'ink.stroke',
+  'shape.rectangle', 'shape.ellipse', 'shape.diamond', 'shape.line', 'shape.arrow',
+  'connector.overlay', 'frame.section',
+] as const;
+
+export function defaultOverlayLayer(): OverlayLayerRecord {
+  return { id: DEFAULT_LAYER_ID, name: 'Default', order_key: '0000000000000000', visible: true, locked: false, export: true };
+}
+
+function layerMap(layer: OverlayLayerRecord): Y.Map<unknown> {
+  const target = new Y.Map<unknown>();
+  for (const [key, value] of Object.entries(layer)) target.set(key, value);
+  return target;
+}
 
 function byteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
@@ -79,6 +99,32 @@ function cloneJsonRecord(value: unknown): Record<string, unknown> | null {
   }
 }
 
+function validLayer(value: unknown): value is OverlayLayerRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const layer = value as Partial<OverlayLayerRecord>;
+  return typeof layer.id === 'string' && layer.id.length > 0 && byteLength(layer.id) <= MAX_METADATA_KEY_BYTES
+    && typeof layer.name === 'string' && byteLength(layer.name) <= MAX_METADATA_STRING_BYTES
+    && typeof layer.order_key === 'string' && layer.order_key.length > 0 && byteLength(layer.order_key) <= MAX_METADATA_KEY_BYTES
+    && typeof layer.visible === 'boolean' && typeof layer.locked === 'boolean' && typeof layer.export === 'boolean';
+}
+
+function readLayers(handle: OverlaySceneHandle): OverlayLayerRecord[] {
+  if (!handle.layers) return [defaultOverlayLayer()];
+  const layers = [...handle.layers.entries()]
+    .flatMap(([id, value]) => {
+      const layer = value instanceof Y.Map ? Object.fromEntries(value.entries()) : value;
+      return validLayer(layer) && layer.id === id ? [structuredClone(layer)] : [];
+    })
+    .sort((left, right) => left.order_key.localeCompare(right.order_key) || left.id.localeCompare(right.id));
+  return layers.length ? layers : [defaultOverlayLayer()];
+}
+
+function sortForLayers<T extends OverlayObjectRecord>(objects: readonly T[], layers: readonly OverlayLayerRecord[]): T[] {
+  const layerOrder = new Map(layers.map((layer, index) => [layer.id, index]));
+  return [...objects].sort((left, right) => (layerOrder.get(left.layer ?? DEFAULT_LAYER_ID) ?? 0) - (layerOrder.get(right.layer ?? DEFAULT_LAYER_ID) ?? 0)
+    || left.order_key.localeCompare(right.order_key) || left.id.localeCompare(right.id));
+}
+
 export function getOverlayScene(doc: Y.Doc, diagramId: string, create = false): OverlaySceneHandle | null {
   const root = doc.getMap<Y.Map<unknown>>('overlays');
   let scene = root.get(diagramId);
@@ -86,13 +132,17 @@ export function getOverlayScene(doc: Y.Doc, diagramId: string, create = false): 
     scene = new Y.Map<unknown>();
     scene.set('version', OVERLAY_SCENE_SCHEMA_VERSION);
     scene.set('objects', new Y.Map<Y.Map<unknown>>());
+    const layers = new Y.Map<Y.Map<unknown>>();
+    layers.set(DEFAULT_LAYER_ID, layerMap(defaultOverlayLayer()));
+    scene.set('layers', layers);
     root.set(diagramId, scene);
   }
   if (!(scene instanceof Y.Map)) return null;
   const version = scene.get('version');
   const objects = scene.get('objects');
   if (!Number.isInteger(version) || (version as number) < 1 || !(objects instanceof Y.Map)) return null;
-  return { scene, objects: objects as Y.Map<Y.Map<unknown>>, writable: version === OVERLAY_SCENE_SCHEMA_VERSION };
+  const layers = scene.get('layers');
+  return { scene, objects: objects as Y.Map<Y.Map<unknown>>, layers: layers instanceof Y.Map ? layers as Y.Map<Y.Map<unknown>> : null, writable: version === OVERLAY_SCENE_SCHEMA_VERSION };
 }
 
 export function readOverlayObject(id: string, value: unknown): OverlayObjectRecord | null {
@@ -134,7 +184,7 @@ export function readOverlayObject(id: string, value: unknown): OverlayObjectReco
 }
 
 export function isSupportedOverlayObject(object: OverlayObjectRecord): boolean {
-  return (['foundation.card', 'annotation.text', 'annotation.sticky'].includes(object.kind) && object.version === 1)
+  return (overlayKinds.includes(object.kind as typeof overlayKinds[number]) && object.kind !== 'ink.stroke' && object.version === 1)
     || validInkObject(object);
 }
 
@@ -142,13 +192,13 @@ export function readOverlayScene(doc: Y.Doc, diagramId: string): OverlaySceneSna
   const handle = getOverlayScene(doc, diagramId);
   if (!handle) return { version: OVERLAY_SCENE_SCHEMA_VERSION, diagram_id: diagramId, objects: [] };
   if (!handle.writable) return { version: handle.scene.get('version') as number, diagram_id: diagramId, objects: [] };
-  const objects = [...handle.objects.entries()]
+  const layers = readLayers(handle);
+  const objects = sortForLayers([...handle.objects.entries()]
     .flatMap(([id, value]) => {
       const object = readOverlayObject(id, value);
       return object && isSupportedOverlayObject(object) ? [object] : [];
-    })
-    .sort((left, right) => left.order_key.localeCompare(right.order_key) || left.id.localeCompare(right.id));
-  return { version: handle.scene.get('version') as number, diagram_id: diagramId, objects };
+    }), layers);
+  return { version: handle.scene.get('version') as number, diagram_id: diagramId, objects, layers };
 }
 
 function writeObject(target: Y.Map<unknown>, object: OverlayObjectRecord): void {
@@ -161,7 +211,7 @@ function writeObject(target: Y.Map<unknown>, object: OverlayObjectRecord): void 
   target.set('style', structuredClone(object.style));
   target.set('metadata', structuredClone(object.metadata));
   target.set('payload', structuredClone(object.payload));
-  if (object.kind.startsWith('annotation.')) {
+  if (object.kind.startsWith('annotation.') || object.kind.startsWith('shape.')) {
     if (!target.doc) target.set('body', new Y.Text());
     else if (!(target.get('body') instanceof Y.Text)) target.set('body', new Y.Text());
   } else target.delete('body');
@@ -183,9 +233,54 @@ function requireWritableScene(doc: Y.Doc, diagramId: string): OverlaySceneHandle
   return handle;
 }
 
+export function getOverlayLayers(doc: Y.Doc, diagramId: string): OverlayLayerRecord[] {
+  const handle = getOverlayScene(doc, diagramId);
+  return handle ? readLayers(handle) : [defaultOverlayLayer()];
+}
+
+function ensureWritableLayers(handle: OverlaySceneHandle): Y.Map<Y.Map<unknown>> {
+  if (handle.layers) return handle.layers;
+  const layers = new Y.Map<Y.Map<unknown>>();
+  layers.set(DEFAULT_LAYER_ID, layerMap(defaultOverlayLayer()));
+  handle.scene.set('layers', layers);
+  handle.layers = layers;
+  return layers;
+}
+
+export function addOverlayLayer(doc: Y.Doc, diagramId: string, layer: OverlayLayerRecord): void {
+  const handle = requireWritableScene(doc, diagramId);
+  if (!validLayer(layer)) throw new Error('Invalid or duplicate overlay layer.');
+  doc.transact(() => {
+    const layers = ensureWritableLayers(handle);
+    if (layers.size >= MAX_OVERLAY_LAYERS || layers.has(layer.id)) throw new Error('Invalid or duplicate overlay layer.');
+    layers.set(layer.id, layerMap(structuredClone(layer)));
+  }, overlayOrigins.localHuman);
+}
+
+export function updateOverlayLayer(doc: Y.Doc, diagramId: string, layerId: string, patch: Partial<Omit<OverlayLayerRecord, 'id'>>): void {
+  const handle = requireWritableScene(doc, diagramId);
+  const current = readLayers(handle).find(({ id }) => id === layerId);
+  if (!current) throw new Error('Overlay layer not found.');
+  const next = { ...current, ...structuredClone(patch), id: layerId };
+  if (!validLayer(next)) throw new Error('Invalid overlay layer update.');
+  doc.transact(() => {
+    const layers = ensureWritableLayers(handle);
+    let target = layers.get(layerId);
+    if (!target) {
+      target = layerMap(next);
+      layers.set(layerId, target);
+    }
+    for (const [key, value] of Object.entries(next)) target.set(key, value);
+  }, overlayOrigins.localHuman);
+}
+
 export function createOverlayUndoManager(doc: Y.Doc, diagramId: string): Y.UndoManager {
-  const { objects } = requireWritableScene(doc, diagramId);
-  return new Y.UndoManager(objects, { trackedOrigins: new Set([overlayOrigins.localHuman]) });
+  const handle = requireWritableScene(doc, diagramId);
+  // Legacy v1 scenes gain their default layer before the manager attaches;
+  // subsequent create/edit/reorder mutations share the same peer-local stack
+  // as overlay objects.
+  if (!handle.layers) doc.transact(() => { ensureWritableLayers(handle); });
+  return new Y.UndoManager([handle.objects, handle.layers!], { trackedOrigins: new Set([overlayOrigins.localHuman]) });
 }
 
 export function addOverlayObject(doc: Y.Doc, diagramId: string, object: OverlayObjectRecord): void {
@@ -210,6 +305,68 @@ export function updateOverlayObject(doc: Y.Doc, diagramId: string, objectId: str
   doc.transact(() => writeObject(handle.objects.get(objectId)!, next), overlayOrigins.localHuman);
 }
 
+/** A frame lock applies transitively through frame membership, including cyclic input. */
+export function hasLockedFrameAncestor(scene: OverlaySceneSnapshot, objectId: string, ignoredFrameId?: string): boolean {
+  const visit = (memberId: string, visited: Set<string>): boolean => scene.objects.some((frame) => {
+    if (frame.id === ignoredFrameId || frame.kind !== 'frame.section' || !Array.isArray(frame.payload.members) || !frame.payload.members.includes(memberId)) return false;
+    if (frame.metadata.locked === true) return true;
+    if (visited.has(frame.id)) return false;
+    const nextVisited = new Set(visited); nextVisited.add(frame.id);
+    return visit(frame.id, nextVisited);
+  });
+  return visit(objectId, new Set([objectId]));
+}
+
+export function isOverlayObjectLocked(scene: OverlaySceneSnapshot, object: OverlayObjectRecord): boolean {
+  return object.metadata.locked === true
+    || scene.layers?.find(({ id }) => id === (object.layer ?? DEFAULT_LAYER_ID))?.locked === true
+    || hasLockedFrameAncestor(scene, object.id, object.id);
+}
+
+/**
+ * A transform is all-or-nothing: moving a frame never silently moves a locked
+ * child. Nested frames are expanded deterministically, and every selected or
+ * inherited member must be editable before the one Yjs transaction begins.
+ */
+export function getOverlayTransformTargets(scene: OverlaySceneSnapshot, objectIds: Iterable<string>): string[] | null {
+  const byId = new Map(scene.objects.map((object) => [object.id, object]));
+  const targets = new Set<string>();
+  const visit = (id: string) => {
+    if (targets.has(id)) return;
+    const object = byId.get(id); if (!object) return;
+    targets.add(id);
+    if (object.kind === 'frame.section' && Array.isArray(object.payload.members)) {
+      for (const member of object.payload.members) if (typeof member === 'string') visit(member);
+    }
+  };
+  for (const id of objectIds) visit(id);
+  for (const id of targets) {
+    const object = byId.get(id)!;
+    if (isOverlayObjectLocked(scene, object)) return null;
+  }
+  return [...targets].sort();
+}
+
+/** Moves a selection and contained frame members in one local-human transaction. */
+export function moveOverlayObjects(doc: Y.Doc, diagramId: string, objectIds: Iterable<string>, dx: number, dy: number): void {
+  if (!finite(dx) || !finite(dy)) throw new Error('Invalid overlay movement.');
+  const handle = requireWritableScene(doc, diagramId);
+  const ids = getOverlayTransformTargets(readOverlayScene(doc, diagramId), objectIds);
+  if (!ids) return;
+  doc.transact(() => {
+    for (const id of ids) {
+      const current = readOverlayObject(id, handle.objects.get(id));
+      if (!current || !isSupportedOverlayObject(current)) continue;
+      const next: OverlayObjectRecord = { ...current, geometry: { ...current.geometry, x: current.geometry.x + dx, y: current.geometry.y + dy } };
+      if (current.anchor) next.anchor = { ...current.anchor, offset: { x: current.anchor.offset.x + dx, y: current.anchor.offset.y + dy }, fallback: { x: current.anchor.fallback.x + dx, y: current.anchor.fallback.y + dy } };
+      if (current.kind === 'ink.stroke' && Array.isArray(current.payload.points)) {
+        next.payload = { ...current.payload, points: current.payload.points.map((point) => ({ ...(point as Record<string, unknown>), x: Number((point as { x: number }).x) + dx, y: Number((point as { y: number }).y) + dy })) };
+      }
+      writeObject(handle.objects.get(id)!, next);
+    }
+  }, overlayOrigins.localHuman);
+}
+
 function consumeTextOperation(doc: Y.Doc): void {
   const now = Date.now();
   let window = textOperationWindows.get(doc);
@@ -227,7 +384,7 @@ export function editOverlayText(doc: Y.Doc, diagramId: string, objectId: string,
   const value = handle.objects.get(objectId);
   const current = readOverlayObject(objectId, value);
   const body = value?.get('body');
-  if (!current || !current.kind.startsWith('annotation.') || !(body instanceof Y.Text)) throw new Error('Annotation not found.');
+  if (!current || !(current.kind.startsWith('annotation.') || current.kind.startsWith('shape.')) || !(body instanceof Y.Text)) throw new Error('Overlay text object not found.');
   if (![index, deleteCount].every(Number.isInteger) || index < 0 || deleteCount < 0 || index + deleteCount > body.length) throw new Error('Invalid annotation text edit.');
   if (byteLength(insert) > MAX_TEXT_INSERT_BYTES) throw new Error('Annotation text operation is too large.');
   if (deleteCount === 0 && insert.length === 0) return;
@@ -243,7 +400,7 @@ export function editOverlayText(doc: Y.Doc, diagramId: string, objectId: string,
 export function beginOverlayTextComposition(doc: Y.Doc, diagramId: string, objectId: string): OverlayTextComposition {
   const value = requireWritableScene(doc, diagramId).objects.get(objectId);
   const body = value?.get('body');
-  if (!(body instanceof Y.Text)) throw new Error('Annotation not found.');
+  if (!(body instanceof Y.Text)) throw new Error('Overlay text object not found.');
   return { base: body.toString(), positions: Array.from({ length: body.length + 1 }, (_, index) => Y.createRelativePositionFromTypeIndex(body, index, -1)) };
 }
 
@@ -252,7 +409,7 @@ export function commitOverlayTextComposition(doc: Y.Doc, diagramId: string, obje
   if (!change.deleteCount && !change.insert) return;
   const value = requireWritableScene(doc, diagramId).objects.get(objectId);
   const body = value?.get('body');
-  if (!(body instanceof Y.Text)) throw new Error('Annotation not found.');
+  if (!(body instanceof Y.Text)) throw new Error('Overlay text object not found.');
   const start = Y.createAbsolutePositionFromRelativePosition(composition.positions[change.index]!, doc);
   const end = Y.createAbsolutePositionFromRelativePosition(composition.positions[change.index + change.deleteCount]!, doc);
   if (!start || !end || start.type !== body || end.type !== body) throw new Error('Annotation changed before composition could be committed.');
@@ -290,6 +447,25 @@ export function copyOverlayObjects(scene: OverlaySceneSnapshot, objectIds: Itera
   return scene.objects.filter((object) => selected.has(object.id)).map((object) => structuredClone(object));
 }
 
+/** The explicit, deterministic policy for a future composite renderer/exporter. */
+export function getCompositeExportObjects(scene: OverlaySceneSnapshot): OverlayObjectRecord[] {
+  const layers = new Map((scene.layers ?? [defaultOverlayLayer()]).map((layer) => [layer.id, layer]));
+  const frames = scene.objects.filter((object) => object.kind === 'frame.section');
+  const frameAllowsMember = (memberId: string, visited = new Set<string>()): boolean => frames.every((frame) => {
+    if (!Array.isArray(frame.payload.members) || !frame.payload.members.includes(memberId)) return true;
+    if (visited.has(frame.id)) return false;
+    visited.add(frame.id);
+    const frameLayer = layers.get(frame.layer ?? DEFAULT_LAYER_ID) ?? defaultOverlayLayer();
+    return frameLayer.visible && frameLayer.export && frame.metadata.hidden !== true
+      && frame.metadata.export !== 'arielcharts-only' && frame.payload.composite_members !== false
+      && frameAllowsMember(frame.id, visited);
+  });
+  return sortForLayers(scene.objects, scene.layers ?? [defaultOverlayLayer()]).filter((object) => {
+    const layer = layers.get(object.layer ?? DEFAULT_LAYER_ID) ?? defaultOverlayLayer();
+    return layer.visible && layer.export && object.metadata.export === 'composite-export' && frameAllowsMember(object.id);
+  });
+}
+
 export function pasteOverlayObjects(doc: Y.Doc, diagramId: string, objects: readonly OverlayObjectRecord[], idFactory: () => string): string[] {
   const ids: string[] = [];
   for (const [index, object] of objects.entries()) {
@@ -299,6 +475,7 @@ export function pasteOverlayObjects(doc: Y.Doc, diagramId: string, objects: read
       id,
       order_key: `${object.order_key}~paste-${index.toString().padStart(4, '0')}-${id}`,
       geometry: { ...object.geometry, x: object.geometry.x + 16, y: object.geometry.y + 16 },
+      ...(object.kind === 'frame.section' ? { payload: { ...object.payload, members: [] } } : {}),
     });
     ids.push(id);
   }
@@ -319,22 +496,31 @@ export function adaptOverlaySceneToViewport(
   semanticAnchors: ReadonlyMap<string, OverlayWorldPoint>,
 ): OverlayRenderObject[] {
   if (![transform.x, transform.y, transform.zoom].every(finite) || transform.zoom <= 0) throw new Error('Invalid viewport transform.');
-  return scene.objects.map((object) => {
+  const source = new Map(scene.objects.map((object) => [object.id, object]));
+  return sortForLayers(scene.objects, scene.layers ?? [defaultOverlayLayer()]).map((object) => {
+    const connector = object.kind === 'connector.overlay' ? object.payload : null;
+    const start = connector && typeof connector.start_id === 'string' ? source.get(connector.start_id) : undefined;
+    const end = connector && typeof connector.end_id === 'string' ? source.get(connector.end_id) : undefined;
+    const startFallback = connector && validPoint(connector.start_fallback) ? connector.start_fallback : { x: object.geometry.x, y: object.geometry.y };
+    const endFallback = connector && validPoint(connector.end_fallback) ? connector.end_fallback : { x: object.geometry.x + object.geometry.width, y: object.geometry.y + object.geometry.height };
+    const connectorStart = start ? { x: start.geometry.x + start.geometry.width / 2, y: start.geometry.y + start.geometry.height / 2 } : startFallback;
+    const connectorEnd = end ? { x: end.geometry.x + end.geometry.width / 2, y: end.geometry.y + end.geometry.height / 2 } : endFallback;
+    const connectorGeometry = connector ? { ...object.geometry, x: connectorStart.x, y: connectorStart.y, width: connectorEnd.x - connectorStart.x, height: connectorEnd.y - connectorStart.y } : object.geometry;
     const semantic = object.anchor ? semanticAnchors.get(object.anchor.mermaid_id) : undefined;
-    const origin = object.anchor
+    const origin = connector ? { x: connectorGeometry.x, y: connectorGeometry.y } : object.anchor
       ? semantic
         ? { x: semantic.x + object.anchor.offset.x, y: semantic.y + object.anchor.offset.y }
         : object.anchor.fallback
       : { x: object.geometry.x, y: object.geometry.y };
     return {
       ...object,
-      orphaned: Boolean(object.anchor && !semantic),
+      orphaned: Boolean((object.anchor && !semantic) || (connector && (!start || !end))),
       screen_geometry: {
-        ...object.geometry,
+        ...connectorGeometry,
         x: origin.x * transform.zoom + transform.x,
         y: origin.y * transform.zoom + transform.y,
-        width: object.geometry.width * transform.zoom,
-        height: object.geometry.height * transform.zoom,
+        width: connectorGeometry.width * transform.zoom,
+        height: connectorGeometry.height * transform.zoom,
       },
     };
   });

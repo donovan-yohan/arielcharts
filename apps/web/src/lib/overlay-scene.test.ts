@@ -3,6 +3,7 @@ import * as Y from 'yjs';
 import {
   adaptOverlaySceneToViewport,
   addOverlayObject,
+  addOverlayLayer,
   beginOverlayTextComposition,
   commitOverlayTextComposition,
   copyOverlayObjects,
@@ -11,9 +12,14 @@ import {
   deleteOverlayObjects,
   editOverlayText,
   getOverlayScene,
+  getOverlayTransformTargets,
+  getCompositeExportObjects,
+  getOverlayLayers,
+  moveOverlayObjects,
   pasteOverlayObjects,
   readOverlayScene,
   setOverlayOrderKey,
+  updateOverlayLayer,
   updateOverlayObject,
 } from './overlay-scene';
 import { inkGeometry, simplifyInkPoints } from './freehand-ink';
@@ -159,6 +165,82 @@ describe('overlay scene', () => {
     const copied = copyOverlayObjects(readOverlayScene(doc, 'main'), ['note']);
     expect(pasteOverlayObjects(doc, 'main', copied, () => 'copy')).toEqual(['copy']);
     expect(readOverlayScene(doc, 'main').objects.map(({ id }) => id)).toEqual(['note', 'copy']);
+  });
+
+  it('keeps shapes, connectors, frames, and layers in the overlay plane with deterministic fallbacks', () => {
+    const doc = new Y.Doc(); const source = doc.getText('mermaid'); source.insert(0, 'flowchart TD\nA-->B  '); const before = source.toString();
+    addOverlayObject(doc, 'main', { ...object('left'), kind: 'shape.rectangle', body: 'Left', layer: 'default' });
+    addOverlayObject(doc, 'main', { ...object('right'), kind: 'shape.ellipse', geometry: { x: 110, y: 20, width: 30, height: 40, rotation: 0 }, body: 'Right', layer: 'default' });
+    addOverlayObject(doc, 'main', { ...object('edge'), kind: 'connector.overlay', geometry: { x: 25, y: 40, width: 100, height: 0, rotation: 0 }, payload: { start_id: 'left', end_id: 'right', start_fallback: { x: 25, y: 40 }, end_fallback: { x: 125, y: 40 } } });
+    addOverlayObject(doc, 'main', { ...object('frame'), kind: 'frame.section', payload: { members: ['left', 'right'] } });
+    addOverlayLayer(doc, 'main', { id: 'facilitation', name: 'Facilitation', order_key: 'z', visible: true, locked: false, export: false });
+    updateOverlayLayer(doc, 'main', 'facilitation', { locked: true });
+    moveOverlayObjects(doc, 'main', ['frame'], 20, -5);
+    const scene = readOverlayScene(doc, 'main');
+    expect(scene.layers).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'default' }), expect.objectContaining({ id: 'facilitation', locked: true, export: false })]));
+    expect(scene.objects.find(({ id }) => id === 'left')?.geometry).toMatchObject({ x: 30, y: 15 });
+    expect(getCompositeExportObjects({ ...scene, objects: [{ ...scene.objects[0]!, metadata: { export: 'composite-export' }, layer: 'facilitation' }] })).toEqual([]);
+    const edge = adaptOverlaySceneToViewport(scene, { x: 0, y: 0, zoom: 1 }, new Map()).find(({ id }) => id === 'edge')!;
+    expect(edge).toMatchObject({ orphaned: false, screen_geometry: { x: 45, y: 35, width: 100, height: 0 } });
+    deleteOverlayObjects(doc, 'main', ['right']);
+    expect(adaptOverlaySceneToViewport(readOverlayScene(doc, 'main'), { x: 0, y: 0, zoom: 1 }, new Map()).find(({ id }) => id === 'edge')?.orphaned).toBe(true);
+    expect(source.toString()).toBe(before);
+  });
+
+  it('blocks a whole frame or multi-transform when any expanded member is locked', () => {
+    const doc = new Y.Doc();
+    addOverlayObject(doc, 'main', { ...object('left'), kind: 'shape.rectangle', body: 'Left', layer: 'default' });
+    addOverlayObject(doc, 'main', { ...object('right'), kind: 'shape.rectangle', body: 'Right', layer: 'default', metadata: { locked: true } });
+    addOverlayObject(doc, 'main', { ...object('frame'), kind: 'frame.section', payload: { members: ['left', 'right'] } });
+    const before = readOverlayScene(doc, 'main');
+    expect(getOverlayTransformTargets(before, ['frame'])).toBeNull();
+    moveOverlayObjects(doc, 'main', ['frame'], 40, 20);
+    expect(readOverlayScene(doc, 'main').objects.map(({ id, geometry }) => ({ id, geometry }))).toEqual(before.objects.map(({ id, geometry }) => ({ id, geometry })));
+    updateOverlayObject(doc, 'main', 'right', { metadata: {} });
+    expect(getOverlayTransformTargets(readOverlayScene(doc, 'main'), ['frame'])).toEqual(['frame', 'left', 'right']);
+    moveOverlayObjects(doc, 'main', ['frame'], 40, 20);
+    expect(readOverlayScene(doc, 'main').objects.find(({ id }) => id === 'left')?.geometry).toMatchObject({ x: 50, y: 40 });
+    expect(readOverlayScene(doc, 'main').objects.find(({ id }) => id === 'right')?.geometry).toMatchObject({ x: 50, y: 40 });
+  });
+
+  it('keeps layer create, edit, and reorder undo/redo peer-local without touching objects or source', () => {
+    const left = new Y.Doc(); const source = left.getText('mermaid'); source.insert(0, 'flowchart TD\nA-->B');
+    getOverlayScene(left, 'main', true); const right = new Y.Doc(); Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
+    const undo = createOverlayUndoManager(left, 'main');
+    addOverlayObject(left, 'main', object('object'));
+    undo.stopCapturing(); addOverlayLayer(left, 'main', { id: 'left', name: 'Left', order_key: 'm', visible: true, locked: false, export: true });
+    undo.stopCapturing(); updateOverlayLayer(left, 'main', 'left', { name: 'Left updated' });
+    undo.stopCapturing();
+    updateOverlayLayer(left, 'main', 'left', { order_key: '~front' });
+    addOverlayLayer(right, 'main', { id: 'peer', name: 'Peer', order_key: 'z', visible: true, locked: false, export: true });
+    Y.applyUpdate(left, Y.encodeStateAsUpdate(right, Y.encodeStateVector(left)));
+    undo.undo(); undo.undo(); undo.undo();
+    expect(getOverlayLayers(left, 'main').map(({ id }) => id)).toContain('peer');
+    expect(getOverlayLayers(left, 'main').some(({ id }) => id === 'left')).toBe(false);
+    expect(readOverlayScene(left, 'main').objects.map(({ id }) => id)).toEqual(['object']);
+    expect(source.toString()).toBe('flowchart TD\nA-->B');
+    undo.redo(); undo.redo(); undo.redo();
+    expect(getOverlayLayers(left, 'main').find(({ id }) => id === 'left')).toMatchObject({ name: 'Left updated', order_key: '~front' });
+    expect(getOverlayLayers(left, 'main').some(({ id }) => id === 'peer')).toBe(true);
+    undo.destroy();
+  });
+
+  it('exports frame-contained content only when every containing frame and layer permits it', () => {
+    const base = object('child');
+    const scene = {
+      version: 1 as const, diagram_id: 'main',
+      layers: [{ id: 'default', name: 'Default', order_key: 'a', visible: true, locked: false, export: true }],
+      objects: [
+        { ...base, metadata: { export: 'composite-export' } },
+        { ...object('inner'), kind: 'frame.section', metadata: { export: 'composite-export' }, payload: { members: ['child'], composite_members: true } },
+        { ...object('outer'), kind: 'frame.section', metadata: { export: 'composite-export' }, payload: { members: ['inner'], composite_members: true } },
+      ],
+    };
+    expect(getCompositeExportObjects(scene).map(({ id }) => id)).toEqual(['child', 'inner', 'outer']);
+    const excludedInner = { ...scene, objects: scene.objects.map((item) => item.id === 'inner' ? { ...item, payload: { ...item.payload, composite_members: false } } : item) };
+    expect(getCompositeExportObjects(excludedInner).map(({ id }) => id)).toEqual(['inner', 'outer']);
+    const hiddenLayer = { ...scene, layers: [{ ...scene.layers[0]!, visible: false }] };
+    expect(getCompositeExportObjects(hiddenLayer)).toEqual([]);
   });
 
   it('uses renderer-neutral world geometry and exposes missing anchors as orphans', () => {

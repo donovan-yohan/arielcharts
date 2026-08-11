@@ -3396,8 +3396,35 @@ async function expectTabKeyboardAndRename(page: Page, created: string): Promise<
   return renamed;
 }
 
+async function expectOverlayControlGapReachesCanvas(page: Page): Promise<void> {
+  const controls = page.getByLabel('Overlay scene controls', { exact: true });
+  const point = await controls.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const interactiveBounds = [...element.querySelectorAll<HTMLElement>('button, input, label, select')]
+      .map((item) => item.getBoundingClientRect());
+    for (let y = Math.ceil(bounds.top) + 4; y < Math.floor(bounds.bottom) - 4; y += 4) {
+      for (let x = Math.ceil(bounds.left) + 4; x < Math.floor(bounds.right) - 4; x += 4) {
+        if (interactiveBounds.some((item) => x >= item.left && x <= item.right && y >= item.top && y <= item.bottom)) continue;
+        const hit = document.elementFromPoint(x, y);
+        if (hit?.closest('.react-flow__pane')) return { x, y };
+      }
+    }
+    return null;
+  });
+  assert(point, 'Expanded overlay controls did not leave a pointer-transparent gap for the React Flow canvas.');
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.click(point.x, point.y);
+  const before = await readCanvasCameraSnapshot(page, 'overlay controls gap pan baseline');
+  await page.mouse.wheel(24, 36);
+  await expect.poll(() => readCanvasCameraSnapshot(page, 'overlay controls gap pan result'), {
+    message: 'A trusted wheel in the overlay-controls gap did not pan the React Flow canvas.',
+    timeout: 5_000,
+  }).not.toEqual(before);
+}
+
 async function expectOverlaySceneFoundation(page: Page, diagramName: string): Promise<void> {
   await selectTabByName(page, diagramName);
+  await expect(page.getByTestId('source-flyout')).toBeVisible();
   await verifiedClick(page, page.getByRole('button', { name: 'Overlay tools', exact: true }), 'open overlay tools');
   await verifiedClick(page, page.getByRole('button', { name: 'Add overlay', exact: true }), 'add overlay object');
   const objects = page.locator('[data-testid^="overlay-object-"]');
@@ -3438,6 +3465,7 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   const topmostObject = page.getByTestId(topmostTestId!);
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
+  await expectOverlayControlGapReachesCanvas(page);
   await verifiedClick(page, topmostObject, 'select topmost overlay for semantic anchor');
   await verifiedClick(page, page.getByRole('button', { name: 'Anchor first node', exact: true }), 'anchor overlay to first Mermaid node');
   await expect(topmostObject).not.toHaveAttribute('data-orphaned', 'true');
@@ -4423,7 +4451,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     await verifiedClick(page, toggle, `${label} open overlay controls`);
     const panel = page.getByLabel('Overlay scene controls', { exact: true });
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
-    const actionNames = ['Add overlay', 'Move right', 'Anchor first node', 'Bring front', 'Copy overlay', 'Paste overlay', 'Delete overlay', 'Undo overlay', 'Restore overlay', 'Pen', 'Highlighter', 'Erase stroke'] as const;
+    const actionNames = ['Add overlay', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow', 'Frame selection', 'Align left', 'Distribute horizontal', 'Move right', 'Anchor first node', 'Bring front', 'Copy overlay', 'Paste overlay', 'Delete overlay', 'Undo overlay', 'Restore overlay', 'Pen', 'Highlighter', 'Erase stroke'] as const;
     for (const actionName of actionNames) {
       const action = panel.getByRole('button', { name: actionName, exact: true });
       await action.scrollIntoViewIfNeeded();
@@ -4446,6 +4474,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
         `${label} overlay action ${actionName} is not contained, reachable, and touch-sized: ${JSON.stringify(evidence)}.`);
     }
     const compositeExport = panel.getByLabel('Include ink in composite export', { exact: true });
+    await compositeExport.scrollIntoViewIfNeeded();
     await assertHitTarget(page, compositeExport, `${label} composite ink export choice`);
     const compositeExportBounds = await compositeExport.evaluate((input) => input.parentElement?.getBoundingClientRect().toJSON());
     assert(compositeExportBounds && compositeExportBounds.width >= 44 && compositeExportBounds.height >= 44,

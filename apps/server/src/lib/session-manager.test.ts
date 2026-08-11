@@ -364,6 +364,27 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     await expect(manager.readOverlayScene('abc123de', 'main')).resolves.toMatchObject({ scene: { objects: [{ body: 'first body' }] } });
   });
 
+  it('persists, histories, restores, and reloads shapes, connectors, frames, and named layers without touching Mermaid', async () => {
+    const state = await manager.getOrCreateSession('abc123de'); const sourceBefore = (await manager.readDiagram('abc123de', 'main')).diagram;
+    const scene = state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!; const objects = scene.get('objects') as Y.Map<Y.Map<unknown>>;
+    const add = (id: string, kind: string, payload: Record<string, unknown>, body?: string) => { const item = new Y.Map<unknown>(); item.set('kind', kind); item.set('version', 1); item.set('order_key', id); item.set('layer', 'facilitation'); item.set('geometry', { x: id === 'right' ? 120 : 0, y: 0, width: 100, height: 60, rotation: 0 }); item.set('style', {}); item.set('metadata', { export: 'composite-export' }); item.set('payload', payload); if (body !== undefined) item.set('body', new Y.Text(body)); objects.set(id, item); };
+    const layers = new Y.Map<Y.Map<unknown>>(); const layer = new Y.Map<unknown>(); layer.set('id', 'facilitation'); layer.set('name', 'Facilitation'); layer.set('order_key', 'a'); layer.set('visible', true); layer.set('locked', false); layer.set('export', true); layers.set('facilitation', layer); scene.set('layers', layers);
+    add('left', 'shape.rectangle', { shape: 'rectangle' }, 'Left'); add('right', 'shape.ellipse', { shape: 'ellipse' }, 'Right'); add('edge', 'connector.overlay', { start_id: 'left', end_id: 'right', start_fallback: { x: 50, y: 30 }, end_fallback: { x: 170, y: 30 } }); add('frame', 'frame.section', { members: ['left', 'right', 'edge'] });
+    await manager.persistSession(state); const first = await manager.readOverlayScene('abc123de', 'main');
+    expect(first.scene.layers?.some((entry) => entry.id === 'facilitation' && entry.name === 'Facilitation')).toBe(true);
+    expect(first.scene.objects).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'shape.rectangle', body: 'Left' }), expect.objectContaining({ kind: 'connector.overlay' }), expect.objectContaining({ kind: 'frame.section' })]));
+    (objects.get('left')!.get('body') as Y.Text).insert(4, ' changed'); await manager.persistSession(state); const current = await manager.readOverlayScene('abc123de', 'main');
+    const history = await manager.listOverlayHistory('abc123de', 'main'); const target = history.revisions.find(({ result_revision }) => result_revision === first.revision)!;
+    const restored = await manager.restoreOverlayRevision('abc123de', 'main', target.revision_id, current.revision, { name: 'Ada', type: 'human' });
+    expect(restored).toMatchObject({ status: 'restored', scene: { objects: expect.arrayContaining([expect.objectContaining({ kind: 'shape.rectangle', body: 'Left' })]) } });
+    if (restored.status === 'restored') expect(restored.scene.layers?.some(({ id }) => id === 'facilitation')).toBe(true);
+    expect((await manager.readDiagram('abc123de', 'main')).diagram).toEqual(sourceBefore);
+    await manager.close(); manager = resources.createManager();
+    const reloaded = await manager.readOverlayScene('abc123de', 'main');
+    expect(reloaded.scene.layers?.some(({ id }) => id === 'facilitation')).toBe(true);
+    expect(reloaded.scene.objects).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'connector.overlay' }), expect.objectContaining({ kind: 'frame.section' })]));
+  });
+
   it('atomically erases a deleted diagram overlay scene and its private overlay history', async () => {
     const state = await manager.getOrCreateSession('abc123de');
     const initial = await manager.getSession('abc123de');

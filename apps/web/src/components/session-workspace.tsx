@@ -109,6 +109,9 @@ import { addTimelineEvent, addTimelinePeriod, addTimelineSection, deleteTimeline
 import { addGitGraphBranch, addGitGraphCheckout, addGitGraphCherryPick, addGitGraphCommit, addGitGraphMerge, deleteGitGraphOperation, editGitGraphBranch, editGitGraphCheckout, editGitGraphCherryPick, editGitGraphCommit, editGitGraphMerge, getGitGraphDiagramSnapshot, moveGitGraphOperation } from '../lib/gitgraph-mutations';
 import { addEventModelingDataBlock, addEventModelingEntity, addEventModelingTimeframe, deleteEventModelingDataBlock, deleteEventModelingEntity, deleteEventModelingTimeframe, editEventModelingDataBlock, editEventModelingTimeframe, getEventModelingDiagramSnapshot, moveEventModelingTimeframe, renameEventModelingEntity } from '../lib/event-modeling-mutations';
 import { addKanbanCard, addKanbanColumn, deleteKanbanCard, deleteKanbanColumn, editKanbanCard, editKanbanColumn, getKanbanDiagramSnapshot, moveKanbanCard } from '../lib/kanban-mutations';
+import { addMindmapNode, deleteMindmapNode, editMindmapNode, getMindmapDiagramSnapshot, moveMindmapNode, reparentMindmapNode } from '../lib/mindmap-mutations';
+import { addTreeViewNode, deleteTreeViewNode, editTreeViewNode, getTreeViewDiagramSnapshot, moveTreeViewNode, reparentTreeViewNode } from '../lib/treeview-mutations';
+import { addIshikawaCause, deleteIshikawaCause, editIshikawaCause, editIshikawaEffect, getIshikawaDiagramSnapshot, moveIshikawaCause, reparentIshikawaCause, setIshikawaEffect } from '../lib/ishikawa-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -1731,6 +1734,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isGitGraph = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'gitgraph');
   const isEventModeling = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'event-modeling');
   const isKanban = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'kanban');
+  const isMindmap = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'mindmap');
+  const isTreeView = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'tree-view');
+  const isIshikawa = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'ishikawa');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1763,6 +1769,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const gitGraphDiagram = useMemo(() => isGitGraph ? getGitGraphDiagramSnapshot(renderedMermaidText) : null, [isGitGraph, renderedMermaidText]);
   const eventModelingDiagram = useMemo(() => isEventModeling ? getEventModelingDiagramSnapshot(renderedMermaidText) : null, [isEventModeling, renderedMermaidText]);
   const kanbanDiagram = useMemo(() => isKanban ? getKanbanDiagramSnapshot(renderedMermaidText) : null, [isKanban, renderedMermaidText]);
+  const mindmapDiagram = useMemo(() => isMindmap ? getMindmapDiagramSnapshot(renderedMermaidText) : null, [isMindmap, renderedMermaidText]);
+  const treeViewDiagram = useMemo(() => isTreeView ? getTreeViewDiagramSnapshot(renderedMermaidText) : null, [isTreeView, renderedMermaidText]);
+  const ishikawaDiagram = useMemo(() => isIshikawa ? getIshikawaDiagramSnapshot(renderedMermaidText) : null, [isIshikawa, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2231,6 +2240,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             eventModelingDiagram={eventModelingDiagram}
             isKanban={isKanban}
             kanbanDiagram={kanbanDiagram}
+            isMindmap={isMindmap}
+            mindmapDiagram={mindmapDiagram}
+            isTreeView={isTreeView}
+            treeViewDiagram={treeViewDiagram}
+            isIshikawa={isIshikawa}
+            ishikawaDiagram={ishikawaDiagram}
             nodePositions={renderedNodePositions}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
@@ -2474,6 +2489,23 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onEditKanbanCard={(id, value) => { mutateCanvasSource((source) => editKanbanCard(source, id, value), 'Edited a Kanban card'); }}
             onDeleteKanbanCard={(id) => { mutateCanvasSource((source) => deleteKanbanCard(source, id), 'Deleted a Kanban card'); }}
             onMoveKanbanCard={(id, column, target) => { mutateCanvasSource((source) => moveKanbanCard(source, id, column, target), 'Moved a Kanban card'); }}
+            onAddMindmapNode={(value, parent) => { mutateCanvasSource((source) => addMindmapNode(source, value, parent), 'Added a Mindmap node'); }}
+            onEditMindmapNode={(identity, value) => { mutateCanvasSource((source) => editMindmapNode(source, identity, value), 'Edited a Mindmap node'); }}
+            onDeleteMindmapNode={(identity) => { mutateCanvasSource((source) => deleteMindmapNode(source, identity), 'Deleted a Mindmap node'); }}
+            onMoveMindmapNode={(identity, direction) => { mutateCanvasSource((source) => moveMindmapNode(source, identity, direction), 'Reordered Mindmap nodes'); }}
+            onReparentMindmapNode={(identity, parent) => { mutateCanvasSource((source) => reparentMindmapNode(source, identity, parent), 'Reparented a Mindmap node'); }}
+            onAddTreeViewNode={(value, parent) => { mutateCanvasSource((source) => addTreeViewNode(source, value, parent), 'Added a TreeView node'); }}
+            onEditTreeViewNode={(identity, value) => { mutateCanvasSource((source) => editTreeViewNode(source, identity, value), 'Edited a TreeView node'); }}
+            onDeleteTreeViewNode={(identity) => { mutateCanvasSource((source) => deleteTreeViewNode(source, identity), 'Deleted a TreeView node'); }}
+            onMoveTreeViewNode={(identity, direction) => { mutateCanvasSource((source) => moveTreeViewNode(source, identity, direction), 'Reordered TreeView nodes'); }}
+            onReparentTreeViewNode={(identity, parent) => { mutateCanvasSource((source) => reparentTreeViewNode(source, identity, parent), 'Reparented a TreeView node'); }}
+            onSetIshikawaEffect={(value) => { mutateCanvasSource((source) => setIshikawaEffect(source, value), 'Updated the Ishikawa effect'); }}
+            onEditIshikawaEffect={(value) => { mutateCanvasSource((source) => editIshikawaEffect(source, value), 'Edited the Ishikawa effect'); }}
+            onAddIshikawaCause={(value) => { mutateCanvasSource((source) => addIshikawaCause(source, value), 'Added an Ishikawa cause'); }}
+            onEditIshikawaCause={(identity, value) => { mutateCanvasSource((source) => editIshikawaCause(source, identity, value), 'Edited an Ishikawa cause'); }}
+            onDeleteIshikawaCause={(identity) => { mutateCanvasSource((source) => deleteIshikawaCause(source, identity), 'Deleted an Ishikawa cause'); }}
+            onMoveIshikawaCause={(identity, direction) => { mutateCanvasSource((source) => moveIshikawaCause(source, identity, direction), 'Reordered Ishikawa causes'); }}
+            onReparentIshikawaCause={(identity, parent) => { mutateCanvasSource((source) => reparentIshikawaCause(source, identity, parent), 'Reparented an Ishikawa cause'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onChangeNodeShape={(nodeId, shape) => {

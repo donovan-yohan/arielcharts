@@ -14,13 +14,16 @@ import { isTimelineSourceRepresentable } from './timeline-mutations';
 import { isGitGraphSourceRepresentable } from './gitgraph-mutations';
 import { isEventModelingSourceRepresentable } from './event-modeling-mutations';
 import { isKanbanSourceRepresentable } from './kanban-mutations';
+import { isMindmapSourceRepresentable } from './mindmap-mutations';
+import { isTreeViewSourceRepresentable } from './treeview-mutations';
+import { isIshikawaSourceRepresentable } from './ishikawa-mutations';
 
 /** The installed Mermaid detector registry this catalog was audited against. */
 export const MERMAID_CAPABILITY_CATALOG_VERSION = '11.16.1';
 
 export type DiagramKind = 'flowchart' | 'sequence' | 'er' | 'generic';
 export type DiagramEditingMode = 'canvas' | 'semantic-form' | 'source-only' | 'unavailable-plugin';
-export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'source-only' | 'unavailable-plugin';
+export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'mindmap' | 'tree-view' | 'ishikawa' | 'source-only' | 'unavailable-plugin';
 export type MermaidDiagramFamilyId = typeof MERMAID_DIAGRAM_FAMILIES[number]['id'];
 
 export interface MermaidDiagramFamily {
@@ -234,6 +237,9 @@ const TIMELINE_OPERATIONS = new Set(['set-direction', 'add-section', 'edit-secti
 const GITGRAPH_OPERATIONS = new Set(['add-commit', 'edit-commit', 'add-branch', 'edit-branch', 'add-checkout', 'edit-checkout', 'add-merge', 'edit-merge', 'add-cherry-pick', 'edit-cherry-pick', 'delete-operation', 'move-operation']);
 const EVENT_MODELING_OPERATIONS = new Set(['add-timeframe', 'edit-timeframe', 'delete-timeframe', 'move-timeframe', 'add-entity', 'rename-entity', 'delete-entity', 'add-data', 'edit-data', 'delete-data']);
 const KANBAN_OPERATIONS = new Set(['add-column', 'edit-column', 'delete-column', 'add-card', 'edit-card', 'delete-card', 'move-card', 'set-card-metadata']);
+const MINDMAP_OPERATIONS = new Set(['add-node', 'edit-node', 'delete-node', 'move-node', 'reparent-node']);
+const TREE_VIEW_OPERATIONS = new Set(['add-node', 'edit-node', 'delete-node', 'move-node', 'reparent-node']);
+const ISHIKAWA_OPERATIONS = new Set(['set-effect', 'add-cause', 'edit-cause', 'delete-cause', 'move-cause', 'reparent-cause']);
 function strictAdapter(id: DiagramAdapterId, operations: ReadonlySet<string>, representable: (source: string) => boolean): DiagramSourceModelAdapter { return { id, getOperationResult(source, operation) { return !representable(source) ? { supported: false, reason: 'unrepresentable' } : operations.has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' }; }, getRepresentability: (source) => representable(source) ? { representable: true } : { representable: false, reason: 'unsupported-syntax' } }; }
 const JOURNEY_ADAPTER = strictAdapter('journey', JOURNEY_OPERATIONS, isJourneySourceRepresentable);
 const GANTT_ADAPTER = strictAdapter('gantt', GANTT_OPERATIONS, isGanttSourceRepresentable);
@@ -241,6 +247,9 @@ const TIMELINE_ADAPTER = strictAdapter('timeline', TIMELINE_OPERATIONS, isTimeli
 const GITGRAPH_ADAPTER = strictAdapter('gitgraph', GITGRAPH_OPERATIONS, isGitGraphSourceRepresentable);
 const EVENT_MODELING_ADAPTER = strictAdapter('event-modeling', EVENT_MODELING_OPERATIONS, isEventModelingSourceRepresentable);
 const KANBAN_ADAPTER = strictAdapter('kanban', KANBAN_OPERATIONS, isKanbanSourceRepresentable);
+const MINDMAP_ADAPTER = strictAdapter('mindmap', MINDMAP_OPERATIONS, isMindmapSourceRepresentable);
+const TREE_VIEW_ADAPTER = strictAdapter('tree-view', TREE_VIEW_OPERATIONS, isTreeViewSourceRepresentable);
+const ISHIKAWA_ADAPTER = strictAdapter('ishikawa', ISHIKAWA_OPERATIONS, isIshikawaSourceRepresentable);
 
 /**
  * Every built-in visual Mermaid family in 11.16.1. Aliases, renderer variants,
@@ -258,10 +267,10 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'flowchart', label: 'Flowchart', parserTypes: ['flowchart', 'flowchart-v2', 'flowchart-elk'], editingMode: 'canvas', adapter: 'flowchart' },
   { id: 'gantt', label: 'Gantt', parserTypes: ['gantt'], editingMode: 'semantic-form', adapter: 'gantt' },
   { id: 'gitgraph', label: 'Gitgraph', parserTypes: ['gitGraph'], editingMode: 'semantic-form', adapter: 'gitgraph' },
-  { id: 'ishikawa', label: 'Ishikawa', parserTypes: ['ishikawa'] },
+  { id: 'ishikawa', label: 'Ishikawa', parserTypes: ['ishikawa'], editingMode: 'semantic-form', adapter: 'ishikawa' },
   { id: 'journey', label: 'User journey', parserTypes: ['journey'], editingMode: 'semantic-form', adapter: 'journey' },
   { id: 'kanban', label: 'Kanban', parserTypes: ['kanban'], editingMode: 'semantic-form', adapter: 'kanban' },
-  { id: 'mindmap', label: 'Mindmap', parserTypes: ['mindmap'] },
+  { id: 'mindmap', label: 'Mindmap', parserTypes: ['mindmap'], editingMode: 'semantic-form', adapter: 'mindmap' },
   { id: 'packet', label: 'Packet', parserTypes: ['packet'] },
   { id: 'pie', label: 'Pie', parserTypes: ['pie'] },
   { id: 'quadrant', label: 'Quadrant chart', parserTypes: ['quadrantChart'] },
@@ -273,7 +282,7 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'state', label: 'State', parserTypes: ['state', 'stateDiagram'], editingMode: 'semantic-form', adapter: 'state' },
   { id: 'swimlane', label: 'Swimlane', parserTypes: ['swimlane'], editingMode: 'semantic-form', adapter: 'swimlane' },
   { id: 'timeline', label: 'Timeline', parserTypes: ['timeline'], editingMode: 'semantic-form', adapter: 'timeline' },
-  { id: 'tree-view', label: 'Tree view', parserTypes: ['treeView'] },
+  { id: 'tree-view', label: 'Tree view', parserTypes: ['treeView'], editingMode: 'semantic-form', adapter: 'tree-view' },
   { id: 'treemap', label: 'Treemap', parserTypes: ['treemap'] },
   { id: 'venn', label: 'Venn', parserTypes: ['venn'] },
   { id: 'wardley', label: 'Wardley', parserTypes: ['wardley'] },
@@ -341,6 +350,9 @@ export function getDiagramSourceModelAdapter(capability: DiagramCapability | nul
     case 'gitgraph': return GITGRAPH_ADAPTER;
     case 'event-modeling': return EVENT_MODELING_ADAPTER;
     case 'kanban': return KANBAN_ADAPTER;
+    case 'mindmap': return MINDMAP_ADAPTER;
+    case 'tree-view': return TREE_VIEW_ADAPTER;
+    case 'ishikawa': return ISHIKAWA_ADAPTER;
     case 'unavailable-plugin': return UNAVAILABLE_PLUGIN_ADAPTER;
     default: return SOURCE_ONLY_ADAPTER;
   }

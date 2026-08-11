@@ -29,6 +29,17 @@ export interface CanvasLaserState {
   point?: CanvasWorldPoint;
 }
 
+/** A lossy, bounded in-progress ink sample. It is awareness-only, never durable. */
+export interface CanvasInkPreviewState {
+  active: boolean;
+  sequence: number;
+  mode?: 'pen' | 'highlighter';
+  color?: string;
+  width?: number;
+  opacity?: number;
+  points?: CanvasWorldPoint[];
+}
+
 export interface PresenterViewportState {
   pan_x: number;
   pan_y: number;
@@ -52,6 +63,8 @@ export interface CanvasAwarenessState {
   diagram_id: string;
   cursor?: CanvasWorldPoint;
   laser?: CanvasLaserState;
+  /** Non-authoritative preview only; finalized ink is an overlay object. */
+  ink_preview?: CanvasInkPreviewState;
   selected_node_ids?: string[];
   /** A live advisory marker only; never a draft, lock, or durable value. */
   editing_node_id?: string;

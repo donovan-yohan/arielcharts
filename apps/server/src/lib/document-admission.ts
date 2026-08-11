@@ -48,6 +48,11 @@ export type DocumentAdmission =
   | { accepted: false; reason: DocumentAdmissionReason };
 
 const OVERLAY_SCHEMA_VERSION = 1;
+const INK_MAX_POINTS = 512;
+const INK_MAX_SERIALIZED_BYTES = 48 * 1024;
+const INK_MAX_WORLD_COORDINATE = 1_000_000;
+const INK_MAX_GEOMETRY_COORDINATE = INK_MAX_WORLD_COORDINATE + 32;
+const INK_MAX_GEOMETRY_SIZE = (INK_MAX_WORLD_COORDINATE * 2) + 64;
 
 function rejected(reason: DocumentAdmissionReason): Extract<DocumentAdmission, { accepted: false }> {
   return { accepted: false, reason };
@@ -223,6 +228,7 @@ function validateOverlayObject(object: unknown): DocumentAdmissionReason | undef
   }
   if ((kind === 'annotation.text' || kind === 'annotation.sticky') && !isYText(body)) return 'invalid_overlay_schema';
   if (isYText(body) && byteLength(body.toString()) > 8_192) return 'overlay_quota_exceeded';
+  if (kind === 'ink.stroke' && !isValidInkStroke(object)) return 'invalid_overlay_schema';
   return undefined;
 }
 
@@ -235,6 +241,41 @@ function isOverlayGeometry(value: unknown): boolean {
   const geometry = value as Record<string, unknown>;
   return Number.isFinite(geometry.width) && (geometry.width as number) >= 0
     && Number.isFinite(geometry.height) && (geometry.height as number) >= 0 && Number.isFinite(geometry.rotation);
+}
+
+/** The immutable final-stroke envelope; previews are awareness-only and never reach this path. */
+function isValidInkStroke(object: Y.Map<unknown>): boolean {
+  if (object.get('body') !== undefined) return false;
+  const payload = object.get('payload');
+  const style = object.get('style');
+  if (!isPlainRecord(payload) || !isPlainRecord(style) || !isOverlayMetadata(style)
+    || (payload.mode !== 'pen' && payload.mode !== 'highlighter')
+    || typeof payload.composite_export !== 'boolean'
+    || !Array.isArray(payload.points) || payload.points.length < 2 || payload.points.length > INK_MAX_POINTS
+    || typeof style.color !== 'string' || byteLength(style.color) > 32
+    || typeof style.width !== 'number' || !Number.isFinite(style.width) || style.width <= 0 || style.width > 64
+    || typeof style.opacity !== 'number' || !Number.isFinite(style.opacity) || style.opacity < 0 || style.opacity > 1) return false;
+  if (!payload.points.every((point) => isPlainRecord(point)
+    && Number.isFinite(point.x) && Math.abs(point.x as number) <= INK_MAX_WORLD_COORDINATE
+    && Number.isFinite(point.y) && Math.abs(point.y as number) <= INK_MAX_WORLD_COORDINATE
+    && (point.pressure === undefined || (typeof point.pressure === 'number' && Number.isFinite(point.pressure) && point.pressure >= 0 && point.pressure <= 1)))) return false;
+  const geometry = object.get('geometry');
+  if (!isPlainRecord(geometry) || Math.abs(geometry.x as number) > INK_MAX_GEOMETRY_COORDINATE
+    || Math.abs(geometry.y as number) > INK_MAX_GEOMETRY_COORDINATE
+    || (geometry.width as number) > INK_MAX_GEOMETRY_SIZE || (geometry.height as number) > INK_MAX_GEOMETRY_SIZE
+    || geometry.rotation !== 0) return false;
+  const points = payload.points as Array<Record<string, number>>;
+  const padding = Math.max(1, (style.width as number) / 2);
+  const minX = Math.min(...points.map((point) => point.x)) - padding;
+  const maxX = Math.max(...points.map((point) => point.x)) + padding;
+  const minY = Math.min(...points.map((point) => point.y)) - padding;
+  const maxY = Math.max(...points.map((point) => point.y)) + padding;
+  const epsilon = 0.001;
+  return Buffer.byteLength(JSON.stringify({ geometry, style, payload }), 'utf8') <= INK_MAX_SERIALIZED_BYTES
+    && Math.abs((geometry.x as number) - minX) <= epsilon
+    && Math.abs((geometry.y as number) - minY) <= epsilon
+    && Math.abs((geometry.width as number) - (maxX - minX)) <= epsilon
+    && Math.abs((geometry.height as number) - (maxY - minY)) <= epsilon;
 }
 
 function isOverlayAnchor(value: unknown): boolean {

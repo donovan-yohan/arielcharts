@@ -1408,6 +1408,13 @@ code {
     min-width: 44px;
   }
 
+  .overlay-scene-controls label {
+    align-items: center;
+    display: flex;
+    min-height: 44px;
+    min-width: 44px;
+  }
+
   .canvas-empty-chooser-card {
     max-width: calc(100% - 16px);
     padding: 12px;

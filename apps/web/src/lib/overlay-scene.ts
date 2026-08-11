@@ -7,6 +7,7 @@ import {
   type OverlayWorldPoint,
 } from '@arielcharts/shared';
 import * as Y from 'yjs';
+import { validInkObject } from './freehand-ink';
 
 export const overlayOrigins = {
   localHuman: Symbol('arielcharts.local-human.overlay'),
@@ -133,7 +134,8 @@ export function readOverlayObject(id: string, value: unknown): OverlayObjectReco
 }
 
 export function isSupportedOverlayObject(object: OverlayObjectRecord): boolean {
-  return ['foundation.card', 'annotation.text', 'annotation.sticky'].includes(object.kind) && object.version === 1;
+  return (['foundation.card', 'annotation.text', 'annotation.sticky'].includes(object.kind) && object.version === 1)
+    || validInkObject(object);
 }
 
 export function readOverlayScene(doc: Y.Doc, diagramId: string): OverlaySceneSnapshot {

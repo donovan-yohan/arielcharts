@@ -3246,7 +3246,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     await verifiedClick(page, toggle, `${label} open overlay controls`);
     const panel = page.getByLabel('Overlay scene controls', { exact: true });
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
-    const actionNames = ['Add overlay', 'Move right', 'Anchor first node', 'Bring front', 'Copy overlay', 'Paste overlay', 'Delete overlay', 'Undo overlay', 'Restore overlay'] as const;
+    const actionNames = ['Add overlay', 'Move right', 'Anchor first node', 'Bring front', 'Copy overlay', 'Paste overlay', 'Delete overlay', 'Undo overlay', 'Restore overlay', 'Pen', 'Highlighter', 'Erase stroke'] as const;
     for (const actionName of actionNames) {
       const action = panel.getByRole('button', { name: actionName, exact: true });
       await action.scrollIntoViewIfNeeded();
@@ -3268,8 +3268,16 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
       assert(evidence.contained && evidence.reachable && evidence.height >= 44 && evidence.width >= 44,
         `${label} overlay action ${actionName} is not contained, reachable, and touch-sized: ${JSON.stringify(evidence)}.`);
     }
+    const compositeExport = panel.getByLabel('Include ink in composite export', { exact: true });
+    await assertHitTarget(page, compositeExport, `${label} composite ink export choice`);
+    const compositeExportBounds = await compositeExport.evaluate((input) => input.parentElement?.getBoundingClientRect().toJSON());
+    assert(compositeExportBounds && compositeExportBounds.width >= 44 && compositeExportBounds.height >= 44,
+      `${label} composite ink export choice is not touch-sized: ${JSON.stringify(compositeExportBounds)}.`);
+    assert(await compositeExport.isChecked(), `${label} did not default ink composite export to an explicit inclusion choice.`);
     const objectCount = await page.locator('[data-testid^="overlay-object-"]').count();
-    await verifiedClick(page, panel.getByRole('button', { name: 'Add overlay', exact: true }), `${label} add overlay from bounded panel`);
+    const addOverlay = panel.getByRole('button', { name: 'Add overlay', exact: true });
+    await addOverlay.scrollIntoViewIfNeeded();
+    await verifiedClick(page, addOverlay, `${label} add overlay from bounded panel`);
     await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(objectCount + 1);
     await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), `${label} close overlay controls`);
     await panel.waitFor({ state: 'detached', timeout: 5_000 });
@@ -3288,7 +3296,9 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     await page.mouse.click(exposedPoint.x, exposedPoint.y);
     await expect.poll(async () => object.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe('2px');
     await verifiedClick(page, page.getByRole('button', { name: 'Overlay tools', exact: true }), `${label} reopen overlay controls for cleanup`);
-    await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), `${label} delete mobile overlay fixture`);
+    const deleteOverlay = page.getByRole('button', { name: 'Delete overlay', exact: true });
+    await deleteOverlay.scrollIntoViewIfNeeded();
+    await verifiedClick(page, deleteOverlay, `${label} delete mobile overlay fixture`);
     await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(objectCount);
     await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), `${label} close overlay controls after cleanup`);
     await assertHitTarget(page, page.getByTestId('create-diagram-tab'), `${label} tab action after overlay close`);
@@ -3727,7 +3737,7 @@ async function allowedCanvasGesturePoints(
     const rect = root.getBoundingClientRect();
     // Keep the test's blank-point contract aligned with DiagramCanvas: a drag
     // beginning on a sequence editor form is intentionally not a canvas pan.
-    const forbiddenSelector = 'a, button, input, select, textarea, form, [contenteditable="true"], [role="button"], [data-canvas-pan-exclusion="true"], [data-subgraph-drag-target="true"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle';
+    const forbiddenSelector = 'a, button, input, label, select, textarea, form, [contenteditable="true"], [role="button"], [data-canvas-pan-exclusion="true"], [data-subgraph-drag-target="true"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle';
     const ratios = [0.12, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.88];
     const candidates: CanvasGesturePoint[] = [];
 

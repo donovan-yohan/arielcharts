@@ -1,4 +1,4 @@
-import type { AwarenessState, CanvasAwarenessState, CanvasLaserState, CanvasPresenceEntry, CanvasWorldPoint, Participant } from '@arielcharts/shared';
+import type { AwarenessState, CanvasAwarenessState, CanvasInkPreviewState, CanvasLaserState, CanvasPresenceEntry, CanvasWorldPoint, Participant } from '@arielcharts/shared';
 
 export const CANVAS_CURSOR_INTERVAL_MS = 75;
 export const CANVAS_CURSOR_GRID_SIZE = 4;
@@ -7,6 +7,7 @@ export const CANVAS_CURSOR_MIN_DISTANCE = 4;
 // immediate stop, cursor, selection, and editor-presence transitions.
 export const CANVAS_LASER_INTERVAL_MS = 125;
 export const CANVAS_LASER_GRID_SIZE = 2;
+export const CANVAS_INK_PREVIEW_MAX_POINTS = 64;
 
 function isParticipant(value: unknown): value is Participant {
   if (!value || typeof value !== 'object') return false;
@@ -39,13 +40,28 @@ function getCanvasAwarenessState(value: unknown): CanvasAwarenessState | null {
     return null;
   }
   if (canvas.laser !== undefined && !isCanvasLaserState(canvas.laser)) return null;
+  if (canvas.ink_preview !== undefined && !isCanvasInkPreviewState(canvas.ink_preview)) return null;
   return {
     diagram_id: canvas.diagram_id,
     ...(canvas.cursor ? { cursor: canvas.cursor } : {}),
     ...(canvas.selected_node_ids ? { selected_node_ids: [...new Set(canvas.selected_node_ids)] } : {}),
     ...(canvas.editing_node_id ? { editing_node_id: canvas.editing_node_id } : {}),
     ...(canvas.laser ? { laser: canvas.laser } : {}),
+    ...(canvas.ink_preview ? { ink_preview: canvas.ink_preview } : {}),
   };
+}
+
+export function isCanvasInkPreviewState(value: unknown): value is CanvasInkPreviewState {
+  if (!value || typeof value !== 'object') return false;
+  const preview = value as Partial<CanvasInkPreviewState>;
+  if (typeof preview.active !== 'boolean' || !Number.isSafeInteger(preview.sequence) || (preview.sequence ?? -1) < 0) return false;
+  if (!preview.active) return preview.points === undefined;
+  return (preview.mode === 'pen' || preview.mode === 'highlighter')
+    && typeof preview.color === 'string' && preview.color.length <= 32
+    && typeof preview.width === 'number' && Number.isFinite(preview.width) && preview.width > 0 && preview.width <= 64
+    && typeof preview.opacity === 'number' && Number.isFinite(preview.opacity) && preview.opacity >= 0 && preview.opacity <= 1
+    && Array.isArray(preview.points) && preview.points.length >= 1 && preview.points.length <= CANVAS_INK_PREVIEW_MAX_POINTS
+    && preview.points.every(isFinitePoint);
 }
 
 export function isCanvasLaserState(value: unknown): value is CanvasLaserState {
@@ -102,6 +118,14 @@ export function areCanvasAwarenessStatesEqual(left: CanvasAwarenessState | null,
     || left.laser?.sequence !== right.laser?.sequence
     || left.laser?.point?.x !== right.laser?.point?.x
     || left.laser?.point?.y !== right.laser?.point?.y) return false;
+  if (left.ink_preview?.active !== right.ink_preview?.active
+    || left.ink_preview?.sequence !== right.ink_preview?.sequence
+    || left.ink_preview?.mode !== right.ink_preview?.mode
+    || left.ink_preview?.color !== right.ink_preview?.color
+    || left.ink_preview?.width !== right.ink_preview?.width
+    || left.ink_preview?.opacity !== right.ink_preview?.opacity
+    || left.ink_preview?.points?.length !== right.ink_preview?.points?.length
+    || left.ink_preview?.points?.some((point, index) => point.x !== right.ink_preview?.points?.[index]?.x || point.y !== right.ink_preview?.points?.[index]?.y)) return false;
   const leftSelection = left.selected_node_ids ?? [];
   const rightSelection = right.selected_node_ids ?? [];
   return left.editing_node_id === right.editing_node_id

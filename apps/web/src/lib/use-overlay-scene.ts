@@ -3,6 +3,7 @@
 import type { OverlayObjectRecord, OverlaySceneSnapshot } from '@arielcharts/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Y from 'yjs';
+import { inkGeometry, simplifyInkPoints, type InkMode, type InkPoint } from './freehand-ink';
 import {
   addOverlayObject,
   beginOverlayTextComposition,
@@ -34,6 +35,7 @@ export interface OverlaySceneController {
   duplicate: (id: string) => void;
   beginComposition: (id: string) => OverlayTextComposition | null;
   commitComposition: (id: string, composition: OverlayTextComposition, draft: string) => void;
+  addStroke: (points: readonly InkPoint[], mode: InkMode, style: { color: string; width: number; opacity: number; compositeExport: boolean }) => void;
 }
 
 export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): OverlaySceneController | null {
@@ -75,13 +77,22 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
     const object = readOverlayScene(doc, diagramId).objects.find((candidate) => candidate.id === id);
     if (object) updateOverlayObject(doc, diagramId, id, {
       geometry: { ...object.geometry, x: object.geometry.x + dx, y: object.geometry.y + dy },
+      ...(object.kind === 'ink.stroke' ? { payload: {
+        ...object.payload,
+        points: Array.isArray(object.payload.points) ? object.payload.points.map((point) => ({
+          ...(point as Record<string, unknown>),
+          x: Number((point as { x: number }).x) + dx,
+          y: Number((point as { y: number }).y) + dy,
+        })) : [],
+      } } : {}),
       ...(object.anchor ? { anchor: {
         ...object.anchor,
         offset: { x: object.anchor.offset.x + dx, y: object.anchor.offset.y + dy },
         fallback: { x: object.anchor.fallback.x + dx, y: object.anchor.fallback.y + dy },
       } } : {}),
     });
-  }, [diagramId, doc]);
+    undoManager?.stopCapturing();
+  }, [diagramId, doc, undoManager]);
   const anchor = useCallback((id: string, mermaidId: string) => {
     if (!doc || !diagramId) return;
     const object = readOverlayScene(doc, diagramId).objects.find((candidate) => candidate.id === id);
@@ -89,7 +100,11 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
       anchor: { mermaid_id: mermaidId, offset: { x: 0, y: 0 }, fallback: { x: object.geometry.x, y: object.geometry.y } },
     });
   }, [diagramId, doc]);
-  const remove = useCallback((ids: readonly string[]) => { if (doc && diagramId) deleteOverlayObjects(doc, diagramId, ids); }, [diagramId, doc]);
+  const remove = useCallback((ids: readonly string[]) => {
+    if (!doc || !diagramId) return;
+    deleteOverlayObjects(doc, diagramId, ids);
+    undoManager?.stopCapturing();
+  }, [diagramId, doc, undoManager]);
   const reorder = useCallback((id: string, direction: 'front' | 'back') => {
     if (!doc || !diagramId) return;
     const key = `${direction === 'back' ? '!' : '~'}${Date.now().toString().padStart(16, '0')}:${doc.clientID}:${id}`;
@@ -114,11 +129,32 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
     const item = readOverlayScene(doc, diagramId).objects.find((candidate) => candidate.id === id);
     if (item) pasteOverlayObjects(doc, diagramId, [item], () => `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`);
   }, [diagramId, doc]);
+  const addStroke = useCallback((points: readonly InkPoint[], mode: InkMode, style: { color: string; width: number; opacity: number; compositeExport: boolean }) => {
+    if (!doc || !diagramId) return;
+    const simplified = simplifyInkPoints(points);
+    if (simplified.length < 2) return;
+    // A pointer-up is one user action even when another local overlay action
+    // happened inside Yjs' capture window. Keep each immutable stroke as its
+    // own undo unit.
+    undoManager?.stopCapturing();
+    const id = `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`;
+    addOverlayObject(doc, diagramId, {
+      id,
+      kind: 'ink.stroke',
+      version: 1,
+      order_key: `${Date.now().toString().padStart(16, '0')}:${doc.clientID}:${id}`,
+      geometry: inkGeometry(simplified, style.width),
+      style: { color: style.color, width: style.width, opacity: style.opacity },
+      metadata: { export: style.compositeExport ? 'composite-export' : 'arielcharts-only' },
+      payload: { points: simplified, mode, composite_export: style.compositeExport },
+    });
+    undoManager?.stopCapturing();
+  }, [diagramId, doc, undoManager]);
   const beginComposition = useCallback((id: string) => doc && diagramId ? beginOverlayTextComposition(doc, diagramId, id) : null, [diagramId, doc]);
   const commitComposition = useCallback((id: string, composition: OverlayTextComposition, draft: string) => {
     if (doc && diagramId) commitOverlayTextComposition(doc, diagramId, id, composition, draft);
   }, [diagramId, doc]);
 
   if (!scene) return null;
-  return { scene, add, move, anchor, remove, reorder, copy, paste, undo: () => undoManager?.undo(), update, editText, duplicate, beginComposition, commitComposition };
+  return { scene, add, move, anchor, remove, reorder, copy, paste, undo: () => undoManager?.undo(), update, editText, duplicate, beginComposition, commitComposition, addStroke };
 }

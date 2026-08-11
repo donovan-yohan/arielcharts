@@ -110,6 +110,79 @@ async function expectCollaborativeAnnotations(pageA: Page, pageB: Page): Promise
     `Collaborative annotation edits changed byte-identical Mermaid source: ${JSON.stringify({ sourceA, sourceB, afterSourceA, afterSourceB })}`);
 }
 
+async function expectCollaborativeInk(
+  pageA: Page,
+  pageB: Page,
+  cdpA: { send(method: string, params?: Record<string, unknown>): Promise<unknown> },
+): Promise<void> {
+  const sourceBefore = await canonicalPageSource(pageA);
+  const canvas = pageA.getByTestId('diagram-canvas');
+  const canvasBox = await boxOf(canvas, 'Ink canvas was missing.');
+  const enable = async (page: Page, tool: 'Pen' | 'Highlighter' | 'Erase stroke') => {
+    await verifiedOverlayClick(page, 'Overlay tools');
+    await verifiedOverlayClick(page, tool);
+    await verifiedOverlayClick(page, 'Close overlay tools');
+  };
+  await enable(pageA, 'Pen');
+  const surfaceA = pageA.getByTestId('ink-drawing-surface');
+  await surfaceA.waitFor({ state: 'visible', timeout: 15_000 });
+  await pageA.mouse.move(canvasBox.x + 180, canvasBox.y + 180); await pageA.mouse.down();
+  await pageA.mouse.move(canvasBox.x + 280, canvasBox.y + 230, { steps: 4 });
+  // Presence is deliberately coalesced; give one later input event a chance to
+  // publish the lossy preview rather than relying on a durable final stroke.
+  await pageA.waitForTimeout(150);
+  await pageA.mouse.move(canvasBox.x + 292, canvasBox.y + 238);
+  const remotePreview = pageB.locator('[data-testid^="ink-preview-"]');
+  await remotePreview.waitFor({ state: 'visible', timeout: 15_000 });
+  await pageA.mouse.up();
+  await remotePreview.waitFor({ state: 'detached', timeout: 15_000 });
+  await Promise.all([
+    expect(pageA.locator('[data-testid^="ink-stroke-"]')).toHaveCount(1),
+    expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(1),
+  ]);
+
+  await enable(pageA, 'Highlighter');
+  // CDP produces a browser-routed stylus gesture. The first stroke above is
+  // ordinary mouse input; this verifies the highlighter path without relying
+  // on a synthetic React event's pointer-capture semantics.
+  await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 1, pointerType: 'pen', type: 'mousePressed', x: canvasBox.x + 220, y: canvasBox.y + 280 });
+  await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 1, pointerType: 'pen', type: 'mouseMoved', x: canvasBox.x + 320, y: canvasBox.y + 320 });
+  await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 0, pointerType: 'pen', type: 'mouseReleased', x: canvasBox.x + 380, y: canvasBox.y + 330 });
+  await Promise.all([
+    expect(pageA.locator('[data-testid^="ink-stroke-"]')).toHaveCount(2),
+    expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(2),
+  ]);
+  // A real browser touch route must remain a drawing gesture while the ink
+  // surface is active; it must not fall through to canvas pan/zoom handling.
+  await cdpA.send('Input.dispatchTouchEvent', { touchPoints: [{ id: 93, x: canvasBox.x + 250, y: canvasBox.y + 360 }], type: 'touchStart' });
+  await cdpA.send('Input.dispatchTouchEvent', { touchPoints: [{ id: 93, x: canvasBox.x + 340, y: canvasBox.y + 390 }], type: 'touchMove' });
+  await cdpA.send('Input.dispatchTouchEvent', { touchPoints: [], type: 'touchEnd' });
+  await Promise.all([
+    expect(pageA.locator('[data-testid^="ink-stroke-"]')).toHaveCount(3),
+    expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(3),
+  ]);
+  const orderA = await pageA.locator('[data-testid^="ink-stroke-"]').evaluateAll((items) => items.map((item) => item.getAttribute('data-testid')));
+  const orderB = await pageB.locator('[data-testid^="ink-stroke-"]').evaluateAll((items) => items.map((item) => item.getAttribute('data-testid')));
+  assert(JSON.stringify(orderA) === JSON.stringify(orderB), `Finalized ink did not retain a stable converged order: ${JSON.stringify({ orderA, orderB })}`);
+  const firstId = orderA[0]?.replace('ink-stroke-', ''); assert(firstId, 'Finalized ink did not expose a durable overlay id.');
+  await verifiedOverlayClick(pageA, 'Overlay tools'); await verifiedOverlayClick(pageA, 'Highlighter');
+  const firstObject = pageA.getByTestId(`overlay-object-${firstId}`);
+  const beforeMove = await firstObject.getAttribute('data-world-x'); await firstObject.click();
+  await verifiedOverlayClick(pageA, 'Move right');
+  await expect.poll(() => firstObject.getAttribute('data-world-x')).not.toBe(beforeMove);
+  // Deliberately separate the independent move and delete undo units.
+  await pageA.waitForTimeout(550);
+  await verifiedOverlayClick(pageA, 'Delete overlay'); await expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(2);
+  await verifiedOverlayClick(pageA, 'Undo overlay'); await expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(3);
+  await verifiedOverlayClick(pageA, 'Erase stroke'); await verifiedOverlayClick(pageA, 'Close overlay tools');
+  const eraseBox = await boxOf(firstObject, 'Ink object was missing for whole-stroke eraser.');
+  await pageA.mouse.click(eraseBox.x + eraseBox.width / 2, eraseBox.y + eraseBox.height / 2);
+  await expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(2);
+  await verifiedOverlayClick(pageA, 'Overlay tools'); await verifiedOverlayClick(pageA, 'Erase stroke'); await verifiedOverlayClick(pageA, 'Close overlay tools');
+  const sourceAfter = await canonicalPageSource(pageA);
+  assert(sourceAfter === sourceBefore, 'Ink creation, move, delete, undo, or erase changed Mermaid source bytes.');
+}
+
 async function verifiedOverlayClick(page: Page, name: string): Promise<void> {
   const button = page.getByRole('button', { name, exact: true });
   await button.scrollIntoViewIfNeeded(); await button.click();
@@ -569,6 +642,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await closeSourceFlyout(pageA);
     await Promise.all([waitForFlowchart(pageA), waitForFlowchart(pageB)]);
     await expectCollaborativeAnnotations(pageA, pageB);
+    await expectCollaborativeInk(pageA, pageB, cdpA);
 
     const pageAParticipantName = await getInternalParticipantName(pageA);
     const pageARemoteCursor = remoteCursorForParticipant(pageB, pageAParticipantName);

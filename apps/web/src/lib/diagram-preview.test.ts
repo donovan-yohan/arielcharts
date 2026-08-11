@@ -68,6 +68,13 @@ describe('DiagramPreviewRegistry', () => {
     expect(canUseSemanticFamilyControls(gitGraphPreview.source, gitGraphPreview, 'gitgraph')).toBe(true);
     expect(canUseSemanticFamilyControls(eventPreview.source, eventPreview, 'event-modeling')).toBe(true);
     expect(canUseSemanticFamilyControls(kanbanPreview.source, kanbanPreview, 'kanban')).toBe(true);
+    const mindmapPreview: DiagramPreview = { capability: { adapter: 'mindmap', diagramType: 'mindmap', kind: 'generic' }, diagramId: 'mindmap', flowchartSnapshot: null, source: 'mindmap\n  Root\n    Child', svg: '<svg />' };
+    const treeViewPreview: DiagramPreview = { capability: { adapter: 'tree-view', diagramType: 'treeView', kind: 'generic' }, diagramId: 'tree', flowchartSnapshot: null, source: 'treeView-beta\n  Root\n    child.txt', svg: '<svg />' };
+    const ishikawaPreview: DiagramPreview = { capability: { adapter: 'ishikawa', diagramType: 'ishikawa', kind: 'generic' }, diagramId: 'fish', flowchartSnapshot: null, source: 'ishikawa-beta\n  Effect\n  Cause', svg: '<svg />' };
+    expect(canUseSemanticFamilyControls(mindmapPreview.source, mindmapPreview, 'mindmap')).toBe(true);
+    expect(canUseSemanticFamilyControls(treeViewPreview.source, treeViewPreview, 'tree-view')).toBe(true);
+    expect(canUseSemanticFamilyControls(ishikawaPreview.source, ishikawaPreview, 'ishikawa')).toBe(true);
+    expect(canUseSemanticFamilyControls('mindmap\n  Root\n    Child:::inline', { ...mindmapPreview, source: 'mindmap\n  Root\n    Child:::inline' }, 'mindmap')).toBe(false);
   });
 
   it('isolates last-known-good previews by stable diagram id', () => {

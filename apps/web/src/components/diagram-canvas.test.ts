@@ -41,6 +41,31 @@ describe('canvas pan exclusions', () => {
   });
 });
 
+describe('new semantic families', () => {
+  it('keeps Mindmap, TreeView, and Ishikawa controls in the measured semantic layer with canonical drafts', () => {
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+    expect(canvasSource).toMatch(/data-testid="mindmap-editor-controls"/u);
+    expect(canvasSource).toMatch(/data-testid="treeview-editor-controls"/u);
+    expect(canvasSource).toMatch(/data-testid="ishikawa-editor-controls"/u);
+    expect(canvasSource).toMatch(/MindmapNodeForm[^]*?useCanonicalDraft\(node\)/u);
+    expect(canvasSource).toMatch(/TreeViewNodeForm[^]*?useCanonicalDraft\(node\)/u);
+    expect(canvasSource).toMatch(/IshikawaCauseForm[^]*?useCanonicalDraft\(cause\)/u);
+    expect(canvasSource).toMatch(/const HIERARCHY_CONTROL_STYLE: CSSProperties = \{ minHeight: 44, minWidth: 44 \}/u);
+    expect(canvasSource).toMatch(/function getMeasuredSemanticPanelMaxHeight\(viewport: ViewportRect, bottom: number\): number \{ return Math\.max\(44, Math\.min\(SEMANTIC_PANEL_MAX_HEIGHT, viewport\.height - bottom - SEMANTIC_PANEL_TOP_INSET\)\); \}/u);
+    expect(canvasSource).toMatch(/const hierarchyPanelMaxHeight = getMeasuredSemanticPanelMaxHeight\(canvasViewport, erEditorBottom\);/u);
+    expect(canvasSource).toMatch(/MindmapEditorControls bottom=\{erEditorBottom\}[^]*?maxHeight=\{hierarchyPanelMaxHeight\}/u);
+    expect(canvasSource).toMatch(/function hierarchyPath[^]*?join\(' \/ '\)/u);
+    expect(canvasSource).toMatch(/function isInvalidHierarchyParent[^]*?candidateAncestors\.length >= nodePath\.length/u);
+    expect(canvasSource).toMatch(/canvas-hierarchy-editor[^]*?New Mindmap parent[^]*?hierarchyPath\(item\)/u);
+    expect(canvasSource).toMatch(/const label = `Mindmap node \$\{node\.label\}`;[^]*?disabled=\{isInvalidHierarchyParent/u);
+    expect(canvasSource).toMatch(/const label = `TreeView node \$\{node\.label\}`;[^]*?disabled=\{isInvalidHierarchyParent/u);
+    expect(canvasSource).toMatch(/isSafeHierarchyIdentity\(identity\)/u);
+    expect(workspaceSource).toMatch(/onAddMindmapNode[^]*?mutateCanvasSource/u);
+    expect(workspaceSource).toMatch(/onAddTreeViewNode[^]*?mutateCanvasSource/u);
+    expect(workspaceSource).toMatch(/onSetIshikawaEffect[^]*?mutateCanvasSource/u);
+  });
+});
+
 describe('ER editor safe area', () => {
   it('keeps the semantic form above the measured canvas controls toolbar', () => {
     expect(canvasSource).toMatch(/const erEditorBottom = canvasToolbarStack\.bottom \+ controlsToolbarHeight \+ BOTTOM_TOOLBAR_GAP;/u);

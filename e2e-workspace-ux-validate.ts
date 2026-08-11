@@ -183,6 +183,19 @@ const KANBAN_DIAGRAM_FIXTURE = `kanban
   todo[Todo]
     design[Design]@{ assigned: "Ava" }
   done[Done]`;
+const MINDMAP_DIAGRAM_FIXTURE = `mindmap
+  Root
+    Child
+    Other`;
+const TREE_VIEW_DIAGRAM_FIXTURE = `treeView-beta
+  root/
+    src/
+      index.ts
+    README.md`;
+const ISHIKAWA_DIAGRAM_FIXTURE = `ishikawa-beta
+  Delivery delay
+  Process
+  Equipment`;
 
 const ACTIVITY_FIT_VIEWPORT = { width: 1487, height: 1058 } as const;
 const SAFE_FLYOUT_MARGIN = 16;
@@ -1377,6 +1390,24 @@ async function expectBoardSemanticEditors(page: Page): Promise<void> {
   await replaceSource(page, 'kanban\n  todo[');
   await waitForSource(page, 'kanban\n  todo[');
   await expect(page.getByTestId('kanban-editor-controls')).toHaveCount(0);
+}
+
+async function expectHierarchySemanticEditors(page: Page): Promise<void> {
+  const anchorsBefore = await snapshotAnchors(page, ANCHORS);
+  await replaceSource(page, MINDMAP_DIAGRAM_FIXTURE); await waitForSource(page, MINDMAP_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Mindmap · editable · form'); await closeFlyout(page, 'source');
+  const mindmap = page.getByTestId('mindmap-editor-controls'); const addMindmap = mindmap.getByRole('button', { name: 'Add node', exact: true }); await assertTouchTarget(page, addMindmap, 'Mindmap hierarchy add-node control'); await assertAndClickBoardControl(page, addMindmap, 'Mindmap add-node control');
+  const mindmapNode = mindmap.getByRole('form', { name: 'Mindmap node Node', exact: true }); await mindmapNode.getByLabel('Mindmap node Node label').fill('Mobile'); await mindmapNode.getByLabel('Mindmap node Node shape').selectOption('rounded'); await mindmapNode.getByLabel('Mindmap node Node classes').fill('client'); await mindmapNode.getByLabel('Mindmap node Node icon').fill('fa fa-phone'); await assertAndClickBoardControl(page, mindmapNode.getByRole('button', { name: 'Save', exact: true }), 'Mindmap edit-node control');
+  const mobile = mindmap.getByRole('form', { name: 'Mindmap node Mobile', exact: true }); await mobile.getByLabel('Mindmap node Mobile parent').selectOption({ label: 'Root / Child' }); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('Child\n      (Mobile)'); await closeFlyout(page, 'source'); await assertAndClickBoardControl(page, mobile.getByLabel('Delete Mindmap node Mobile', { exact: true }), 'Mindmap delete-node control'); await assertAndClickBoardControl(page, mindmap.getByLabel('Move Mindmap node Other up', { exact: true }), 'Mindmap reorder control');
+  await replaceSource(page, 'mindmap\n  Root\n    Child:::inline'); await waitForSource(page, 'mindmap\n  Root\n    Child:::inline'); await expect(page.getByTestId('mindmap-editor-controls')).toHaveCount(0);
+
+  await replaceSource(page, TREE_VIEW_DIAGRAM_FIXTURE); await waitForSource(page, TREE_VIEW_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Tree view · editable · form'); await closeFlyout(page, 'source');
+  const tree = page.getByTestId('treeview-editor-controls'); const addTree = tree.getByRole('button', { name: 'Add node', exact: true }); await assertTouchTarget(page, addTree, 'TreeView hierarchy add-node control'); await assertAndClickBoardControl(page, addTree, 'TreeView add-node control'); const treeNode = tree.getByRole('form', { name: 'TreeView node file.txt', exact: true }); await treeNode.getByLabel('TreeView node file.txt label').fill('package.json'); await treeNode.getByLabel('TreeView node file.txt description').fill('manifest'); await treeNode.getByLabel('TreeView node file.txt classes').fill('config'); await treeNode.getByLabel('TreeView node file.txt icon').fill('json'); await assertAndClickBoardControl(page, treeNode.getByRole('button', { name: 'Save', exact: true }), 'TreeView edit-node control'); const packageJson = tree.getByRole('form', { name: 'TreeView node package.json', exact: true }); await packageJson.getByLabel('TreeView node package.json parent').selectOption({ label: 'root / src' }); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('src/\n      index.ts\n      package.json'); await closeFlyout(page, 'source'); await assertAndClickBoardControl(page, packageJson.getByLabel('Delete TreeView node package.json', { exact: true }), 'TreeView delete-node control'); await assertAndClickBoardControl(page, tree.getByLabel('Move TreeView node README.md up', { exact: true }), 'TreeView reorder control');
+  await replaceSource(page, 'treeView-beta\n  Root\n   Unclear'); await waitForSource(page, 'treeView-beta\n  Root\n   Unclear'); await expect(page.getByTestId('treeview-editor-controls')).toHaveCount(0);
+
+  await replaceSource(page, ISHIKAWA_DIAGRAM_FIXTURE); await waitForSource(page, ISHIKAWA_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Ishikawa · editable · form'); await closeFlyout(page, 'source');
+  const ishikawa = page.getByTestId('ishikawa-editor-controls'); const effect = ishikawa.getByLabel('Ishikawa effect'); await assertBoardControl(page, effect, 'Ishikawa effect control'); await effect.fill('Delivery risk'); await assertAndClickBoardControl(page, ishikawa.getByRole('button', { name: 'Save effect', exact: true }), 'Ishikawa effect save control'); await ishikawa.getByLabel('New Ishikawa cause').fill('Training'); await ishikawa.getByLabel('New Ishikawa parent').selectOption({ label: 'Process' }); const addCause = ishikawa.getByRole('button', { name: 'Add cause', exact: true }); await assertTouchTarget(page, addCause, 'Ishikawa hierarchy add-cause control'); await assertAndClickBoardControl(page, addCause, 'Ishikawa add-cause control'); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe('ishikawa-beta\n  Delivery risk\n  Process\n    Training\n  Equipment'); await closeFlyout(page, 'source'); const training = ishikawa.getByRole('form', { name: 'Ishikawa cause Training', exact: true }); await training.getByLabel('Ishikawa cause Training label').fill('Operator training'); await assertAndClickBoardControl(page, training.getByRole('button', { name: 'Save', exact: true }), 'Ishikawa edit-cause control'); const operatorTraining = ishikawa.getByRole('form', { name: 'Ishikawa cause Operator training', exact: true }); await operatorTraining.getByLabel('Ishikawa cause Operator training parent').selectOption({ label: 'Equipment' }); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toContain('Equipment\n    Operator training'); await closeFlyout(page, 'source'); await assertAndClickBoardControl(page, operatorTraining.getByLabel('Delete Ishikawa cause Operator training', { exact: true }), 'Ishikawa delete-cause control'); await assertAndClickBoardControl(page, ishikawa.getByLabel('Move Ishikawa cause Equipment up', { exact: true }), 'Ishikawa reorder control');
+  await replaceSource(page, 'ishikawa-beta\n  Effect\n  Parent\n      Skipped'); await waitForSource(page, 'ishikawa-beta\n  Effect\n  Parent\n      Skipped'); await expect(page.getByTestId('ishikawa-editor-controls')).toHaveCount(0);
+  assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS));
 }
 
 async function assertAndClickBoardControl(page: Page, target: Locator, label: string): Promise<void> {
@@ -3484,7 +3515,8 @@ async function expectRevisionHistoryCollaboration(
       'Cancelling history preview changed peer local state.');
 
     const historyBeforeRestore = await mcp.listDiagramHistory(sessionId, target.id);
-    const activityCountBeforeRestore = observer.snapshot(target.id).activity.length;
+    const restoredActivityCountBeforeRestore = observer.snapshot(target.id).activity
+      .filter((event) => event.action === 'restored' && event.restoredFromRevisionId === historical.revision.id).length;
     const restoreTracker = observer.trackSnapshot(target.id);
     const serverOrigin = new URL(mcpUrl).origin;
     const currentPath = `/api/sessions/${encodeURIComponent(sessionId)}/diagrams/${encodeURIComponent(target.id)}`;
@@ -3541,10 +3573,17 @@ async function expectRevisionHistoryCollaboration(
     assert(restoredCurrent.mermaidText === historical.revision.mermaidText
       && restoredCurrent.revision === historyAfterRestore.currentRevision,
     'MCP current head did not match the confirmed UI restore.');
+    await observer.waitFor(
+      (current) => {
+        const activity = current.snapshot(target.id).activity;
+        return activity.filter((event) => event.action === 'restored'
+          && event.restoredFromRevisionId === historical.revision.id).length === restoredActivityCountBeforeRestore + 1;
+      },
+      'the linked restore activity in Yjs',
+    );
     const activityAfterRestore = observer.snapshot(target.id).activity;
-    assert(activityAfterRestore.length === activityCountBeforeRestore + 1
-      && activityAfterRestore.at(-1)?.action === 'restored'
-      && activityAfterRestore.at(-1)?.restoredFromRevisionId === historical.revision.id,
+    assert(activityAfterRestore.filter((event) => event.action === 'restored'
+      && event.restoredFromRevisionId === historical.revision.id).length === restoredActivityCountBeforeRestore + 1,
     `Confirmed restore did not append exactly one linked activity item: ${JSON.stringify(activityAfterRestore.slice(-2))}.`);
     await saveScreenshot(page, 'issue-17-history-restored');
 
@@ -3767,6 +3806,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'Journey, Gantt, and Timeline semantic forms expose hit-tested source-backed controls and fail closed for advanced source');
       await expectBoardSemanticEditors(page);
       record(results, 'GitGraph, Event Modeling, and Kanban semantic forms expose hit-tested source-backed controls and fail closed for invalid history/source');
+      await expectHierarchySemanticEditors(page);
+      record(results, 'Mindmap, TreeView, and Ishikawa semantic forms expose hit-tested hierarchy controls and fail closed for advanced source');
       await selectTabByName(page, diagramName);
       await expectMermaidStatesAndToolbar(page);
       record(results, 'flowchart, static, invalid Mermaid, and toolbar action');

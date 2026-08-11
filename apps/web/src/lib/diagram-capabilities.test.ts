@@ -98,6 +98,9 @@ describe('diagram capability catalog', () => {
     const gitgraph = classifyDiagramCapability('gitGraph');
     const eventModeling = classifyDiagramCapability('eventmodeling');
     const kanban = classifyDiagramCapability('kanban');
+    const mindmap = classifyDiagramCapability('mindmap');
+    const treeView = classifyDiagramCapability('treeView');
+    const ishikawa = classifyDiagramCapability('ishikawa');
 
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A --> B', 'add-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(flowchart).getOperationResult('flowchart TD\n  A -->', 'add-node')).toEqual({ supported: false, reason: 'unrepresentable' });
@@ -119,6 +122,9 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(gitgraph).getOperationResult('gitGraph\n  commit id: "base"', 'add-branch')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(eventModeling).getOperationResult('eventmodeling\n  entity Order', 'add-timeframe')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(kanban).getOperationResult('kanban\n  todo[Todo]', 'add-card')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(mindmap).getOperationResult('mindmap\n  Root\n    Child', 'reparent-node')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(treeView).getOperationResult('treeView-beta\n  Root\n    child.txt', 'move-node')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(ishikawa).getOperationResult('ishikawa-beta\n  Effect\n  Cause', 'set-effect')).toEqual({ supported: true });
     const noteOnlySequence = 'sequenceDiagram\n  Note over A: details';
     await expect(mermaid.parse(noteOnlySequence)).resolves.toMatchObject({ diagramType: 'sequence' });
     expect(getDiagramSourceModelAdapter(sequence).getOperationResult(noteOnlySequence, 'add-message')).toEqual({ supported: true });
@@ -147,6 +153,9 @@ describe('diagram capability catalog', () => {
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('gitGraph'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('eventmodeling'))).toBe(true);
     expect(isStructurallyEditableDiagram(classifyDiagramCapability('kanban'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('mindmap'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('treeView'))).toBe(true);
+    expect(isStructurallyEditableDiagram(classifyDiagramCapability('ishikawa'))).toBe(true);
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('flowchart-v2'))).toBe('Flowchart · editable · canvas');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('sequence'))).toBe('Sequence · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('er'))).toBe('Entity relationship · editable · form');
@@ -162,6 +171,9 @@ describe('diagram capability catalog', () => {
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('gitGraph'))).toBe('Gitgraph · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('eventmodeling'))).toBe('Event modeling · editable · form');
     expect(getDiagramCapabilityLabel(classifyDiagramCapability('kanban'))).toBe('Kanban · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('mindmap'))).toBe('Mindmap · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('treeView'))).toBe('Tree view · editable · form');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('ishikawa'))).toBe('Ishikawa · editable · form');
   });
 
   it('labels a current unrepresentable structural source as source-only', () => {

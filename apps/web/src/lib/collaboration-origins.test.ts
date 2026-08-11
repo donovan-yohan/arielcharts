@@ -16,6 +16,9 @@ import { addTimelineEvent } from './timeline-mutations';
 import { addGitGraphCommit } from './gitgraph-mutations';
 import { addEventModelingEntity } from './event-modeling-mutations';
 import { addKanbanColumn } from './kanban-mutations';
+import { addMindmapNode } from './mindmap-mutations';
+import { addTreeViewNode } from './treeview-mutations';
+import { addIshikawaCause } from './ishikawa-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from './collaboration-origins';
 
 describe('collaboration transaction origins', () => {
@@ -132,6 +135,9 @@ describe('collaboration transaction origins', () => {
     ['gitgraph', 'gitGraph', (source: string) => addGitGraphCommit(source, { id: 'base', tags: [] })],
     ['event modeling', 'eventmodeling', (source: string) => addEventModelingEntity(source, 'Order')],
     ['kanban', 'kanban', (source: string) => addKanbanColumn(source, { id: 'todo', title: 'Todo' })],
+    ['mindmap', 'mindmap\n  Root', (source: string) => addMindmapNode(source, { classes: [], label: 'Child', shape: 'default' }, { node: { classes: [], label: 'Root', shape: 'default' }, occurrenceCount: 1 })],
+    ['tree view', 'treeView-beta\n  Root', (source: string) => addTreeViewNode(source, { classes: [], directory: false, label: 'child.txt', quoted: false }, { node: { classes: [], directory: false, label: 'Root', quoted: false, sourceStyle: 'indent' }, occurrenceCount: 1 })],
+    ['ishikawa', 'ishikawa-beta\n  Effect', (source: string) => addIshikawaCause(source, { label: 'Cause', parent: null })],
   ])('keeps %s semantic form mutations in the local visual undo stack', (_family, initial, mutate) => {
     const doc = new Y.Doc();
     const source = doc.getText('semantic-source');

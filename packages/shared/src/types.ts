@@ -22,6 +22,13 @@ export interface CanvasWorldPoint {
   y: number;
 }
 
+/** One bounded, ephemeral laser sample. Sequence is monotonic per browser connection. */
+export interface CanvasLaserState {
+  active: boolean;
+  sequence: number;
+  point?: CanvasWorldPoint;
+}
+
 /**
  * Live canvas presence. Awareness transports this field only; it is never a
  * Yjs document value, activity entry, revision, or persisted session field.
@@ -29,6 +36,7 @@ export interface CanvasWorldPoint {
 export interface CanvasAwarenessState {
   diagram_id: string;
   cursor?: CanvasWorldPoint;
+  laser?: CanvasLaserState;
   selected_node_ids?: string[];
   /** A live advisory marker only; never a draft, lock, or durable value. */
   editing_node_id?: string;

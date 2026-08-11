@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
+import { applyAwarenessUpdate, Awareness } from 'y-protocols/awareness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, type RawData } from 'ws';
 import * as Y from 'yjs';
@@ -97,6 +98,8 @@ async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 5_000)
 
 async function openClient(port: number, sessionId: string, cookie: string) {
   const doc = new Y.Doc();
+  const awareness = new Awareness(doc);
+  awareness.setLocalState(null);
   let awarenessMessageCount = 0;
   let documentMessageCount = 0;
   const socket = new WebSocket(`ws://127.0.0.1:${port}/ws/${sessionId}`, {
@@ -124,7 +127,7 @@ async function openClient(port: number, sessionId: string, cookie: string) {
 
     if (messageType === MESSAGE_TYPE_AWARENESS) {
       awarenessMessageCount += 1;
-      decoding.readVarUint8Array(decoderInstance);
+      applyAwarenessUpdate(awareness, decoding.readVarUint8Array(decoderInstance), socket);
     }
   });
 
@@ -144,6 +147,7 @@ async function openClient(port: number, sessionId: string, cookie: string) {
       return documentMessageCount;
     },
     doc,
+    awareness,
     socket,
     close: async () => {
       if (socket.readyState === WebSocket.CLOSED) {
@@ -394,7 +398,11 @@ describe('SessionWebSocketServer', () => {
     const clientA = await openClient(port, sessionId, roomCookie);
     const clientB = await openClient(port, sessionId, roomCookie);
     const stateA = { user: { name: 'A', color: '#111111', type: 'human' } };
-    const currentStateA = { user: { name: 'A', color: '#111111', type: 'human' }, cursor: { anchor: 8, head: 8 } };
+    const currentStateA = {
+      user: { name: 'A', color: '#111111', type: 'human' },
+      cursor: { anchor: 8, head: 8 },
+      canvas: { diagram_id: 'main', laser: { active: true, sequence: 7, point: { x: 12, y: 16 } } },
+    };
     const stateB = { user: { name: 'B', color: '#222222', type: 'human' } };
     clientA.sendAwareness([{ clientId: 101, clock: 1, state: stateA }]);
     clientB.sendAwareness([{ clientId: 202, clock: 1, state: stateB }]);
@@ -576,6 +584,136 @@ describe('SessionWebSocketServer', () => {
     await client.close();
   });
 
+  it('keeps bounded laser samples awareness-only and strips invalid laser state', async () => {
+    const sessionId = 'abc123de';
+    const client = await openClient(port, sessionId, roomCookie);
+    const participant = { name: 'Laser user', color: '#ff3366', type: 'human' };
+    const session = await app.manager.getOrCreateSession(sessionId);
+    let documentUpdates = 0;
+    session.doc.on('update', () => { documentUpdates += 1; });
+
+    client.sendAwareness([{
+      clientId: 416,
+      clock: 1,
+      state: { user: participant },
+    }]);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(416)).toEqual({ user: participant });
+    });
+    documentUpdates = 0;
+
+    client.sendAwareness([{
+      clientId: 416,
+      clock: 2,
+      state: { user: participant, canvas: { diagram_id: 'main', laser: { active: true, sequence: 1, point: { x: 24, y: -12 } } } },
+    }]);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(416)).toEqual({
+        user: participant,
+        canvas: { diagram_id: 'main', laser: { active: true, sequence: 1, point: { x: 24, y: -12 } } },
+      });
+    });
+    expect(documentUpdates).toBe(0);
+    expect(session.doc.share.has('laser')).toBe(false);
+
+    client.sendAwareness([{
+      clientId: 416,
+      clock: 3,
+      state: { user: participant, canvas: { diagram_id: 'main', laser: { active: true, sequence: 2, point: { x: 1_000_001, y: 0 } } } },
+    }]);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(416)).toEqual({ user: participant });
+    });
+    expect(documentUpdates).toBe(0);
+    await client.close();
+  });
+
+  it('keeps the laser watermark for owned lifetime without old-clock poisoning and resets on disconnect', async () => {
+    const sessionId = 'abc123de';
+    const sender = await openClient(port, sessionId, roomCookie);
+    const observer = await openClient(port, sessionId, roomCookie);
+    const participant = { name: 'Sequenced laser', color: '#ff3366', type: 'human' };
+    const session = await app.manager.getOrCreateSession(sessionId);
+    const active = (sequence: number) => ({
+      user: participant,
+      canvas: { diagram_id: 'main', laser: { active: true, sequence, point: { x: sequence, y: sequence } } },
+    });
+
+    sender.sendAwareness([{ clientId: 417, clock: 1, state: active(5) }]);
+    await waitFor(() => expect(session.awareness.getStates().get(417)).toEqual(active(5)));
+    const observerAfterAccepted = observer.awarenessMessageCount;
+    sender.sendAwareness([{ clientId: 417, clock: 2, state: active(5) }]);
+    sender.sendAwareness([{ clientId: 417, clock: 3, state: active(4) }]);
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(session.awareness.getStates().get(417)).toEqual(active(5));
+    expect(session.awareness.meta.get(417)?.clock).toBe(1);
+    expect(observer.awarenessMessageCount).toBe(observerAfterAccepted);
+
+    const inactive = { user: participant, canvas: { diagram_id: 'main', laser: { active: false, sequence: 6 } } };
+    sender.sendAwareness([{ clientId: 417, clock: 4, state: inactive }]);
+    await waitFor(() => expect(session.awareness.getStates().get(417)).toEqual(inactive));
+    const observerAfterInactive = observer.awarenessMessageCount;
+    sender.sendAwareness([{ clientId: 417, clock: 5, state: active(1) }]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(session.awareness.getStates().get(417)).toEqual(inactive);
+    expect(observer.awarenessMessageCount).toBe(observerAfterInactive);
+
+    sender.sendAwareness([{ clientId: 417, clock: 6, state: { user: participant } }]);
+    await waitFor(() => expect(session.awareness.getStates().get(417)).toEqual({ user: participant }));
+    const observerAfterOmitted = observer.awarenessMessageCount;
+    sender.sendAwareness([{ clientId: 417, clock: 5, state: active(999) }]);
+    sender.sendAwareness([{ clientId: 417, clock: 7, state: active(6) }]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(session.awareness.getStates().get(417)).toEqual({ user: participant });
+    expect(session.awareness.meta.get(417)?.clock).toBe(6);
+    expect(observer.awarenessMessageCount).toBe(observerAfterOmitted);
+
+    sender.sendAwareness([{ clientId: 417, clock: 8, state: active(7) }]);
+    await waitFor(() => expect(session.awareness.getStates().get(417)).toEqual(active(7)));
+    const freshObserver = await openClient(port, sessionId, roomCookie);
+    await waitFor(() => expect(freshObserver.awareness.getStates().get(417)).toEqual(active(7)));
+    expect(freshObserver.awareness.getStates().get(417)).not.toEqual(active(999));
+    await freshObserver.close();
+
+    await sender.close();
+    await waitFor(() => expect(session.awareness.getStates().has(417)).toBe(false));
+    const reconnected = await openClient(port, sessionId, roomCookie);
+    reconnected.sendAwareness([{ clientId: 417, clock: 100, state: active(1) }]);
+    await waitFor(() => expect(session.awareness.getStates().get(417)).toEqual(active(1)));
+    await reconnected.close();
+    await observer.close();
+  });
+
+  it('admits the legitimate ten-second laser cadence with stop and collaboration headroom', async () => {
+    const sessionId = 'abc123de';
+    const sender = await openClient(port, sessionId, roomCookie);
+    const observer = await openClient(port, sessionId, roomCookie);
+    const participant = { name: 'Sustained laser', color: '#ff3366', type: 'human' };
+    const session = await app.manager.getOrCreateSession(sessionId);
+    for (let sequence = 1; sequence <= 80; sequence += 1) {
+      sender.sendAwareness([{
+        clientId: 418,
+        clock: sequence,
+        state: { user: participant, canvas: { diagram_id: 'main', laser: { active: true, sequence, point: { x: sequence, y: sequence } } } },
+      }]);
+    }
+    sender.sendAwareness([{
+      clientId: 418,
+      clock: 81,
+      state: { user: participant, canvas: { diagram_id: 'main', laser: { active: false, sequence: 81 } } },
+    }]);
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(418)).toEqual({
+        user: participant,
+        canvas: { diagram_id: 'main', laser: { active: false, sequence: 81 } },
+      });
+    });
+    expect(sender.socket.readyState).toBe(WebSocket.OPEN);
+    expect(observer.awarenessMessageCount).toBeGreaterThanOrEqual(81);
+    await sender.close();
+    await observer.close();
+  });
+
   it('drops over-state-byte-limit awareness before parsing, ownership, or peer fan-out', async () => {
     const sessionId = 'abc123de';
     const sender = await openClient(port, sessionId, roomCookie);
@@ -638,7 +776,10 @@ describe('SessionWebSocketServer', () => {
       attacker.sendAwareness([{
         clientId: 10_000 + index,
         clock: 1,
-        state: { user: { name: `Flood ${index}`, color: '#1188cc', type: 'human' } },
+        state: {
+          user: { name: `Flood ${index}`, color: '#1188cc', type: 'human' },
+          canvas: { diagram_id: 'main', laser: { active: true, sequence: index, point: { x: index, y: index } } },
+        },
       }]);
     }
     await new Promise((resolve) => setTimeout(resolve, 250));

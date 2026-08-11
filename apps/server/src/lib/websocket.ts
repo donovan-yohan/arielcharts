@@ -23,6 +23,7 @@ const MAX_CANVAS_AWARENESS_DIAGRAM_ID_LENGTH = 128;
 const MAX_CANVAS_AWARENESS_NODE_IDS = 100;
 const MAX_CANVAS_AWARENESS_NODE_ID_LENGTH = 256;
 const MAX_CANVAS_AWARENESS_COORDINATE = 1_000_000;
+const MAX_CANVAS_LASER_SEQUENCE = Number.MAX_SAFE_INTEGER;
 const INGRESS_RATE_WINDOW_MS = 10_000;
 const INGRESS_BUDGETS = {
   // A normal text-editor burst emits many small Yjs deltas. Permit that path
@@ -41,6 +42,7 @@ type IngressRejectionReason = DocumentAdmissionReason
   | 'control_rate_limited'
   | 'awareness_update_too_large'
   | 'malformed_awareness_update'
+  | 'stale_laser_sequence'
   | 'outbound_sync_too_large';
 
 function toUint8Array(message: RawData): Uint8Array {
@@ -130,6 +132,7 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
   const cursor = candidate.cursor;
   const selectedNodeIds = candidate.selected_node_ids;
   const editingNodeId = candidate.editing_node_id;
+  const laser = candidate.laser;
   const hasValidDiagramId = typeof diagramId === 'string'
     && diagramId.length > 0
     && diagramId.length <= MAX_CANVAS_AWARENESS_DIAGRAM_ID_LENGTH;
@@ -150,7 +153,23 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
     && editingNodeId.length > 0
     && editingNodeId.length <= MAX_CANVAS_AWARENESS_NODE_ID_LENGTH
   );
-  if (!hasValidDiagramId || !hasValidCursor || !hasValidSelectedNodeIds || !hasValidEditingNodeId) {
+  const hasValidLaser = laser === undefined || (
+    laser !== null
+    && typeof laser === 'object'
+    && !Array.isArray(laser)
+    && typeof (laser as Record<string, unknown>).active === 'boolean'
+    && Number.isSafeInteger((laser as Record<string, unknown>).sequence)
+    && ((laser as Record<string, unknown>).sequence as number) >= 0
+    && ((laser as Record<string, unknown>).sequence as number) <= MAX_CANVAS_LASER_SEQUENCE
+    && ((laser as Record<string, unknown>).active === false
+      ? (laser as Record<string, unknown>).point === undefined
+      : (laser as Record<string, unknown>).point !== null
+        && typeof (laser as Record<string, unknown>).point === 'object'
+        && !Array.isArray((laser as Record<string, unknown>).point)
+        && isFiniteCanvasCoordinate(((laser as Record<string, unknown>).point as Record<string, unknown>).x)
+        && isFiniteCanvasCoordinate(((laser as Record<string, unknown>).point as Record<string, unknown>).y))
+  );
+  if (!hasValidDiagramId || !hasValidCursor || !hasValidSelectedNodeIds || !hasValidEditingNodeId || !hasValidLaser) {
     const { canvas: _canvas, ...state } = entry.state;
     return { ...entry, state, stateJson: JSON.stringify(state) };
   }
@@ -160,6 +179,7 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
     ...(cursor === undefined ? {} : { cursor }),
     ...(selectedNodeIds === undefined ? {} : { selected_node_ids: selectedNodeIds }),
     ...(editingNodeId === undefined ? {} : { editing_node_id: editingNodeId }),
+    ...(laser === undefined ? {} : { laser }),
   };
   const state = { ...entry.state, canvas: normalizedCanvas };
   return { ...entry, state, stateJson: JSON.stringify(state) };
@@ -171,6 +191,7 @@ export class SessionWebSocketServer {
   private readonly minimumAccessVersions = new Map<string, number>();
   private readonly ingressBySocket = new WeakMap<WebSocket, Map<IngressClass, { windowStartedAt: number; messages: number; bytes: number }>>();
   private readonly ingressRejectionCounts = new Map<IngressRejectionReason, number>();
+  private readonly laserSequencesBySession = new WeakMap<SessionState, Map<number, number>>();
   /**
    * An upgraded connection does not join SessionState.sockets until its
    * asynchronous session lookup completes. Track that interval so key
@@ -305,6 +326,8 @@ export class SessionWebSocketServer {
     if (clientIds && clientIds.size > 0) {
       const orphanedClientIds = [...clientIds].filter((clientId) => !this.findLiveOwner(session, clientId));
       if (orphanedClientIds.length > 0) {
+        const laserSequences = this.laserSequencesBySession.get(session);
+        orphanedClientIds.forEach((clientId) => laserSequences?.delete(clientId));
         removeAwarenessStates(session.awareness, orphanedClientIds, socket);
       }
     }
@@ -537,8 +560,12 @@ export class SessionWebSocketServer {
     for (const rawEntry of entries) {
       const entry = sanitizeCanvasAwarenessEntry(rawEntry);
       if (nextOwnedClientIds.has(entry.clientId)) {
+        const authoritativeClock = session.awareness.meta.get(entry.clientId)?.clock;
+        if (authoritativeClock !== undefined && entry.clock <= authoritativeClock) continue;
+        if (!this.admitLaserSequence(session, entry)) continue;
         allowed.push(entry);
         if (entry.state === null) {
+          this.laserSequencesBySession.get(session)?.delete(entry.clientId);
           nextOwnedClientIds.delete(entry.clientId);
           releasedClientIds.push(entry.clientId);
         }
@@ -548,6 +575,8 @@ export class SessionWebSocketServer {
       const liveOwner = this.findLiveOwner(session, entry.clientId, socket);
       if (!liveOwner && !session.managedAwarenessClientIds.has(entry.clientId) && entry.state !== null) {
         this.releaseStaleOwners(session, entry.clientId, socket);
+        this.laserSequencesBySession.get(session)?.delete(entry.clientId);
+        if (!this.admitLaserSequence(session, entry)) continue;
         nextOwnedClientIds.add(entry.clientId);
         claimedClientIds.push(entry.clientId);
         allowed.push(entry);
@@ -569,6 +598,29 @@ export class SessionWebSocketServer {
     }
 
     return { entries: allowed, claimedClientIds, releasedClientIds };
+  }
+
+  private admitLaserSequence(session: SessionState, entry: AwarenessEntry): boolean {
+    let sequences = this.laserSequencesBySession.get(session);
+    if (!sequences) {
+      sequences = new Map();
+      this.laserSequencesBySession.set(session, sequences);
+    }
+    const canvas = entry.state?.canvas;
+    const laser = canvas && typeof canvas === 'object' && !Array.isArray(canvas)
+      ? (canvas as Record<string, unknown>).laser
+      : undefined;
+    if (!laser || typeof laser !== 'object' || Array.isArray(laser)) {
+      return true;
+    }
+    const candidate = laser as { active: boolean; sequence: number };
+    const previous = sequences.get(entry.clientId);
+    if (previous !== undefined && candidate.sequence <= previous) {
+      this.recordIngressRejection('stale_laser_sequence');
+      return false;
+    }
+    sequences.set(entry.clientId, candidate.sequence);
+    return true;
   }
 
   private findLiveOwner(session: SessionState, clientId: number, except?: WebSocket): WebSocket | undefined {

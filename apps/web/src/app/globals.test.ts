@@ -6,6 +6,12 @@ const mobileCss = css.slice(css.indexOf('@media (max-width: 720px), (max-height:
 const narrowCanvasCss = css.slice(css.indexOf('@media (max-width: 420px)'));
 
 describe('mobile workspace CSS contracts', () => {
+  it('reserves a non-overlapping lane for overlay tools beside narrow canvas controls', () => {
+    expect(narrowCanvasCss).toMatch(/\.overlay-tools-toggle\s*\{[^}]*bottom:\s*auto\s*!important;[^}]*top:\s*50%;[^}]*transform:\s*translateY\(-50%\);/u);
+    expect(narrowCanvasCss).toMatch(/\.overlay-scene-controls\s*\{[^}]*bottom:\s*8px;[^}]*display:\s*grid\s*!important;[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*max-height:\s*calc\(100% - 16px\);[^}]*overflow-y:\s*auto;/u);
+    expect(narrowCanvasCss).toMatch(/\.overlay-scene-controls button\s*\{[^}]*min-height:\s*44px;[^}]*min-width:\s*44px;/u);
+  });
+
   it('keeps capped error banners touch-scrollable without blocking the rest of the canvas', () => {
     expect(mobileCss).toMatch(/\.error-banner\s*\{[^}]*overflow:\s*auto;[^}]*pointer-events:\s*auto;[^}]*touch-action:\s*pan-y;/u);
   });

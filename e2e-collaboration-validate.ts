@@ -19,7 +19,7 @@ import {
   rotateRoomAccess,
   type RoomCredentials,
 } from './e2e/support/room-access';
-import { openYjsSessionObserver, type YjsSessionObserver } from './e2e/support/yjs-session';
+import { getYjsSourceLayoutSignature, openYjsSessionObserver, type YjsSessionObserver } from './e2e/support/yjs-session';
 
 const BASE_FLOWCHART = `flowchart LR
   Browser[Browser] --> Gateway[Gateway]
@@ -138,6 +138,12 @@ function remoteCursorForParticipant(page: Page, participantName: string): Locato
   return page.locator(
     `[data-testid^="remote-canvas-cursor-"][data-participant-name=${JSON.stringify(participantName)}]`,
   );
+}
+
+function remoteLaserForParticipant(page: Page, participantName: string): Locator {
+  return page.locator(
+    `[data-testid^="laser-pointer-"][data-participant-name=${JSON.stringify(participantName)}]`,
+  ).last();
 }
 
 function transformedLayer(page: Page): Locator {
@@ -423,10 +429,11 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
   const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
   const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
   try {
-  const browserA = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const browserA = await browser.newContext({ hasTouch: true, viewport: { width: 1400, height: 900 } });
   const browserB = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const pageA = await browserA.newPage();
   const pageB = await browserB.newPage();
+  const cdpA = await browserA.newCDPSession(pageA);
   await pageA.clock.install({ time: Date.now() });
   const diagnosticsA = collectReactFlowDiagnostics(pageA);
   const diagnosticsB = collectReactFlowDiagnostics(pageB);
@@ -527,6 +534,125 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     assert(remoteSelectionDoesNotTakeLocalSelection, 'Remote canvas selection took over the receiving browser selection state.');
     await pageB.screenshot({ path: '/tmp/arielcharts-canvas-presence.png' });
 
+    const laserObserver = await openYjsSessionObserver(mcpUrl, sessionId, { cookie: roomAccess.cookie, origin: baseUrl });
+    await pageA.waitForTimeout(1_100);
+    const durableBeforeLaser = await mcp.readDiagram(sessionId, main.id);
+    const sessionBeforeLaser = await mcp.getSession(sessionId);
+    const yjsBeforeLaser = laserObserver.snapshot(main.id);
+    const cameraABeforeLaser = await transformedLayer(pageA).getAttribute('style');
+    await pageB.getByRole('button', { name: 'Zoom in' }).click();
+    const cameraBBeforeLaser = await transformedLayer(pageB).getAttribute('style');
+    await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
+    const canvasA = pageA.getByTestId('diagram-canvas');
+    const canvasABox = await boxOf(canvasA, 'Laser canvas was missing.');
+    await pageA.mouse.move(canvasABox.x + 220, canvasABox.y + 180);
+    await pageA.mouse.down();
+    await pageA.mouse.move(canvasABox.x + 300, canvasABox.y + 240, { steps: 4 });
+    const remoteLaser = remoteLaserForParticipant(pageB, pageAParticipantName);
+    await remoteLaser.waitFor({ state: 'visible', timeout: 15_000 });
+    const remoteLaserBeforeZoom = await boxOf(remoteLaser, 'Remote laser had no bounds before receiver zoom.');
+    await pageB.getByRole('button', { name: 'Zoom in' }).click();
+    const remoteLaserAfterZoom = await boxOf(remoteLaser, 'Remote laser had no bounds after receiver zoom.');
+    assert(!positionsMatch(remoteLaserBeforeZoom, remoteLaserAfterZoom),
+      'World-coordinate laser did not reproject when the receiving browser camera changed.');
+    await pageB.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+    const accessibleLaserStyle = await remoteLaser.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, transition: style.transitionDuration };
+    });
+    assert(accessibleLaserStyle.transition === '0s', 'Reduced-motion laser retained a fade transition.');
+    await pageB.screenshot({ path: '/tmp/arielcharts-collaboration-laser.png' });
+    await pageB.emulateMedia({ forcedColors: 'none', reducedMotion: 'no-preference' });
+    await pageA.keyboard.press('Escape');
+    await pageA.mouse.up();
+    await remoteLaser.waitFor({ state: 'detached', timeout: 15_000 });
+    assert(await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).count() === 1,
+      'Escape did not exit the laser tool.');
+
+    await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
+    await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 1, pointerType: 'pen', type: 'mousePressed', x: canvasABox.x + 180, y: canvasABox.y + 140 });
+    await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 1, pointerType: 'pen', type: 'mouseMoved', x: canvasABox.x + 200, y: canvasABox.y + 160 });
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'visible', timeout: 15_000 });
+    await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 0, pointerType: 'pen', type: 'mouseReleased', x: canvasABox.x + 200, y: canvasABox.y + 160 });
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'detached', timeout: 15_000 });
+    await cdpA.send('Input.dispatchTouchEvent', { touchPoints: [{ id: 92, x: canvasABox.x + 160, y: canvasABox.y + 120 }], type: 'touchStart' });
+    await cdpA.send('Input.dispatchTouchEvent', { touchPoints: [{ id: 92, x: canvasABox.x + 190, y: canvasABox.y + 150 }], type: 'touchMove' });
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'visible', timeout: 15_000 });
+    await cdpA.send('Input.dispatchTouchEvent', { touchPoints: [], type: 'touchEnd' });
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'detached', timeout: 15_000 });
+    await canvasA.focus();
+    await pageA.keyboard.press('Escape');
+    await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+    assert(await transformedLayer(pageA).getAttribute('style') === cameraABeforeLaser,
+      'Laser gestures changed the presenting browser camera.');
+    assert(await transformedLayer(pageB).getAttribute('style') !== cameraBBeforeLaser,
+      'Receiver camera evidence did not record its independent zoom.');
+    const yjsAfterLaserGestures = laserObserver.snapshot(main.id);
+    assert(JSON.stringify(yjsAfterLaserGestures) === JSON.stringify(yjsBeforeLaser),
+      'Laser gestures changed live Yjs source/layout/activity history.');
+
+    await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
+    await pageA.mouse.move(canvasABox.x + 240, canvasABox.y + 200);
+    await pageA.mouse.down();
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'visible', timeout: 15_000 });
+    await pageA.evaluate(() => {
+      [...document.querySelectorAll<HTMLElement>('[role="tab"]')]
+        .find((tab) => tab.textContent?.trim() === 'Local view')?.click();
+    });
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'detached', timeout: 15_000 });
+    await pageA.mouse.up();
+    await selectTabByName(pageA, 'Main');
+    await waitForFlowchart(pageA);
+
+    const reconnectedCanvas = pageA.getByTestId('diagram-canvas');
+    const reconnectedCanvasBox = await boxOf(reconnectedCanvas, 'Reconnect laser canvas was missing.');
+    await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
+    await pageA.mouse.move(reconnectedCanvasBox.x + 260, reconnectedCanvasBox.y + 210);
+    await pageA.mouse.down();
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'visible', timeout: 15_000 });
+    await pageA.reload({ waitUntil: 'domcontentloaded' });
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'detached', timeout: 15_000 });
+    await pageA.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+    await waitForFlowchart(pageA);
+    await pageA.waitForTimeout(1_100);
+    assert(await remoteLaserForParticipant(pageB, pageAParticipantName).count() === 0,
+      'Laser reappeared after sender socket close/reconnect timeout.');
+
+    const postReconnectBaseline = laserObserver.snapshot(main.id);
+    const finalCanvas = pageA.getByTestId('diagram-canvas');
+    const finalCanvasBox = await boxOf(finalCanvas, 'Final laser evidence canvas was missing.');
+    await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
+    await pageA.mouse.move(finalCanvasBox.x + 280, finalCanvasBox.y + 220);
+    await pageA.mouse.down();
+    await pageA.mouse.move(finalCanvasBox.x + 310, finalCanvasBox.y + 250, { steps: 3 });
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'visible', timeout: 15_000 });
+    await pageA.mouse.up();
+    await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'detached', timeout: 15_000 });
+    await finalCanvas.focus();
+    await pageA.keyboard.press('Escape');
+    const finalLaserSnapshot = laserObserver.snapshot(main.id);
+    assert(JSON.stringify(finalLaserSnapshot) === JSON.stringify(postReconnectBaseline),
+      'Final laser gesture changed source/layout/activity after the reconnect baseline.');
+
+    const durableAfterLaser = await mcp.readDiagram(sessionId, main.id);
+    const sessionAfterLaser = await mcp.getSession(sessionId);
+    const yjsAfterLaser = finalLaserSnapshot;
+    const persistedLaserObserver = await openYjsSessionObserver(mcpUrl, sessionId, { cookie: roomAccess.cookie, origin: baseUrl });
+    const persistedAfterLaser = persistedLaserObserver.snapshot(main.id);
+    persistedLaserObserver.destroy();
+    laserObserver.destroy();
+    assert(durableAfterLaser.revision === durableBeforeLaser.revision
+      && durableAfterLaser.mermaidText === durableBeforeLaser.mermaidText,
+    'Laser use changed durable diagram source/revision.');
+    assert(JSON.stringify(sessionAfterLaser.diagrams) === JSON.stringify(sessionBeforeLaser.diagrams),
+      'Laser use changed the exported session diagram catalog/revisions.');
+    assert(getYjsSourceLayoutSignature(yjsAfterLaser) === getYjsSourceLayoutSignature(yjsBeforeLaser),
+      'Laser lifecycle testing changed durable source/layout.');
+    assert(JSON.stringify(persistedAfterLaser) === JSON.stringify(yjsAfterLaser),
+      'Fresh persisted reload did not match the post-reconnect durable source/layout/activity baseline.');
+
+    await nodeById(pageA, presenceNodeId).click();
+    await pageA.getByRole('button', { name: 'Edit label', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
     await pageA.getByRole('button', { name: 'Edit label', exact: true }).click();
     const nodeLabelInput = pageA.locator('input[placeholder="node label"]');
     await nodeLabelInput.waitFor({ state: 'visible', timeout: 15_000 });
@@ -794,6 +920,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     console.log(`browser/MCP merged source converged=${merged.mermaidText.includes(HUMAN_EDGE.trim()) && merged.mermaidText.includes(AGENT_EDGE.trim())}`);
     console.log(`remote local-state isolation tab=${activeTabPreserved} flyouts=${sourceFlyoutsPreserved} selection=${localSelectionPreserved} mode=${localConnectModePreserved} camera=${localCameraPreserved}`);
     console.log('remote node editing awareness open/draft/inactive-resume/Escape/commit/history cleanup passed=true');
+    console.log('awareness laser world reprojection, mouse/stylus/touch/Escape, a11y media, fade/switch/socket/reconnect cleanup, camera and durable isolation passed=true');
     console.log(`concurrent drag active overlay stable=${activeDragStable} replicas converged=${replicasConverged}`);
     console.log(`post-release same-node winner moved=${postReleaseWinnerMoved} replicas converged=${postReleaseReplicasConverged}`);
     console.log(`pending removal reconciled before commit=${removalAdvanceMs}ms timer pruned=${pendingPrunedBeforeStop} stop pruned=${pendingPrunedAfterStop}`);

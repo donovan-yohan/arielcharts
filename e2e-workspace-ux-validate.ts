@@ -2674,6 +2674,69 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
   await selectTabByName(page, diagramName);
   await waitForCanvas(page, 'flowchart');
+  if (label.startsWith('mobile')) {
+    const toggle = page.getByRole('button', { name: 'Overlay tools', exact: true });
+    const canvas = page.getByTestId('diagram-canvas');
+    await assertHitTarget(page, toggle, `${label} closed overlay toggle`);
+    const toggleBounds = await toggle.boundingBox();
+    const controlsBounds = await page.getByTestId('canvas-controls-toolbar').boundingBox();
+    assert(toggleBounds && controlsBounds
+      && (toggleBounds.x + toggleBounds.width <= controlsBounds.x || controlsBounds.x + controlsBounds.width <= toggleBounds.x
+        || toggleBounds.y + toggleBounds.height <= controlsBounds.y || controlsBounds.y + controlsBounds.height <= toggleBounds.y),
+    `${label} closed overlay toggle overlaps the bottom canvas toolbar.`);
+    await verifiedClick(page, toggle, `${label} open overlay controls`);
+    const panel = page.getByLabel('Overlay scene controls', { exact: true });
+    await panel.waitFor({ state: 'visible', timeout: 5_000 });
+    const actionNames = ['Add overlay', 'Move right', 'Anchor first node', 'Bring front', 'Copy overlay', 'Paste overlay', 'Delete overlay', 'Undo overlay', 'Restore overlay'] as const;
+    for (const actionName of actionNames) {
+      const action = panel.getByRole('button', { name: actionName, exact: true });
+      await action.scrollIntoViewIfNeeded();
+      const evidence = await action.evaluate((element) => {
+        const actionBounds = element.getBoundingClientRect();
+        const panelBounds = element.parentElement!.getBoundingClientRect();
+        const canvasBounds = element.closest('[data-testid="diagram-canvas"]')!.getBoundingClientRect();
+        const hit = document.elementFromPoint(actionBounds.left + actionBounds.width / 2, actionBounds.top + actionBounds.height / 2);
+        return {
+          contained: actionBounds.left >= canvasBounds.left - 0.5 && actionBounds.right <= canvasBounds.right + 0.5
+            && actionBounds.top >= canvasBounds.top - 0.5 && actionBounds.bottom <= canvasBounds.bottom + 0.5
+            && actionBounds.left >= panelBounds.left - 0.5 && actionBounds.right <= panelBounds.right + 0.5
+            && actionBounds.top >= panelBounds.top - 0.5 && actionBounds.bottom <= panelBounds.bottom + 0.5,
+          height: actionBounds.height,
+          reachable: hit instanceof Node && element.contains(hit),
+          width: actionBounds.width,
+        };
+      });
+      assert(evidence.contained && evidence.reachable && evidence.height >= 44 && evidence.width >= 44,
+        `${label} overlay action ${actionName} is not contained, reachable, and touch-sized: ${JSON.stringify(evidence)}.`);
+    }
+    const objectCount = await page.locator('[data-testid^="overlay-object-"]').count();
+    await verifiedClick(page, panel.getByRole('button', { name: 'Add overlay', exact: true }), `${label} add overlay from bounded panel`);
+    await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(objectCount + 1);
+    await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), `${label} close overlay controls`);
+    await panel.waitFor({ state: 'detached', timeout: 5_000 });
+    const object = page.locator('[data-testid^="overlay-object-"]').last();
+    const exposedPoint = await object.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      for (let y = bounds.top + 4; y < bounds.bottom - 4; y += 4) {
+        for (let x = bounds.left + 4; x < bounds.right - 4; x += 4) {
+          const hit = document.elementFromPoint(x, y);
+          if (hit instanceof Node && element.contains(hit)) return { x, y };
+        }
+      }
+      return null;
+    });
+    assert(exposedPoint, `${label} overlay object has no exposed click point after closing controls.`);
+    await page.mouse.click(exposedPoint.x, exposedPoint.y);
+    await expect.poll(async () => object.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe('2px');
+    await verifiedClick(page, page.getByRole('button', { name: 'Overlay tools', exact: true }), `${label} reopen overlay controls for cleanup`);
+    await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), `${label} delete mobile overlay fixture`);
+    await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(objectCount);
+    await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), `${label} close overlay controls after cleanup`);
+    await assertHitTarget(page, page.getByTestId('create-diagram-tab'), `${label} tab action after overlay close`);
+    await assertHitTarget(page, page.getByTestId(SETTINGS_TRIGGER_TEST_ID), `${label} semantic topbar action after overlay close`);
+    await assertHitTarget(page, page.getByRole('button', { name: 'Zoom out', exact: true }), `${label} bottom toolbar action after overlay close`);
+    await assertHitTarget(page, canvas, `${label} canvas after overlay close`);
+  }
   const sourceToggle = page.getByTestId('source-flyout-toggle');
   await expect(sourceToggle).toHaveAccessibleName(/^(show|hide) source$/i);
   assert(await sourceToggle.getAttribute('title') === 'Mermaid source',

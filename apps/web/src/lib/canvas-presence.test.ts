@@ -38,6 +38,23 @@ describe('canvas presence', () => {
       { diagram_id: 'main', editing_node_id: 'A' },
       { diagram_id: 'main', editing_node_id: 'B' },
     )).toBe(false);
+    expect(areCanvasAwarenessStatesEqual(
+      { diagram_id: 'main', laser: { active: true, sequence: 1, point: { x: 2, y: 4 } } },
+      { diagram_id: 'main', laser: { active: true, sequence: 2, point: { x: 2, y: 4 } } },
+    )).toBe(false);
+  });
+
+  it('accepts bounded laser samples and rejects malformed laser state atomically', () => {
+    const participant = { name: 'Other', color: '#f0a', type: 'human' as const };
+    expect(getRemoteCanvasPresence(new Map([
+      [9, { user: participant, canvas: { diagram_id: 'main', laser: { active: true, sequence: 4, point: { x: 12, y: 16 } } } }],
+    ]), 1, 'main')[0]?.canvas.laser).toEqual({ active: true, sequence: 4, point: { x: 12, y: 16 } });
+    expect(getRemoteCanvasPresence(new Map([
+      [9, { user: participant, canvas: { diagram_id: 'main', laser: { active: true, sequence: 5, point: { x: Number.NaN, y: 16 } } } }],
+    ]), 1, 'main')).toEqual([]);
+    expect(getRemoteCanvasPresence(new Map([
+      [9, { user: participant, canvas: { diagram_id: 'main', laser: { active: false, sequence: 6, point: { x: 1, y: 2 } } } }],
+    ]), 1, 'main')).toEqual([]);
   });
 
   it('drops malformed editing awareness with the same all-or-nothing policy as other canvas fields', () => {

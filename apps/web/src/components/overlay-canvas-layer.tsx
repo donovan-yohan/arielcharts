@@ -49,7 +49,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     }
   };
 
-  return (
+  return (<>
     <div data-testid="overlay-canvas-owner" style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 8 }}>
       {objects.map((object) => (
         <button
@@ -79,13 +79,16 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
           {object.orphaned ? ' (orphaned)' : ''}
         </button>
       ))}
+    </div>
+    <div data-testid="overlay-controls-owner" style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 31 }}>
       <button
         aria-expanded={toolsOpen}
+        className="overlay-tools-toggle"
         onClick={() => setToolsOpen((open) => !open)}
         style={{ bottom: 12, left: 12, minHeight: 44, minWidth: 44, pointerEvents: 'auto', position: 'absolute' }}
         type="button"
       >{toolsOpen ? 'Close overlay tools' : 'Overlay tools'}</button>
-      {toolsOpen ? <div aria-label="Overlay scene controls" style={{ display: 'flex', gap: 4, left: 12, pointerEvents: 'auto', position: 'absolute', top: 56 }}>
+      {toolsOpen ? <div aria-label="Overlay scene controls" className="overlay-scene-controls" style={{ display: 'flex', gap: 4, left: 12, pointerEvents: 'auto', position: 'absolute', top: 56 }}>
         <button disabled={!writable} onClick={() => props.onAdd({ x: 80, y: 80 })} type="button">Add overlay</button>
         <button disabled={!writable || !selected} onClick={() => selected && props.onMove(selected.id, 16, 0)} type="button">Move right</button>
         <button disabled={!writable || !selected || props.semanticAnchors.size === 0} onClick={() => {
@@ -102,5 +105,5 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
         {historyStatus ? <span role="status">{historyStatus}</span> : null}
       </div> : null}
     </div>
-  );
+  </>);
 }

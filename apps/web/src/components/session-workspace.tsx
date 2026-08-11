@@ -1,6 +1,6 @@
 'use client';
 
-import type { ActivityEvent, AwarenessState, CanvasAwarenessState, CanvasPresenceEntry, CanvasWorldPoint, DiagramRevision, DiagramRevisionSummary, ListDiagramHistoryOutput, Participant, StarterTemplateId } from '@arielcharts/shared';
+import type { ActivityEvent, AwarenessState, CanvasAwarenessState, CanvasLaserState, CanvasPresenceEntry, CanvasWorldPoint, DiagramRevision, DiagramRevisionSummary, ListDiagramHistoryOutput, Participant, StarterTemplateId } from '@arielcharts/shared';
 import { APP_NAME, STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
@@ -135,6 +135,7 @@ import {
   hasCanvasCursorMovedEnough,
   quantizeCanvasCursor,
 } from '../lib/canvas-presence';
+import { LaserPresencePublisher } from '../lib/laser-presence-publisher';
 
 const DIAGRAMS_KEY = 'diagrams';
 const DIAGRAM_ORDER_KEY = 'diagramOrder';
@@ -588,12 +589,15 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const lastCanvasCursorPublishedAtRef = useRef(0);
   const canvasCursorTimerRef = useRef<number | null>(null);
   const canvasPresenceReadyDiagramIdRef = useRef<string | null>(null);
+  const localLaserRef = useRef<CanvasLaserState | null>(null);
+  const laserPublisherRef = useRef<LaserPresencePublisher | null>(null);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [displayName, setDisplayName] = useState('Human');
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [remoteCanvasPresence, setRemoteCanvasPresence] = useState<CanvasPresenceEntry[]>([]);
+  const [localLaser, setLocalLaser] = useState<CanvasLaserState | null>(null);
   const [diagrams, setDiagrams] = useState<DiagramTab[]>([]);
   const [activeDiagramId, setActiveDiagramId] = useState<string | null>(null);
   const [mermaidText, setMermaidText] = useState('');
@@ -609,7 +613,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [nodePositions, setNodePositions] = useState<DiagramNodePositions>({});
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const [interactionMode, setInteractionMode] = useState<'select' | 'connect'>('select');
+  const [interactionMode, setInteractionMode] = useState<'select' | 'connect' | 'laser'>('select');
   const [renamingDiagramId, setRenamingDiagramId] = useState<string | null>(null);
   const [diagramNameDraft, setDiagramNameDraft] = useState('');
   const [openFlyout, setOpenFlyout] = useState<WorkspaceFlyout>(null);
@@ -694,12 +698,14 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       return;
     }
 
-    const next: CanvasAwarenessState | null = cursor || selectedNodeIds.length > 0 || editingNodeId
+    const laser = localLaserRef.current;
+    const next: CanvasAwarenessState | null = cursor || selectedNodeIds.length > 0 || editingNodeId || laser
       ? {
         diagram_id: diagramId,
         ...(cursor ? { cursor } : {}),
         ...(selectedNodeIds.length > 0 ? { selected_node_ids: [...selectedNodeIds] } : {}),
         ...(editingNodeId ? { editing_node_id: editingNodeId } : {}),
+        ...(laser ? { laser } : {}),
       }
       : null;
     if (areCanvasAwarenessStatesEqual(localCanvasPresenceRef.current, next)) {
@@ -708,6 +714,28 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     localCanvasPresenceRef.current = next;
     collaboration.awareness.setLocalStateField('canvas', next);
   }, [collaboration]);
+
+  useEffect(() => {
+    const publisher = new LaserPresencePublisher((laser) => {
+      localLaserRef.current = laser;
+      setLocalLaser(laser.active ? laser : null);
+      publishCanvasPresence(localCanvasCursorRef.current, selectedNodeIdsRef.current);
+      if (!laser.active) {
+        localLaserRef.current = null;
+        publishCanvasPresence(localCanvasCursorRef.current, selectedNodeIdsRef.current);
+      }
+    });
+    laserPublisherRef.current = publisher;
+    return () => {
+      publisher.destroy();
+      if (laserPublisherRef.current === publisher) laserPublisherRef.current = null;
+    };
+  }, [publishCanvasPresence]);
+
+  const handleLaserChange = useCallback((value: { active: boolean; point?: CanvasWorldPoint }) => {
+    if (value.active && value.point) laserPublisherRef.current?.move(value.point);
+    else laserPublisherRef.current?.stop();
+  }, []);
 
   const handleNodeEditingChange = useCallback((nodeId: string | null) => {
     if (editingNodeIdRef.current === nodeId) {
@@ -775,6 +803,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       editingNodeIdRef.current = null;
     }
     localCanvasPresenceRef.current = null;
+    laserPublisherRef.current?.destroy();
+    localLaserRef.current = null;
+    setLocalLaser(null);
     if (collaboration) {
       collaboration.awareness.setLocalStateField('canvas', null);
     }
@@ -788,6 +819,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     pendingCanvasCursorRef.current = null;
     editingNodeIdRef.current = null;
     localCanvasPresenceRef.current = null;
+    laserPublisherRef.current?.destroy();
+    localLaserRef.current = null;
+    setLocalLaser(null);
     if (collaboration) {
       collaboration.awareness.setLocalStateField('canvas', null);
     }
@@ -2271,6 +2305,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}
             remoteCanvasPresence={historyPreview === null ? remoteCanvasPresence : []}
+            localLaser={historyPreview === null ? localLaser : null}
+            localParticipant={currentIdentityRef.current ?? { color: '#ef4444', name: displayName, type: 'human' }}
             onAddEdge={(source, target, label, type) => {
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.addEdge(source, target, { label, type }));
@@ -2534,6 +2570,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onMoveRailroadRule={(identity, direction) => { mutateCanvasSource((source) => moveRailroadRule(source, identity, direction), 'Reordered Railroad rules'); }}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
+            onLaserChange={handleLaserChange}
             onChangeNodeShape={(nodeId, shape) => {
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.changeNodeShape(nodeId, shape));

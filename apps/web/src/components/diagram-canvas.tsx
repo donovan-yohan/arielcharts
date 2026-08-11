@@ -1,6 +1,6 @@
 'use client';
 
-import type { CanvasPresenceEntry, CanvasWorldPoint } from '@arielcharts/shared';
+import type { CanvasLaserState, CanvasPresenceEntry, CanvasWorldPoint, Participant } from '@arielcharts/shared';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   ConnectionLineType,
@@ -29,6 +29,7 @@ import {
   Plus,
   RotateCcw,
   ScanSearch,
+  Sparkles,
   Shapes,
   Trash2,
   ZoomIn,
@@ -80,6 +81,7 @@ import {
   type SequenceSvgTextTarget,
 } from '../lib/svg-hit-map';
 import { getSafeToolbarPosition } from '../lib/toolbar-safe-area';
+import { LaserPointerLayer } from './laser-pointer-layer';
 import { getDirtyDraftFields, reconcileCanonicalDraft, sameCanonicalDraft } from '../lib/canonical-draft';
 import type { SequenceActivationAction, SequenceArrow, SequenceDiagramSnapshot, SequenceFragmentKind, SequenceMessage, SequenceNote, SequenceParticipant, SequenceParticipantKind } from '../lib/sequence-mutations';
 import { getErRelationshipIdentity, type ErAttribute, type ErDiagramSnapshot, type ErRelationship, type ErRelationshipIdentity } from '../lib/er-mutations';
@@ -108,7 +110,7 @@ export interface DiagramCanvasProps {
   className?: string;
   emptyMessage?: string;
   graph: FlowchartSnapshot | null;
-  interactionMode?: 'select' | 'connect';
+  interactionMode?: 'select' | 'connect' | 'laser';
   emptyState?: DiagramEmptyState;
   isFlowchart?: boolean;
   mermaidSource?: string;
@@ -348,6 +350,7 @@ export interface DiagramCanvasProps {
   onMoveRailroadRule?: (identity: RailroadRuleIdentity, direction: 'up' | 'down') => void;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
+  onLaserChange?: (value: { active: boolean; point?: CanvasWorldPoint }) => void;
   onChangeNodeShape?: (nodeId: string, newShape: DiagramNodeShape) => void;
   onChooseDiagramType?: (type: 'flowchart' | 'sequence') => void;
   onDeleteEdge?: (edge: DiagramEdgeIdentity) => void;
@@ -357,7 +360,7 @@ export interface DiagramCanvasProps {
   onNodeEditingChange?: (nodeId: string | null) => void;
   onEditSubgraphLabel?: (subgraphId: string, newLabel: string) => void;
   onGroupNodes?: (nodeIds: string[], label: string) => void;
-  onInteractionModeChange?: (mode: 'select' | 'connect') => void;
+  onInteractionModeChange?: (mode: 'select' | 'connect' | 'laser') => void;
   onNodeDrag?: (positions: DiagramNodePositions) => void;
   onNodeDragStart?: (positions: DiagramNodePositions) => boolean | void;
   onNodeDragStop?: (positions: DiagramNodePositions) => void;
@@ -370,6 +373,8 @@ export interface DiagramCanvasProps {
   onUngroupNodes?: (subgraphId: string) => void;
   onUndo?: () => void;
   remoteCanvasPresence?: readonly CanvasPresenceEntry[];
+  localLaser?: CanvasLaserState | null;
+  localParticipant?: Participant;
 }
 
 interface ViewportState {
@@ -511,10 +516,10 @@ export function getFlowSelectionChange(
 }
 
 export function getRendererInteractionMode(
-  current: 'select' | 'connect',
+  current: 'select' | 'connect' | 'laser',
   isFlowchart: boolean,
-): 'select' | 'connect' {
-  return isFlowchart ? current : 'select';
+): 'select' | 'connect' | 'laser' {
+  return current === 'connect' && !isFlowchart ? 'select' : current;
 }
 
 export function shouldHandleCanvasShortcut(
@@ -562,7 +567,7 @@ export function shouldRestoreCanvasFocusAfterPaste(activeElementIsInCanvas: bool
 
 export function shouldEnableCanvasMarquee(
   canEditStructure: boolean,
-  mode: 'select' | 'connect',
+  mode: 'select' | 'connect' | 'laser',
   isCoarsePointer: boolean,
 ): boolean {
   return canEditStructure && mode === 'select' && !isCoarsePointer;
@@ -828,6 +833,7 @@ export function DiagramCanvas({
   onReparentIshikawaCause,
   onAddConnectedNode,
   onCanvasCursorChange,
+  onLaserChange,
   onChangeNodeShape,
   onChooseDiagramType,
   onDeleteEdge,
@@ -851,6 +857,8 @@ export function DiagramCanvas({
   onUndo,
   readOnly = false,
   remoteCanvasPresence = [],
+  localLaser = null,
+  localParticipant = { name: 'You', color: '#ef4444', type: 'human' },
   selectedNodeIds,
   sequenceParticipants = [],
   sequenceDiagram = null,
@@ -937,7 +945,7 @@ export function DiagramCanvas({
   useEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
-  const [internalMode, setInternalMode] = useState<'select' | 'connect'>(interactionMode ?? 'select');
+  const [internalMode, setInternalMode] = useState<'select' | 'connect' | 'laser'>(interactionMode ?? 'select');
   const mode = interactionMode ?? internalMode;
   const [viewport, setViewport] = useState<ViewportState>({ panX: 24, panY: 24, zoom: 1 });
   const [animateTransform, setAnimateTransform] = useState(false);
@@ -975,6 +983,7 @@ export function DiagramCanvas({
   const [hasCanvasClipboard, setHasCanvasClipboard] = useState(false);
   const onCanvasCursorChangeRef = useRef(onCanvasCursorChange);
   const onNodeEditingChangeRef = useRef(onNodeEditingChange);
+  const activeLaserPointerRef = useRef<number | null>(null);
   onRenderSettledRef.current = onRenderSettled;
   onCanvasCursorChangeRef.current = onCanvasCursorChange;
   onNodeEditingChangeRef.current = onNodeEditingChange;
@@ -1408,8 +1417,8 @@ export function DiagramCanvas({
     }
   }, [isControlledSelection, onSelectedNodeIdsChange, readOnly]);
 
-  const setMode = useCallback((nextMode: 'select' | 'connect') => {
-    if (!isFlowchart && nextMode !== 'select') {
+  const setMode = useCallback((nextMode: 'select' | 'connect' | 'laser') => {
+    if (!isFlowchart && nextMode === 'connect') {
       return;
     }
     onInteractionModeChange?.(nextMode);
@@ -1417,6 +1426,12 @@ export function DiagramCanvas({
       setInternalMode(nextMode);
     }
   }, [interactionMode, isFlowchart, onInteractionModeChange]);
+
+  useEffect(() => {
+    if (mode === 'laser') return;
+    activeLaserPointerRef.current = null;
+    onLaserChange?.({ active: false });
+  }, [mode, onLaserChange]);
 
   const toggleConnectMode = useCallback(() => {
     const nextMode = mode === 'connect' ? 'select' : 'connect';
@@ -1957,6 +1972,12 @@ export function DiagramCanvas({
         return;
       }
 
+      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && key === 'l') {
+        event.preventDefault();
+        setMode(mode === 'laser' ? 'select' : 'laser');
+        return;
+      }
+
       if (!isModifierShortcut && canvasOwnsSingleKeyFocus && canEditStructure && key === 'c') {
         event.preventDefault();
         toggleConnectMode();
@@ -2042,7 +2063,7 @@ export function DiagramCanvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [canEditStructure, copySelectedNodes, fitToDiagram, graph, hasPersistedLayout, nodeById, onAddNode, onDeleteEdge, onDeleteNodes, onRedo, onUndo, onUngroupNodes, pasteClipboard, readOnly, selectedCurrentEdgeIdentity, selection, setMode, setSelection, simplifyLayout, toggleConnectMode, zoomCanvas]);
+  }, [canEditStructure, copySelectedNodes, fitToDiagram, graph, hasPersistedLayout, mode, nodeById, onAddNode, onDeleteEdge, onDeleteNodes, onRedo, onUndo, onUngroupNodes, pasteClipboard, readOnly, selectedCurrentEdgeIdentity, selection, setMode, setSelection, simplifyLayout, toggleConnectMode, zoomCanvas]);
 
   useEffect(() => {
     if (viewport.zoom >= EDITOR_MIN_ZOOM) {
@@ -2205,13 +2226,27 @@ export function DiagramCanvas({
   }, [spacePressed, viewport]);
 
   const handlePointerDownCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (mode === 'laser' && event.button === 0) {
+      const canvas = containerRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const point = {
+        x: (event.clientX - rect.left - viewport.panX) / viewport.zoom,
+        y: (event.clientY - rect.top - viewport.panY) / viewport.zoom,
+      };
+      event.preventDefault();
+      activeLaserPointerRef.current = event.pointerId;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      onLaserChange?.({ active: true, point });
+      return;
+    }
     if (event.pointerType === 'touch') {
       handleTouchPointerDown(event);
       return;
     }
 
     handlePointerDown(event);
-  }, [handlePointerDown, handleTouchPointerDown]);
+  }, [handlePointerDown, handleTouchPointerDown, mode, onLaserChange, viewport]);
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!containerRef.current) {
@@ -2223,6 +2258,12 @@ export function DiagramCanvas({
       x: (event.clientX - rect.left - viewport.panX) / viewport.zoom,
       y: (event.clientY - rect.top - viewport.panY) / viewport.zoom,
     };
+
+    if (mode === 'laser' && activeLaserPointerRef.current === event.pointerId) {
+      event.preventDefault();
+      onLaserChange?.({ active: true, point });
+      return;
+    }
 
     if (event.pointerType !== 'touch') {
       onCanvasCursorChange?.(point);
@@ -2244,7 +2285,7 @@ export function DiagramCanvas({
       ...current,
       ...nextPan,
     }));
-  }, [hitMap, onCanvasCursorChange, viewport.panX, viewport.panY, viewport.zoom]);
+  }, [hitMap, mode, onCanvasCursorChange, onLaserChange, viewport.panX, viewport.panY, viewport.zoom]);
 
   const suppressCanvasClick = useCallback(() => {
     suppressCanvasClickRef.current = true;
@@ -2271,12 +2312,17 @@ export function DiagramCanvas({
   }, []);
 
   const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (activeLaserPointerRef.current === event.pointerId) {
+      activeLaserPointerRef.current = null;
+      onLaserChange?.({ active: false });
+      return;
+    }
     if (!handleTouchPointerEnd(event)) {
       if (stopPanning(event.pointerId)) {
         suppressCanvasClick();
       }
     }
-  }, [handleTouchPointerEnd, stopPanning, suppressCanvasClick]);
+  }, [handleTouchPointerEnd, onLaserChange, stopPanning, suppressCanvasClick]);
 
   const handleLostPointerCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!handleTouchPointerEnd(event)) {
@@ -2852,7 +2898,7 @@ export function DiagramCanvas({
       onPointerDownCapture={handlePointerDownCapture}
       onPointerLeave={() => {
         setCursorPoint(null);
-        onCanvasCursorChange?.(null);
+        if (mode !== 'laser') onCanvasCursorChange?.(null);
       }}
       onPointerMove={handlePointerMove}
       onPointerMoveCapture={handleTouchPointerMove}
@@ -3182,6 +3228,13 @@ export function DiagramCanvas({
           transform={{ x: viewport.panX, y: viewport.panY, zoom: viewport.zoom }}
         />
       ) : null}
+
+      <LaserPointerLayer
+        local={localLaser}
+        localParticipant={localParticipant}
+        remote={remoteCanvasPresence}
+        transform={{ x: viewport.panX, y: viewport.panY, zoom: viewport.zoom }}
+      />
 
       <div aria-hidden="true" style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 10 }}>
         {remoteCanvasPresence.flatMap((presence) => {
@@ -3671,6 +3724,11 @@ export function DiagramCanvas({
                 <ClipboardPaste size={16} />
               </ToolbarButton>
             ) : null}
+            <ToolbarButton label={mode === 'laser' ? 'Exit laser pointer' : 'Laser pointer'} onClick={() => {
+              setMode(mode === 'laser' ? 'select' : 'laser');
+            }} shortcut="L">
+              <Sparkles size={16} />
+            </ToolbarButton>
             <ToolbarButton label="Zoom out" onClick={() => { zoomCanvas(0.9); }} shortcut="−">
               <ZoomOut size={16} />
             </ToolbarButton>

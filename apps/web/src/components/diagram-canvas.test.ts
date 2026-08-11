@@ -208,6 +208,7 @@ describe('getRendererInteractionMode', () => {
     expect(getRendererInteractionMode('connect', false)).toBe('select');
     expect(getRendererInteractionMode('connect', true)).toBe('connect');
     expect(getRendererInteractionMode('select', false)).toBe('select');
+    expect(getRendererInteractionMode('laser', false)).toBe('laser');
   });
 });
 

@@ -28,24 +28,23 @@ import { isCynefinSourceRepresentable } from './cynefin-mutations';
 import { isTreemapSourceRepresentable } from './treemap-mutations';
 import { getVennDiagramSnapshot, isVennSourceRepresentable } from './venn-mutations';
 import { isWardleySourceRepresentable } from './wardley-mutations';
+import {
+  EXTERNAL_MERMAID_PLUGIN_FAMILIES,
+  getExternalMermaidDiagramFamily,
+  getMermaidDiagramFamily,
+  MERMAID_DIAGRAM_CATALOG_VERSION,
+  MERMAID_DIAGRAM_FAMILIES,
+  type MermaidDiagramFamilyId,
+} from '@arielcharts/shared';
 
-/** The installed Mermaid detector registry this catalog was audited against. */
-export const MERMAID_CAPABILITY_CATALOG_VERSION = '11.16.1';
+/** Backward-compatible browser export for the shared version-pinned catalog. */
+export const MERMAID_CAPABILITY_CATALOG_VERSION = MERMAID_DIAGRAM_CATALOG_VERSION;
+export { EXTERNAL_MERMAID_PLUGIN_FAMILIES, MERMAID_DIAGRAM_FAMILIES };
+export type { MermaidDiagramFamilyId };
 
 export type DiagramKind = 'flowchart' | 'sequence' | 'er' | 'generic';
 export type DiagramEditingMode = 'canvas' | 'semantic-form' | 'source-only' | 'unavailable-plugin';
 export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'mindmap' | 'tree-view' | 'ishikawa' | 'railroad' | 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'treemap' | 'venn' | 'wardley' | 'source-only' | 'unavailable-plugin';
-export type MermaidDiagramFamilyId = typeof MERMAID_DIAGRAM_FAMILIES[number]['id'];
-
-export interface MermaidDiagramFamily {
-  adapter?: DiagramAdapterId;
-  /** Mermaid detector IDs returned by `mermaid.parse`, not authored header text. */
-  parserTypes: readonly string[];
-  editingMode?: DiagramEditingMode;
-  id: string;
-  label: string;
-}
-
 export interface DiagramCapability {
   adapter?: DiagramAdapterId;
   diagramType: string;
@@ -289,74 +288,31 @@ const VENN_ADAPTER = strictAdapter('venn', VENN_OPERATIONS, (source) => {
 });
 const WARDLEY_ADAPTER = strictAdapter('wardley', WARDLEY_OPERATIONS, isWardleySourceRepresentable);
 
-/**
- * Every built-in visual Mermaid family in 11.16.1. Aliases, renderer variants,
- * and Railroad's four grammar detector IDs deliberately collapse to one family.
- * `info` is a diagnostic rather than a visual family and is intentionally absent.
- */
-export const MERMAID_DIAGRAM_FAMILIES = [
-  { id: 'architecture', label: 'Architecture', parserTypes: ['architecture'], editingMode: 'semantic-form', adapter: 'architecture' },
-  { id: 'block', label: 'Block', parserTypes: ['block'], editingMode: 'semantic-form', adapter: 'block' },
-  { id: 'c4', label: 'C4', parserTypes: ['c4'], editingMode: 'semantic-form', adapter: 'c4' },
-  { id: 'class', label: 'Class', parserTypes: ['class', 'classDiagram'], editingMode: 'semantic-form', adapter: 'class' },
-  { id: 'cynefin', label: 'Cynefin', parserTypes: ['cynefin'], editingMode: 'semantic-form', adapter: 'cynefin' },
-  { id: 'entity-relationship', label: 'Entity relationship', parserTypes: ['er'], editingMode: 'semantic-form', adapter: 'er' },
-  { id: 'event-modeling', label: 'Event modeling', parserTypes: ['eventmodeling'], editingMode: 'semantic-form', adapter: 'event-modeling' },
-  { id: 'flowchart', label: 'Flowchart', parserTypes: ['flowchart', 'flowchart-v2', 'flowchart-elk'], editingMode: 'canvas', adapter: 'flowchart' },
-  { id: 'gantt', label: 'Gantt', parserTypes: ['gantt'], editingMode: 'semantic-form', adapter: 'gantt' },
-  { id: 'gitgraph', label: 'Gitgraph', parserTypes: ['gitGraph'], editingMode: 'semantic-form', adapter: 'gitgraph' },
-  { id: 'ishikawa', label: 'Ishikawa', parserTypes: ['ishikawa'], editingMode: 'semantic-form', adapter: 'ishikawa' },
-  { id: 'journey', label: 'User journey', parserTypes: ['journey'], editingMode: 'semantic-form', adapter: 'journey' },
-  { id: 'kanban', label: 'Kanban', parserTypes: ['kanban'], editingMode: 'semantic-form', adapter: 'kanban' },
-  { id: 'mindmap', label: 'Mindmap', parserTypes: ['mindmap'], editingMode: 'semantic-form', adapter: 'mindmap' },
-  { id: 'packet', label: 'Packet', parserTypes: ['packet'], editingMode: 'semantic-form', adapter: 'packet' },
-  { id: 'pie', label: 'Pie', parserTypes: ['pie'], editingMode: 'semantic-form', adapter: 'pie' },
-  { id: 'quadrant', label: 'Quadrant chart', parserTypes: ['quadrantChart'], editingMode: 'semantic-form', adapter: 'quadrant' },
-  { id: 'radar', label: 'Radar', parserTypes: ['radar'], editingMode: 'semantic-form', adapter: 'radar' },
-  { id: 'railroad', label: 'Railroad', parserTypes: ['railroad', 'railroadEbnf', 'railroadAbnf', 'railroadPeg'], editingMode: 'semantic-form', adapter: 'railroad' },
-  { id: 'requirement', label: 'Requirement', parserTypes: ['requirement'], editingMode: 'semantic-form', adapter: 'requirement' },
-  { id: 'sankey', label: 'Sankey', parserTypes: ['sankey'], editingMode: 'semantic-form', adapter: 'sankey' },
-  { id: 'sequence', label: 'Sequence', parserTypes: ['sequence'], editingMode: 'semantic-form', adapter: 'sequence' },
-  { id: 'state', label: 'State', parserTypes: ['state', 'stateDiagram'], editingMode: 'semantic-form', adapter: 'state' },
-  { id: 'swimlane', label: 'Swimlane', parserTypes: ['swimlane'], editingMode: 'semantic-form', adapter: 'swimlane' },
-  { id: 'timeline', label: 'Timeline', parserTypes: ['timeline'], editingMode: 'semantic-form', adapter: 'timeline' },
-  { id: 'tree-view', label: 'Tree view', parserTypes: ['treeView'], editingMode: 'semantic-form', adapter: 'tree-view' },
-  { id: 'treemap', label: 'Treemap', parserTypes: ['treemap'], editingMode: 'semantic-form', adapter: 'treemap' },
-  { id: 'venn', label: 'Venn', parserTypes: ['venn'], editingMode: 'semantic-form', adapter: 'venn' },
-{ id: 'wardley', label: 'Wardley', parserTypes: ['wardley'], editingMode: 'semantic-form', adapter: 'wardley' },
-  { id: 'xy-chart', label: 'XY chart', parserTypes: ['xychart'], editingMode: 'semantic-form', adapter: 'xy-chart' },
-] as const satisfies readonly MermaidDiagramFamily[];
-
-/** ZenUML is intentionally catalogued separately because it needs an external Mermaid plugin. */
-export const EXTERNAL_MERMAID_PLUGIN_FAMILIES = [
-  { id: 'zenuml', label: 'ZenUML', parserTypes: ['zenuml', 'zenUml'] },
-] as const;
-
-const DEFAULT_FAMILY_VALUES = { adapter: 'source-only', editingMode: 'source-only' } as const;
-const FAMILY_BY_PARSER_TYPE = new Map(
-  MERMAID_DIAGRAM_FAMILIES.flatMap((family) => family.parserTypes.map((parserType) => [parserType.toLowerCase(), family] as const)),
-);
-const EXTERNAL_FAMILY_BY_PARSER_TYPE = new Map(
-  EXTERNAL_MERMAID_PLUGIN_FAMILIES.flatMap((family) => family.parserTypes.map((parserType) => [parserType.toLowerCase(), family] as const)),
-);
+/** Browser-only semantic adapters remain intentionally separate from shared catalog metadata. */
+const ADAPTER_BY_FAMILY: Readonly<Record<MermaidDiagramFamilyId, DiagramAdapterId>> = {
+  architecture: 'architecture', block: 'block', c4: 'c4', class: 'class', cynefin: 'cynefin',
+  'entity-relationship': 'er', 'event-modeling': 'event-modeling', flowchart: 'flowchart', gantt: 'gantt',
+  gitgraph: 'gitgraph', ishikawa: 'ishikawa', journey: 'journey', kanban: 'kanban', mindmap: 'mindmap',
+  packet: 'packet', pie: 'pie', quadrant: 'quadrant', radar: 'radar', railroad: 'railroad',
+  requirement: 'requirement', sankey: 'sankey', sequence: 'sequence', state: 'state', swimlane: 'swimlane',
+  timeline: 'timeline', 'tree-view': 'tree-view', treemap: 'treemap', venn: 'venn', wardley: 'wardley',
+  'xy-chart': 'xy-chart',
+};
 
 export function classifyDiagramCapability(diagramType: string): DiagramCapability {
-  const normalizedType = diagramType.trim().toLowerCase();
-  const family = FAMILY_BY_PARSER_TYPE.get(normalizedType);
+  const family = getMermaidDiagramFamily(diagramType);
   if (family) {
-    const adapter = ('adapter' in family ? family.adapter : undefined) ?? DEFAULT_FAMILY_VALUES.adapter;
-    const editingMode = ('editingMode' in family ? family.editingMode : undefined) ?? DEFAULT_FAMILY_VALUES.editingMode;
     return {
-      adapter,
+      adapter: ADAPTER_BY_FAMILY[family.id],
       diagramType,
-      editingMode,
-      family: family.id as MermaidDiagramFamilyId,
+      editingMode: family.editingModel,
+      family: family.id,
       kind: family.id === 'flowchart' ? 'flowchart' : family.id === 'sequence' ? 'sequence' : family.id === 'entity-relationship' ? 'er' : 'generic',
       label: family.label,
     };
   }
 
-  const externalFamily = EXTERNAL_FAMILY_BY_PARSER_TYPE.get(normalizedType);
+  const externalFamily = getExternalMermaidDiagramFamily(diagramType);
   if (externalFamily) {
     return {
       adapter: 'unavailable-plugin', diagramType, editingMode: 'unavailable-plugin', family: 'zenuml', kind: 'generic', label: externalFamily.label,

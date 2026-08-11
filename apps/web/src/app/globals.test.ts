@@ -25,6 +25,10 @@ describe('mobile workspace CSS contracts', () => {
   it('keeps the GitHub copy action touch-sized inside the mobile source sheet', () => {
     expect(mobileCss).toMatch(/\.workspace-source-github-copy \.workspace-copy-button\s*\{[^}]*min-height:\s*44px;/u);
   });
+
+  it('keeps chooser documentation links as centered 44px touch targets', () => {
+    expect(css).toMatch(/\.workspace-template-menu-help\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*min-width:\s*44px;[^}]*min-height:\s*44px;/u);
+  });
 });
 
 describe('Mermaid source highlighting accessibility', () => {

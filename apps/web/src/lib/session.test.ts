@@ -166,8 +166,8 @@ describe('session helpers', () => {
   });
 
   it('creates an ordinary collision-safe template tab from the shared starter source', () => {
-    const creation = getTemplateDiagramCreation('api-sequence', 'diagram_1234567890abcdef', ['API sequence cdef']);
-    expect(creation.name).toBe('API sequence 90abcdef');
+    const creation = getTemplateDiagramCreation('sequence', 'diagram_1234567890abcdef', ['Sequence diagram cdef']);
+    expect(creation.name).toBe('Sequence diagram 90abcdef');
     expect(creation.source).toContain('sequenceDiagram');
     expect(creation.id).toBe('diagram_1234567890abcdef');
   });

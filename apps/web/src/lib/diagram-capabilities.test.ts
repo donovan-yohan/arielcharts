@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import mermaid from 'mermaid';
+import { PRIMARY_STARTER_TEMPLATES } from '@arielcharts/shared';
 import {
   EXTERNAL_MERMAID_PLUGIN_FAMILIES,
   MERMAID_CAPABILITY_CATALOG_VERSION,
@@ -25,12 +26,37 @@ const MERMAID_11_16_1_PARSER_TYPES = [
   'swimlane', 'timeline', 'treeView', 'treemap', 'venn', 'wardley', 'xychart',
 ].sort();
 
+const EXPECTED_STABILITY_BY_FAMILY = {
+  architecture: 'preview', block: 'preview', c4: 'preview', class: 'stable', cynefin: 'preview',
+  'entity-relationship': 'stable', 'event-modeling': 'preview', flowchart: 'stable', gantt: 'stable',
+  gitgraph: 'stable', ishikawa: 'preview', journey: 'stable', kanban: 'preview', mindmap: 'preview', packet: 'preview',
+  pie: 'stable', quadrant: 'stable', radar: 'preview', railroad: 'preview', requirement: 'stable', sankey: 'preview',
+  sequence: 'stable', state: 'stable', swimlane: 'preview', timeline: 'preview', 'tree-view': 'preview', treemap: 'preview',
+  venn: 'preview', wardley: 'preview', 'xy-chart': 'preview',
+} as const;
+
+const EXPECTED_HELP_URL_BY_FAMILY = {
+  architecture: 'https://mermaid.js.org/syntax/architecture.html', block: 'https://mermaid.js.org/syntax/block.html', c4: 'https://mermaid.js.org/syntax/c4.html', class: 'https://mermaid.js.org/syntax/classDiagram.html', cynefin: 'https://mermaid.js.org/syntax/cynefin.html',
+  'entity-relationship': 'https://mermaid.js.org/syntax/entityRelationshipDiagram.html', 'event-modeling': 'https://mermaid.js.org/syntax/eventmodeling.html', flowchart: 'https://mermaid.js.org/syntax/flowchart.html', gantt: 'https://mermaid.js.org/syntax/gantt.html',
+  gitgraph: 'https://mermaid.js.org/syntax/gitgraph.html', ishikawa: 'https://mermaid.js.org/syntax/ishikawa.html', journey: 'https://mermaid.js.org/syntax/userJourney.html', kanban: 'https://mermaid.js.org/syntax/kanban.html', mindmap: 'https://mermaid.js.org/syntax/mindmap.html', packet: 'https://mermaid.js.org/syntax/packet.html',
+  pie: 'https://mermaid.js.org/syntax/pie.html', quadrant: 'https://mermaid.js.org/syntax/quadrantChart.html', radar: 'https://mermaid.js.org/syntax/radar.html', railroad: 'https://mermaid.js.org/syntax/railroad.html', requirement: 'https://mermaid.js.org/syntax/requirementDiagram.html', sankey: 'https://mermaid.js.org/syntax/sankey.html',
+  sequence: 'https://mermaid.js.org/syntax/sequenceDiagram.html', state: 'https://mermaid.js.org/syntax/stateDiagram.html', swimlane: 'https://mermaid.js.org/syntax/swimlanes.html', timeline: 'https://mermaid.js.org/syntax/timeline.html', 'tree-view': 'https://mermaid.js.org/syntax/treeView.html', treemap: 'https://mermaid.js.org/syntax/treemap.html', venn: 'https://mermaid.js.org/syntax/venn.html', wardley: 'https://mermaid.js.org/syntax/wardley.html', 'xy-chart': 'https://mermaid.js.org/syntax/xyChart.html',
+} as const;
+
 describe('diagram capability catalog', () => {
   it('pins the complete Mermaid 11.16.1 visual detector matrix to 30 canonical families', async () => {
     mermaid.initialize({ startOnLoad: false });
     expect(MERMAID_CAPABILITY_CATALOG_VERSION).toBe('11.16.1');
     expect(MERMAID_CAPABILITY_FIXTURE_VERSION).toBe(MERMAID_CAPABILITY_CATALOG_VERSION);
     expect(MERMAID_DIAGRAM_FAMILIES).toHaveLength(30);
+    expect(Object.isFrozen(MERMAID_DIAGRAM_FAMILIES)).toBe(true);
+    for (const family of MERMAID_DIAGRAM_FAMILIES) {
+      expect(Object.isFrozen(family)).toBe(true);
+      expect(Object.isFrozen(family.parserTypes)).toBe(true);
+      expect(Object.isFrozen(family.starter)).toBe(true);
+    }
+    expect(Object.fromEntries(MERMAID_DIAGRAM_FAMILIES.map((family) => [family.id, family.stability])))
+      .toEqual(EXPECTED_STABILITY_BY_FAMILY);
     expect(MERMAID_CAPABILITY_FIXTURES).toHaveLength(30);
     expect([...new Set(MERMAID_CAPABILITY_FIXTURES.map((fixture) => fixture.family))]).toHaveLength(30);
     expect(MERMAID_DIAGRAM_FAMILIES.flatMap((family) => family.parserTypes).sort()).toEqual(MERMAID_11_16_1_PARSER_TYPES);
@@ -72,6 +98,37 @@ describe('diagram capability catalog', () => {
       expect(classifyDiagramCapability(parserType)).toMatchObject({ family: 'railroad', editingMode: 'semantic-form', adapter: 'railroad' });
     }
   });
+
+  it('pins every catalog help URL to the audited Mermaid documentation path and reserves no ZenUML starter', () => {
+    for (const family of MERMAID_DIAGRAM_FAMILIES) {
+      expect(family.helpUrl).toMatch(/^https:\/\/mermaid\.js\.org\/syntax\/.+\.html$/u);
+      expect(family.help.trim()).not.toBe('');
+    }
+    expect(Object.fromEntries(MERMAID_DIAGRAM_FAMILIES.map((family) => [family.id, family.helpUrl])))
+      .toEqual(EXPECTED_HELP_URL_BY_FAMILY);
+    expect(Object.isFrozen(EXTERNAL_MERMAID_PLUGIN_FAMILIES)).toBe(true);
+    expect(Object.isFrozen(EXTERNAL_MERMAID_PLUGIN_FAMILIES[0]!)).toBe(true);
+    expect(Object.isFrozen(EXTERNAL_MERMAID_PLUGIN_FAMILIES[0]!.parserTypes)).toBe(true);
+    expect(EXTERNAL_MERMAID_PLUGIN_FAMILIES).toEqual([
+      expect.objectContaining({ helpUrl: 'https://mermaid.js.org/syntax/zenuml.html', id: 'zenuml' }),
+    ]);
+  });
+
+  it('keeps every generated built-in starter parser-confirmed and adapter-representable', async () => {
+    mermaid.initialize({ startOnLoad: false });
+    for (const family of MERMAID_DIAGRAM_FAMILIES) {
+      const starter = PRIMARY_STARTER_TEMPLATES.find((template) => template.familyId === family.id);
+      expect(starter, family.id).toBeDefined();
+      const parsed = await mermaid.parse(starter!.source);
+      const capability = classifyDiagramCapability(parsed.diagramType);
+      expect(capability).toMatchObject({ family: family.id, editingMode: family.editingModel });
+      expect(getDiagramSourceModelAdapter(capability).getRepresentability(starter!.source), family.id).toEqual({ representable: true });
+      expect(getDiagramCapabilityLabel(capability, starter!.source), family.id).toContain('editable');
+      const sourceEdit = `${starter!.source}\n`;
+      await expect(mermaid.parse(sourceEdit), `${family.id} source edit`).resolves.toBeDefined();
+      expect(getDiagramSourceModelAdapter(capability).getRepresentability(sourceEdit), `${family.id} source edit`).toEqual({ representable: true });
+    }
+  }, 30_000);
 
   it('keeps unknown and future parser types source-only while reserving ZenUML for plugin registration', () => {
     expect(classifyDiagramCapability('future-diagram-v9')).toMatchObject({ family: 'unknown', kind: 'generic', editingMode: 'source-only' });

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import * as Y from 'yjs';
+import { ALL_STARTER_TEMPLATES } from '@arielcharts/shared';
 import { createApp } from './index.js';
 import { createActivityEvent } from './lib/activity.js';
 import type { ServerEnv } from './lib/types.js';
@@ -361,16 +362,8 @@ describe('server integration', () => {
       'restoreDiagramRevision',
     ]);
     const createTool = toolsPayload.result.tools.find((tool) => tool.name === 'createDiagram');
-    expect(createTool?.inputSchema?.properties?.templateId?.enum).toEqual([
-      'blank',
-      'api-sequence',
-      'service-flowchart',
-      'data-model-er',
-      'state-machine',
-      'incident-timeline',
-      'deployment-architecture',
-    ]);
-    expect(createTool?.inputSchema?.properties?.templateId?.description).toContain('api-sequence: A request, response');
+    expect(createTool?.inputSchema?.properties?.templateId?.enum).toEqual(ALL_STARTER_TEMPLATES.map((template) => template.id));
+    expect(createTool?.inputSchema?.properties?.templateId?.description).toContain('sequence: A minimal sequence message');
 
     const promptsResponse = await mcpRequest({ id: 3, method: 'prompts/list' });
     expect(promptsResponse.status).toBe(200);
@@ -466,7 +459,7 @@ describe('server integration', () => {
         arguments: {
           sessionId: 'abc123de',
           name: 'Checkout API flow',
-          templateId: 'api-sequence',
+          templateId: 'sequence',
           expectedRevision: latestRevision,
         },
       },
@@ -485,7 +478,7 @@ describe('server integration', () => {
     });
     expect(readResponse.status).toBe(200);
     const readPayload = await readResponse.json() as { result: { structuredContent: { diagram: { revision: string; mermaidText: string } } } };
-    expect(readPayload.result.structuredContent.diagram.mermaidText).toContain('POST /orders');
+    expect(readPayload.result.structuredContent.diagram.mermaidText).toContain('A->>B: Request');
 
     const writeResponse = await mcpRequest({
       id: 12,

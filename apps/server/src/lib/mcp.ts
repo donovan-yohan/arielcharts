@@ -9,7 +9,7 @@ import type {
   RenameDiagramOutput,
   WriteDiagramOutput,
 } from '@arielcharts/shared';
-import { getStarterTemplate, STARTER_TEMPLATES } from '@arielcharts/shared';
+import { ALL_STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/shared';
 import { createActivityEvent } from './activity.js';
 import { assertValidSessionId } from './session-id.js';
 import type { SessionManager } from './session-manager.js';
@@ -80,7 +80,7 @@ function readHistoryTarget(input: Record<string, unknown>, authorizedSessionId: 
   return { sessionId, diagramId, revisionId };
 }
 
-const STARTER_TEMPLATE_IDS = STARTER_TEMPLATES.map((template) => template.id).join(', ');
+const STARTER_TEMPLATE_IDS = ALL_STARTER_TEMPLATES.map((template) => template.id).join(', ');
 
 function readCreateDiagramSource(input: Record<string, unknown>): string {
   const hasMermaidText = input.mermaid_text !== undefined;

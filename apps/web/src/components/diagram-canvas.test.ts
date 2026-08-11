@@ -270,6 +270,16 @@ describe('new semantic families', () => {
     expect(workspaceE2eSource).toMatch(/Venn · editable · form[^]*?closeFlyout\(page, "source"\)[^]*?vennPanel\.waitFor[^]*?resetFixedWorkspaceOrigin\(page, `\$\{label\} Venn visible panel`\)[^]*?Venn semantic panel/u);
     expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?advancedTreemap =[^]*?"Root":::important[^]*?Treemap · source only[^]*?advancedVenn = "venn-beta\\n  title Advanced\\n  set A: 1"[^]*?Venn · source only/u);
     expect(workspaceE2eSource).toMatch(/function scrollErControlIntoView[^]*?scrollIntoView[^]*?window\.scrollTo\(0, 0\)/u);
+    expect(workspaceE2eSource).toMatch(/function waitForCatalogStarterCameraReady[^]*?requestAnimationFrame[^]*?requestAnimationFrame[^]*?expect\.poll[^]*?requestAnimationFrame[^]*?current === previous[^]*?toBe\(true\)/u);
+    expect(workspaceE2eSource).toContain('async function waitForCatalogStarterReadiness(');
+    expect(workspaceE2eSource).toContain('return latest.activeTab === name && latest.mode.includes(`${family.label} · editable`);');
+    expect(workspaceE2eSource).toContain('timeout: 15_000,');
+    expect(workspaceE2eSource).toContain('catalog readiness failed:');
+    expect(workspaceE2eSource).toContain('sourceFlyout.isVisible()');
+    expect(workspaceE2eSource).toMatch(/function expectCatalogStarterMobileSweep[^]*?selectTabByName\(page, name\)[^]*?waitForCatalogStarterReadiness\(page, family, name[^]*?const currentSvg = page\.locator\('\.diagram-canvas-svg > svg'\)[^]*?currentSvg\.waitFor[^]*?waitForCatalogStarterCameraReady\(page, `\$\{label\} \$\{family\.label\} source baseline`\)[^]*?source open camera[^]*?source close camera/u);
+    expect(workspaceE2eSource).toMatch(/function expectCatalogStarterMobileSweep[^]*?originalWorkingTabName[^]*?originalWorkingSource[^]*?originalWorkingMode[^]*?originalWorkingCamera[^]*?selectTabByName\(page, originalWorkingTabName\)[^]*?waitForSource\(page, originalWorkingSource\)[^]*?catalog handoff restored camera[^]*?originalWorkingDiagram\.id/u);
+    expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?selectTabByName\(page, diagramName\)[^]*?intendedSource[^]*?intendedMode[^]*?numeric restored intended-tab camera[^]*?replaceSource\(page, source\)/u);
+    expect(workspaceE2eSource).toMatch(/function expectCatalogStarterSweep[^]*?originalWorkingTabName[^]*?originalWorkingSource[^]*?originalWorkingMode[^]*?originalWorkingCamera[^]*?expectRemoteUpdateWithoutAnchorJump[^]*?Restore generated Flowchart catalog starter after representative MCP proof[^]*?for \(const \{ family, id, name \} of catalogDiagrams\)[^]*?selectTabByName\(page, originalWorkingTabName\)[^]*?waitForSource\(page, originalWorkingSource\)[^]*?toHaveText\(originalWorkingMode\)[^]*?catalog handoff original working camera/u);
     expect(workspaceE2eSource).toMatch(/function assertClosedOverlayToggleBesideError[^]*?assertTouchTarget[^]*?assertContainedInViewport\(page, toggle[^]*?viewportSize\(\)\?\.width[^]*?<= 420[^]*?toggle overlaps its error banner/u);
   });
 

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { STARTER_TEMPLATES } from '@arielcharts/shared';
+import { ALL_STARTER_TEMPLATES, PRIMARY_STARTER_TEMPLATES } from '@arielcharts/shared';
 import { handleMcpToolCall as handleAuthorizedMcpToolCall } from './mcp.js';
 import { SessionStore } from './persistence.js';
 import { SessionManager } from './session-manager.js';
@@ -252,21 +252,59 @@ describe('handleMcpToolCall', () => {
     });
   });
 
-  it('resolves a starter before creating an ordinary diagram without persisting template identity', async () => {
+  it('resolves every accepted starter into ordinary name, source, and layout records without template identity', async () => {
     await resources.manager.getOrCreateSession('abc123de');
-    const initial = await getSession();
-    const template = STARTER_TEMPLATES.find(({ id }) => id === 'api-sequence')!;
-
-    const created = await handleMcpToolCall(resources.manager, {
-      tool: 'create_diagram',
-      input: { session_id: 'abc123de', name: template.defaultName, template_id: template.id, revision: initial.revision },
-    }) as { diagram: { id: string; mermaid_text: string } };
-
-    expect(created.diagram.mermaid_text).toBe(template.source);
     const session = await resources.manager.getOrCreateSession('abc123de');
-    const diagram = session.doc.getMap<Y.Map<unknown>>('diagrams').get(created.diagram.id);
-    expect([...diagram!.keys()]).toEqual(expect.not.arrayContaining(['template_id', 'templateId']));
-    expect(JSON.stringify((await resources.manager.readSession('abc123de'))?.activity)).not.toContain(template.id);
+    const forbiddenFields = ['template_id', 'templateId', 'family_id', 'familyId'];
+    for (const [index, template] of ALL_STARTER_TEMPLATES.entries()) {
+      const before = await getSession();
+      const name = `Starter conformance ${index + 1}`;
+      const created = await handleMcpToolCall(resources.manager, {
+        tool: 'create_diagram',
+        input: { session_id: 'abc123de', name, template_id: template.id, revision: before.revision },
+      }) as { diagram: { id: string; mermaid_text: string } };
+
+      expect(created.diagram.mermaid_text, template.id).toBe(template.source);
+      const diagram = session.doc.getMap<Y.Map<unknown>>('diagrams').get(created.diagram.id);
+      expect([...diagram!.keys()].sort(), template.id).toEqual(['mermaid', 'name', 'nodePositions']);
+      expect([...diagram!.keys()], template.id).toEqual(expect.not.arrayContaining(forbiddenFields));
+      expect(diagram!.get('name'), template.id).toBe(name);
+      const source = diagram!.get('mermaid');
+      const positions = diagram!.get('nodePositions');
+      expect(source, template.id).toBeInstanceOf(Y.Text);
+      expect((source as Y.Text).toString(), template.id).toBe(template.source);
+      expect(positions, template.id).toBeInstanceOf(Y.Map);
+      expect((positions as Y.Map<unknown>).size, template.id).toBe(0);
+    }
+  });
+
+  it('resolves every generated primary templateId into an isolated current diagram revision and history', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    for (const template of PRIMARY_STARTER_TEMPLATES.filter((candidate) => candidate.familyId)) {
+      const before = await getSession();
+      const created = await handleMcpToolCall(resources.manager, {
+        tool: 'create_diagram',
+        input: {
+          session_id: 'abc123de',
+          name: `Catalog ${template.id}`,
+          template_id: template.id,
+          revision: before.revision,
+        },
+      }) as { diagram: { id: string; mermaid_text: string; revision: string } };
+      expect(created.diagram.mermaid_text, template.id).toBe(template.source);
+      const current = await getSession();
+      expect(current.diagrams.find((diagram) => diagram.id === created.diagram.id), template.id)
+        .toMatchObject({ name: `Catalog ${template.id}`, revision: created.diagram.revision });
+      await expect(handleMcpToolCall(resources.manager, {
+        tool: 'read_diagram', input: { session_id: 'abc123de', diagram_id: created.diagram.id },
+      })).resolves.toMatchObject({ diagram: { mermaid_text: template.source, revision: created.diagram.revision } });
+      await expect(handleMcpToolCall(resources.manager, {
+        tool: 'list_diagram_history', input: { session_id: 'abc123de', diagram_id: created.diagram.id },
+      })).resolves.toMatchObject({
+        current_revision: created.diagram.revision,
+        revisions: expect.arrayContaining([expect.objectContaining({ result_revision: created.diagram.revision })]),
+      });
+    }
   });
 
   it('requires exactly one creation source before it mutates the session', async () => {
@@ -292,12 +330,12 @@ describe('handleMcpToolCall', () => {
     const initial = await getSession();
     await handleMcpToolCall(resources.manager, {
       tool: 'create_diagram',
-      input: { session_id: 'abc123de', name: 'First template', template_id: 'service-flowchart', revision: initial.revision },
+      input: { session_id: 'abc123de', name: 'First template', template_id: 'flowchart', revision: initial.revision },
     });
 
     await expect(handleMcpToolCall(resources.manager, {
       tool: 'create_diagram',
-      input: { session_id: 'abc123de', name: 'Stale template', template_id: 'api-sequence', revision: initial.revision },
+      input: { session_id: 'abc123de', name: 'Stale template', template_id: 'sequence', revision: initial.revision },
     })).rejects.toThrow('Stale diagram revision');
     await expect(getSession()).resolves.toMatchObject({ diagrams: [{ id: 'main' }, { name: 'First template' }] });
   });

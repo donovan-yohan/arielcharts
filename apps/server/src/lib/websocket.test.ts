@@ -98,6 +98,7 @@ async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 5_000)
 async function openClient(port: number, sessionId: string, cookie: string) {
   const doc = new Y.Doc();
   let awarenessMessageCount = 0;
+  let documentMessageCount = 0;
   const socket = new WebSocket(`ws://127.0.0.1:${port}/ws/${sessionId}`, {
     headers: {
       origin: 'http://allowed.test',
@@ -110,6 +111,7 @@ async function openClient(port: number, sessionId: string, cookie: string) {
     const messageType = decoding.readVarUint(decoderInstance);
 
     if (messageType === MESSAGE_TYPE_SYNC) {
+      documentMessageCount += 1;
       const encoderInstance = encoding.createEncoder();
       encoding.writeVarUint(encoderInstance, MESSAGE_TYPE_SYNC);
       syncProtocol.readSyncMessage(decoderInstance, encoderInstance, doc, socket);
@@ -138,6 +140,9 @@ async function openClient(port: number, sessionId: string, cookie: string) {
     get awarenessMessageCount() {
       return awarenessMessageCount;
     },
+    get documentMessageCount() {
+      return documentMessageCount;
+    },
     doc,
     socket,
     close: async () => {
@@ -156,11 +161,20 @@ async function openClient(port: number, sessionId: string, cookie: string) {
         syncProtocol.writeUpdate(encoderInstance, update);
       })));
     },
+    sendSyncStep2(update: Uint8Array) {
+      socket.send(Buffer.from(encodeSyncMessage((encoderInstance) => {
+        encoding.writeVarUint(encoderInstance, syncProtocol.messageYjsSyncStep2);
+        encoding.writeVarUint8Array(encoderInstance, update);
+      })));
+    },
     sendAwareness(entries: TestAwarenessEntry[]) {
       socket.send(Buffer.from(encodeAwarenessMessage(entries)));
     },
     sendRawAwareness(entries: Array<Pick<TestAwarenessEntry, 'clientId' | 'clock'> & { stateJson: string }>) {
       socket.send(Buffer.from(encodeRawAwarenessMessage(entries)));
+    },
+    sendRaw(payload: Uint8Array) {
+      socket.send(Buffer.from(payload));
     },
   };
 }
@@ -286,6 +300,93 @@ describe('SessionWebSocketServer', () => {
 
     await reopenedWriter.close();
     await reopenedReader.close();
+  }, 15_000);
+
+  it('rejects malformed and oversized SyncStep2 updates before live state, peer fan-out, or persistence', async () => {
+    const sessionId = 'abc123de';
+    const attacker = await openClient(port, sessionId, roomCookie);
+    const peer = await openClient(port, sessionId, roomCookie);
+    await waitFor(() => {
+      expect(readMermaidText(attacker.doc)).toBe('');
+      expect(readMermaidText(peer.doc)).toBe('');
+    });
+    const session = await app.manager.getOrCreateSession(sessionId);
+    const before = Buffer.from(Y.encodeStateAsUpdate(session.doc));
+    const activityBefore = session.doc.getArray('activity').toArray();
+    const peerMessagesBefore = peer.documentMessageCount;
+
+    attacker.sendSyncStep2(new Uint8Array([255]));
+    attacker.sendSyncStep2(new Uint8Array(129 * 1024));
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(Buffer.from(Y.encodeStateAsUpdate(session.doc))).toEqual(before);
+    expect(session.doc.getArray('activity').toArray()).toEqual(activityBefore);
+    expect(peer.documentMessageCount).toBe(peerMessagesBefore);
+    expect(readMermaidText(peer.doc)).toBe('');
+
+    const normal = new Y.Doc();
+    Y.applyUpdate(normal, Y.encodeStateAsUpdate(attacker.doc));
+    const text = mainDiagram(normal).get('mermaid');
+    if (!(text instanceof Y.Text)) throw new Error('Expected Mermaid text.');
+    text.insert(0, 'flowchart LR\n  Client-->Server');
+    attacker.syncUpdate(Y.encodeStateAsUpdate(normal, Y.encodeStateVector(attacker.doc)));
+    await waitFor(() => {
+      expect(readMermaidText(peer.doc)).toBe('flowchart LR\n  Client-->Server');
+    });
+
+    await attacker.close();
+    await peer.close();
+  });
+
+  it('rejects schema-invalid SyncStep2 before live state, peer fan-out, or persistence', async () => {
+    const sessionId = 'abc123de';
+    const attacker = await openClient(port, sessionId, roomCookie);
+    const peer = await openClient(port, sessionId, roomCookie);
+    await waitFor(() => expect(readMermaidText(peer.doc)).toBe(''));
+    const session = await app.manager.getOrCreateSession(sessionId);
+    const before = Buffer.from(Y.encodeStateAsUpdate(session.doc));
+    const peerMessagesBefore = peer.documentMessageCount;
+    const persist = vi.spyOn(app.manager, 'persistSession');
+    const invalid = new Y.Doc();
+    Y.applyUpdate(invalid, Y.encodeStateAsUpdate(attacker.doc));
+    invalid.getMap('presence').set('invalid', { name: 'invalid', color: '#111111', type: 'robot' });
+    attacker.sendSyncStep2(Y.encodeStateAsUpdate(invalid, Y.encodeStateVector(attacker.doc)));
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(Buffer.from(Y.encodeStateAsUpdate(session.doc))).toEqual(before);
+    expect(peer.documentMessageCount).toBe(peerMessagesBefore);
+    expect(persist).not.toHaveBeenCalled();
+
+    const normal = new Y.Doc();
+    Y.applyUpdate(normal, Y.encodeStateAsUpdate(attacker.doc));
+    const text = mainDiagram(normal).get('mermaid');
+    if (!(text instanceof Y.Text)) throw new Error('Expected Mermaid text.');
+    text.insert(0, 'flowchart LR\n  Valid-->AfterRejectedSchema');
+    attacker.syncUpdate(Y.encodeStateAsUpdate(normal, Y.encodeStateVector(attacker.doc)));
+    await waitFor(() => expect(readMermaidText(peer.doc)).toContain('AfterRejectedSchema'));
+
+    persist.mockRestore();
+    await attacker.close();
+    await peer.close();
+  });
+
+  it('accepts a realistic burst of source deltas without consuming the awareness budget', async () => {
+    const sessionId = 'abc123de';
+    const writer = await openClient(port, sessionId, roomCookie);
+    const peer = await openClient(port, sessionId, roomCookie);
+    await waitFor(() => expect(readMermaidText(peer.doc)).toBe(''));
+    const text = mainDiagram(writer.doc).get('mermaid');
+    if (!(text instanceof Y.Text)) throw new Error('Expected Mermaid text.');
+
+    for (let index = 0; index < 160; index += 1) {
+      const before = Y.encodeStateVector(writer.doc);
+      text.insert(text.length, 'x');
+      writer.sendSyncStep2(Y.encodeStateAsUpdate(writer.doc, before));
+    }
+
+    await waitFor(() => expect(readMermaidText(peer.doc)).toBe('x'.repeat(160)), 10_000);
+    await writer.close();
+    await peer.close();
   }, 15_000);
 
   it('drops stale and current foreign awareness echoes but rejects a foreign clock advance', async () => {
@@ -521,6 +622,61 @@ describe('SessionWebSocketServer', () => {
     });
 
     session.doc.off('update', countDocumentUpdate);
+    await sender.close();
+    await observer.close();
+  });
+
+  it('rate-limits an awareness flood without exhausting peer fan-out or poisoning a healthy peer', async () => {
+    const sessionId = 'abc123de';
+    const attacker = await openClient(port, sessionId, roomCookie);
+    const observer = await openClient(port, sessionId, roomCookie);
+    const healthy = await openClient(port, sessionId, roomCookie);
+    const session = await app.manager.getOrCreateSession(sessionId);
+    const observerBaseline = observer.awarenessMessageCount;
+
+    for (let index = 0; index < 160; index += 1) {
+      attacker.sendAwareness([{
+        clientId: 10_000 + index,
+        clock: 1,
+        state: { user: { name: `Flood ${index}`, color: '#1188cc', type: 'human' } },
+      }]);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    // One socket's shared ingress window bounds both live awareness states and
+    // the resulting observer broadcasts, even if its frames are individually valid.
+    expect(session.awareness.getStates().size).toBeLessThanOrEqual(120);
+    expect(observer.awarenessMessageCount - observerBaseline).toBeLessThanOrEqual(120);
+
+    const participant = { name: 'Healthy peer', color: '#22aa66', type: 'human' };
+    healthy.sendAwareness([{ clientId: 20_000, clock: 1, state: { user: participant } }]);
+    await waitFor(() => expect(session.awareness.getStates().get(20_000)).toEqual({ user: participant }));
+
+    await attacker.close();
+    await observer.close();
+    await healthy.close();
+  });
+
+  it('rejects an over-budget first control frame before it can trigger awareness fan-out', async () => {
+    const sessionId = 'abc123de';
+    const sender = await openClient(port, sessionId, roomCookie);
+    const observer = await openClient(port, sessionId, roomCookie);
+    const session = await app.manager.getOrCreateSession(sessionId);
+    const observerBaseline = observer.awarenessMessageCount;
+    const oversizedControl = new Uint8Array(128 * 1024 + 1);
+    oversizedControl[0] = 3; // MESSAGE_TYPE_QUERY_AWARENESS
+
+    sender.sendRaw(oversizedControl);
+    await new Promise((resolve) => setTimeout(resolve, 75));
+
+    expect(sender.socket.readyState).toBe(WebSocket.OPEN);
+    expect(session.awareness.getStates().size).toBe(0);
+    expect(observer.awarenessMessageCount).toBe(observerBaseline);
+
+    const participant = { name: 'Usable after control drop', color: '#1188cc', type: 'human' };
+    sender.sendAwareness([{ clientId: 30_000, clock: 1, state: { user: participant } }]);
+    await waitFor(() => expect(session.awareness.getStates().get(30_000)).toEqual({ user: participant }));
+
     await sender.close();
     await observer.close();
   });

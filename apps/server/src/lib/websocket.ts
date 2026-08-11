@@ -4,7 +4,9 @@ import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import { applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
 import * as syncProtocol from 'y-protocols/sync';
+import * as Y from 'yjs';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
+import { admitYjsUpdate, COLLABORATION_BUDGETS, type DocumentAdmissionReason } from './document-admission.js';
 import type { SessionManager } from './session-manager.js';
 import { isValidSessionId } from './session-id.js';
 import type { SessionState, UpgradeContext } from './types.js';
@@ -16,10 +18,30 @@ const MESSAGE_TYPE_QUERY_AWARENESS = 3;
 // for seven maximum-size states plus protocol overhead in a batched update.
 const MAX_AWARENESS_UPDATE_BYTES = 256 * 1024;
 const MAX_AWARENESS_STATE_JSON_BYTES = 32 * 1024;
+const MAX_AWARENESS_ENTRIES_PER_UPDATE = 64;
 const MAX_CANVAS_AWARENESS_DIAGRAM_ID_LENGTH = 128;
 const MAX_CANVAS_AWARENESS_NODE_IDS = 100;
 const MAX_CANVAS_AWARENESS_NODE_ID_LENGTH = 256;
 const MAX_CANVAS_AWARENESS_COORDINATE = 1_000_000;
+const INGRESS_RATE_WINDOW_MS = 10_000;
+const INGRESS_BUDGETS = {
+  // A normal text-editor burst emits many small Yjs deltas. Permit that path
+  // independently from ephemeral fan-out so it cannot be starved by presence.
+  sync: { messages: 512, bytes: 4 * 1024 * 1024 },
+  awareness: { messages: 120, bytes: 512 * 1024 },
+  control: { messages: 32, bytes: 128 * 1024 },
+} as const;
+
+type IngressClass = keyof typeof INGRESS_BUDGETS;
+
+type IngressRejectionReason = DocumentAdmissionReason
+  | 'sync_frame_too_large'
+  | 'sync_rate_limited'
+  | 'awareness_rate_limited'
+  | 'control_rate_limited'
+  | 'awareness_update_too_large'
+  | 'malformed_awareness_update'
+  | 'outbound_sync_too_large';
 
 function toUint8Array(message: RawData): Uint8Array {
   if (message instanceof ArrayBuffer) {
@@ -50,6 +72,9 @@ interface AwarenessEntry {
 function parseAwarenessEntries(update: Uint8Array): AwarenessEntry[] {
   const decoderInstance = decoding.createDecoder(update);
   const clientCount = decoding.readVarUint(decoderInstance);
+  if (clientCount > MAX_AWARENESS_ENTRIES_PER_UPDATE) {
+    throw new Error('Awareness update exceeds entry limit.');
+  }
   const entries: AwarenessEntry[] = [];
 
   for (let index = 0; index < clientCount; index += 1) {
@@ -141,9 +166,11 @@ function sanitizeCanvasAwarenessEntry(entry: AwarenessEntry): AwarenessEntry {
 }
 
 export class SessionWebSocketServer {
-  private readonly wss = new WebSocketServer({ noServer: true });
+  private readonly wss = new WebSocketServer({ noServer: true, maxPayload: COLLABORATION_BUDGETS.websocketFrameBytes });
   private readonly observedDocs = new WeakSet<object>();
   private readonly minimumAccessVersions = new Map<string, number>();
+  private readonly ingressBySocket = new WeakMap<WebSocket, Map<IngressClass, { windowStartedAt: number; messages: number; bytes: number }>>();
+  private readonly ingressRejectionCounts = new Map<IngressRejectionReason, number>();
   /**
    * An upgraded connection does not join SessionState.sockets until its
    * asynchronous session lookup completes. Track that interval so key
@@ -163,6 +190,7 @@ export class SessionWebSocketServer {
         socket.close();
       });
       socket.on('close', () => {
+        this.ingressBySocket.delete(socket);
         this.untrackPendingSocket(sessionId, socket);
         void this.handleClose(socket, sessionId).catch((error) => {
           console.error('WebSocket close handling failed:', error);
@@ -221,6 +249,11 @@ export class SessionWebSocketServer {
         resolve();
       });
     });
+  }
+
+  /** Fixed-key, content-free observability for bounded ingress rejections. */
+  getIngressRejectionCounts(): ReadonlyMap<IngressRejectionReason, number> {
+    return this.ingressRejectionCounts;
   }
 
   /** Rotation revokes already-upgraded peers; cookie checks alone only protect reconnects. */
@@ -282,37 +315,102 @@ export class SessionWebSocketServer {
     if (buffer.length === 0) {
       return;
     }
-
+    if (buffer.byteLength > COLLABORATION_BUDGETS.websocketFrameBytes) {
+      this.recordIngressRejection('sync_frame_too_large');
+      return;
+    }
     const session = await this.manager.requireSession(sessionId);
     if (sender.readyState !== WebSocket.OPEN) {
       return;
     }
     this.ensureSocketRegistered(session, sender);
     const decoderInstance = decoding.createDecoder(buffer);
-    const messageType = decoding.readVarUint(decoderInstance);
+    let messageType: number;
+    try {
+      messageType = decoding.readVarUint(decoderInstance);
+    } catch {
+      this.recordIngressRejection('malformed_yjs_update');
+      return;
+    }
+    const ingressClass: IngressClass = messageType === MESSAGE_TYPE_SYNC
+      ? 'sync'
+      : messageType === MESSAGE_TYPE_AWARENESS
+        ? 'awareness'
+        : 'control';
+    if (!this.allowIngress(sender, ingressClass, buffer.byteLength)) {
+      this.recordIngressRejection(`${ingressClass}_rate_limited`);
+      return;
+    }
 
     switch (messageType) {
       case MESSAGE_TYPE_SYNC: {
         const encoderInstance = encoding.createEncoder();
         encoding.writeVarUint(encoderInstance, MESSAGE_TYPE_SYNC);
-        const syncMessageType = syncProtocol.readSyncMessage(decoderInstance, encoderInstance, session.doc, sender);
-        if (encoding.length(encoderInstance) > 1 && sender.readyState === WebSocket.OPEN) {
-          sender.send(Buffer.from(encoding.toUint8Array(encoderInstance)));
+        let syncMessageType: number;
+        try {
+          syncMessageType = decoding.readVarUint(decoderInstance);
+        } catch {
+          this.recordIngressRejection('malformed_yjs_update');
+          return;
         }
-
-        if (syncMessageType === syncProtocol.messageYjsSyncStep2 || syncMessageType === syncProtocol.messageYjsUpdate) {
-          session.updatedAt = Date.now();
-          await this.manager.persistSession(session);
+        if (syncMessageType === syncProtocol.messageYjsSyncStep1) {
+          try {
+            syncProtocol.writeSyncStep2(encoderInstance, session.doc, decoding.readVarUint8Array(decoderInstance));
+          } catch {
+            this.recordIngressRejection('malformed_yjs_update');
+            return;
+          }
+          if (encoding.length(encoderInstance) > COLLABORATION_BUDGETS.websocketFrameBytes) {
+            this.recordIngressRejection('outbound_sync_too_large');
+            return;
+          }
+          if (encoding.length(encoderInstance) > 1 && sender.readyState === WebSocket.OPEN) {
+            sender.send(Buffer.from(encoding.toUint8Array(encoderInstance)));
+          }
+          return;
         }
+        if (syncMessageType !== syncProtocol.messageYjsSyncStep2 && syncMessageType !== syncProtocol.messageYjsUpdate) {
+          this.recordIngressRejection('malformed_yjs_update');
+          return;
+        }
+        let update: Uint8Array;
+        try {
+          update = decoding.readVarUint8Array(decoderInstance);
+        } catch {
+          this.recordIngressRejection('malformed_yjs_update');
+          return;
+        }
+        const admission = admitYjsUpdate(session.doc, update);
+        if (!admission.accepted) {
+          this.recordIngressRejection(admission.reason);
+          return;
+        }
+        Y.applyUpdate(session.doc, update, sender);
+        session.updatedAt = Date.now();
+        await this.manager.persistSession(session);
         return;
       }
 
       case MESSAGE_TYPE_AWARENESS: {
-        const awarenessUpdate = decoding.readVarUint8Array(decoderInstance);
-        if (awarenessUpdate.byteLength > MAX_AWARENESS_UPDATE_BYTES) {
+        let awarenessUpdate: Uint8Array;
+        try {
+          awarenessUpdate = decoding.readVarUint8Array(decoderInstance);
+        } catch {
+          this.recordIngressRejection('malformed_awareness_update');
           return;
         }
-        const filtered = this.filterAwarenessEntries(session, sender, parseAwarenessEntries(awarenessUpdate));
+        if (awarenessUpdate.byteLength > MAX_AWARENESS_UPDATE_BYTES) {
+          this.recordIngressRejection('awareness_update_too_large');
+          return;
+        }
+        let entries: AwarenessEntry[];
+        try {
+          entries = parseAwarenessEntries(awarenessUpdate);
+        } catch {
+          this.recordIngressRejection('malformed_awareness_update');
+          return;
+        }
+        const filtered = this.filterAwarenessEntries(session, sender, entries);
         if (filtered.entries.length === 0) {
           return;
         }
@@ -340,6 +438,38 @@ export class SessionWebSocketServer {
     session.sockets.add(socket);
     if (!session.socketClientIds.has(socket)) {
       session.socketClientIds.set(socket, new Set());
+    }
+  }
+
+  private allowIngress(socket: WebSocket, ingressClass: IngressClass, bytes: number): boolean {
+    const now = Date.now();
+    const budget = INGRESS_BUDGETS[ingressClass];
+    if (bytes > budget.bytes) {
+      return false;
+    }
+    let windows = this.ingressBySocket.get(socket);
+    if (!windows) {
+      windows = new Map();
+      this.ingressBySocket.set(socket, windows);
+    }
+    const current = windows.get(ingressClass);
+    if (!current || now - current.windowStartedAt >= INGRESS_RATE_WINDOW_MS) {
+      windows.set(ingressClass, { windowStartedAt: now, messages: 1, bytes });
+      return true;
+    }
+    if (current.messages >= budget.messages || current.bytes + bytes > budget.bytes) {
+      return false;
+    }
+    current.messages += 1;
+    current.bytes += bytes;
+    return true;
+  }
+
+  private recordIngressRejection(reason: IngressRejectionReason): void {
+    const count = (this.ingressRejectionCounts.get(reason) ?? 0) + 1;
+    this.ingressRejectionCounts.set(reason, count);
+    if (count === 1) {
+      console.warn(`[collaboration-ingress] rejected ${reason}`);
     }
   }
 

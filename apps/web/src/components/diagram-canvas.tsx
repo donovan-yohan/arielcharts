@@ -100,6 +100,7 @@ import { getMindmapNodeIdentity, type MindmapDiagramSnapshot, type MindmapNode, 
 import { getTreeViewNodeIdentity, type TreeViewDiagramSnapshot, type TreeViewNode, type TreeViewNodeIdentity } from '../lib/treeview-mutations';
 import { getIshikawaCauseIdentity, type IshikawaCause, type IshikawaCauseIdentity, type IshikawaCauseInput, type IshikawaDiagramSnapshot } from '../lib/ishikawa-mutations';
 import { getRailroadRuleIdentity, type RailroadDiagramSnapshot, type RailroadRule, type RailroadRuleIdentity } from '../lib/railroad-mutations';
+import { OverlayCanvasLayer, type OverlayCanvasLayerProps } from './overlay-canvas-layer';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
 
@@ -135,6 +136,7 @@ export interface DiagramCanvasProps {
   readOnly?: boolean;
   selectedNodeIds?: string[];
   svg: string;
+  overlay?: Omit<OverlayCanvasLayerProps, 'semanticAnchors' | 'transform'>;
   sequenceParticipants?: readonly SequenceParticipant[];
   sequenceDiagram?: SequenceDiagramSnapshot | null;
   sequenceTextItems?: readonly SequenceSvgTextItem[];
@@ -890,6 +892,7 @@ export function DiagramCanvas({
   onRenameRailroadRule,
   onDeleteRailroadRule,
   onMoveRailroadRule,
+  overlay,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -1037,6 +1040,13 @@ export function DiagramCanvas({
 
     return boundsByNodeId;
   }, [hitMap, visibleNodePositions]);
+  const overlaySemanticAnchors = useMemo(() => {
+    const anchors = new Map<string, CanvasWorldPoint>();
+    for (const [id, bounds] of interactiveNodeBounds ?? hitMap?.nodes ?? []) {
+      anchors.set(id, { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 });
+    }
+    return anchors;
+  }, [hitMap, interactiveNodeBounds]);
 
   const orderedNodeIds = useMemo(() => {
     if (graph?.nodes.length) {
@@ -3163,6 +3173,14 @@ export function DiagramCanvas({
             );
           })}
         </div>
+      ) : null}
+
+      {overlay ? (
+        <OverlayCanvasLayer
+          {...overlay}
+          semanticAnchors={overlaySemanticAnchors}
+          transform={{ x: viewport.panX, y: viewport.panY, zoom: viewport.zoom }}
+        />
       ) : null}
 
       <div aria-hidden="true" style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 10 }}>

@@ -1732,6 +1732,86 @@ async function expectTabKeyboardAndRename(page: Page, created: string): Promise<
   return renamed;
 }
 
+async function expectOverlaySceneFoundation(page: Page, diagramName: string): Promise<void> {
+  await selectTabByName(page, diagramName);
+  await verifiedClick(page, page.getByRole('button', { name: 'Overlay tools', exact: true }), 'open overlay tools');
+  await verifiedClick(page, page.getByRole('button', { name: 'Add overlay', exact: true }), 'add overlay object');
+  const objects = page.locator('[data-testid^="overlay-object-"]');
+  await expect(objects).toHaveCount(1);
+  await verifiedClick(page, objects.first(), 'select overlay object');
+  const beforeMove = await objects.first().boundingBox();
+  await verifiedClick(page, page.getByRole('button', { name: 'Move right', exact: true }), 'move overlay object');
+  const afterMove = await objects.first().boundingBox();
+  assert(Boolean(beforeMove && afterMove && afterMove.x > beforeMove.x), 'Overlay move did not update visible world placement.');
+  await verifiedClick(page, page.getByRole('button', { name: 'Bring front', exact: true }), 'reorder overlay object');
+  await verifiedClick(page, page.getByRole('button', { name: 'Copy overlay', exact: true }), 'copy overlay object');
+  await verifiedClick(page, page.getByRole('button', { name: 'Paste overlay', exact: true }), 'paste overlay object');
+  await expect(objects).toHaveCount(2);
+  const pastedTestId = await objects.last().getAttribute('data-testid');
+  assert(pastedTestId?.startsWith('overlay-object-overlay_'), `Pasted overlay did not expose a stable object id: ${pastedTestId}.`);
+  const pastedObject = page.getByTestId(pastedTestId!);
+
+  await selectTabByName(page, 'Main');
+  await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(0);
+  await selectTabByName(page, diagramName);
+  await expect(objects).toHaveCount(2);
+  await verifiedClick(page, page.getByRole('button', { name: 'Overlay tools', exact: true }), 'reopen overlay tools after tab switch');
+  await verifiedClick(page, pastedObject, 'reselect topmost pasted overlay object');
+  await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete overlay object');
+  await expect(objects).toHaveCount(1);
+  await verifiedClick(page, page.getByRole('button', { name: 'Undo overlay', exact: true }), 'undo overlay delete');
+  await expect(objects).toHaveCount(2);
+  await verifiedClick(page, pastedObject, 'select pasted overlay before history restore');
+  await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete overlay before history restore');
+  await verifiedClick(page, objects.first(), 'select final overlay before history restore');
+  await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete final overlay before history restore');
+  await expect(objects).toHaveCount(0);
+  await verifiedClick(page, page.getByRole('button', { name: 'Restore overlay', exact: true }), 'restore prior overlay revision');
+  await expect(page.getByText('overlay restored', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(objects).not.toHaveCount(0);
+  const topmostTestId = await objects.last().getAttribute('data-testid');
+  assert(topmostTestId?.startsWith('overlay-object-overlay_'), `Restored overlay did not expose a stable topmost id: ${topmostTestId}.`);
+  const topmostObject = page.getByTestId(topmostTestId!);
+  await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForCanvas(page, 'flowchart');
+  await verifiedClick(page, topmostObject, 'select topmost overlay for semantic anchor');
+  await verifiedClick(page, page.getByRole('button', { name: 'Anchor first node', exact: true }), 'anchor overlay to first Mermaid node');
+  await expect(topmostObject).not.toHaveAttribute('data-orphaned', 'true');
+  const worldBeforePan = await topmostObject.evaluate((element) => ({ x: element.getAttribute('data-world-x'), y: element.getAttribute('data-world-y') }));
+  const cameraBeforePan = await readCanvasCameraSnapshot(page, 'overlay pan baseline');
+  const boxBeforePan = await topmostObject.boundingBox();
+  await dispatchTrustedCanvasWheel(page, 'overlay flowchart pan', 'flowchart', { ctrlKey: false, deltaX: 24, deltaY: 36 });
+  const cameraAfterPan = await readCanvasCameraSnapshot(page, 'overlay pan result');
+  const boxAfterPan = await topmostObject.boundingBox();
+  const worldAfterPan = await topmostObject.evaluate((element) => ({ x: element.getAttribute('data-world-x'), y: element.getAttribute('data-world-y') }));
+  assert(worldAfterPan.x === worldBeforePan.x && worldAfterPan.y === worldBeforePan.y, 'Canvas pan changed durable overlay world geometry.');
+  assert(Boolean(boxBeforePan && boxAfterPan
+    && Math.abs((boxAfterPan.x - boxBeforePan.x) - (cameraAfterPan.panX - cameraBeforePan.panX)) < 1
+    && Math.abs((boxAfterPan.y - boxBeforePan.y) - (cameraAfterPan.panY - cameraBeforePan.panY)) < 1),
+  'Overlay screen delta did not match the live canvas pan delta.');
+  const flowBox = await topmostObject.boundingBox();
+  await verifiedClick(page, page.getByRole('button', { name: 'Zoom in', exact: true }), 'zoom flowchart with overlay');
+  const zoomedBox = await topmostObject.boundingBox();
+  assert(Boolean(flowBox && zoomedBox && zoomedBox.width > flowBox.width), 'Overlay did not follow the React Flow zoom transform.');
+  await verifiedClick(page, page.getByRole('button', { name: 'Fit diagram', exact: true }), 'fit flowchart with overlay');
+  await expect(topmostObject).toBeVisible();
+  await replaceSource(page, API_SEQUENCE_FIXTURE);
+  await waitForCanvas(page, 'sequence');
+  await expect(topmostObject).toBeVisible();
+  await expect(topmostObject).toHaveAttribute('data-orphaned', 'true');
+  await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForCanvas(page, 'flowchart');
+  await expect(topmostObject).not.toHaveAttribute('data-orphaned', 'true');
+  await replaceSource(page, '');
+  await waitForSource(page, '');
+  while (await objects.count() > 0) {
+    await verifiedClick(page, objects.last(), 'select overlay for scenario cleanup');
+    await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete overlay during scenario cleanup');
+  }
+  await expect(objects).toHaveCount(0);
+  await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), 'close overlay tools after scenario');
+}
+
 async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForSource(page, FLOWCHART_FIXTURE);
@@ -3929,6 +4009,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'GitHub Mermaid copy fence, clipboard content, and source preservation');
       const diagramName = await expectTabKeyboardAndRename(page, blankDiagramName);
       record(results, 'blank tab create, rename, and keyboard navigation');
+      await expectOverlaySceneFoundation(page, diagramName);
+      record(results, 'durable overlay create, move, order, clipboard, delete, undo, history restore, tab isolation, and SVG/React Flow camera placement');
       await selectTabByName(page, diagramName);
       await saveScreenshot(page, 'issue-14-blank');
       await expectTemplateDiagramCreation(page);

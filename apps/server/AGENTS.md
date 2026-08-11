@@ -7,7 +7,7 @@ the internal tool boundary; `mcp-server.ts` exposes the modern MCP contract;
 
 ## Durable-document invariants
 
-- The root Yjs keys are `diagrams`, `diagramOrder`, `activity`, and `presence`.
+- The root Yjs keys are `diagrams`, `diagramOrder`, `activity`, `presence`, and `overlays`.
   A diagram contains `name`, `mermaid` (`Y.Text`), and `nodePositions`
   (`Y.Map`). Preserve this shape or migrate it deliberately with persistence
   coverage.
@@ -46,6 +46,11 @@ the internal tool boundary; `mcp-server.ts` exposes the modern MCP contract;
   browser checkpoint deduplication. Restore copies an immutable source/layout
   snapshot into one new transaction, preserves the current name, and returns a
   structured no-op for a stale expected diagram revision.
+- Overlay scenes have a separate server-derived content revision and private
+  journal. Browser raw writes checkpoint canonical scenes during persistence;
+  overlay restore cannot change Mermaid source/layout. Diagram deletion must
+  remove its live scene plus both journals in the same LevelDB batch. MCP must
+  not expose overlays until its dedicated feature owns that contract.
 - `POST /mcp` is modern-only MCP `2026-07-28`; application `sessionId` and
   `diagramId` are explicit tool inputs, not MCP transport-session state. Keep
   fetch-before-write revision checks, header validation, and CORS behavior

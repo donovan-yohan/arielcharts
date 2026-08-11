@@ -206,7 +206,43 @@ function validateOverlayObject(object: unknown): DocumentAdmissionReason | undef
   // renderer semantics; recursively count nested arrays so wrapping a point
   // list in maps/arrays cannot bypass the per-object collaboration budget.
   if (countOverlayArrayItems(object, new Set<object>()) > COLLABORATION_BUDGETS.strokePointsPerObject) return 'overlay_quota_exceeded';
+  const kind = object.get('kind');
+  const version = object.get('version');
+  const orderKey = object.get('order_key');
+  const geometry = object.get('geometry');
+  const anchor = object.get('anchor');
+  const layer = object.get('layer');
+  if (!isBoundedIdentifier(kind) || !Number.isInteger(version) || (version as number) < 1
+    || !isBoundedIdentifier(orderKey) || !isOverlayGeometry(geometry)
+    || (layer !== undefined && (typeof layer !== 'string' || byteLength(layer) > COLLABORATION_BUDGETS.identifierBytes))
+    || !isOverlayMetadata(object.get('style')) || !isOverlayMetadata(object.get('metadata'))
+    || !isPlainRecord(object.get('payload')) || (anchor !== undefined && !isOverlayAnchor(anchor))) {
+    return 'invalid_overlay_schema';
+  }
   return undefined;
+}
+
+function isOverlayPoint(value: unknown): boolean {
+  return isPlainRecord(value) && Number.isFinite(value.x) && Number.isFinite(value.y);
+}
+
+function isOverlayGeometry(value: unknown): boolean {
+  if (!isOverlayPoint(value)) return false;
+  const geometry = value as Record<string, unknown>;
+  return Number.isFinite(geometry.width) && (geometry.width as number) >= 0
+    && Number.isFinite(geometry.height) && (geometry.height as number) >= 0 && Number.isFinite(geometry.rotation);
+}
+
+function isOverlayAnchor(value: unknown): boolean {
+  return isPlainRecord(value) && isBoundedIdentifier(value.mermaid_id)
+    && isOverlayPoint(value.offset) && isOverlayPoint(value.fallback);
+}
+
+function isOverlayMetadata(value: unknown): boolean {
+  if (!isPlainRecord(value) || Object.keys(value).length > 32) return false;
+  return Object.entries(value).every(([key, item]) => byteLength(key) <= 128
+    && (item === null || typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item))
+      || (typeof item === 'string' && byteLength(item) <= 2_048)));
 }
 
 function countOverlayArrayItems(value: unknown, seen: Set<object>): number {
@@ -346,8 +382,23 @@ export function repairOverlayDocument(doc: Y.Doc): boolean {
   const overlays = doc.share.get(OVERLAYS_KEY);
   if (overlays === undefined || !isYMap(overlays)) return false;
   let changed = false;
+  const diagrams = doc.share.get(DIAGRAMS_KEY);
+  const diagramIds = isYMap(diagrams) ? new Set(diagrams.keys()) : new Set<string>();
+  for (const diagramId of [...diagramIds].sort()) {
+    if (overlays.has(diagramId)) continue;
+    const scene = new Y.Map<unknown>();
+    scene.set('version', OVERLAY_SCHEMA_VERSION);
+    scene.set('objects', new Y.Map<unknown>());
+    overlays.set(diagramId, scene);
+    changed = true;
+  }
   const sceneEntries = [...overlays.entries()].sort(([left], [right]) => left.localeCompare(right));
   for (const [sceneId, rawScene] of sceneEntries) {
+    if (diagramIds.size > 0 && !diagramIds.has(sceneId)) {
+      overlays.delete(sceneId);
+      changed = true;
+      continue;
+    }
     if (!isYMap(rawScene)) {
       overlays.delete(sceneId);
       changed = true;

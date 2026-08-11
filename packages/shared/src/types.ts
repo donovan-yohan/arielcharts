@@ -78,6 +78,78 @@ export interface DiagramNodePosition {
 
 export type DiagramNodePositions = Record<string, DiagramNodePosition>;
 
+export const OVERLAY_SCENE_SCHEMA_VERSION = 1 as const;
+
+export interface OverlayWorldPoint {
+  x: number;
+  y: number;
+}
+
+/** Renderer-neutral world geometry; camera transforms are never persisted here. */
+export interface OverlayGeometry extends OverlayWorldPoint {
+  width: number;
+  height: number;
+  rotation: number;
+}
+
+export interface OverlayMermaidAnchor {
+  mermaid_id: string;
+  offset: OverlayWorldPoint;
+  /** Preserved placement used whenever the semantic Mermaid target is absent. */
+  fallback: OverlayWorldPoint;
+}
+
+export type OverlayMetadataValue = string | number | boolean | null;
+export type OverlayMetadata = Record<string, OverlayMetadataValue>;
+
+export interface OverlayObjectRecord {
+  id: string;
+  kind: string;
+  version: number;
+  order_key: string;
+  geometry: OverlayGeometry;
+  anchor?: OverlayMermaidAnchor;
+  layer?: string;
+  style: OverlayMetadata;
+  metadata: OverlayMetadata;
+  payload: Record<string, unknown>;
+}
+
+export interface OverlaySceneSnapshot {
+  version: number;
+  diagram_id: string;
+  objects: OverlayObjectRecord[];
+}
+
+export interface ListOverlayHistoryOutput {
+  revisions: OverlayRevisionSummary[];
+  current_revision: string;
+}
+
+export interface OverlayRevisionSummary {
+  revision_id: string;
+  sequence: number;
+  diagram_id: string;
+  timestamp: number;
+  actor: { name: string; type: ParticipantType };
+  action: 'baseline' | 'checkpoint' | 'restored';
+  result_revision: string;
+  restored_from_revision_id?: string;
+}
+
+export interface OverlayRevision extends OverlayRevisionSummary {
+  scene: OverlaySceneSnapshot;
+}
+
+export interface WorkspaceSnapshotPair {
+  mermaidRevisionId: string;
+  overlayRevisionId: string;
+}
+
+export type RestoreOverlayRevisionResult =
+  | { status: 'restored'; scene: OverlaySceneSnapshot; revision: OverlayRevisionSummary }
+  | { status: 'stale'; scene: OverlaySceneSnapshot; current_revision: string };
+
 export type DiagramRevisionOrigin = 'browser' | 'mcp' | 'system';
 
 export type DiagramRevisionAction = ActivityEvent['action'] | 'baseline' | 'checkpoint';

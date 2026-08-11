@@ -10,6 +10,7 @@ import { isCredentialedBrowserOriginAllowed, isMcpOriginAllowed } from './lib/or
 import { SessionStore } from './lib/persistence.js';
 import { assertValidSessionId, isValidSessionId } from './lib/session-id.js';
 import { SessionManager } from './lib/session-manager.js';
+import { COLLABORATION_BUDGETS } from './lib/document-admission.js';
 import { loadServerEnv } from './lib/env.js';
 import { SessionWebSocketServer } from './lib/websocket.js';
 import { RoomAccessError, RoomAccessService, roomAccessErrorHeaders } from './lib/room-access.js';
@@ -25,6 +26,12 @@ function readRequiredString(value: unknown, field: string): string {
   return value;
 }
 
+function readOverlayActorName(value: unknown): string {
+  const name = readRequiredString(value ?? 'browser', 'actor_name');
+  if (Buffer.byteLength(name, 'utf8') > COLLABORATION_BUDGETS.identifierBytes) throw new Error('Overlay actor name exceeds the collaboration identifier budget.');
+  return name;
+}
+
 function readRestoreActor(body: Record<string, unknown>) {
   const actorName = typeof body.actor_name === 'string' && body.actor_name.trim() ? body.actor_name : 'browser';
   const actorType = body.actor_type === 'agent' ? 'agent' : 'human';
@@ -36,7 +43,11 @@ type DiagramApiPath =
   | { kind: 'current'; sessionId: string; diagramId: string }
   | { kind: 'history'; sessionId: string; diagramId: string }
   | { kind: 'revision'; sessionId: string; diagramId: string; revisionId: string }
-  | { kind: 'restore'; sessionId: string; diagramId: string; revisionId: string };
+  | { kind: 'restore'; sessionId: string; diagramId: string; revisionId: string }
+  | { kind: 'overlay-current'; sessionId: string; diagramId: string }
+  | { kind: 'overlay-history'; sessionId: string; diagramId: string }
+  | { kind: 'overlay-revision'; sessionId: string; diagramId: string; revisionId: string }
+  | { kind: 'overlay-restore'; sessionId: string; diagramId: string; revisionId: string };
 
 function parseDiagramApiPath(pathname: string): DiagramApiPath | undefined {
   const segments = pathname.split('/').filter(Boolean);
@@ -48,6 +59,14 @@ function parseDiagramApiPath(pathname: string): DiagramApiPath | undefined {
     const sessionId = decodeURIComponent(segments[2]!);
     const diagramId = decodeURIComponent(segments[4]!);
     if (segments.length === 5) return { kind: 'current', sessionId, diagramId };
+    if (segments.length === 6 && segments[5] === 'overlays') return { kind: 'overlay-current', sessionId, diagramId };
+    if (segments.length === 7 && segments[5] === 'overlays' && segments[6] === 'history') return { kind: 'overlay-history', sessionId, diagramId };
+    if (segments.length === 8 && segments[5] === 'overlays' && segments[6] === 'history') {
+      return { kind: 'overlay-revision', sessionId, diagramId, revisionId: decodeURIComponent(segments[7]!) };
+    }
+    if (segments.length === 9 && segments[5] === 'overlays' && segments[6] === 'history' && segments[8] === 'restore') {
+      return { kind: 'overlay-restore', sessionId, diagramId, revisionId: decodeURIComponent(segments[7]!) };
+    }
     if (segments.length === 6 && segments[5] === 'history') return { kind: 'history', sessionId, diagramId };
     if (segments.length === 7 && segments[5] === 'history') {
       return { kind: 'revision', sessionId, diagramId, revisionId: decodeURIComponent(segments[6]!) };
@@ -63,8 +82,9 @@ function parseDiagramApiPath(pathname: string): DiagramApiPath | undefined {
 }
 
 function historyErrorStatus(message: string): number {
-  if (/^(Session|Diagram|Diagram revision) not found:/.test(message)) return 404;
-  if (/^(Expected |Invalid |Unexpected token)/.test(message)) return 400;
+  if (/^(Session|Diagram|Diagram revision|Overlay revision) not found:/.test(message)) return 404;
+  if (/^Unsupported overlay/u.test(message)) return 422;
+  if (/^(Expected |Invalid |Unexpected token|Overlay actor)/.test(message)) return 400;
   return 500;
 }
 
@@ -295,6 +315,40 @@ export function createApp(env = loadServerEnv()) {
         await roomAccess.authenticateBrowserCookie(diagramApiPath.sessionId, request);
         if (request.method === 'GET' && diagramApiPath.kind === 'current') {
           sendJson(response, 200, await manager.readDiagram(diagramApiPath.sessionId, diagramApiPath.diagramId), corsHeaders);
+          return;
+        }
+
+        if (request.method === 'GET' && diagramApiPath.kind === 'overlay-current') {
+          sendJson(response, 200, await manager.readOverlayScene(diagramApiPath.sessionId, diagramApiPath.diagramId), corsHeaders);
+          return;
+        }
+
+        if (request.method === 'GET' && diagramApiPath.kind === 'overlay-history') {
+          sendJson(response, 200, await manager.listOverlayHistory(diagramApiPath.sessionId, diagramApiPath.diagramId), corsHeaders);
+          return;
+        }
+
+        if (request.method === 'GET' && diagramApiPath.kind === 'overlay-revision') {
+          sendJson(response, 200, { revision: await manager.readOverlayRevision(diagramApiPath.sessionId, diagramApiPath.diagramId, diagramApiPath.revisionId) }, corsHeaders);
+          return;
+        }
+
+        if (request.method === 'POST' && diagramApiPath.kind === 'overlay-restore') {
+          const rawBody = await readJsonBody(request);
+          if (!isRecord(rawBody)) throw new Error('Expected JSON object payload.');
+          const expectedRevision = readRequiredString(rawBody.expected_revision, 'expected_revision');
+          const actor = {
+            name: readOverlayActorName(rawBody.actor_name),
+            type: rawBody.actor_type === 'agent' ? 'agent' as const : 'human' as const,
+          };
+          const result = await manager.restoreOverlayRevision(
+            diagramApiPath.sessionId,
+            diagramApiPath.diagramId,
+            diagramApiPath.revisionId,
+            expectedRevision,
+            actor,
+          );
+          sendJson(response, result.status === 'stale' ? 409 : 200, result, corsHeaders);
           return;
         }
 

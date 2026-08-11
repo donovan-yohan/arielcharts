@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
+import * as Y from 'yjs';
 import { createApp } from './index.js';
 import { createActivityEvent } from './lib/activity.js';
 import type { ServerEnv } from './lib/types.js';
@@ -642,6 +643,74 @@ describe('server integration', () => {
     const blocked = await fetch(`${baseUrl}/history`, { headers: { origin: 'http://blocked.test' } });
     expect(blocked.status).toBe(403);
     await expect(blocked.json()).resolves.toEqual({ error: 'Origin not allowed.' });
+  });
+
+  it('exposes overlay history only on cookie-authenticated browser routes', async () => {
+    const state = await app.manager.getOrCreateSession('abc123de');
+    const scene = state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!;
+    const object = new Y.Map<unknown>();
+    object.set('kind', 'foundation.card');
+    object.set('version', 1);
+    object.set('order_key', 'a');
+    object.set('geometry', { x: 1, y: 2, width: 3, height: 4, rotation: 0 });
+    object.set('style', {});
+    object.set('metadata', {});
+    object.set('payload', { text: 'hello' });
+    (scene.get('objects') as Y.Map<Y.Map<unknown>>).set('note', object);
+    await app.manager.persistSession(state);
+
+    const baseUrl = `http://127.0.0.1:${port}/api/sessions/abc123de/diagrams/main/overlays`;
+    const headers = { origin: 'http://allowed.test', cookie: roomCookie };
+    const current = await fetch(baseUrl, { headers });
+    const currentPayload = await current.json() as { revision: string; scene: { objects: unknown[] } };
+    expect(current.status).toBe(200);
+    expect(currentPayload.scene.objects).toHaveLength(1);
+    const history = await fetch(`${baseUrl}/history`, { headers });
+    const historyPayload = await history.json() as { revisions: Array<{ revision_id: string }>; current_revision: string };
+    expect(historyPayload.current_revision).toBe(currentPayload.revision);
+    const baselineId = historyPayload.revisions.at(-1)!.revision_id;
+    const oversizedActor = await fetch(`${baseUrl}/history/${baselineId}/restore`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: currentPayload.revision, actor_name: 'x'.repeat(257) }),
+    });
+    expect(oversizedActor.status).toBe(400);
+    const historyAfterRejectedActor = await fetch(`${baseUrl}/history`, { headers });
+    expect((await historyAfterRejectedActor.json() as { revisions: unknown[] }).revisions).toHaveLength(historyPayload.revisions.length);
+    const restore = await fetch(`${baseUrl}/history/${baselineId}/restore`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: currentPayload.revision, actor_name: 'Ada' }),
+    });
+    expect(restore.status).toBe(200);
+    await expect(restore.json()).resolves.toMatchObject({ status: 'restored', scene: { objects: [] }, revision: { restored_from_revision_id: baselineId } });
+    expect((await app.manager.readDiagram('abc123de', 'main')).diagram.mermaid_text).toBe('');
+
+    const unsupported = new Y.Map<unknown>();
+    unsupported.set('kind', 'future.tool'); unsupported.set('version', 1); unsupported.set('order_key', 'future');
+    unsupported.set('geometry', { x: 1, y: 2, width: 3, height: 4, rotation: 0 });
+    unsupported.set('style', {}); unsupported.set('metadata', {}); unsupported.set('payload', { opaque: 'keep' });
+    const restoredScene = state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!;
+    (restoredScene.get('objects') as Y.Map<Y.Map<unknown>>).set('future', unsupported);
+    await app.manager.persistSession(state);
+    const rawBefore = Buffer.from(Y.encodeStateAsUpdate(state.doc));
+    for (const [url, init] of [
+      [baseUrl, { headers }],
+      [`${baseUrl}/history`, { headers }],
+      [`${baseUrl}/history/${baselineId}/restore`, {
+        method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ expected_revision: 'unused', actor_name: 'Ada' }),
+      }],
+    ] as const) {
+      const rejected = await fetch(url, init);
+      expect(rejected.status).toBe(422);
+      await expect(rejected.json()).resolves.toMatchObject({ error: 'Unsupported overlay object: future.tool@1' });
+    }
+    expect(Buffer.from(Y.encodeStateAsUpdate(state.doc))).toEqual(rawBefore);
+    expect(unsupported.get('payload')).toEqual({ opaque: 'keep' });
+
+    const unauthenticated = await fetch(`${baseUrl}/history`, { headers: { origin: 'http://allowed.test' } });
+    expect(unauthenticated.status).toBe(401);
   });
 
   it('discovers history tools with named metadata and returns a structured stale restore result', async () => {

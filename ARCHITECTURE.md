@@ -94,7 +94,8 @@ single Fly client-IP header is the intended trusted source. It does not use
 
 ## Shared state, writes, and persistence
 
-The root Yjs keys are `diagrams`, `diagramOrder`, `activity`, and `presence`.
+The root Yjs keys are `diagrams`, `diagramOrder`, `activity`, `presence`, and
+`overlays`.
 Each diagram contains a name, Mermaid `Y.Text`, and `nodePositions` `Y.Map`.
 The server repairs the durable catalog and serializes persistence; browser
 selection, camera, toolbar, flyout, drafts, and active drag presentation stay
@@ -106,7 +107,7 @@ flowchart TB
   Agent["MCP tool call"] -->|"fresh expected revision"| Manager["SessionManager"]
   Socket --> Manager
 
-  Manager --> Doc["Canonical Yjs document\ndiagrams, source, layouts, activity, presence"]
+  Manager --> Doc["Canonical Yjs document\ndiagrams, source, layouts, overlays, activity, presence"]
   Manager -->|"serialized snapshot"| Snapshot["LevelDB session record"]
   Manager -->|"baseline and retained checkpoints"| History["LevelDB immutable history"]
   Doc -->|"accepted updates"| Socket
@@ -145,8 +146,10 @@ flowchart LR
 ```
 
 The web app keeps preview state per stable diagram ID so a last-valid SVG and
-parse error do not leak across tabs. It also keeps local-only theme, camera,
-selection, undo origins, and overlay state out of the durable document.
+parse error do not leak across tabs. Versioned overlay scenes are durable but
+independent from Mermaid source/layout; selection, tool drafts, camera, and
+handles remain local. A focused adapter projects world geometry and semantic
+anchor fallbacks into either renderer family.
 
 ## Interfaces and deployment
 

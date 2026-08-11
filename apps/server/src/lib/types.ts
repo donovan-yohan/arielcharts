@@ -1,4 +1,4 @@
-import type { ActivityEvent, Diagram, DiagramRevision, Participant, SessionSummary } from '@arielcharts/shared';
+import type { ActivityEvent, Diagram, DiagramRevision, OverlayRevision, Participant, SessionSummary } from '@arielcharts/shared';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { WebSocket } from 'ws';
@@ -32,11 +32,23 @@ export interface DiagramHistoryMetadata {
   latestRevision: string;
 }
 
+export interface OverlayHistoryMetadata {
+  sessionId: string;
+  diagramId: string;
+  firstRetainedSequence: number;
+  nextSequence: number;
+  latestRevision: string;
+}
+
 export interface HistoryPersistenceChange {
   revisions: DiagramRevision[];
   metadata: DiagramHistoryMetadata[];
   deleteSequences: Array<{ sessionId: string; diagramId: string; sequence: number }>;
   deleteDiagramHistory: Array<{ sessionId: string; diagramId: string }>;
+  overlayRevisions: OverlayRevision[];
+  overlayMetadata: OverlayHistoryMetadata[];
+  deleteOverlaySequences: Array<{ sessionId: string; diagramId: string; sequence: number }>;
+  deleteOverlayHistory: Array<{ sessionId: string; diagramId: string }>;
 }
 
 export interface SessionSnapshot {

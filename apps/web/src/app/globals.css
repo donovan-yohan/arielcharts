@@ -3024,3 +3024,30 @@ code {
   font-size: 13px;
   line-height: 1.55;
 }
+
+@media (max-width: 420px) {
+  .canvas-treemap-venn-editor {
+    left: 8px !important;
+    max-height: calc(100% - 84px) !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    right: 8px !important;
+    touch-action: pan-y;
+    width: auto !important;
+  }
+
+  .canvas-treemap-venn-editor form {
+    box-sizing: border-box;
+    display: grid;
+    gap: 4px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .canvas-treemap-venn-editor input,
+  .canvas-treemap-venn-editor select,
+  .canvas-treemap-venn-editor button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

@@ -12,7 +12,7 @@ import { Check, KeyRound, Share2 } from 'lucide-react';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
-import { DiagramCanvas } from './diagram-canvas';
+import { DiagramCanvas, type CanvasCameraState } from './diagram-canvas';
 import { PresenterControls } from './presenter-controls';
 import { useTheme } from './theme-provider';
 import { WorkspaceFlyouts } from './workspace-flyouts';
@@ -121,6 +121,8 @@ import { addRadarAxis, addRadarCurve, deleteRadarAxis, deleteRadarCurve, editRad
 import { addSankeyLink, deleteSankeyLink, editSankeyLink, getSankeyDiagramSnapshot, moveSankeyLink, renameSankeyNode } from '../lib/sankey-mutations';
 import { addPacketField, deletePacketField, editPacketField, getPacketDiagramSnapshot, movePacketField } from '../lib/packet-mutations';
 import { addCynefinItem, addCynefinTransition, deleteCynefinItem, deleteCynefinTransition, editCynefinItem, editCynefinTransition, getCynefinDiagramSnapshot, moveCynefinItem, moveCynefinTransition } from '../lib/cynefin-mutations';
+import { addTreemapNode, deleteTreemapNode, editTreemapNode, getTreemapDiagramSnapshot, moveTreemapNode, reparentTreemapNode } from '../lib/treemap-mutations';
+import { addVennStyle, addVennSubset, deleteVennStyle, deleteVennSubset, editVennStyle, editVennSubset, getVennDiagramSnapshot, moveVennStyle, moveVennSubset, renameVennSet } from '../lib/venn-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -574,6 +576,10 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const undoManagerRef = useRef<Y.UndoManager | null>(null);
   const dragCommitterRef = useRef<DragLayoutCommitter | null>(null);
   const diagramTabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const diagramCameraSessionRef = useRef({ cameras: new Map<string, CanvasCameraState>(), sessionId });
+  if (diagramCameraSessionRef.current.sessionId !== sessionId) {
+    diagramCameraSessionRef.current = { cameras: new Map<string, CanvasCameraState>(), sessionId };
+  }
   const flyoutOriginRef = useRef<HTMLButtonElement | null>(null);
   const pendingFlyoutReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const activityCloseRef = useRef<HTMLButtonElement | null>(null);
@@ -643,6 +649,17 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const [touchLabelStatus, setTouchLabelStatus] = useState<{ label: string } | null>(null);
   const selectPresentedDiagram = useCallback((diagramId: string) => { setActiveDiagramId(diagramId); }, []);
   const presenterFollow = usePresenterFollow(collaboration?.awareness ?? null, activeDiagramId, selectPresentedDiagram);
+  const handleCanvasCameraChange = useCallback((camera: CanvasCameraState) => {
+    if (activeDiagramId) diagramCameraSessionRef.current.cameras.set(activeDiagramId, camera);
+    presenterFollow.onCameraChange(camera);
+  }, [activeDiagramId, presenterFollow.onCameraChange]);
+
+  useEffect(() => {
+    const retainedDiagramIds = new Set(diagrams.map((diagram) => diagram.id));
+    for (const diagramId of diagramCameraSessionRef.current.cameras.keys()) {
+      if (!retainedDiagramIds.has(diagramId)) diagramCameraSessionRef.current.cameras.delete(diagramId);
+    }
+  }, [diagrams]);
 
   useEffect(() => {
     if (presenterFollow.followingClientId === null) return;
@@ -950,25 +967,33 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     }));
   }, [activeDiagramId, runMutation]);
 
-  const mutateCanvasSource = useCallback((mutate: (source: string) => string, detail: string) => {
-    if (!activeDiagram || !collaboration || historyPreview !== null) return false;
+  const mutateCanvasSourceDetailed = useCallback((mutate: (source: string) => string, detail: string) => {
+    if (!activeDiagram || !collaboration || historyPreview !== null) {
+      return { applied: false, error: 'The diagram update is unavailable right now.' };
+    }
     try {
       const previousText = activeDiagram.yText.toString();
       const nextText = mutate(previousText);
       setMutationError(null);
-      if (nextText === previousText) return true;
+      if (nextText === previousText) return { applied: true };
       undoManagerRef.current?.stopCapturing();
       collaboration.doc.transact(() => {
         applyDiff(activeDiagram.yText, nextText, previousText);
       }, collaborationOrigins.visual);
       undoManagerRef.current?.stopCapturing();
       addActivityRef.current?.('edited', detail, activeDiagram.id);
-      return true;
+      return { applied: true };
     } catch (error) {
-      setMutationError(error instanceof Error ? error.message : 'The diagram update could not be applied.');
-      return false;
+      const message = error instanceof Error ? error.message : 'The diagram update could not be applied.';
+      setMutationError(message);
+      return { applied: false, error: message };
     }
   }, [activeDiagram, collaboration, historyPreview]);
+
+  const mutateCanvasSource = useCallback(
+    (mutate: (source: string) => string, detail: string) => mutateCanvasSourceDetailed(mutate, detail).applied,
+    [mutateCanvasSourceDetailed],
+  );
 
   const refreshDiagramHistory = useCallback(async () => {
     if (!activeDiagramId) {
@@ -1824,6 +1849,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isSankey = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'sankey');
   const isPacket = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'packet');
   const isCynefin = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'cynefin');
+  const isTreemap = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'treemap');
+  const isVenn = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'venn');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1867,6 +1894,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const sankeyDiagram = useMemo(() => isSankey ? getSankeyDiagramSnapshot(renderedMermaidText) : null, [isSankey, renderedMermaidText]);
   const packetDiagram = useMemo(() => isPacket ? getPacketDiagramSnapshot(renderedMermaidText) : null, [isPacket, renderedMermaidText]);
   const cynefinDiagram = useMemo(() => isCynefin ? getCynefinDiagramSnapshot(renderedMermaidText) : null, [isCynefin, renderedMermaidText]);
+  const treemapDiagram = useMemo(() => isTreemap ? getTreemapDiagramSnapshot(renderedMermaidText) : null, [isTreemap, renderedMermaidText]);
+  const vennDiagram = useMemo(() => isVenn ? getVennDiagramSnapshot(renderedMermaidText) : null, [isVenn, renderedMermaidText]);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -2372,6 +2401,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             packetDiagram={packetDiagram}
             isCynefin={isCynefin}
             cynefinDiagram={cynefinDiagram}
+            isTreemap={isTreemap}
+            treemapDiagram={treemapDiagram}
+            isVenn={isVenn}
+            vennDiagram={vennDiagram}
+            initialCamera={activeDiagramId ? diagramCameraSessionRef.current.cameras.get(activeDiagramId) : undefined}
             nodePositions={renderedNodePositions}
             overlay={overlayController && activeDiagramId ? {
               diagramId: activeDiagramId,
@@ -2401,7 +2435,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             localLaser={historyPreview === null ? localLaser : null}
             localParticipant={currentIdentityRef.current ?? { color: '#ef4444', name: displayName, type: 'human' }}
             followedCamera={presenterFollow.followedCamera}
-            onCameraChange={presenterFollow.onCameraChange}
+            onCameraChange={handleCanvasCameraChange}
             onLocalCanvasInteraction={presenterFollow.stopFollowing}
             onAddEdge={(source, target, label, type) => {
               const queue = mutationQueueRef.current;
@@ -2711,6 +2745,20 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onEditCynefinTransition={(identity, patch) => mutateCanvasSource((source) => editCynefinTransition(source, identity, patch), 'Edited a Cynefin transition')}
             onDeleteCynefinTransition={(identity) => { mutateCanvasSource((source) => deleteCynefinTransition(source, identity), 'Deleted a Cynefin transition'); }}
             onMoveCynefinTransition={(identity, direction) => { mutateCanvasSource((source) => moveCynefinTransition(source, identity, direction), 'Reordered Cynefin transitions'); }}
+            onAddTreemapNode={(node, parent) => mutateCanvasSourceDetailed((source) => addTreemapNode(source, node, parent), 'Added a Treemap node')}
+            onEditTreemapNode={(identity, patch) => mutateCanvasSourceDetailed((source) => editTreemapNode(source, identity, patch), 'Edited a Treemap node')}
+            onDeleteTreemapNode={(identity) => mutateCanvasSourceDetailed((source) => deleteTreemapNode(source, identity), 'Deleted a Treemap subtree')}
+            onMoveTreemapNode={(identity, direction) => mutateCanvasSourceDetailed((source) => moveTreemapNode(source, identity, direction), 'Reordered Treemap node')}
+            onReparentTreemapNode={(identity, parent) => mutateCanvasSourceDetailed((source) => reparentTreemapNode(source, identity, parent), 'Moved Treemap subtree')}
+            onAddVennSubset={(subset) => mutateCanvasSourceDetailed((source) => addVennSubset(source, subset), 'Added a Venn subset')}
+            onEditVennSubset={(identity, patch) => mutateCanvasSourceDetailed((source) => editVennSubset(source, identity, patch), 'Edited a Venn subset')}
+            onDeleteVennSubset={(identity) => mutateCanvasSourceDetailed((source) => deleteVennSubset(source, identity), 'Deleted a Venn subset')}
+            onMoveVennSubset={(identity, direction) => mutateCanvasSourceDetailed((source) => moveVennSubset(source, identity, direction), 'Reordered Venn subset')}
+            onRenameVennSet={(identity, value) => mutateCanvasSourceDetailed((source) => renameVennSet(source, identity, value), 'Renamed a Venn set')}
+            onAddVennStyle={(style) => mutateCanvasSourceDetailed((source) => addVennStyle(source, style), 'Added a Venn style')}
+            onEditVennStyle={(identity, patch) => mutateCanvasSourceDetailed((source) => editVennStyle(source, identity, patch), 'Edited a Venn style')}
+            onDeleteVennStyle={(identity) => mutateCanvasSourceDetailed((source) => deleteVennStyle(source, identity), 'Deleted a Venn style')}
+            onMoveVennStyle={(identity, direction) => mutateCanvasSourceDetailed((source) => moveVennStyle(source, identity, direction), 'Reordered Venn style')}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onLaserChange={handleLaserChange}

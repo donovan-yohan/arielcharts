@@ -56,6 +56,7 @@ export type YjsSessionObserver = {
   destroy(): void;
   hasNodePosition(diagramId: string, nodeId: string): boolean;
   snapshot(diagramId: string): YjsSessionSnapshot;
+  trackDiagramSnapshot(diagramId: string): YjsSessionSnapshotHistory;
   trackSnapshot(diagramId: string): YjsSessionSnapshotHistory;
   trackNodePosition(diagramId: string, nodeId: string): YjsNodePositionHistory;
   waitFor(
@@ -140,6 +141,14 @@ export function readYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessio
   };
 }
 
+function readYjsDiagramSnapshot(doc: Y.Doc, diagramId: string): YjsSessionSnapshot {
+  const snapshot = readYjsSessionSnapshot(doc, diagramId);
+  return {
+    ...snapshot,
+    activity: snapshot.activity.filter((event) => event.diagramId === diagramId),
+  };
+}
+
 /**
  * A diagram restore is one source/layout state transition. Document updates
  * that only persist participant metadata must not count as another restore.
@@ -166,14 +175,18 @@ export function getYjsSourceLayoutTransitions(
   });
 }
 
-export function trackYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessionSnapshotHistory {
+function trackYjsSnapshot(
+  doc: Y.Doc,
+  diagramId: string,
+  readSnapshot: (doc: Y.Doc, diagramId: string) => YjsSessionSnapshot,
+): YjsSessionSnapshotHistory {
   const appearances: YjsSessionSnapshotAppearance[] = [];
   const listeners = new Set<(appearance: YjsSessionSnapshotAppearance) => void>();
   let destroyed = false;
   let update = 0;
 
   const record = () => {
-    const appearance = { snapshot: readYjsSessionSnapshot(doc, diagramId), update };
+    const appearance = { snapshot: readSnapshot(doc, diagramId), update };
     appearances.push(appearance);
     listeners.forEach((listener) => { listener(appearance); });
   };
@@ -219,6 +232,14 @@ export function trackYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessi
       });
     },
   };
+}
+
+export function trackYjsSessionSnapshot(doc: Y.Doc, diagramId: string): YjsSessionSnapshotHistory {
+  return trackYjsSnapshot(doc, diagramId, readYjsSessionSnapshot);
+}
+
+export function trackYjsDiagramSnapshot(doc: Y.Doc, diagramId: string): YjsSessionSnapshotHistory {
+  return trackYjsSnapshot(doc, diagramId, readYjsDiagramSnapshot);
 }
 
 export function trackYjsNodePosition(
@@ -357,6 +378,12 @@ export async function openYjsSessionObserver(
     },
     snapshot(diagramId) {
       return readYjsSessionSnapshot(doc, diagramId);
+    },
+    trackDiagramSnapshot(diagramId) {
+      if (destroyed) throw new Error('Cannot track a snapshot on a destroyed Yjs session observer.');
+      const history = trackYjsDiagramSnapshot(doc, diagramId);
+      snapshotHistories.add(history);
+      return history;
     },
     trackSnapshot(diagramId) {
       if (destroyed) throw new Error('Cannot track a snapshot on a destroyed Yjs session observer.');

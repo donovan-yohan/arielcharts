@@ -25,13 +25,15 @@ import { isRadarSourceRepresentable } from './radar-mutations';
 import { isSankeySourceRepresentable } from './sankey-mutations';
 import { isPacketSourceRepresentable } from './packet-mutations';
 import { isCynefinSourceRepresentable } from './cynefin-mutations';
+import { isTreemapSourceRepresentable } from './treemap-mutations';
+import { getVennDiagramSnapshot, isVennSourceRepresentable } from './venn-mutations';
 
 /** The installed Mermaid detector registry this catalog was audited against. */
 export const MERMAID_CAPABILITY_CATALOG_VERSION = '11.16.1';
 
 export type DiagramKind = 'flowchart' | 'sequence' | 'er' | 'generic';
 export type DiagramEditingMode = 'canvas' | 'semantic-form' | 'source-only' | 'unavailable-plugin';
-export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'mindmap' | 'tree-view' | 'ishikawa' | 'railroad' | 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'source-only' | 'unavailable-plugin';
+export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'mindmap' | 'tree-view' | 'ishikawa' | 'railroad' | 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'treemap' | 'venn' | 'source-only' | 'unavailable-plugin';
 export type MermaidDiagramFamilyId = typeof MERMAID_DIAGRAM_FAMILIES[number]['id'];
 
 export interface MermaidDiagramFamily {
@@ -256,6 +258,8 @@ const RADAR_OPERATIONS = new Set(['set-title', 'edit-options', 'add-axis', 'edit
 const SANKEY_OPERATIONS = new Set(['add-link', 'edit-link', 'delete-link', 'move-link', 'rename-node']);
 const PACKET_OPERATIONS = new Set(['add-field', 'edit-field', 'delete-field', 'move-field']);
 const CYNEFIN_OPERATIONS = new Set(['add-item', 'edit-item', 'delete-item', 'move-item', 'add-transition', 'edit-transition', 'delete-transition', 'move-transition']);
+const TREEMAP_OPERATIONS = new Set(['add-node', 'edit-node', 'delete-node', 'move-node', 'reparent-node']);
+const VENN_OPERATIONS = new Set(['add-subset', 'edit-subset', 'delete-subset', 'move-subset', 'rename-set', 'add-style', 'edit-style', 'delete-style', 'move-style']);
 function strictAdapter(id: DiagramAdapterId, operations: ReadonlySet<string>, representable: (source: string) => boolean): DiagramSourceModelAdapter { return { id, getOperationResult(source, operation) { return !representable(source) ? { supported: false, reason: 'unrepresentable' } : operations.has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' }; }, getRepresentability: (source) => representable(source) ? { representable: true } : { representable: false, reason: 'unsupported-syntax' } }; }
 const JOURNEY_ADAPTER = strictAdapter('journey', JOURNEY_OPERATIONS, isJourneySourceRepresentable);
 const GANTT_ADAPTER = strictAdapter('gantt', GANTT_OPERATIONS, isGanttSourceRepresentable);
@@ -274,6 +278,13 @@ const RADAR_ADAPTER = strictAdapter('radar', RADAR_OPERATIONS, isRadarSourceRepr
 const SANKEY_ADAPTER = strictAdapter('sankey', SANKEY_OPERATIONS, isSankeySourceRepresentable);
 const PACKET_ADAPTER = strictAdapter('packet', PACKET_OPERATIONS, isPacketSourceRepresentable);
 const CYNEFIN_ADAPTER = strictAdapter('cynefin', CYNEFIN_OPERATIONS, isCynefinSourceRepresentable);
+const TREEMAP_ADAPTER = strictAdapter('treemap', TREEMAP_OPERATIONS, isTreemapSourceRepresentable);
+/** The panel edits one whitelisted property per authored target; multi-property
+ * style lines remain source-only until the form can expose each property. */
+const VENN_ADAPTER = strictAdapter('venn', VENN_OPERATIONS, (source) => {
+  if (!isVennSourceRepresentable(source)) return false;
+  return getVennDiagramSnapshot(source).styles.every((style) => style.properties.length === 1);
+});
 
 /**
  * Every built-in visual Mermaid family in 11.16.1. Aliases, renderer variants,
@@ -307,8 +318,8 @@ export const MERMAID_DIAGRAM_FAMILIES = [
   { id: 'swimlane', label: 'Swimlane', parserTypes: ['swimlane'], editingMode: 'semantic-form', adapter: 'swimlane' },
   { id: 'timeline', label: 'Timeline', parserTypes: ['timeline'], editingMode: 'semantic-form', adapter: 'timeline' },
   { id: 'tree-view', label: 'Tree view', parserTypes: ['treeView'], editingMode: 'semantic-form', adapter: 'tree-view' },
-  { id: 'treemap', label: 'Treemap', parserTypes: ['treemap'] },
-  { id: 'venn', label: 'Venn', parserTypes: ['venn'] },
+  { id: 'treemap', label: 'Treemap', parserTypes: ['treemap'], editingMode: 'semantic-form', adapter: 'treemap' },
+  { id: 'venn', label: 'Venn', parserTypes: ['venn'], editingMode: 'semantic-form', adapter: 'venn' },
   { id: 'wardley', label: 'Wardley', parserTypes: ['wardley'] },
   { id: 'xy-chart', label: 'XY chart', parserTypes: ['xychart'], editingMode: 'semantic-form', adapter: 'xy-chart' },
 ] as const satisfies readonly MermaidDiagramFamily[];
@@ -385,6 +396,8 @@ export function getDiagramSourceModelAdapter(capability: DiagramCapability | nul
     case 'sankey': return SANKEY_ADAPTER;
     case 'packet': return PACKET_ADAPTER;
     case 'cynefin': return CYNEFIN_ADAPTER;
+    case 'treemap': return TREEMAP_ADAPTER;
+    case 'venn': return VENN_ADAPTER;
     case 'unavailable-plugin': return UNAVAILABLE_PLUGIN_ADAPTER;
     default: return SOURCE_ONLY_ADAPTER;
   }

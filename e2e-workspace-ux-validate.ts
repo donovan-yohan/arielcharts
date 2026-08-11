@@ -80,6 +80,12 @@ const SOURCE_OWNED_COLOR_FIXTURE = `flowchart LR
   Browser[Browser]:::critical --> Gateway[Gateway]
   Gateway --> Service[Service]`;
 
+const MERMAID_HIGHLIGHT_BROWSER_FIXTURE = `%%{init: { "theme": "base" }}%%
+flowchart LR
+  A["Label"]-->B
+  classDef hot fill:#ff0
+  %% source comment`;
+
 const TRANSPARENT_MERMAID_FIXTURE = `flowchart LR
   classDef ghost fill:none,stroke:transparent,color:transparent;
   Ghost[Ghost]:::ghost --> Visible[Visible]`;
@@ -3479,6 +3485,75 @@ async function expectThemeContract(page: Page): Promise<void> {
   await selectThemePreference(page, 'system');
 }
 
+async function expectMermaidSyntaxHighlighting(page: Page, mcp: ModernMcpClient, sessionId: string): Promise<void> {
+  await page.emulateMedia({ forcedColors: 'none' });
+  await selectThemePreference(page, 'light');
+  const diagramName = await activeTabName(page);
+  const diagram = (await mcp.getSession(sessionId)).diagrams.find((candidate) => candidate.name === diagramName);
+  assert(diagram, `Could not resolve active syntax-test diagram ${JSON.stringify(diagramName)} from the session catalog.`);
+  await ensureSourceFlyoutOpen(page);
+  await replaceSource(page, MERMAID_HIGHLIGHT_BROWSER_FIXTURE);
+  await waitForSource(page, MERMAID_HIGHLIGHT_BROWSER_FIXTURE);
+
+  const readSyntax = async () => page.locator('.cm-content').evaluate((content) => {
+    const source = content as HTMLElement;
+    const spans = [...source.querySelectorAll<HTMLElement>('span')];
+    const header = spans.find((candidate) => candidate.textContent === 'flowchart');
+    const label = spans.find((candidate) => candidate.textContent === '"Label"');
+    const link = spans.find((candidate) => candidate.textContent === '-->');
+    return {
+      bodyColor: getComputedStyle(source).color,
+      header: header ? { className: header.className, color: getComputedStyle(header).color } : null,
+      label: label ? { className: label.className, color: getComputedStyle(label).color } : null,
+      link: link ? { className: link.className, color: getComputedStyle(link).color } : null,
+    };
+  });
+
+  await expect.poll(readSyntax, { message: 'Light Mermaid source spans did not receive syntax styles.', timeout: 5_000 }).toMatchObject({
+    header: { color: 'rgb(21, 89, 200)' },
+    label: { color: 'rgb(25, 94, 45)' },
+    link: { color: 'rgb(141, 23, 48)' },
+  });
+
+  await selectThemePreference(page, 'dark');
+  await expect.poll(readSyntax, { message: 'Dark Mermaid source spans did not receive syntax styles.', timeout: 5_000 }).toMatchObject({
+    header: { color: 'rgb(154, 191, 255)' },
+    label: { color: 'rgb(162, 230, 178)' },
+    link: { color: 'rgb(255, 184, 196)' },
+  });
+
+  await page.emulateMedia({ forcedColors: 'active' });
+  await expect.poll(async () => {
+    const syntax = await readSyntax();
+    return Boolean(
+      syntax.header?.className.length
+      && syntax.label?.className.length
+      && syntax.link?.className.length
+      && syntax.header.color === syntax.bodyColor
+      && syntax.label.color === syntax.bodyColor
+      && syntax.link.color === syntax.bodyColor,
+    );
+  }, { message: 'Forced-colors Mermaid source spans did not resolve to CanvasText.', timeout: 5_000 }).toBe(true);
+  await page.emulateMedia({ forcedColors: 'none' });
+  await selectThemePreference(page, 'light');
+
+  const editor = await ensureSourceFlyoutOpen(page);
+  await editor.click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('\nB-->C');
+  const expected = `${MERMAID_HIGHLIGHT_BROWSER_FIXTURE}\n  B-->C`;
+  await waitForSource(page, expected);
+  const selection = await editor.evaluate((content) => {
+    const view = (content as HTMLElement & { cmView?: { rootView?: { view?: { state?: { doc?: { toString(): string }; selection?: { main?: { head?: number } } } } } } }).cmView?.rootView?.view;
+    return { head: view?.state?.selection?.main?.head ?? null, source: view?.state?.doc?.toString() ?? null };
+  });
+  assert(selection.source === expected && selection.head === expected.length,
+    `Incremental syntax edit changed the CodeMirror document or selection: ${JSON.stringify(selection)}.`);
+  await expect.poll(async () => {
+    return (await mcp.readDiagram(sessionId, diagram.id)).mermaidText;
+  }, { message: 'Syntax-highlighted source did not reach the shared Yjs session.', timeout: 15_000 }).toBe(expected);
+}
+
 async function openAgentConnectionModal(page: Page, actionLabel: 'Connect my agent' | 'Connection details'): Promise<Locator> {
   const settings = await openWorkspaceSettings(page);
   await verifiedClick(page, settings.getByRole('button', { name: actionLabel, exact: true }), `settings ${actionLabel} action`);
@@ -6189,6 +6264,8 @@ async function validateWorkspaceUx(): Promise<void> {
         record(results, 'fragment-derived room key exposes a copyable MCP bearer prompt');
         await expectThemeContract(page);
         record(results, 'system, light, and dark media resolution plus persistence');
+        await expectMermaidSyntaxHighlighting(page, mcp, sessionId);
+        record(results, 'Mermaid source tokens render in light, dark, and forced colors while incremental edits preserve selection and Yjs source');
         // The theme contract already reloads after the fragment exchange, so the
         // following check exercises cookie-only access without another navigation.
         await expectAgentConnectionModal(page, mcpUrl, sessionId, roomAccess.cookie, 'cookie-only');

@@ -27,6 +27,17 @@ describe('mobile workspace CSS contracts', () => {
   });
 });
 
+describe('Mermaid source highlighting accessibility', () => {
+  it('uses theme tokens and a forced-colors fallback instead of fixed editor colors', () => {
+    expect(css).toMatch(/--source-syntax-keyword:\s*#1559c8;/u);
+    expect(css).toMatch(/html\[data-theme='dark'\]\s*\{[^}]*--source-syntax-keyword:\s*#9abfff;/u);
+    const forcedColors = css.slice(css.indexOf('@media (forced-colors: active)'));
+    expect(forcedColors).toMatch(/:root\s*\{[^}]*--source-syntax-keyword:\s*CanvasText;/u);
+    expect(forcedColors).toMatch(/--source-syntax-comment:\s*CanvasText;/u);
+    expect(forcedColors).toMatch(/--source-syntax-invalid:\s*CanvasText;/u);
+  });
+});
+
 describe('flow-node shape surface contracts', () => {
   it('clips only the painted shape surface, leaving React Flow handles outside it', () => {
     expect(css).toMatch(/\.mermaid-flow-node\s*\{[^}]*position:\s*relative;[^}]*\}/u);

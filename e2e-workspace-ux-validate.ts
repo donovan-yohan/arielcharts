@@ -7120,6 +7120,72 @@ async function expectRevisionHistoryCollaboration(
   }
 }
 
+async function expectAutomaticPrivateWorkspaceEntry(browser: BrowserHarness, baseUrl: string): Promise<void> {
+  const { page } = await browser.newPage(DESKTOP_VIEWPORT);
+  let createRequests = 0;
+  let issuedRoomKey: string | null = null;
+  let issuedRoomResponse: Promise<void> | null = null;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/rooms') createRequests += 1;
+  });
+  page.on('response', (response) => {
+    if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/rooms') return;
+    issuedRoomResponse = response.json().then((payload: { room_key?: unknown }) => {
+      issuedRoomKey = typeof payload.room_key === 'string' ? payload.room_key : null;
+    }).catch(() => undefined);
+  });
+  await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByTestId('auto-private-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+  const workspaceUrl = page.url();
+  const workspacePath = new URL(workspaceUrl).pathname;
+  assert(/^\/s\/[A-Za-z0-9_-]{6,32}$/u.test(workspacePath), `Automatic private workspace did not replace-navigate to a session path: ${workspaceUrl}.`);
+  assert(!workspaceUrl.includes('roomKey'), 'Automatic private workspace leaked the raw room key after the RoomGate exchange.');
+  assert(createRequests === 1, `Automatic private workspace created ${createRequests} rooms for one root visit.`);
+  await issuedRoomResponse;
+  assert(issuedRoomKey, 'Automatic private workspace room creation response did not include a room key.');
+  const storedValues = await page.evaluate(() => [
+    ...Object.values(localStorage),
+    ...Object.values(sessionStorage),
+  ]);
+  assert(!storedValues.some((value) => value.includes(issuedRoomKey!)),
+    'Automatic private workspace persisted the raw room key in browser storage.');
+
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+  assert(createRequests === 1, 'Cookie-only workspace reload created another private room.');
+  await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15_000 });
+  assert(new URL(page.url()).pathname !== '/', `Back navigation returned to the auto-create root and could loop: ${page.url()}.`);
+  await page.goForward({ waitUntil: 'domcontentloaded', timeout: 15_000 });
+  await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+  assert(createRequests === 1, 'Back/forward navigation created another private room.');
+
+  const { context: retryContext, page: retryPage } = await browser.newPage(MOBILE_VIEWPORT, { hasTouch: true, isMobile: true });
+  let retryRequests = 0;
+  await retryPage.route('**/api/rooms', async (route) => {
+    retryRequests += 1;
+    if (retryRequests === 1) {
+      await route.fulfill({ body: JSON.stringify({ error: 'private workspace unavailable' }), contentType: 'application/json', status: 503 });
+      return;
+    }
+    await route.continue();
+  });
+  try {
+    await retryPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    const retry = retryPage.getByTestId('retry-auto-private-workspace');
+    await retry.waitFor({ state: 'visible', timeout: 15_000 });
+    await assertTouchTarget(retryPage, retry, 'mobile automatic-private-workspace retry');
+    assert(!retryPage.url().includes('roomKey'), 'Failed automatic room creation leaked a raw room key.');
+    assert(retryRequests === 1, `Failed automatic room creation made ${retryRequests} requests before retry.`);
+    await verifiedClick(retryPage, retry, 'automatic-private-workspace retry');
+    await retryPage.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+    assert(retryRequests === 2, `Automatic room retry made ${retryRequests} requests instead of exactly one retry request.`);
+    assert(!retryPage.url().includes('roomKey'), 'Retried automatic room creation leaked a raw room key after exchange.');
+  } finally {
+    await retryContext.close();
+  }
+}
+
 async function validateWorkspaceUx(): Promise<void> {
   const results: string[] = [];
   const mobilePinchResiduals: string[] = [];
@@ -7130,6 +7196,8 @@ async function validateWorkspaceUx(): Promise<void> {
   await withOwnedServices(async ({ baseUrl, mcpUrl, serverUrl }) => {
     const browser = await launchBrowserHarness();
     try {
+      await expectAutomaticPrivateWorkspaceEntry(browser, baseUrl);
+      record(results, 'root auto-creates one private workspace with replace navigation, cookie-only reload/back-forward safety, no key storage, and an explicit mobile retry');
       const room = await createRoom(serverUrl, baseUrl);
       const roomAccess = await exchangeRoomAccess(serverUrl, baseUrl, room);
       const sessionId = room.sessionId;

@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 
 import React, { act } from 'react';
+import { readFileSync } from 'node:fs';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { incrementalTextChange, OverlayCanvasLayer, syncCompactErrorToolbarState, syncOverlayToolbarSafeTop, viewportCenterToWorld } from './overlay-canvas-layer';
+import { incrementalTextChange, OverlayCanvasLayer, syncCompactErrorToolbarState, viewportCenterToWorld } from './overlay-canvas-layer';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -38,15 +39,10 @@ describe('OverlayCanvasLayer', () => {
     observer.disconnect();
   });
 
-  it('publishes a measured short-touch toolbar lane only while it is needed', () => {
-    const canvas = document.createElement('div');
-    expect(syncOverlayToolbarSafeTop(canvas, 74)).toBe(true);
-    expect(canvas.dataset.overlayToolbarSafeTop).toBe('true');
-    expect(canvas.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('74px');
-    expect(syncOverlayToolbarSafeTop(canvas, 74)).toBe(false);
-    expect(syncOverlayToolbarSafeTop(canvas, null)).toBe(true);
-    expect(canvas.dataset.overlayToolbarSafeTop).toBeUndefined();
-    expect(canvas.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('');
+  it('identifies its portalled toolbar by diagram without owning semantic layout state', () => {
+    const source = readFileSync('src/components/overlay-canvas-layer.tsx', 'utf8');
+    expect(source).toContain('data-overlay-diagram-id={props.diagramId}');
+    expect(source).not.toContain('syncOverlayToolbarSafeTop');
   });
 
   it('exposes sticky text and a pointer-independent semantic list without interpreting markup', async () => {

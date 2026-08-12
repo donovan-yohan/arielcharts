@@ -1324,6 +1324,7 @@ code {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  overscroll-behavior: contain;
   position: relative;
   background-color: var(--surface-canvas) !important;
 }
@@ -3263,9 +3264,13 @@ code {
 /* On short touch canvases, the fixed centered overlay strip gets a measured
    lane. Sequence controls scroll beneath it instead of being covered after a
    lower action is scrolled into view. */
-@media (pointer: coarse) and (max-height: 500px) {
-  [data-testid='diagram-canvas'][data-overlay-toolbar-safe-top='true'] .canvas-sequence-editor:not(.is-centered) {
-    max-height: calc(100% - var(--overlay-toolbar-safe-top) - 12px);
+@media (max-height: 500px) {
+  .diagram-canvas-shell[data-overlay-toolbar-safe-top='true'] > .canvas-sequence-editor:not(.is-centered) {
+    bottom: var(--canvas-controls-toolbar-safe-bottom);
+    max-height: calc(100% - var(--overlay-toolbar-safe-top) - var(--canvas-controls-toolbar-safe-bottom));
+    padding-bottom: calc(4px + var(--canvas-controls-toolbar-safe-bottom));
+    scroll-padding-bottom: var(--canvas-controls-toolbar-safe-bottom);
+    scroll-padding-top: var(--overlay-toolbar-safe-top);
     top: var(--overlay-toolbar-safe-top);
   }
 }

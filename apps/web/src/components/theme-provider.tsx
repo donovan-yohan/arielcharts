@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   applyTheme,
   getSystemTheme,

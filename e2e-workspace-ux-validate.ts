@@ -7186,6 +7186,97 @@ async function expectAutomaticPrivateWorkspaceEntry(browser: BrowserHarness, bas
   }
 }
 
+async function expectWorkspaceOnboarding(browser: BrowserHarness, baseUrl: string, serverUrl: string): Promise<void> {
+  const room = await createRoom(serverUrl, baseUrl);
+  const { page } = await browser.newPage(DESKTOP_VIEWPORT);
+  await visitWorkspace(page, baseUrl, room.sessionId, room.roomKey);
+  const onboarding = page.getByTestId('workspace-onboarding');
+  await expect(onboarding).toBeVisible({ timeout: 15_000 });
+  const sourceToggle = page.getByTestId('source-flyout-toggle');
+  await verifiedClick(page, sourceToggle, 'open source while onboarding is visible');
+  await expect(onboarding).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.getByTestId('source-flyout').waitFor({ state: 'detached', timeout: 5_000 });
+  await expect(onboarding).toBeVisible();
+  await verifiedClick(page, page.getByTestId(SETTINGS_TRIGGER_TEST_ID), 'open settings while onboarding is visible');
+  await expect(onboarding).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.getByTestId('workspace-settings-dialog').waitFor({ state: 'detached', timeout: 5_000 });
+  await expect(onboarding).toBeVisible();
+  await page.keyboard.press('Escape');
+  await onboarding.waitFor({ state: 'detached', timeout: 5_000 });
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await onboarding.waitFor({ state: 'detached', timeout: 5_000 });
+
+  const onboardingTemplateMenu = await openTemplateMenu(page);
+  const blank = await templateMenuItem(onboardingTemplateMenu, 'Blank sheet');
+  await verifiedClick(page, blank, 'create a fresh blank diagram after onboarding dismissal');
+  await expect(onboarding).toBeVisible({ timeout: 10_000 });
+
+  await verifiedClick(page, onboarding.getByRole('button', { name: /Add a sticky note/u }), 'onboarding sticky-note quick start');
+  const stickyEditor = page.locator('[data-testid^="overlay-object-"] textarea');
+  await expect(stickyEditor).toBeVisible({ timeout: 10_000 });
+  assert(await stickyEditor.evaluate((element) => document.activeElement === element), 'Sticky-note onboarding quick start did not focus its real text editor.');
+
+  const penTemplateMenu = await openTemplateMenu(page);
+  await verifiedClick(page, await templateMenuItem(penTemplateMenu, 'Blank sheet'), 'create a blank diagram for onboarding pen');
+  await expect(onboarding).toBeVisible({ timeout: 10_000 });
+  await verifiedClick(page, onboarding.getByRole('button', { name: /Draw on the canvas/u }), 'onboarding pen quick start');
+  const drawingSurface = page.getByTestId('ink-drawing-surface');
+  await expect(drawingSurface).toBeVisible({ timeout: 10_000 });
+  assert(await drawingSurface.evaluate((element) => document.activeElement === element), 'Pen onboarding quick start did not focus its usable drawing surface.');
+
+  const discoveryTemplateMenu = await openTemplateMenu(page);
+  await verifiedClick(page, await templateMenuItem(discoveryTemplateMenu, 'Blank sheet'), 'create a blank diagram for onboarding discovery');
+  await expect(onboarding).toBeVisible({ timeout: 10_000 });
+  await verifiedClick(page, onboarding.getByRole('button', { name: /Browse Mermaid templates/u }), 'onboarding template discovery');
+  const templateMenu = page.getByRole('dialog', { name: 'Starter templates', exact: true });
+  await expect(templateMenu).toBeVisible({ timeout: 10_000 });
+  await (await templateMenuItem(templateMenu, 'Blank sheet')).press('Escape');
+  await templateMenu.waitFor({ state: 'detached', timeout: 5_000 });
+  await expect(onboarding).toHaveCount(0);
+
+  const flowTemplateMenu = await openTemplateMenu(page);
+  await verifiedClick(page, await templateMenuItem(flowTemplateMenu, 'Blank sheet'), 'create a blank diagram for onboarding Mermaid starter');
+  await expect(onboarding).toBeVisible({ timeout: 10_000 });
+  await verifiedClick(page, onboarding.getByRole('button', { name: /Use a service flow/u }), 'onboarding Mermaid template quick start');
+  await waitForCanvas(page, 'flowchart');
+  await expect(onboarding).toHaveCount(0);
+  await replaceSource(page, '');
+  await waitForSource(page, '');
+  await expect(onboarding).toHaveCount(0);
+  await closeFlyout(page, 'source');
+
+  for (const [label, viewport] of [
+    ['tablet', TABLET_VIEWPORT],
+    ['mobile-390', MOBILE_VIEWPORT],
+    ['mobile-320', NARROW_MOBILE_VIEWPORT],
+    ['mobile-landscape', MOBILE_LANDSCAPE_VIEWPORT],
+  ] as const) {
+    const { page: responsivePage } = await browser.newPage(viewport, label.startsWith('mobile') ? PHONE_CONTEXT_OPTIONS : undefined);
+    await visitWorkspace(responsivePage, baseUrl, room.sessionId, room.roomKey);
+    const responsiveTemplateMenu = await openTemplateMenu(responsivePage);
+    await verifiedClick(responsivePage, await templateMenuItem(responsiveTemplateMenu, 'Blank sheet'), `${label} create a blank diagram for onboarding`);
+    const responsiveOnboarding = responsivePage.getByTestId('workspace-onboarding');
+    await expect(responsiveOnboarding).toBeVisible({ timeout: 15_000 });
+    for (const action of await responsiveOnboarding.getByRole('button').all()) {
+      // The short landscape panel intentionally owns an internal scroll surface
+      // between the fixed toolbar and camera-control lanes. Each quick start
+      // must remain a real, reachable touch target within that surface.
+      await action.scrollIntoViewIfNeeded();
+      await assertTouchTarget(responsivePage, action, `${label} onboarding action`);
+    }
+    const [panel, canvasControls, overlayToolbar] = await Promise.all([
+      responsiveOnboarding.boundingBox(),
+      responsivePage.getByTestId('canvas-controls-toolbar').boundingBox(),
+      responsivePage.getByTestId('overlay-toolbar-primary').boundingBox(),
+    ]);
+    assert(panel && canvasControls && (panel.y + panel.height <= canvasControls.y || canvasControls.y + canvasControls.height <= panel.y || panel.x + panel.width <= canvasControls.x || canvasControls.x + canvasControls.width <= panel.x), `${label} onboarding panel obscured the canvas controls.`);
+    assert(panel && overlayToolbar && panel.y >= overlayToolbar.y + overlayToolbar.height - 1,
+      `${label} onboarding panel did not reserve the measured overlay toolbar lane: ${JSON.stringify({ overlayToolbar, panel })}.`);
+  }
+}
+
 async function validateWorkspaceUx(): Promise<void> {
   const results: string[] = [];
   const mobilePinchResiduals: string[] = [];
@@ -7198,6 +7289,8 @@ async function validateWorkspaceUx(): Promise<void> {
     try {
       await expectAutomaticPrivateWorkspaceEntry(browser, baseUrl);
       record(results, 'root auto-creates one private workspace with replace navigation, cookie-only reload/back-forward safety, no key storage, and an explicit mobile retry');
+      await expectWorkspaceOnboarding(browser, baseUrl, serverUrl);
+      record(results, 'nonmodal blank-canvas onboarding defers Escape to flyouts, persists only per browser/session/diagram dismissal, starts Mermaid/overlay tools through real handlers, focuses editors/canvas, and preserves compact canvas controls');
       const room = await createRoom(serverUrl, baseUrl);
       const roomAccess = await exchangeRoomAccess(serverUrl, baseUrl, room);
       const sessionId = room.sessionId;

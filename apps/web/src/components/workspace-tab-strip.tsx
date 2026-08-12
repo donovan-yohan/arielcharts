@@ -22,6 +22,8 @@ interface WorkspaceTabStripProps {
   onRenameDiagram: (diagram: WorkspaceDiagramTab) => void;
   onRenameDismiss: () => void;
   onSourceToggle: (origin: HTMLButtonElement) => void;
+  onTemplatePickerOpenChange?: (open: boolean) => void;
+  templatePickerOpenRequest?: number;
   registerTabButton: (diagramId: string, element: HTMLButtonElement | null) => void;
   renamingDiagramId: string | null;
   sourceOpen: boolean;
@@ -42,10 +44,12 @@ export function WorkspaceTabStrip({
   onRenameDiagram,
   onRenameDismiss,
   onSourceToggle,
+  onTemplatePickerOpenChange,
   registerTabButton,
   renamingDiagramId,
   sourceOpen,
   starterTemplates,
+  templatePickerOpenRequest,
 }: WorkspaceTabStripProps) {
   return (
     <nav aria-label="Session diagrams" className="workspace-diagram-tabs" data-testid="diagram-tab-bar">
@@ -105,7 +109,7 @@ export function WorkspaceTabStrip({
           })}
         </div>
       </div>
-      <WorkspaceTemplatePicker onCreateDiagram={onCreateDiagram} templates={starterTemplates} />
+      <WorkspaceTemplatePicker onCreateDiagram={onCreateDiagram} onOpenChange={onTemplatePickerOpenChange} openRequest={templatePickerOpenRequest} templates={starterTemplates} />
       <div className="workspace-diagram-tab-tools">
         <button
           aria-controls="source-flyout"

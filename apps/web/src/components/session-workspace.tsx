@@ -20,6 +20,13 @@ import { WorkspaceSettings } from './workspace-settings';
 import { WorkspaceExportMenu } from './workspace-export-menu';
 import { WorkspaceTabStrip, type WorkspaceDiagramTab } from './workspace-tab-strip';
 import {
+  canShowWorkspaceOnboarding,
+  dismissWorkspaceOnboarding,
+  isWorkspaceOnboardingDismissed,
+  shouldDismissWorkspaceOnboardingForContent,
+  WorkspaceOnboarding,
+} from './workspace-onboarding';
+import {
   MutationQueue,
   applyDiff,
   getHeaderOnlyFlowchartSnapshot,
@@ -662,6 +669,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const [touchLabelStatus, setTouchLabelStatus] = useState<{ label: string } | null>(null);
   const [canvasHistoryNotice, setCanvasHistoryNotice] = useState<string | null>(null);
   const [canvasHistory, setCanvasHistory] = useState<CanvasHistoryCoordinator | null>(null);
+  const [onboardingDismissalVersion, setOnboardingDismissalVersion] = useState(0);
+  const [onboardingRequest, setOnboardingRequest] = useState<{ diagramId: string; id: number; action: 'sticky' | 'pen' } | null>(null);
+  const [onboardingTextEditId, setOnboardingTextEditId] = useState<string | null>(null);
+  const [templatePickerOpenRequest, setTemplatePickerOpenRequest] = useState(0);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const selectPresentedDiagram = useCallback((diagramId: string) => { setActiveDiagramId(diagramId); }, []);
   const presenterFollow = usePresenterFollow(collaboration?.awareness ?? null, activeDiagramId, selectPresentedDiagram);
   const handleCanvasCameraChange = useCallback((camera: CanvasCameraState) => {
@@ -696,7 +709,16 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     () => getActiveDiagramState(collaboration, activeDiagramId),
     [activeDiagramId, activeDiagramIdentityVersion, collaboration],
   );
+  // `mermaidText` is presentation state synchronized in an effect. On a tab
+  // switch it can briefly describe the previous diagram, so onboarding
+  // eligibility must read the exact current Y.Text instead.
+  const activeDiagramSource = activeDiagram?.yText.toString() ?? '';
   const overlayController = useOverlayScene(collaboration?.doc ?? null, activeDiagramId, canvasHistory);
+  // Like source, derive onboarding eligibility from the active durable scene
+  // rather than the controller's last rendered scene during a tab transition.
+  const activeOverlayCount = collaboration && activeDiagramId
+    ? getOverlayScene(collaboration.doc, activeDiagramId)?.objects.size ?? 0
+    : 0;
   // The coordinator is scoped to this concrete Y.Map, not merely an id. An
   // import can replace the scene map under a stable diagram id.
   const overlaySceneIdentity = useMemo(() => {
@@ -1847,7 +1869,19 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   useEffect(() => {
     if (!openFlyout) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeFlyout();
+      if (event.key === 'Escape') {
+        const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+        const canvasOwnsEscape = canvas !== null && (
+          (event.target instanceof Node && canvas.contains(event.target))
+          || (document.activeElement instanceof Node && canvas.contains(document.activeElement))
+        );
+        // The canvas owns Escape while its interaction surface is focused: it
+        // must always be able to leave laser/ink even if a source flyout stays
+        // open. A flyout-focused Escape continues to close that flyout.
+        if (canvasOwnsEscape) return;
+        event.preventDefault();
+        closeFlyout();
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => { document.removeEventListener('keydown', handleKeyDown); };
@@ -2231,6 +2265,58 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     addActivityRef.current?.('created', `Created ${creation.name}`, creation.id);
   }, [collaboration, focusDiagramTab]);
 
+  const onboardingDismissed = useMemo(() => activeDiagramId
+    ? isWorkspaceOnboardingDismissed(sessionId, activeDiagramId)
+    : false, [activeDiagramId, onboardingDismissalVersion, sessionId]);
+  const onboardingVisible = canShowWorkspaceOnboarding({
+    activeDiagramId,
+    hasCompetingModal: showConnectModal || restoreCandidate !== null || historyPreview !== null || templatePickerOpen || settingsOpen,
+    openFlyout: openFlyout !== null,
+    overlayCount: activeOverlayCount,
+    source: activeDiagramSource,
+  }) && !onboardingDismissed;
+
+  const dismissOnboarding = useCallback(() => {
+    if (activeDiagramId) dismissWorkspaceOnboarding(sessionId, activeDiagramId);
+    setOnboardingDismissalVersion((version) => version + 1);
+  }, [activeDiagramId, sessionId]);
+
+  // A blank workspace may regain an empty source later, but once its owner has
+  // created durable Mermaid or canvas content it is no longer a new canvas.
+  useEffect(() => {
+    if (!activeDiagramId || !shouldDismissWorkspaceOnboardingForContent(activeDiagramSource, activeOverlayCount)) return;
+    if (isWorkspaceOnboardingDismissed(sessionId, activeDiagramId)) return;
+    dismissWorkspaceOnboarding(sessionId, activeDiagramId);
+    setOnboardingDismissalVersion((version) => version + 1);
+  }, [activeDiagramId, activeDiagramSource, activeOverlayCount, sessionId]);
+
+  const startOnboardingOverlayAction = useCallback((action: 'sticky' | 'pen') => {
+    if (!activeDiagramId) return;
+    dismissOnboarding();
+    setOnboardingRequest((current) => ({ diagramId: activeDiagramId, id: (current?.id ?? 0) + 1, action }));
+  }, [activeDiagramId, dismissOnboarding]);
+
+  const browseOnboardingTemplates = useCallback(() => {
+    dismissOnboarding();
+    setTemplatePickerOpenRequest((request) => request + 1);
+  }, [dismissOnboarding]);
+
+  const startOnboardingTemplate = useCallback(() => {
+    dismissOnboarding();
+    createDiagramFromTemplate('service-flowchart');
+  }, [createDiagramFromTemplate, dismissOnboarding]);
+
+  useEffect(() => {
+    if (openFlyout === null && !showConnectModal && restoreCandidate === null && historyPreview === null && !templatePickerOpen && !settingsOpen) return;
+    setOnboardingRequest(null);
+    setOnboardingTextEditId(null);
+  }, [historyPreview, openFlyout, restoreCandidate, settingsOpen, showConnectModal, templatePickerOpen]);
+
+  useEffect(() => {
+    setOnboardingRequest((request) => request?.diagramId === activeDiagramId ? request : null);
+    setOnboardingTextEditId(null);
+  }, [activeDiagramId]);
+
   const commitDiagramName = useCallback(() => {
     if (!collaboration || !renamingDiagramId) return;
     const normalizedName = normalizeDiagramName(diagramNameDraft);
@@ -2397,6 +2483,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             displayName={displayName}
             onConnectAgent={openConnectModal}
             onDisplayNameSave={saveDisplayName}
+            onOpenChange={setSettingsOpen}
             onResetRoomKey={resetRoomKey}
             roomKey={roomKey}
           />
@@ -2417,6 +2504,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         onRenameDiagram={(diagram) => { setRenamingDiagramId(diagram.id); setDiagramNameDraft(diagram.name); }}
         onRenameDismiss={() => { setRenamingDiagramId(null); setDiagramNameDraft(''); }}
         onSourceToggle={(origin) => { toggleFlyout('source', origin); }}
+        onTemplatePickerOpenChange={setTemplatePickerOpen}
         registerTabButton={(diagramId, element) => {
           if (element) diagramTabRefs.current.set(diagramId, element);
           else diagramTabRefs.current.delete(diagramId);
@@ -2424,6 +2512,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         renamingDiagramId={renamingDiagramId}
         sourceOpen={openFlyout === 'source'}
         starterTemplates={CHOOSER_STARTER_TEMPLATES}
+        templatePickerOpenRequest={templatePickerOpenRequest}
       />
 
       <section aria-labelledby={activeDiagramId ? `diagram-tab-${activeDiagramId}` : undefined} className="workspace-main" data-testid="canvas-first-workspace" id="diagram-workspace" role="tabpanel">
@@ -2450,11 +2539,19 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             </div>
           ) : null}
 
+          {onboardingVisible ? <WorkspaceOnboarding
+            onAddStickyNote={() => { startOnboardingOverlayAction('sticky'); }}
+            onBrowseTemplates={browseOnboardingTemplates}
+            onClose={dismissOnboarding}
+            onDraw={() => { startOnboardingOverlayAction('pen'); }}
+            onStartTemplate={startOnboardingTemplate}
+          /> : null}
+
           <DiagramCanvas
             key={activeDiagramId ?? 'no-active-diagram'}
             className="diagram-canvas"
             emptyMessage={renderedMermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
-            emptyState={emptyState}
+            emptyState={onboardingVisible ? null : emptyState}
             graph={renderedPreview?.flowchartSnapshot ?? null}
             interactionMode={interactionMode}
             isFlowchart={isFlowchart}
@@ -2553,6 +2650,16 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
               onHistoryActionRun: (run) => { if (overlayHistoryActionRef.current) canvasHistoryRef.current?.runAction(overlayHistoryActionRef.current, run); else run(); },
               nextInkPreviewSequence,
               remoteInkPreviews: historyPreview === null ? remoteCanvasPresence.flatMap((presence) => presence.canvas.ink_preview ? [{ id: String(presence.client_id), color: presence.participant.color, preview: presence.canvas.ink_preview }] : []) : [],
+              onboardingRequest: onboardingRequest?.diagramId === activeDiagramId ? onboardingRequest : null,
+              onOnboardingRequestComplete: (requestId, createdTextId) => {
+                if (onboardingRequest?.id !== requestId) return;
+                setOnboardingRequest(null);
+                if (createdTextId) setOnboardingTextEditId(createdTextId);
+              },
+              requestedTextEditId: onboardingTextEditId,
+              onRequestedTextEditComplete: (id) => {
+                setOnboardingTextEditId((current) => current === id ? null : current);
+              },
             } : undefined}
             preserveCamera={historyPreviewCameraLock}
             readOnly={historyPreview !== null}

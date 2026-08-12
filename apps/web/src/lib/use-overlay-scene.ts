@@ -28,7 +28,7 @@ import {
 
 export interface OverlaySceneController {
   scene: OverlaySceneSnapshot;
-  add: (point: { x: number; y: number }, kind?: 'annotation.text' | 'annotation.sticky') => void;
+  add: (point: { x: number; y: number }, kind?: 'annotation.text' | 'annotation.sticky') => string | null;
   addShape: (point: { x: number; y: number }, kind: 'shape.rectangle' | 'shape.ellipse' | 'shape.diamond' | 'shape.line' | 'shape.arrow') => void;
   addConnector: (startId: string, endId: string) => void;
   addFrame: (point: { x: number; y: number }, members: readonly string[]) => void;
@@ -93,7 +93,7 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, his
   }, [diagramId, doc]);
 
   const add = useCallback((point: { x: number; y: number }, kind: 'annotation.text' | 'annotation.sticky' = 'annotation.text') => {
-    if (!doc || !diagramId) return;
+    if (!doc || !diagramId) return null;
     const id = `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`;
     addOverlayObject(doc, diagramId, {
       id,
@@ -105,6 +105,7 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, his
       metadata: { export: 'arielcharts-only' },
       payload: {}, body: '',
     });
+    return id;
   }, [diagramId, doc]);
   const nextId = useCallback(() => `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`, []);
   const nextOrder = useCallback((id: string) => `${Date.now().toString().padStart(16, '0')}:${doc?.clientID ?? 0}:${id}`, [doc]);

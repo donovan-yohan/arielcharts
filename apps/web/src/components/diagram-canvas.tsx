@@ -114,6 +114,7 @@ import { reconcileCynefinItemRenderIdentities, reconcileCynefinTransitionRenderI
 import { getTreemapNodeIdentity, isTreemapSourceRepresentable, type TreemapDiagramSnapshot, type TreemapNode, type TreemapNodeIdentity } from '../lib/treemap-mutations';
 import { getVennStyleIdentity, getVennSubsetIdentity, isVennSourceRepresentable, type VennDiagramSnapshot, type VennStyle, type VennStyleIdentity, type VennSubset, type VennSubsetIdentity } from '../lib/venn-mutations';
 import { getWardleyEvolutionIdentity, getWardleyLinkIdentity, getWardleyNodeIdentity, getWardleyNoteIdentity, getWardleyPipelineIdentity, isWardleySourceRepresentable, WARDLEY_LINK_KINDS, WARDLEY_STRATEGIES, type WardleyDiagramSnapshot, type WardleyEvolution, type WardleyEvolutionIdentity, type WardleyLink, type WardleyLinkIdentity, type WardleyNode, type WardleyNodeIdentity, type WardleyNote, type WardleyNoteIdentity, type WardleyPipeline, type WardleyPipelineIdentity } from '../lib/wardley-mutations';
+import { getZenUmlControlIdentity, getZenUmlMessageIdentity, getZenUmlParticipantIdentity, isZenUmlSourceRepresentable, type ZenUmlBlockIdentity, type ZenUmlControl, type ZenUmlControlIdentity, type ZenUmlDiagramSnapshot, type ZenUmlMessage, type ZenUmlMessageIdentity, type ZenUmlParticipant, type ZenUmlParticipantIdentity, type ZenUmlParticipantKind } from '../lib/zenuml-mutations';
 import { reconcileHierarchicalSemanticRenderIdentities, reconcileSemanticRenderIdentities, type SemanticRenderIdentityState } from '../lib/semantic-render-identities';
 
 export type DiagramEmptyState = 'chooser' | 'flowchart' | 'sequence' | null;
@@ -162,6 +163,7 @@ export interface DiagramCanvasProps {
   isTreemap?: boolean;
   isVenn?: boolean;
   isWardley?: boolean;
+  isZenUml?: boolean;
   initialCamera?: CanvasCameraState;
   nodePositions?: DiagramNodePositions;
   preserveCamera?: boolean;
@@ -200,6 +202,7 @@ export interface DiagramCanvasProps {
   treemapDiagram?: TreemapDiagramSnapshot | null;
   vennDiagram?: VennDiagramSnapshot | null;
   wardleyDiagram?: WardleyDiagramSnapshot | null;
+  zenUmlDiagram?: ZenUmlDiagramSnapshot | null;
   theme?: 'light' | 'dark';
   onAddEdge?: (source: string, target: string, label?: string, type?: DiagramLinkType) => void;
   onAddNode?: (label: string, shape: DiagramNodeShape) => void;
@@ -467,6 +470,18 @@ export interface DiagramCanvasProps {
   onMoveWardleyNote?: (identity: WardleyNoteIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
   onAddWardleyPipeline?: (value: WardleyPipeline) => SemanticFormActionResult;
   onDeleteWardleyPipeline?: (identity: WardleyPipelineIdentity) => SemanticFormActionResult;
+  onAddZenUmlParticipant?: (value: ZenUmlParticipant) => SemanticFormActionResult;
+  onEditZenUmlParticipant?: (identity: ZenUmlParticipantIdentity, value: Partial<ZenUmlParticipant>) => SemanticFormActionResult;
+  onDeleteZenUmlParticipant?: (identity: ZenUmlParticipantIdentity) => SemanticFormActionResult;
+  onMoveZenUmlParticipant?: (identity: ZenUmlParticipantIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onAddZenUmlMessage?: (value: ZenUmlMessage, parent?: ZenUmlBlockIdentity) => SemanticFormActionResult;
+  onEditZenUmlMessage?: (identity: ZenUmlMessageIdentity, value: Partial<ZenUmlMessage>) => SemanticFormActionResult;
+  onDeleteZenUmlMessage?: (identity: ZenUmlMessageIdentity) => SemanticFormActionResult;
+  onMoveZenUmlMessage?: (identity: ZenUmlMessageIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onAddZenUmlControl?: (value: ZenUmlControl, parent?: ZenUmlBlockIdentity) => SemanticFormActionResult;
+  onEditZenUmlControl?: (identity: ZenUmlControlIdentity, value: Partial<ZenUmlControl>) => SemanticFormActionResult;
+  onDeleteZenUmlControl?: (identity: ZenUmlControlIdentity) => SemanticFormActionResult;
+  onMoveZenUmlControl?: (identity: ZenUmlControlIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
   onAddConnectedNode?: (source: string, label: string, shape: DiagramNodeShape, position: SvgPoint, type: DiagramLinkType) => void;
   onCanvasCursorChange?: (point: CanvasWorldPoint | null) => void;
   onCameraChange?: (camera: CanvasCameraState) => void;
@@ -1040,6 +1055,18 @@ export function DiagramCanvas({
   onMoveWardleyNote,
   onAddWardleyPipeline,
   onDeleteWardleyPipeline,
+  onAddZenUmlParticipant,
+  onEditZenUmlParticipant,
+  onDeleteZenUmlParticipant,
+  onMoveZenUmlParticipant,
+  onAddZenUmlMessage,
+  onEditZenUmlMessage,
+  onDeleteZenUmlMessage,
+  onMoveZenUmlMessage,
+  onAddZenUmlControl,
+  onEditZenUmlControl,
+  onDeleteZenUmlControl,
+  onMoveZenUmlControl,
   onAddConnectedNode,
   onCanvasCursorChange,
   onCameraChange,
@@ -1107,6 +1134,7 @@ export function DiagramCanvas({
   isTreemap = false,
   isVenn = false,
   isWardley = false,
+  isZenUml = false,
   journeyDiagram = null,
   ganttDiagram = null,
   timelineDiagram = null,
@@ -1128,6 +1156,7 @@ export function DiagramCanvas({
   treemapDiagram = null,
   vennDiagram = null,
   wardleyDiagram = null,
+  zenUmlDiagram = null,
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
@@ -1268,6 +1297,24 @@ export function DiagramCanvas({
     wardleyEvolutionDraftCacheRef.current.clear();
     wardleyNoteDraftCacheRef.current.clear();
   }
+  const zenUmlParticipantRenderKeys = useSemanticRenderIdentityKeys(
+    zenUmlDiagram?.participants ?? null,
+    isZenUmlSourceRepresentable(mermaidSource ?? ''),
+    'zenuml-participant-render',
+    (participant) => JSON.stringify(participant),
+  );
+  const zenUmlMessageRenderKeys = useSemanticRenderIdentityKeys(
+    zenUmlDiagram?.messages ?? null,
+    isZenUmlSourceRepresentable(mermaidSource ?? ''),
+    'zenuml-message-render',
+    (message) => JSON.stringify(message),
+  );
+  const zenUmlControlRenderKeys = useSemanticRenderIdentityKeys(
+    zenUmlDiagram?.controls ?? null,
+    isZenUmlSourceRepresentable(mermaidSource ?? ''),
+    'zenuml-control-render',
+    (control) => JSON.stringify(control),
+  );
   pruneInactivePersistentDrafts(
     wardleyNodeDraftCacheRef.current,
     wardleyNodeRenderKeys.keys.values(),
@@ -3898,6 +3945,7 @@ export function DiagramCanvas({
         {isTreemap && !readOnly && treemapDiagram ? <TreemapEditorControls bottom={semanticPanelPlacement.bottom} diagram={treemapDiagram} draftCache={treemapRenderIdentityKeys.draftCache} keys={treemapRenderIdentityKeys.keys} maxHeight={semanticPanelPlacement.maxHeight} onAdd={onAddTreemapNode} onDelete={onDeleteTreemapNode} onEdit={onEditTreemapNode} onMove={onMoveTreemapNode} onReparent={onReparentTreemapNode} /> : null}
         {isVenn && !readOnly && vennDiagram ? <VennEditorControls bottom={semanticPanelPlacement.bottom} diagram={vennDiagram} maxHeight={semanticPanelPlacement.maxHeight} onAddStyle={onAddVennStyle} onAddSubset={onAddVennSubset} onDeleteStyle={onDeleteVennStyle} onDeleteSubset={onDeleteVennSubset} onEditStyle={onEditVennStyle} onEditSubset={onEditVennSubset} onMoveStyle={onMoveVennStyle} onMoveSubset={onMoveVennSubset} onRenameSet={onRenameVennSet} renameDraftCache={vennRenameDraftCacheRef.current} styleDraftCache={vennStyleRenderIdentityKeys.draftCache} styleKeys={vennStyleRenderIdentityKeys.keys} subsetDraftCache={vennSubsetRenderIdentityKeys.draftCache} subsetKeys={vennSubsetRenderIdentityKeys.keys} /> : null}
         {isWardley && !readOnly && wardleyDiagram ? <WardleyEditorControls bottom={semanticPanelPlacement.bottom} diagram={wardleyDiagram} evolutionDraftCache={wardleyEvolutionDraftCacheRef.current} evolutionKeys={wardleyEvolutionRenderKeys.keys} linkDraftCache={wardleyLinkRenderKeys.draftCache} linkKeys={wardleyLinkRenderKeys.keys} maxHeight={semanticPanelPlacement.maxHeight} nodeDraftCache={wardleyNodeDraftCacheRef.current} nodeKeys={wardleyNodeRenderKeys.keys} noteDraftCache={wardleyNoteDraftCacheRef.current} noteKeys={wardleyNoteRenderKeys.keys} onAddEvolution={onAddWardleyEvolution} onAddLink={onAddWardleyLink} onAddNode={onAddWardleyNode} onAddNote={onAddWardleyNote} onAddPipeline={onAddWardleyPipeline} onDeleteEvolution={onDeleteWardleyEvolution} onDeleteLink={onDeleteWardleyLink} onDeleteNode={onDeleteWardleyNode} onDeleteNote={onDeleteWardleyNote} onDeletePipeline={onDeleteWardleyPipeline} onEditEvolution={onEditWardleyEvolution} onEditLink={onEditWardleyLink} onEditNode={onEditWardleyNode} onEditNote={onEditWardleyNote} onMoveLink={onMoveWardleyLink} onMoveNode={onMoveWardleyNode} onMoveNote={onMoveWardleyNote} onRenameNode={onRenameWardleyNode} /> : null}
+        {isZenUml && !readOnly && zenUmlDiagram ? <ZenUmlEditorControls bottom={semanticPanelPlacement.bottom} controlDraftCache={zenUmlControlRenderKeys.draftCache} controlKeys={zenUmlControlRenderKeys.keys} diagram={zenUmlDiagram} maxHeight={semanticPanelPlacement.maxHeight} messageDraftCache={zenUmlMessageRenderKeys.draftCache} messageKeys={zenUmlMessageRenderKeys.keys} onAddControl={onAddZenUmlControl} onAddMessage={onAddZenUmlMessage} onAddParticipant={onAddZenUmlParticipant} onDeleteControl={onDeleteZenUmlControl} onDeleteMessage={onDeleteZenUmlMessage} onDeleteParticipant={onDeleteZenUmlParticipant} onEditControl={onEditZenUmlControl} onEditMessage={onEditZenUmlMessage} onEditParticipant={onEditZenUmlParticipant} onMoveControl={onMoveZenUmlControl} onMoveMessage={onMoveZenUmlMessage} onMoveParticipant={onMoveZenUmlParticipant} participantDraftCache={zenUmlParticipantRenderKeys.draftCache} participantKeys={zenUmlParticipantRenderKeys.keys} /> : null}
 
         {isFlowchart && !readOnly && toolbarOpen && selection.length > 0 ? (
           <div data-testid="canvas-node-toolbar" style={toolbarStyle}>
@@ -6011,6 +6059,97 @@ function usePersistentCanonicalDraft<T extends object>(
 type WardleyNodeDraft = Omit<WardleyNode, 'evolution' | 'visibility'> & { evolution: string; visibility: string };
 type WardleyEvolutionDraft = Omit<WardleyEvolution, 'target'> & { target: string };
 type WardleyNoteDraft = Omit<WardleyNote, 'evolution' | 'visibility'> & { evolution: string; visibility: string };
+
+const ZENUML_PARTICIPANT_KINDS: readonly ZenUmlParticipantKind[] = ['participant', 'actor', 'database', 'boundary', 'control', 'entity', 'queue'];
+const ZENUML_CONTROL_KINDS: readonly ZenUmlControl['kind'][] = ['if', 'else-if', 'else', 'opt', 'par', 'while', 'for', 'foreach', 'loop', 'try', 'catch', 'finally'];
+
+function ZenUmlEditorControls({
+  bottom, controlDraftCache, controlKeys, diagram, maxHeight, messageDraftCache, messageKeys,
+  onAddControl, onAddMessage, onAddParticipant, onDeleteControl, onDeleteMessage,
+  onDeleteParticipant, onEditControl, onEditMessage, onEditParticipant, onMoveControl,
+  onMoveMessage, onMoveParticipant, participantDraftCache, participantKeys,
+}: {
+  bottom: number; diagram: ZenUmlDiagramSnapshot; maxHeight: number;
+  controlDraftCache: PersistentCanonicalDraftCache<ZenUmlControl>; controlKeys: Map<ZenUmlControl, string>;
+  messageDraftCache: PersistentCanonicalDraftCache<ZenUmlMessage>; messageKeys: Map<ZenUmlMessage, string>;
+  participantDraftCache: PersistentCanonicalDraftCache<ZenUmlParticipant>; participantKeys: Map<ZenUmlParticipant, string>;
+  onAddControl?: (value: ZenUmlControl, parent?: ZenUmlBlockIdentity) => SemanticFormActionResult;
+  onAddMessage?: (value: ZenUmlMessage, parent?: ZenUmlBlockIdentity) => SemanticFormActionResult;
+  onAddParticipant?: (value: ZenUmlParticipant) => SemanticFormActionResult;
+  onDeleteControl?: (identity: ZenUmlControlIdentity) => SemanticFormActionResult;
+  onDeleteMessage?: (identity: ZenUmlMessageIdentity) => SemanticFormActionResult;
+  onDeleteParticipant?: (identity: ZenUmlParticipantIdentity) => SemanticFormActionResult;
+  onEditControl?: (identity: ZenUmlControlIdentity, value: Partial<ZenUmlControl>) => SemanticFormActionResult;
+  onEditMessage?: (identity: ZenUmlMessageIdentity, value: Partial<ZenUmlMessage>) => SemanticFormActionResult;
+  onEditParticipant?: (identity: ZenUmlParticipantIdentity, value: Partial<ZenUmlParticipant>) => SemanticFormActionResult;
+  onMoveControl?: (identity: ZenUmlControlIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onMoveMessage?: (identity: ZenUmlMessageIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+  onMoveParticipant?: (identity: ZenUmlParticipantIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
+}) {
+  const aliases = diagram.participants.map((item) => item.alias);
+  const firstAlias = aliases[0] ?? 'Client';
+  const secondAlias = aliases[1] ?? firstAlias;
+  const [participant, setParticipant] = useState<ZenUmlParticipant>({ alias: 'Service', kind: 'participant', label: 'Service' });
+  const [message, setMessage] = useState<ZenUmlMessage>({ assignment: null, from: firstAlias, kind: 'async', text: 'request', to: secondAlias });
+  const [control, setControl] = useState<ZenUmlControl>({ depth: 0, kind: 'if', label: 'condition' });
+  const [messageParentKey, setMessageParentKey] = useState('');
+  const [controlParentKey, setControlParentKey] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const blockKeys = diagram.blocks.map((block) => zenUmlBlockIdentityKey(block.identity));
+  useEffect(() => {
+    setMessage((current) => ({
+      ...current,
+      from: current.from && aliases.includes(current.from) ? current.from : firstAlias,
+      to: current.to && aliases.includes(current.to) ? current.to : secondAlias,
+    }));
+  }, [aliases.join('\u0000'), firstAlias, secondAlias]);
+  useEffect(() => {
+    setMessageParentKey((current) => current && !blockKeys.includes(current) ? '' : current);
+    setControlParentKey((current) => current && !blockKeys.includes(current) ? '' : current);
+  }, [blockKeys.join('\u0000')]);
+  return <aside aria-label="ZenUML editor" className="canvas-semantic-editor canvas-hierarchy-editor canvas-zenuml-editor" data-canvas-pan-exclusion="true" data-testid="zenuml-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+    <strong>ZenUML</strong>
+    <form aria-label="Add ZenUML participant" onSubmit={(event) => { event.preventDefault(); runSemanticForm(setError, () => onAddParticipant?.(participant)); }}>
+      <input aria-label="New ZenUML participant alias" onChange={(event) => setParticipant((current) => ({ ...current, alias: event.target.value }))} value={participant.alias} />
+      <input aria-label="New ZenUML participant label" onChange={(event) => setParticipant((current) => ({ ...current, label: event.target.value }))} value={participant.label} />
+      <ZenUmlParticipantKindSelect label="New ZenUML participant kind" onChange={(kind) => setParticipant((current) => ({ ...current, kind }))} value={participant.kind} />
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add participant</button>
+    </form>
+    <form aria-label="Add ZenUML message" onSubmit={(event) => { event.preventDefault(); runSemanticForm(setError, () => onAddMessage?.(message, diagram.blocks.find((block) => zenUmlBlockIdentityKey(block.identity) === messageParentKey)?.identity)); }}>
+      <select aria-label="New ZenUML message kind" onChange={(event) => setMessage((current) => ({ ...current, kind: event.target.value as ZenUmlMessage['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={message.kind}><option value="async">async message</option><option value="sync">sync call</option><option value="return">return</option></select>
+      {message.kind === 'async' ? <ZenUmlAliasSelect aliases={aliases} label="New ZenUML message sender" onChange={(from) => setMessage((current) => ({ ...current, from }))} value={message.from ?? firstAlias} /> : null}
+      {message.kind === 'sync' ? <ZenUmlOptionalAliasSelect aliases={aliases} label="New ZenUML call sender" onChange={(from) => setMessage((current) => ({ ...current, from }))} value={message.from} /> : null}
+      {message.kind !== 'return' ? <ZenUmlAliasSelect aliases={aliases} label="New ZenUML message recipient" onChange={(to) => setMessage((current) => ({ ...current, to }))} value={message.to ?? secondAlias} /> : null}
+      {message.kind === 'sync' ? <input aria-label="New ZenUML assignment" onChange={(event) => setMessage((current) => ({ ...current, assignment: event.target.value || null }))} placeholder="optional assignment" value={message.assignment ?? ''} /> : null}
+      <input aria-label="New ZenUML message text" onChange={(event) => setMessage((current) => ({ ...current, text: event.target.value }))} value={message.text} />
+      <ZenUmlParentSelect blocks={diagram.blocks} label="New ZenUML message parent" onChange={setMessageParentKey} value={messageParentKey} />
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add message</button>
+    </form>
+    <form aria-label="Add ZenUML control" onSubmit={(event) => { event.preventDefault(); runSemanticForm(setError, () => onAddControl?.(control, diagram.blocks.find((block) => zenUmlBlockIdentityKey(block.identity) === controlParentKey)?.identity)); }}>
+      <ZenUmlControlKindSelect label="New ZenUML control kind" onChange={(kind) => setControl((current) => ({ ...current, kind }))} value={control.kind} />
+      <input aria-label="New ZenUML control label" onChange={(event) => setControl((current) => ({ ...current, label: event.target.value }))} placeholder="condition" value={control.label} />
+      <ZenUmlParentSelect blocks={diagram.blocks} label="New ZenUML control parent" onChange={setControlParentKey} value={controlParentKey} />
+      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add control</button>
+    </form>
+    <NumericEditorError error={error} />
+    {diagram.participants.map((item) => <ZenUmlParticipantForm cache={participantDraftCache} identity={getZenUmlParticipantIdentity(item, diagram.participants)} key={participantKeys.get(item)} onDelete={onDeleteParticipant} onEdit={onEditParticipant} onMove={onMoveParticipant} renderKey={participantKeys.get(item)!} value={item} />)}
+    {diagram.messages.map((item) => <ZenUmlMessageForm aliases={aliases} cache={messageDraftCache} identity={getZenUmlMessageIdentity(item, diagram.messages)} key={messageKeys.get(item)} onDelete={onDeleteMessage} onEdit={onEditMessage} onMove={onMoveMessage} renderKey={messageKeys.get(item)!} value={item} />)}
+    {diagram.controls.map((item) => <ZenUmlControlForm cache={controlDraftCache} identity={getZenUmlControlIdentity(item, diagram.controls)} key={controlKeys.get(item)} onDelete={onDeleteControl} onEdit={onEditControl} onMove={onMoveControl} renderKey={controlKeys.get(item)!} value={item} />)}
+  </aside>;
+}
+
+function ZenUmlParticipantKindSelect({ label, onChange, value }: { label: string; onChange: (value: ZenUmlParticipantKind) => void; value: ZenUmlParticipantKind }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value as ZenUmlParticipantKind)} style={HIERARCHY_CONTROL_STYLE} value={value}>{ZENUML_PARTICIPANT_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select>; }
+function ZenUmlControlKindSelect({ label, onChange, value }: { label: string; onChange: (value: ZenUmlControl['kind']) => void; value: ZenUmlControl['kind'] }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value as ZenUmlControl['kind'])} style={HIERARCHY_CONTROL_STYLE} value={value}>{ZENUML_CONTROL_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select>; }
+function ZenUmlAliasSelect({ aliases, label, onChange, value }: { aliases: string[]; label: string; onChange: (value: string) => void; value: string }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value)} style={HIERARCHY_CONTROL_STYLE} value={value}>{aliases.map((alias) => <option key={alias}>{alias}</option>)}</select>; }
+function ZenUmlOptionalAliasSelect({ aliases, label, onChange, value }: { aliases: string[]; label: string; onChange: (value: string | null) => void; value: string | null }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value || null)} style={HIERARCHY_CONTROL_STYLE} value={value ?? ''}><option value="">implicit caller</option>{aliases.map((alias) => <option key={alias}>{alias}</option>)}</select>; }
+function zenUmlBlockIdentityKey(identity: ZenUmlBlockIdentity): string { return JSON.stringify(identity); }
+function ZenUmlParentSelect({ blocks, label, onChange, value }: { blocks: ZenUmlDiagramSnapshot['blocks']; label: string; onChange: (value: string) => void; value: string }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value)} style={HIERARCHY_CONTROL_STYLE} value={value}><option value="">Top level</option>{blocks.map((block) => { const key = zenUmlBlockIdentityKey(block.identity); return <option key={key} value={key}>{`${'  '.repeat(block.depth + 1)}${block.label}`}</option>; })}</select>; }
+
+function ZenUmlParticipantForm({ cache, identity, onDelete, onEdit, onMove, renderKey, value }: { cache: PersistentCanonicalDraftCache<ZenUmlParticipant>; identity: ZenUmlParticipantIdentity; onDelete?: (identity: ZenUmlParticipantIdentity) => SemanticFormActionResult; onEdit?: (identity: ZenUmlParticipantIdentity, value: Partial<ZenUmlParticipant>) => SemanticFormActionResult; onMove?: (identity: ZenUmlParticipantIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string; value: ZenUmlParticipant }) { const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(value, renderKey, cache); const [error, setError] = useState<string | null>(null); return <form aria-label={`ZenUML participant ${value.alias}`} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onEdit?.(identity, draft))) resetDraft(); }}><input aria-label={`ZenUML participant ${value.alias} alias`} onChange={(event) => updateDraft((current) => ({ ...current, alias: event.target.value }))} value={draft.alias} /><input aria-label={`ZenUML participant ${value.alias} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><ZenUmlParticipantKindSelect label={`ZenUML participant ${value.alias} kind`} onChange={(kind) => updateDraft((current) => ({ ...current, kind }))} value={draft.kind} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ZenUML participant ${value.alias} up`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ZenUML participant ${value.alias} down`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ZenUML participant ${value.alias}`} onClick={() => runSemanticForm(setError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button><NumericEditorError error={error} /></form>; }
+
+function ZenUmlMessageForm({ aliases, cache, identity, onDelete, onEdit, onMove, renderKey, value }: { aliases: string[]; cache: PersistentCanonicalDraftCache<ZenUmlMessage>; identity: ZenUmlMessageIdentity; onDelete?: (identity: ZenUmlMessageIdentity) => SemanticFormActionResult; onEdit?: (identity: ZenUmlMessageIdentity, value: Partial<ZenUmlMessage>) => SemanticFormActionResult; onMove?: (identity: ZenUmlMessageIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string; value: ZenUmlMessage }) { const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(value, renderKey, cache); const [error, setError] = useState<string | null>(null); return <form aria-label={`ZenUML ${value.kind} message ${value.text}`} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onEdit?.(identity, draft))) resetDraft(); }}><input aria-label={`ZenUML message ${value.text} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />{draft.kind === 'async' ? <ZenUmlAliasSelect aliases={aliases} label={`ZenUML message ${value.text} sender`} onChange={(from) => updateDraft((current) => ({ ...current, from }))} value={draft.from ?? ''} /> : null}{draft.kind === 'sync' ? <ZenUmlOptionalAliasSelect aliases={aliases} label={`ZenUML message ${value.text} sender`} onChange={(from) => updateDraft((current) => ({ ...current, from }))} value={draft.from} /> : null}{draft.kind !== 'return' ? <ZenUmlAliasSelect aliases={aliases} label={`ZenUML message ${value.text} recipient`} onChange={(to) => updateDraft((current) => ({ ...current, to }))} value={draft.to ?? ''} /> : null}{draft.kind === 'sync' ? <input aria-label={`ZenUML message ${value.text} assignment`} onChange={(event) => updateDraft((current) => ({ ...current, assignment: event.target.value || null }))} value={draft.assignment ?? ''} /> : null}<button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ZenUML message ${value.text} up`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ZenUML message ${value.text} down`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ZenUML message ${value.text}`} onClick={() => runSemanticForm(setError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button><NumericEditorError error={error} /></form>; }
+
+function ZenUmlControlForm({ cache, identity, onDelete, onEdit, onMove, renderKey, value }: { cache: PersistentCanonicalDraftCache<ZenUmlControl>; identity: ZenUmlControlIdentity; onDelete?: (identity: ZenUmlControlIdentity) => SemanticFormActionResult; onEdit?: (identity: ZenUmlControlIdentity, value: Partial<ZenUmlControl>) => SemanticFormActionResult; onMove?: (identity: ZenUmlControlIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string; value: ZenUmlControl }) { const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(value, renderKey, cache); const [error, setError] = useState<string | null>(null); return <form aria-label={`ZenUML control ${value.kind} ${value.label}`} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onEdit?.(identity, draft))) resetDraft(); }}><strong>{value.kind}</strong><input aria-label={`ZenUML control ${value.kind} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ZenUML control ${value.kind} up`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ZenUML control ${value.kind} down`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ZenUML control ${value.kind}`} onClick={() => runSemanticForm(setError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button><NumericEditorError error={error} /></form>; }
 
 function WardleyEditorControls({
   bottom, diagram, evolutionDraftCache, evolutionKeys, linkDraftCache, linkKeys, maxHeight,

@@ -1,4 +1,4 @@
-import { EXTERNAL_MERMAID_PLUGIN_FAMILIES, type StarterTemplate, type StarterTemplateId } from '@arielcharts/shared';
+import { EXTERNAL_MERMAID_PLUGIN_FAMILIES, getStarterTemplate, type StarterTemplate, type StarterTemplateId } from '@arielcharts/shared';
 import React, { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Plus } from 'lucide-react';
 
@@ -82,7 +82,11 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, templates }: Workspac
   const menuRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const templateGroups = getTemplateMenuGroups(templates);
-  const menuTemplates = templateGroups.flatMap((group) => group.templates);
+  const externalTemplates = EXTERNAL_MERMAID_PLUGIN_FAMILIES.flatMap((family) => {
+    const template = family.availability === 'available-plugin' ? getStarterTemplate(family.id) : undefined;
+    return template ? [template] : [];
+  });
+  const menuTemplates = [...templateGroups.flatMap((group) => group.templates), ...externalTemplates];
 
   const closeMenu = useCallback((returnFocus: boolean) => {
     setOpen(false);
@@ -190,19 +194,34 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, templates }: Workspac
           ))}
           <div aria-label="External plugins" className="workspace-template-menu-group" role="group">
             <p className="workspace-template-menu-group-label">External plugins</p>
-            {EXTERNAL_MERMAID_PLUGIN_FAMILIES.map((family) => (
+            {EXTERNAL_MERMAID_PLUGIN_FAMILIES.map((family) => {
+              const template = externalTemplates.find((candidate) => candidate.id === family.id);
+              const index = menuTemplates.findIndex((candidate) => candidate.id === family.id);
+              return (
               <div className="workspace-template-menu-choice" key={family.id}>
-                <div
-                  aria-describedby={`starter-template-${family.id}-help`}
-                  aria-disabled="true"
-                  className="workspace-template-menu-item is-unavailable"
-                >
-                  <span>{family.label} · plugin unavailable</span>
-                  <small id={`starter-template-${family.id}-help`}>{family.help}</small>
-                </div>
+                {template ? (
+                  <button
+                    className="workspace-template-menu-item"
+                    data-testid="starter-template-create"
+                    onClick={() => { setOpen(false); onCreateDiagram(template.id as StarterTemplateId); }}
+                    onKeyDown={(event) => { onItemKeyDown(event, index, template.id as StarterTemplateId); }}
+                    ref={(element) => { itemRefs.current[index] = element; }}
+                    tabIndex={index === activeIndex ? 0 : -1}
+                    type="button"
+                  >
+                    <span>{family.label} · lazy plugin</span>
+                    <small>{family.help}</small>
+                  </button>
+                ) : (
+                  <div aria-describedby={`starter-template-${family.id}-help`} aria-disabled="true" className="workspace-template-menu-item is-unavailable">
+                    <span>{family.label} · plugin unavailable</span>
+                    <small id={`starter-template-${family.id}-help`}>{family.help}</small>
+                  </div>
+                )}
                 <a aria-label={`Learn about ${family.label} Mermaid syntax`} className="workspace-template-menu-help" href={family.helpUrl} rel="noreferrer" target="_blank">Docs</a>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       ) : null}

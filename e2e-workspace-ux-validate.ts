@@ -38,7 +38,7 @@ import {
   type YjsSessionObserver,
 } from './e2e/support/yjs-session.ts';
 import { EXTERNAL_MERMAID_PLUGIN_FAMILIES, MERMAID_DIAGRAM_FAMILIES } from './packages/shared/src/mermaid-diagram-catalog.js';
-import { CHOOSER_STARTER_TEMPLATES, PRIMARY_STARTER_TEMPLATES } from './packages/shared/src/starter-templates.js';
+import { CHOOSER_STARTER_TEMPLATES, EXTERNAL_STARTER_TEMPLATES, PRIMARY_STARTER_TEMPLATES } from './packages/shared/src/starter-templates.js';
 import { getWebsocketServerUrl } from './apps/web/src/lib/session.ts';
 import { getCanvasDotGridGeometry } from './apps/web/src/lib/canvas-dot-grid.ts';
 import {
@@ -1172,7 +1172,7 @@ async function expectTemplateMenu(page: Page): Promise<string> {
     .map((value) => value.trim());
   const [firstLabel, nextLabel] = labels;
   const lastLabel = labels.at(-1);
-  assert(labels.length === CHOOSER_STARTER_TEMPLATES.length,
+  assert(labels.length === CHOOSER_STARTER_TEMPLATES.length + EXTERNAL_STARTER_TEMPLATES.length,
     `Starter chooser DOM labels diverged from its catalog-owned templates: ${JSON.stringify(labels)}.`);
   assert(firstLabel && nextLabel && lastLabel,
     `Starter chooser must expose first, next, and last labels: ${JSON.stringify(labels)}.`);
@@ -1340,9 +1340,15 @@ async function expectCatalogStarterSweep(page: Page, mcp: ModernMcpClient, sessi
   const blank = await templateMenuItem(menu, 'Blank sheet');
   await waitForFocusedLocator(page, blank, 'Opening generated catalog starter chooser');
   const enabledItems = menu.getByTestId('starter-template-create');
-  assert(await enabledItems.count() === CHOOSER_STARTER_TEMPLATES.length,
-    `Catalog picker exposed ${await enabledItems.count()} enabled rows instead of ${CHOOSER_STARTER_TEMPLATES.length}.`);
+  const expectedEnabledItems = CHOOSER_STARTER_TEMPLATES.length + EXTERNAL_STARTER_TEMPLATES.length;
+  assert(await enabledItems.count() === expectedEnabledItems,
+    `Catalog picker exposed ${await enabledItems.count()} enabled rows instead of ${expectedEnabledItems}.`);
   for (const family of EXTERNAL_MERMAID_PLUGIN_FAMILIES) {
+    if (family.availability === 'available-plugin') {
+      const available = menu.getByTestId('starter-template-create').filter({ hasText: `${family.label} · lazy plugin` });
+      await expect(available).toHaveCount(1);
+      continue;
+    }
     const unavailable = menu.locator('[aria-disabled="true"]', { hasText: new RegExp(`^${family.label}.*plugin unavailable`, 'u') });
     await expect(unavailable).toHaveAttribute('aria-disabled', 'true');
     assert(await unavailable.getByRole('link').count() === 0,
@@ -5813,8 +5819,8 @@ async function expectCatalogStarterMobileSweep(page: Page, label: 'mobile-390' |
   const blank = await templateMenuItem(menu, 'Blank sheet');
   await waitForFocusedLocator(page, blank, `${label} opening generated catalog chooser`);
   await assertContainedInViewport(page, menu, `${label} catalog chooser`);
-  assert(await menu.getByTestId('starter-template-create').count() === PRIMARY_STARTER_TEMPLATES.length,
-    `${label} catalog chooser did not expose all primary starters.`);
+  assert(await menu.getByTestId('starter-template-create').count() === PRIMARY_STARTER_TEMPLATES.length + EXTERNAL_STARTER_TEMPLATES.length,
+    `${label} catalog chooser did not expose all primary and available plugin starters.`);
   for (const template of PRIMARY_STARTER_TEMPLATES) {
     const choice = await templateMenuItem(menu, template.label);
     await choice.scrollIntoViewIfNeeded();
@@ -5823,6 +5829,15 @@ async function expectCatalogStarterMobileSweep(page: Page, label: 'mobile-390' |
     await assertContainedInViewport(page, menu, `${label} ${template.label} chooser containment`);
     await assertDocumentMatchesViewport(page, `${label} ${template.label} chooser`);
     assert(await renderedCanvasCameraTransform(page, `${label} ${template.label} chooser camera`) === menuCamera,
+      `${label} scrolling to ${template.label} changed the active canvas camera.`);
+  }
+  for (const template of EXTERNAL_STARTER_TEMPLATES) {
+    const choice = menu.getByTestId('starter-template-create').filter({ hasText: `${template.label} · lazy plugin` });
+    await choice.scrollIntoViewIfNeeded();
+    await assertTouchTarget(page, choice, `${label} ${template.label} plugin chooser target`);
+    await choice.click({ trial: true, timeout: 15_000 });
+    await assertContainedInViewport(page, menu, `${label} ${template.label} plugin chooser containment`);
+    assert(await renderedCanvasCameraTransform(page, `${label} ${template.label} plugin chooser camera`) === menuCamera,
       `${label} scrolling to ${template.label} changed the active canvas camera.`);
   }
   await page.keyboard.press('Escape');
@@ -5895,11 +5910,11 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   assert(await renderedCanvasCameraTransform(page, `${label} template open`) === templateCamera,
     `${label} opening templates changed the local canvas camera.`);
   await assertContainedInViewport(page, templateMenu, `${label} starter template menu`);
-  assert(await templateMenu.getByTestId('starter-template-create').count() === CHOOSER_STARTER_TEMPLATES.length,
-    `${label} did not expose every built-in catalog starter.`);
-  const unavailableZenUml = templateMenu.locator('[aria-disabled="true"]', { hasText: /^ZenUML.*plugin unavailable/u });
-  await unavailableZenUml.scrollIntoViewIfNeeded();
-  await expect(unavailableZenUml).toHaveAttribute('aria-disabled', 'true');
+  assert(await templateMenu.getByTestId('starter-template-create').count() === CHOOSER_STARTER_TEMPLATES.length + EXTERNAL_STARTER_TEMPLATES.length,
+    `${label} did not expose every built-in and available plugin starter.`);
+  const availableZenUml = templateMenu.getByTestId('starter-template-create').filter({ hasText: 'ZenUML · lazy plugin' });
+  await availableZenUml.scrollIntoViewIfNeeded();
+  await assertTouchTarget(page, availableZenUml, `${label} ZenUML plugin template`);
   const blankTemplate = await templateMenuItem(templateMenu, 'Blank sheet');
   await blankTemplate.scrollIntoViewIfNeeded();
   await assertTouchTarget(page, blankTemplate, `${label} Blank sheet template`);

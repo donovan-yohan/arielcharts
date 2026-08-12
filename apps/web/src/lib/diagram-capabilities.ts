@@ -28,6 +28,7 @@ import { isCynefinSourceRepresentable } from './cynefin-mutations';
 import { isTreemapSourceRepresentable } from './treemap-mutations';
 import { getVennDiagramSnapshot, isVennSourceRepresentable } from './venn-mutations';
 import { isWardleySourceRepresentable } from './wardley-mutations';
+import { isZenUmlSourceRepresentable } from './zenuml-mutations';
 import {
   EXTERNAL_MERMAID_PLUGIN_FAMILIES,
   getExternalMermaidDiagramFamily,
@@ -44,7 +45,7 @@ export type { MermaidDiagramFamilyId };
 
 export type DiagramKind = 'flowchart' | 'sequence' | 'er' | 'generic';
 export type DiagramEditingMode = 'canvas' | 'semantic-form' | 'source-only' | 'unavailable-plugin';
-export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'mindmap' | 'tree-view' | 'ishikawa' | 'railroad' | 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'treemap' | 'venn' | 'wardley' | 'source-only' | 'unavailable-plugin';
+export type DiagramAdapterId = 'architecture' | 'block' | 'c4' | 'class' | 'flowchart' | 'sequence' | 'er' | 'requirement' | 'state' | 'swimlane' | 'journey' | 'gantt' | 'timeline' | 'gitgraph' | 'event-modeling' | 'kanban' | 'mindmap' | 'tree-view' | 'ishikawa' | 'railroad' | 'pie' | 'quadrant' | 'xy-chart' | 'radar' | 'sankey' | 'packet' | 'cynefin' | 'treemap' | 'venn' | 'wardley' | 'zenuml' | 'source-only' | 'unavailable-plugin';
 export interface DiagramCapability {
   adapter?: DiagramAdapterId;
   diagramType: string;
@@ -261,6 +262,7 @@ const CYNEFIN_OPERATIONS = new Set(['add-item', 'edit-item', 'delete-item', 'mov
 const TREEMAP_OPERATIONS = new Set(['add-node', 'edit-node', 'delete-node', 'move-node', 'reparent-node']);
 const VENN_OPERATIONS = new Set(['add-subset', 'edit-subset', 'delete-subset', 'move-subset', 'rename-set', 'add-style', 'edit-style', 'delete-style', 'move-style']);
 const WARDLEY_OPERATIONS = new Set(['add-node', 'edit-node', 'delete-node', 'move-node', 'rename-node', 'add-link', 'edit-link', 'delete-link', 'move-link', 'add-evolution', 'edit-evolution', 'delete-evolution', 'add-note', 'edit-note', 'delete-note', 'move-note', 'add-pipeline', 'delete-pipeline']);
+const ZENUML_OPERATIONS = new Set(['add-participant', 'edit-participant', 'delete-participant', 'move-participant', 'add-message', 'edit-message', 'delete-message', 'move-message', 'add-control', 'edit-control', 'delete-control', 'move-control']);
 function strictAdapter(id: DiagramAdapterId, operations: ReadonlySet<string>, representable: (source: string) => boolean): DiagramSourceModelAdapter { return { id, getOperationResult(source, operation) { return !representable(source) ? { supported: false, reason: 'unrepresentable' } : operations.has(operation) ? { supported: true } : { supported: false, reason: 'unsupported-operation' }; }, getRepresentability: (source) => representable(source) ? { representable: true } : { representable: false, reason: 'unsupported-syntax' } }; }
 const JOURNEY_ADAPTER = strictAdapter('journey', JOURNEY_OPERATIONS, isJourneySourceRepresentable);
 const GANTT_ADAPTER = strictAdapter('gantt', GANTT_OPERATIONS, isGanttSourceRepresentable);
@@ -287,6 +289,7 @@ const VENN_ADAPTER = strictAdapter('venn', VENN_OPERATIONS, (source) => {
   return getVennDiagramSnapshot(source).styles.every((style) => style.properties.length === 1);
 });
 const WARDLEY_ADAPTER = strictAdapter('wardley', WARDLEY_OPERATIONS, isWardleySourceRepresentable);
+const ZENUML_ADAPTER = strictAdapter('zenuml', ZENUML_OPERATIONS, isZenUmlSourceRepresentable);
 
 /** Browser-only semantic adapters remain intentionally separate from shared catalog metadata. */
 const ADAPTER_BY_FAMILY: Readonly<Record<MermaidDiagramFamilyId, DiagramAdapterId>> = {
@@ -314,6 +317,11 @@ export function classifyDiagramCapability(diagramType: string): DiagramCapabilit
 
   const externalFamily = getExternalMermaidDiagramFamily(diagramType);
   if (externalFamily) {
+    if (externalFamily.availability === 'available-plugin') {
+      return {
+        adapter: 'zenuml', diagramType, editingMode: 'semantic-form', family: 'zenuml', kind: 'generic', label: externalFamily.label,
+      };
+    }
     return {
       adapter: 'unavailable-plugin', diagramType, editingMode: 'unavailable-plugin', family: 'zenuml', kind: 'generic', label: externalFamily.label,
     };
@@ -358,6 +366,7 @@ export function getDiagramSourceModelAdapter(capability: DiagramCapability | nul
     case 'treemap': return TREEMAP_ADAPTER;
 case 'venn': return VENN_ADAPTER;
 case 'wardley': return WARDLEY_ADAPTER;
+    case 'zenuml': return ZENUML_ADAPTER;
     case 'unavailable-plugin': return UNAVAILABLE_PLUGIN_ADAPTER;
     default: return SOURCE_ONLY_ADAPTER;
   }

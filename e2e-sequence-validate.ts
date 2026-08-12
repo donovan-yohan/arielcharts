@@ -190,6 +190,71 @@ async function assertNarrowSequenceControls(page: Page): Promise<void> {
   await page.setViewportSize({ height: 900, width: 1400 });
 }
 
+async function assertZenUmlPluginAndControls(page: Page): Promise<void> {
+  const source = `zenuml
+  @Actor Client
+  API as Checkout API
+  Client->API: request
+  Client->API.checkout() {
+  }`;
+  await replaceSource(page, source);
+  await page.waitForFunction(() => {
+    const mode = document.querySelector('[data-testid="diagram-mode"]')?.textContent ?? '';
+    return mode.includes('ZenUML · editable · form')
+      && document.querySelector('.diagram-canvas-svg svg')?.getAttribute('viewBox')
+      && document.querySelector('[data-testid="zenuml-editor-controls"]');
+  }, undefined, { timeout: 30_000 });
+  await closeSourceFlyout(page);
+  const panel = page.getByTestId('zenuml-editor-controls');
+  await panel.getByRole('button', { name: 'Add participant', exact: true }).click();
+  await panel.getByLabel('New ZenUML message sender').selectOption('Client');
+  await panel.getByLabel('New ZenUML message recipient').selectOption('API');
+  await panel.getByLabel('New ZenUML message text').fill('confirmed');
+  await panel.getByRole('button', { name: 'Add message', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.diagram-canvas-svg')?.textContent?.includes('confirmed'), undefined, { timeout: 15_000 });
+  await panel.getByLabel('New ZenUML control parent').selectOption({ index: 1 });
+  await panel.getByRole('button', { name: 'Add control', exact: true }).click();
+  const mutated = await readCanonicalSource(page);
+  if (!mutated.includes('  Service') || !mutated.includes('  Client->API: confirmed') || !mutated.includes('    if(condition) {')) {
+    throw new Error(`ZenUML form did not write canonical source: ${mutated}`);
+  }
+  await closeSourceFlyout(page);
+  const canvas = page.locator('[aria-label="Interactive diagram canvas"]');
+  await canvas.press('ControlOrMeta+z');
+  await canvas.press('ControlOrMeta+z');
+  await page.waitForFunction(() => !document.querySelector('.diagram-canvas-svg')?.textContent?.includes('confirmed'), undefined, { timeout: 15_000 });
+  const undone = await readCanonicalSource(page);
+  if (undone.includes('Client->API: confirmed')) throw new Error(`ZenUML mutation did not participate in canvas undo: ${undone}`);
+  await closeSourceFlyout(page);
+
+  await page.setViewportSize({ height: 720, width: 320 });
+  const narrowLayout = await panel.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const canvasRect = element.closest<HTMLElement>('[aria-label="Interactive diagram canvas"]')?.getBoundingClientRect();
+    return {
+      contained: !!canvasRect && rect.left >= canvasRect.left - 0.5 && rect.right <= canvasRect.right + 0.5,
+      documentFits: document.documentElement.scrollWidth <= window.innerWidth,
+      internallyScrollable: element.scrollHeight > element.clientHeight && getComputedStyle(element).overflowY !== 'visible',
+    };
+  });
+  if (!narrowLayout.contained || !narrowLayout.documentFits || !narrowLayout.internallyScrollable) {
+    throw new Error(`ZenUML controls failed the 320px measured-panel contract: ${JSON.stringify(narrowLayout)}`);
+  }
+  await page.setViewportSize({ height: 900, width: 1400 });
+
+  const advancedSource = `zenuml
+  title Advanced source remains renderable
+  A->B: hello`;
+  await replaceSource(page, advancedSource);
+  await page.waitForFunction(() => {
+    const mode = document.querySelector('[data-testid="diagram-mode"]')?.textContent ?? '';
+    return mode.includes('ZenUML · source only')
+      && document.querySelector('.diagram-canvas-svg svg')?.getAttribute('viewBox')
+      && !document.querySelector('[data-testid="zenuml-editor-controls"]');
+  }, undefined, { timeout: 15_000 });
+  await page.screenshot({ path: '/tmp/arielcharts-zenuml.png' });
+}
+
 async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
   const source = `sequenceDiagram
   participant A as Alpha
@@ -573,6 +638,7 @@ sequenceDiagram; A<<->>B: ping`;
     }
     await assertNarrowSequenceControls(page);
     await assertSequenceInlineTextEditing(page);
+    await assertZenUmlPluginAndControls(page);
 
     const quotedParticipantSequence = `sequenceDiagram
   participant "Web browser" as Browser

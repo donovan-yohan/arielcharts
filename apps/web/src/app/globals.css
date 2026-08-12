@@ -2511,6 +2511,26 @@ code {
   color: var(--status-danger-text);
 }
 
+.error-banner.is-loading {
+  border-color: var(--control-border);
+  background: var(--control-surface);
+  color: var(--ink);
+}
+
+.canvas-zenuml-editor form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+}
+
+.canvas-zenuml-editor input,
+.canvas-zenuml-editor select {
+  flex: 1 1 9rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .share-url {
   display: block;
   padding: 0.95rem 1rem;

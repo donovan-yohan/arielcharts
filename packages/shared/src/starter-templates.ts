@@ -1,5 +1,6 @@
 import {
   MERMAID_DIAGRAM_FAMILIES,
+  EXTERNAL_MERMAID_PLUGIN_FAMILIES,
   type MermaidDiagramEditingModel,
   type MermaidDiagramFamilyId,
   type MermaidDiagramStability,
@@ -7,7 +8,7 @@ import {
 
 /** The authored header names exposed by the pre-catalog public starter set. */
 export type LegacyStarterTemplateDiagramType = 'blank' | 'sequenceDiagram' | 'flowchart' | 'erDiagram' | 'stateDiagram-v2' | 'timeline';
-export type StarterTemplateDiagramType = LegacyStarterTemplateDiagramType | MermaidDiagramFamilyId;
+export type StarterTemplateDiagramType = LegacyStarterTemplateDiagramType | MermaidDiagramFamilyId | 'zenuml';
 
 export type StarterTemplate = Readonly<{
   id: string;
@@ -23,7 +24,7 @@ export type StarterTemplate = Readonly<{
 }>;
 
 export type LegacyStarterTemplateId = 'api-sequence' | 'service-flowchart' | 'data-model-er' | 'state-machine' | 'incident-timeline' | 'deployment-architecture';
-export type StarterTemplateId = 'blank' | LegacyStarterTemplateId | typeof MERMAID_DIAGRAM_FAMILIES[number]['starter']['id'];
+export type StarterTemplateId = 'blank' | LegacyStarterTemplateId | typeof MERMAID_DIAGRAM_FAMILIES[number]['starter']['id'] | 'zenuml';
 
 /**
  * The established public starter export. Keep these seven values byte-for-byte
@@ -67,10 +68,25 @@ export const CHOOSER_STARTER_TEMPLATES = PRIMARY_STARTER_TEMPLATES;
 /** The six compatibility-only members of the established STARTER_TEMPLATES export. */
 export const STARTER_TEMPLATE_ALIASES: readonly StarterTemplate[] = Object.freeze(STARTER_TEMPLATES.slice(1));
 
+export const EXTERNAL_STARTER_TEMPLATES: readonly StarterTemplate[] = Object.freeze(
+  EXTERNAL_MERMAID_PLUGIN_FAMILIES.flatMap((family) => family.starter ? [Object.freeze({
+    id: family.starter.id,
+    label: family.label,
+    defaultName: family.starter.defaultName,
+    description: family.starter.description,
+    diagramType: family.id,
+    editingModel: family.editingModel,
+    helpUrl: family.helpUrl,
+    source: family.starter.source,
+    stability: family.stability,
+  })] : []),
+);
+
 /** Every accepted ID, with the pre-catalog public values first and Blank de-duplicated. */
 export const ALL_STARTER_TEMPLATES: readonly StarterTemplate[] = Object.freeze([
   ...STARTER_TEMPLATES,
   ...PRIMARY_STARTER_TEMPLATES.filter((primary) => !STARTER_TEMPLATES.some((legacy) => legacy.id === primary.id)),
+  ...EXTERNAL_STARTER_TEMPLATES,
 ]);
 
 export function getStarterTemplate(id: string): StarterTemplate | undefined {

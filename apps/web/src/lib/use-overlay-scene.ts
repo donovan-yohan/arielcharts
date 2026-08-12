@@ -84,11 +84,12 @@ export function updateOverlayControllerObject(
 export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): OverlaySceneController | null {
   const [scene, setScene] = useState<OverlaySceneSnapshot | null>(null);
   const [clipboard, setClipboard] = useState<OverlayObjectRecord[]>([]);
+  const sceneIdentity = doc && diagramId ? getOverlayScene(doc, diagramId)?.scene ?? null : null;
   const undoManager = useMemo(() => {
-    if (!doc || !diagramId) return null;
+    if (!doc || !diagramId || !sceneIdentity) return null;
     const handle = getOverlayScene(doc, diagramId);
-    return handle?.writable ? createOverlayUndoManager(doc, diagramId) : null;
-  }, [diagramId, doc]);
+    return handle?.writable && handle.scene === sceneIdentity ? createOverlayUndoManager(doc, diagramId) : null;
+  }, [diagramId, doc, sceneIdentity]);
 
   useEffect(() => () => undoManager?.destroy(), [undoManager]);
 

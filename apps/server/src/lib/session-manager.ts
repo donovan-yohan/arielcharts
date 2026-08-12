@@ -46,15 +46,22 @@ import {
 } from './document-admission.js';
 import { SessionStore } from './persistence.js';
 import type { CleanupOptions, DiagramHistoryMetadata, HistoryPersistenceChange, OverlayHistoryMetadata, RoomAccessRecord, SessionRecord, SessionSnapshot, SessionState } from './types.js';
+import { applyWorkspacePayload, canonicalWorkspaceJson, parseWorkspaceBundle, WorkspaceImportError } from './workspace-import.js';
 
 const MANAGED_AWARENESS_ORIGIN = 'session-manager';
 const CATALOG_REPAIR_ORIGIN = 'catalog-repair';
+const WORKSPACE_IMPORT_ORIGIN = 'workspace-import';
 const DEFAULT_DIAGRAM_ID = 'main';
 const DEFAULT_DIAGRAM_TITLE = 'Main';
 const HISTORY_PROCESSED_ACTIVITY_LIMIT = 200;
 const HISTORY_RETAINED_MUTATIONS = 99;
 const SYSTEM_HISTORY_ACTOR = { name: 'System', type: 'agent' as const };
 const ACTIVITY_ACTIONS = new Set<ActivityEvent['action']>(['joined', 'left', 'edited', 'replaced', 'created', 'renamed', 'deleted', 'restored']);
+const SUPPORTED_OVERLAY_KINDS = new Set(['foundation.card', 'annotation.text', 'annotation.sticky', 'ink.stroke', 'shape.rectangle', 'shape.ellipse', 'shape.diamond', 'shape.line', 'shape.arrow', 'connector.overlay', 'frame.section']);
+const TEXT_OVERLAY_KINDS = new Set(['annotation.text', 'annotation.sticky', 'shape.rectangle', 'shape.ellipse', 'shape.diamond', 'shape.line', 'shape.arrow']);
+const OVERLAY_SCENE_KEYS = new Set(['version', 'objects', 'layers']);
+const OVERLAY_LAYER_KEYS = new Set(['id', 'name', 'order_key', 'visible', 'locked', 'export']);
+const OVERLAY_OBJECT_KEYS = new Set(['kind', 'version', 'order_key', 'geometry', 'anchor', 'layer', 'style', 'metadata', 'payload', 'body']);
 
 type DiagramMap = Y.Map<unknown>;
 
@@ -136,6 +143,72 @@ function overlaysMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return doc.getMap<Y.Map<unknown>>(OVERLAYS_KEY);
 }
 
+function hasOnlyKeys(map: Y.Map<unknown>, keys: ReadonlySet<string>): boolean {
+  return [...map.keys()].every((key) => keys.has(key));
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+    && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+}
+
+function overlayRevisionValue(value: unknown, depth = 0): unknown {
+  if (depth > 32) return { type: 'depth-limit' };
+  if (value instanceof Y.Text) return { type: 'y-text', text: value.toString() };
+  if (value instanceof Y.Map) return { type: 'y-map', entries: [...value.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, overlayRevisionValue(entry, depth + 1)]) };
+  if (value instanceof Y.Array) return { type: 'y-array', entries: value.toArray().map((entry) => overlayRevisionValue(entry, depth + 1)) };
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : { type: 'non-finite' };
+  if (Array.isArray(value)) return value.map((entry) => overlayRevisionValue(entry, depth + 1));
+  if (isPlainRecord(value)) return Object.fromEntries(Object.keys(value).sort().map((key) => [key, overlayRevisionValue(value[key], depth + 1)]));
+  return { type: 'unsupported', value: Object.prototype.toString.call(value) };
+}
+
+/** Include every raw overlay cell so opaque future data never shares a workspace revision. */
+function rawOverlayRevisionValue(doc: Y.Doc): unknown {
+  return [...overlaysMap(doc).entries()].sort(([left], [right]) => left.localeCompare(right))
+    .map(([id, scene]) => [id, overlayRevisionValue(scene)]);
+}
+
+/**
+ * Imports replace overlay roots. Refuse rather than erase data that the v1
+ * writer cannot reproduce exactly, including future scene/object/layer forms.
+ */
+function assertOverlayRootsLosslesslyReplaceable(doc: Y.Doc): void {
+  for (const [diagramId, scene] of overlaysMap(doc).entries()) {
+    if (!(scene instanceof Y.Map) || !hasOnlyKeys(scene, OVERLAY_SCENE_KEYS) || scene.get('version') !== OVERLAY_SCENE_SCHEMA_VERSION) {
+      throw new WorkspaceImportError(`Workspace import cannot replace unsupported overlay scene ${diagramId}.`);
+    }
+    const objects = scene.get('objects'); const layers = scene.get('layers');
+    if (!(objects instanceof Y.Map) || !(layers instanceof Y.Map) || layers.size === 0) {
+      throw new WorkspaceImportError(`Workspace import cannot replace opaque overlay schema ${diagramId}.`);
+    }
+    const layerIds = new Set<string>();
+    for (const [layerId, layer] of layers.entries()) {
+      if (!(layer instanceof Y.Map) || !hasOnlyKeys(layer, OVERLAY_LAYER_KEYS) || layer.get('id') !== layerId
+        || typeof layer.get('name') !== 'string' || typeof layer.get('order_key') !== 'string'
+        || typeof layer.get('visible') !== 'boolean' || typeof layer.get('locked') !== 'boolean' || typeof layer.get('export') !== 'boolean') {
+        throw new WorkspaceImportError(`Workspace import cannot replace unsupported overlay layer ${diagramId}.`);
+      }
+      layerIds.add(layerId);
+    }
+    for (const [objectId, object] of objects.entries()) {
+      if (!(object instanceof Y.Map) || !hasOnlyKeys(object, OVERLAY_OBJECT_KEYS)) {
+        throw new WorkspaceImportError(`Workspace import cannot replace opaque overlay object ${diagramId}.`);
+      }
+      const kind = object.get('kind'); const version = object.get('version'); const layer = object.get('layer'); const body = object.get('body');
+      if (typeof objectId !== 'string' || !objectId || typeof kind !== 'string' || !SUPPORTED_OVERLAY_KINDS.has(kind) || version !== 1
+        || typeof object.get('order_key') !== 'string' || !isPlainRecord(object.get('geometry')) || !isPlainRecord(object.get('style'))
+        || !isPlainRecord(object.get('metadata')) || !isPlainRecord(object.get('payload'))
+        || (layer !== undefined && (typeof layer !== 'string' || !layerIds.has(layer)))
+        || (object.get('anchor') !== undefined && !isPlainRecord(object.get('anchor')))
+        || (TEXT_OVERLAY_KINDS.has(kind) ? !(body instanceof Y.Text) : body !== undefined)) {
+        throw new WorkspaceImportError(`Workspace import cannot replace unsupported overlay object ${diagramId}.`);
+      }
+    }
+  }
+}
+
 function createEmptyOverlayScene(): Y.Map<unknown> {
   const scene = new Y.Map<unknown>();
   scene.set('version', OVERLAY_SCENE_SCHEMA_VERSION);
@@ -211,8 +284,7 @@ function assertSupportedOverlayScene(scene: OverlaySceneSnapshot): void {
   if (scene.version !== OVERLAY_SCENE_SCHEMA_VERSION) {
     throw new Error(`Unsupported overlay scene version: ${scene.version}`);
   }
-  const supported = new Set(['foundation.card', 'annotation.text', 'annotation.sticky', 'ink.stroke', 'shape.rectangle', 'shape.ellipse', 'shape.diamond', 'shape.line', 'shape.arrow', 'connector.overlay', 'frame.section']);
-  const unsupported = scene.objects.find((object) => !supported.has(object.kind) || object.version !== 1);
+  const unsupported = scene.objects.find((object) => !SUPPORTED_OVERLAY_KINDS.has(object.kind) || object.version !== 1);
   if (unsupported) {
     throw new Error(`Unsupported overlay object: ${unsupported.kind}@${unsupported.version}`);
   }
@@ -325,6 +397,23 @@ function revisionFromDoc(doc: Y.Doc): string {
     return diagram ? [{ id, revision: revisionForDiagram(diagram, id) }] : [];
   });
   return createHash('sha256').update(JSON.stringify(catalog)).digest('base64url');
+}
+
+/** Unlike the catalog revision, this includes overlay scenes because import replaces both planes. */
+function workspaceRevisionFromDoc(doc: Y.Doc): string {
+  return createHash('sha256').update(canonicalWorkspaceJson({
+    diagrams: orderedDiagramIds(doc).flatMap((id) => {
+      const diagram = diagramsMap(doc).get(id);
+      return diagram ? [{
+        id,
+        name: getDiagramName(diagram, id),
+        source: getMermaidText(diagram).toString(),
+        positions: readRevisionNodePositions(diagram),
+      }] : [];
+    }),
+    order: orderedDiagramIds(doc),
+    overlays: rawOverlayRevisionValue(doc),
+  })).digest('base64url');
 }
 
 function revisionForDiagram(diagram: DiagramMap, id: string): string {
@@ -786,6 +875,48 @@ export class SessionManager {
       participants: snapshot.participants,
       revision: snapshot.revision,
     };
+  }
+
+  /** Read the revision for the complete user-authored workspace plane. */
+  async readWorkspaceRevision(sessionId: string): Promise<{ revision: string }> {
+    const session = await this.requireSession(sessionId);
+    return { revision: workspaceRevisionFromDoc(session.doc) };
+  }
+
+  /**
+   * Validate in a detached full-session clone, then replace just catalog and
+   * overlay roots in one live transaction. Activity and presence stay intact.
+   */
+  async importWorkspace(
+    sessionId: string,
+    expectedRevision: string,
+    bundle: unknown,
+  ): Promise<{ status: 'imported'; revision: string } | { status: 'stale'; revision: string }> {
+    const session = await this.requireSession(sessionId);
+    const payload = parseWorkspaceBundle(bundle);
+    assertOverlayRootsLosslesslyReplaceable(session.doc);
+    const currentRevision = workspaceRevisionFromDoc(session.doc);
+    if (expectedRevision !== currentRevision) return { status: 'stale', revision: currentRevision };
+
+    // Build the exact prospective state before touching the authoritative
+    // document, so every rejected import is side-effect free.
+    const candidate = createReservedRootDocument();
+    try {
+      Y.applyUpdate(candidate, Y.encodeStateAsUpdate(session.doc));
+      candidate.transact(() => applyWorkspacePayload(candidate, payload), WORKSPACE_IMPORT_ORIGIN);
+      const admission = validateDocumentState(candidate);
+      if (!admission.accepted) throw new WorkspaceImportError(`The workspace bundle exceeds collaboration limits: ${admission.reason}.`);
+    } finally {
+      candidate.destroy();
+    }
+
+    // No await occurs between the precondition and transaction. Websocket
+    // writers therefore cannot interleave a stale replacement here.
+    session.doc.transact(() => applyWorkspacePayload(session.doc, payload), WORKSPACE_IMPORT_ORIGIN);
+    session.lastAccessedAt = Date.now();
+    session.updatedAt = Date.now();
+    await this.persistSession(session);
+    return { status: 'imported', revision: workspaceRevisionFromDoc(session.doc) };
   }
 
   async listDiagrams(sessionId: string): Promise<{ diagrams: DiagramSummary[]; participants: Participant[]; revision: string }> {

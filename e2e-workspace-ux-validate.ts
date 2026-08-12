@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { WebsocketProvider } from 'y-websocket';
 import { WebSocket } from 'ws';
 import * as Y from 'yjs';
@@ -3428,6 +3429,164 @@ async function expectOverlayControlGapReachesCanvas(page: Page): Promise<void> {
   }).not.toEqual(before);
 }
 
+type ExportPeerDiagnostics = { consoleErrorCount: number; pageErrorCount: number };
+
+async function currentAuthenticatedRoomCookie(page: Page, serverUrl: string, sessionId: string) {
+  await waitForSyncedSource(page);
+  const expectedName = `arielcharts_room_${sessionId}`;
+  const cookieUrl = new URL(serverUrl);
+  const secureCookie = cookieUrl.protocol === 'https:';
+  const matches = (await page.context().cookies(serverUrl)).filter(({ name }) => name === expectedName);
+  assert(matches.length === 1, 'The primary browser context did not hold exactly one authenticated room cookie.');
+  const cookie = matches[0]!;
+  assert(cookie.domain === cookieUrl.hostname && cookie.path === '/' && cookie.httpOnly && cookie.sameSite === 'Lax' && cookie.secure === secureCookie,
+    'The authenticated browser room cookie did not match the server cookie contract.');
+  return cookie;
+}
+
+async function waitForAuthenticatedExportPeer(page: Page, diagnostics: ExportPeerDiagnostics): Promise<void> {
+  try {
+    await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: 'Enter the room key', exact: true })).toHaveCount(0);
+    await expect(page.locator('main[aria-busy="true"]')).toHaveCount(0);
+    await ensureSourceFlyoutOpen(page);
+    await waitForSyncedSource(page);
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      badge: (() => {
+        const value = document.querySelector('[data-testid="connection-status-badge"]')?.textContent?.trim();
+        return value === 'synced' || value === 'connecting' || value === 'reconnecting' || value === 'offline' ? value : value ? 'unexpected' : 'missing';
+      })(),
+      hasCanvas: document.querySelector('[data-testid="canvas-first-workspace"]') !== null,
+      hasRoomKeyError: document.querySelector('#room-key-error') !== null,
+      isCheckingRoomAccess: document.querySelector('main[aria-busy="true"]') !== null,
+      pathname: window.location.pathname,
+      roomFragmentPresent: window.location.hash.includes('roomKey='),
+    })).catch(() => ({ pageDiagnosticFailed: true }));
+    throw new Error(`Authenticated export peer did not connect: ${JSON.stringify({ diagnostics, state })}`, { cause: error });
+  }
+}
+
+async function expectPortableWorkspaceExports(page: Page, peer: Page): Promise<void> {
+  await ensureSourceFlyoutOpen(page);
+  if (!(await canonicalSource(page))) {
+    await replaceSource(page, 'flowchart LR\n  Export --> Workspace');
+  }
+  const source = await canonicalSource(page);
+  await waitForSource(peer, source);
+  await page.evaluate(() => {
+    const browserWindow = window as typeof window & { __arielchartsBlobTypes?: string[]; __arielchartsCreateObjectUrl?: typeof URL.createObjectURL };
+    browserWindow.__arielchartsBlobTypes = [];
+    browserWindow.__arielchartsCreateObjectUrl = URL.createObjectURL;
+    URL.createObjectURL = (value: Blob | MediaSource) => {
+      browserWindow.__arielchartsBlobTypes!.push(value instanceof Blob ? value.type : '');
+      return browserWindow.__arielchartsCreateObjectUrl!.call(URL, value);
+    };
+  });
+  const exportTrigger = page.getByRole('button', { name: 'Export', exact: true });
+  await verifiedClick(page, exportTrigger, 'workspace export trigger');
+  const menu = page.getByRole('menu', { name: 'Export and import workspace' });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Export Mermaid (.mmd)' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Export canvas SVG' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Export canvas PNG' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Export editable workspace' })).toBeVisible();
+
+  const mermaidExportAction = menu.getByRole('menuitem', { name: 'Export Mermaid (.mmd)' });
+  await assertHitTarget(page, mermaidExportAction, 'Mermaid source export menu item');
+  console.log('E2E #75 workspace export: downloading Mermaid source');
+  const [mermaidDownload] = await Promise.all([
+    page.waitForEvent('download'),
+    mermaidExportAction.click(),
+  ]);
+  assert(mermaidDownload.suggestedFilename().endsWith('.mmd'), 'Mermaid export uses a safe .mmd filename.');
+  const mermaidPath = await mermaidDownload.path(); assert(mermaidPath, 'Mermaid download is available for byte verification.');
+  assert((await readFile(mermaidPath, 'utf8')) === source, 'Mermaid export remains byte-identical and excludes overlays.');
+
+  const canvasSvgAction = menu.getByRole('menuitem', { name: 'Export canvas SVG' });
+  await expect(canvasSvgAction).toBeEnabled();
+  console.log('E2E #75 workspace export: downloading canvas SVG');
+  const [canvasSvgDownload] = await Promise.all([
+    page.waitForEvent('download'),
+    canvasSvgAction.click(),
+  ]);
+  assert(canvasSvgDownload.suggestedFilename().endsWith('.svg'), 'Canvas SVG export uses a safe .svg filename.');
+  const canvasSvgPath = await canvasSvgDownload.path(); assert(canvasSvgPath, 'Canvas SVG download is available for safety verification.');
+  const canvasSvg = await readFile(canvasSvgPath, 'utf8');
+  assert(canvasSvg.includes('<svg') && !/<script\b|javascript:|data:/iu.test(canvasSvg), 'Canvas SVG is a standalone, non-executable composite.');
+
+  console.log('E2E #75 workspace export: downloading canvas PNG');
+  const [canvasPngDownload] = await Promise.all([
+    page.waitForEvent('download'),
+    menu.getByRole('menuitem', { name: 'Export canvas PNG' }).click(),
+  ]);
+  assert(canvasPngDownload.suggestedFilename().endsWith('.png'), 'Canvas PNG export uses a safe .png filename.');
+  const canvasPngPath = await canvasPngDownload.path(); assert(canvasPngPath, 'Canvas PNG download is available for binary verification.');
+  assert((await readFile(canvasPngPath)).subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])), 'Canvas PNG is rasterized without editable SVG metadata.');
+
+  console.log('E2E #75 workspace export: downloading editable workspace');
+  const [bundleDownload] = await Promise.all([
+    page.waitForEvent('download'),
+    menu.getByRole('menuitem', { name: 'Export editable workspace' }).click(),
+  ]);
+  assert(bundleDownload.suggestedFilename().endsWith('.arielcharts'), 'Editable workspace export uses the .arielcharts extension.');
+  const bundlePath = await bundleDownload.path(); assert(bundlePath, 'Workspace bundle download is available for validation.');
+  const bundle = await readFile(bundlePath);
+  const bundleText = bundle.toString('utf8');
+  assert(!bundleText.includes('"presence"') && !bundleText.includes('"activity"') && !bundleText.includes('"history"'), 'Editable workspace bundle excludes transient presence and private activity/history roots.');
+
+  const peerSource = `${source}\n  Peer --> BeforeImport`;
+  console.log('E2E #75 workspace export: changing peer source before import');
+  await ensureSourceFlyoutOpen(peer);
+  await replaceSource(peer, peerSource);
+  await waitForSource(page, peerSource);
+
+  const input = page.getByLabel('Choose editable ArielCharts workspace');
+  console.log('E2E #75 workspace export: submitting editable workspace import');
+  await input.setInputFiles({ name: 'roundtrip.arielcharts', mimeType: 'application/vnd.arielcharts.workspace+json', buffer: bundle });
+  try {
+    await page.waitForFunction(() => document.querySelector('.workspace-export-status')?.textContent === 'Editable workspace imported.');
+  } catch (error) {
+    const status = await page.evaluate(() => {
+      const value = document.querySelector('.workspace-export-status')?.textContent ?? '';
+      if (value === 'Editable workspace imported.') return 'imported';
+      if (/stale workspace revision/iu.test(value)) return 'stale';
+      if (/integrity/iu.test(value)) return 'integrity';
+      if (/newer ArielCharts version/iu.test(value)) return 'newer';
+      if (/too large/iu.test(value)) return 'oversized';
+      return value ? 'unexpected' : 'empty';
+    });
+    throw new Error(`Editable workspace import did not complete: ${status}`, { cause: error });
+  }
+  console.log('E2E #75 workspace export: workspace import accepted; verifying fanout');
+  await waitForSource(page, source);
+  console.log('E2E #75 workspace export: importer received workspace fanout');
+  await waitForSource(peer, source);
+  console.log('E2E #75 workspace export: peer received workspace fanout');
+  const tampered = JSON.parse(bundleText) as { payload: { diagrams: Array<{ name: string }> } };
+  tampered.payload.diagrams[0]!.name = 'tampered without resigning';
+  await input.setInputFiles({ name: 'tampered.arielcharts', mimeType: 'application/vnd.arielcharts.workspace+json', buffer: Buffer.from(JSON.stringify(tampered)) });
+  await page.waitForFunction(() => /integrity/u.test(document.querySelector('.workspace-export-status')?.textContent ?? ''));
+  await waitForSource(page, source);
+  const newer = JSON.parse(bundleText) as { version: number };
+  newer.version = 2;
+  await input.setInputFiles({ name: 'newer.arielcharts', mimeType: 'application/vnd.arielcharts.workspace+json', buffer: Buffer.from(JSON.stringify(newer)) });
+  await page.waitForFunction(() => /newer ArielCharts version/u.test(document.querySelector('.workspace-export-status')?.textContent ?? ''));
+  await waitForSource(page, source);
+  await input.setInputFiles({ name: 'oversized.arielcharts', mimeType: 'application/vnd.arielcharts.workspace+json', buffer: Buffer.alloc(192 * 1024 + 1, 0x20) });
+  await page.waitForFunction(() => /too large/u.test(document.querySelector('.workspace-export-status')?.textContent ?? ''));
+  await waitForSource(page, source);
+  await waitForSource(peer, source);
+  const blobTypes = await page.evaluate(() => {
+    const browserWindow = window as typeof window & { __arielchartsBlobTypes?: string[]; __arielchartsCreateObjectUrl?: typeof URL.createObjectURL };
+    if (browserWindow.__arielchartsCreateObjectUrl) URL.createObjectURL = browserWindow.__arielchartsCreateObjectUrl;
+    return browserWindow.__arielchartsBlobTypes ?? [];
+  });
+  assert(blobTypes.includes('text/vnd.mermaid; charset=utf-8') && blobTypes.includes('image/svg+xml') && blobTypes.includes('image/png') && blobTypes.includes('application/vnd.arielcharts.workspace+json; charset=utf-8'), `Export download MIME types were not exact: ${JSON.stringify(blobTypes)}.`);
+  await verifiedClick(page, exportTrigger, 'close workspace export menu');
+  await expect(menu).toHaveCount(0);
+}
+
 async function expectOverlaySceneFoundation(page: Page, diagramName: string): Promise<void> {
   await selectTabByName(page, diagramName);
   await expect(page.getByTestId('source-flyout')).toBeVisible();
@@ -6709,6 +6868,28 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'blank tab create, rename, and keyboard navigation');
       await expectOverlaySceneFoundation(page, diagramName);
       record(results, 'durable overlay create, move, order, clipboard, delete, undo, history restore, tab isolation, and SVG/React Flow camera placement');
+      const primaryRoomCookie = await currentAuthenticatedRoomCookie(page, serverUrl, sessionId);
+      const { context: exportPeerContext, page: exportPeer } = await browser.newPage(DESKTOP_VIEWPORT);
+      await exportPeerContext.addCookies([primaryRoomCookie]);
+      const installedRoomCookies = (await exportPeerContext.cookies(serverUrl)).filter(({ name }) => name === primaryRoomCookie.name);
+      assert(installedRoomCookies.length === 1 && installedRoomCookies[0]!.value === primaryRoomCookie.value
+        && installedRoomCookies[0]!.domain === primaryRoomCookie.domain && installedRoomCookies[0]!.path === primaryRoomCookie.path
+        && installedRoomCookies[0]!.httpOnly === primaryRoomCookie.httpOnly && installedRoomCookies[0]!.sameSite === primaryRoomCookie.sameSite
+        && installedRoomCookies[0]!.secure === primaryRoomCookie.secure,
+      'The export peer did not receive the current authenticated room cookie.');
+      const exportPeerDiagnostics: ExportPeerDiagnostics = { consoleErrorCount: 0, pageErrorCount: 0 };
+      exportPeer.on('console', (message) => {
+        if (message.type() === 'error') exportPeerDiagnostics.consoleErrorCount += 1;
+      });
+      exportPeer.on('pageerror', () => { exportPeerDiagnostics.pageErrorCount += 1; });
+      console.log('E2E #75 workspace export: opening authenticated peer workspace');
+      await visitWorkspace(exportPeer, baseUrl, sessionId);
+      await waitForAuthenticatedExportPeer(exportPeer, exportPeerDiagnostics);
+      console.log('E2E #75 workspace export: peer synced; selecting diagram');
+      await selectTabByName(exportPeer, diagramName);
+      console.log('E2E #75 workspace export: peer selected; starting export/import');
+      await expectPortableWorkspaceExports(page, exportPeer);
+      record(results, 'source-only Mermaid download, exact MIME/names, sanitized canvas choices, signed two-browser workspace fan-out, transient-history exclusion, and atomic tamper rejection');
       await selectTabByName(page, diagramName);
       await saveScreenshot(page, 'issue-14-blank');
       await expectTemplateDiagramCreation(page);

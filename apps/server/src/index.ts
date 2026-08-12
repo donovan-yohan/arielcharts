@@ -14,6 +14,7 @@ import { COLLABORATION_BUDGETS } from './lib/document-admission.js';
 import { loadServerEnv } from './lib/env.js';
 import { SessionWebSocketServer } from './lib/websocket.js';
 import { RoomAccessError, RoomAccessService, roomAccessErrorHeaders } from './lib/room-access.js';
+import { WorkspaceImportError } from './lib/workspace-import.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -95,6 +96,16 @@ function historyErrorStatusFor(error: unknown, message: string): number {
 
 function roomApiSessionId(pathname: string, suffix: 'access' | 'rotate'): string | undefined {
   const match = pathname.match(new RegExp(`^/api/rooms/([^/]+)/${suffix}$`, 'u'));
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return undefined;
+  }
+}
+
+function workspaceApiSessionId(pathname: string): string | undefined {
+  const match = pathname.match(/^\/api\/sessions\/([^/]+)\/workspace$/u);
   if (!match) return undefined;
   try {
     return decodeURIComponent(match[1]!);
@@ -294,6 +305,49 @@ export function createApp(env = loadServerEnv()) {
       } catch (error) {
         sendRoomAccessFailure(response, error, corsHeaders);
       }
+      return;
+    }
+
+    const workspaceSessionId = workspaceApiSessionId(pathname);
+    if (workspaceSessionId) {
+      const corsHeaders = browserCorsHeaders(request, env.allowedOrigins, 'GET, POST, OPTIONS');
+      if (!corsHeaders) {
+        sendJson(response, 403, { error: 'Origin not allowed.' });
+        return;
+      }
+      if (request.method === 'OPTIONS') {
+        sendEmpty(response, 204, corsHeaders);
+        return;
+      }
+      try {
+        assertValidSessionId(workspaceSessionId);
+        await roomAccess.authenticateBrowserCookie(workspaceSessionId, request);
+        if (request.method === 'GET') {
+          sendJson(response, 200, await manager.readWorkspaceRevision(workspaceSessionId), { ...corsHeaders, 'cache-control': 'no-store' });
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readJsonBody(request);
+          if (!isRecord(body) || !Object.hasOwn(body, 'expected_revision') || !Object.hasOwn(body, 'bundle')
+            || !Object.keys(body).every((key) => key === 'expected_revision' || key === 'bundle')) {
+            throw new WorkspaceImportError('Expected expected_revision and bundle fields.');
+          }
+          const expectedRevision = readRequiredString(body.expected_revision, 'expected_revision');
+          const result = await manager.importWorkspace(workspaceSessionId, expectedRevision, body.bundle);
+          sendJson(response, result.status === 'stale' ? 409 : 200, result, { ...corsHeaders, 'cache-control': 'no-store' });
+          return;
+        }
+      } catch (error) {
+        if (error instanceof RoomAccessError) {
+          sendRoomAccessError(response, error, corsHeaders);
+          return;
+        }
+        const message = error instanceof Error ? error.message : 'Invalid workspace import request.';
+        const status = error instanceof RequestBodyTooLargeError ? 413 : error instanceof WorkspaceImportError || /^(Expected |Invalid session_id)/.test(message) ? 400 : 500;
+        sendJson(response, status, { error: message }, { ...corsHeaders, 'cache-control': 'no-store' });
+        return;
+      }
+      sendJson(response, 405, { error: 'Method not allowed.' }, corsHeaders);
       return;
     }
 

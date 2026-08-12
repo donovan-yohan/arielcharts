@@ -8,8 +8,27 @@ import { handleMcpToolCall as handleAuthorizedMcpToolCall } from './mcp.js';
 import { SessionStore } from './persistence.js';
 import { SessionManager } from './session-manager.js';
 
+function overlayObject(id: string, orderKey = id) {
+  return {
+    id,
+    kind: 'foundation.card',
+    version: 1,
+    order_key: orderKey,
+    geometry: { x: 10, y: 20, width: 120, height: 72, rotation: 0 },
+    style: {},
+    metadata: {},
+    payload: { text: id },
+  };
+}
+
 function handleMcpToolCall(manager: SessionManager, payload: unknown, authorizedSessionId = 'abc123de') {
   return handleAuthorizedMcpToolCall(manager, payload, authorizedSessionId);
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((next) => { resolve = next; });
+  return { promise, resolve };
 }
 
 async function createManager() {
@@ -182,6 +201,10 @@ describe('handleMcpToolCall', () => {
     const initial = await getSession();
 
     await expect(handleMcpToolCall(resources.manager, {
+      tool: 'read_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' },
+    }, 'other123')).rejects.toThrow('Room access denied.');
+
+    await expect(handleMcpToolCall(resources.manager, {
       tool: 'write_diagram',
       input: {
         session_id: 'abc123de',
@@ -222,6 +245,166 @@ describe('handleMcpToolCall', () => {
       ['Concurrent Agent', { name: 'Concurrent Agent', color: '#7c3aed', type: 'agent' }],
     ]);
     expect((await resources.manager.readSession('abc123de'))?.activity).toHaveLength(1);
+  });
+
+  it('rejects invalid overlay payloads and a deleted diagram without joining an actor', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const scene = await handleMcpToolCall(resources.manager, { tool: 'read_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' } }) as { overlay_revision: string };
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'create_overlay_object',
+      input: { session_id: 'abc123de', diagram_id: 'main', expected_overlay_revision: scene.overlay_revision, object: { ...overlayObject('invalid'), geometry: { x: 0, y: 0, width: -1, height: 1, rotation: 0 } }, actor_name: 'Rejected Overlay Agent' },
+    })).rejects.toThrow('Overlay mutation exceeds collaboration limits');
+    expect([...((await durableParticipants()).entries())]).toEqual([]);
+
+    const initial = await getSession();
+    const extra = await resources.manager.createDiagram('abc123de', 'Disposable', '', initial.revision, { action: 'created', actor: { name: 'Browser', type: 'human' }, id: 'delete-overlay-target', timestamp: 1 });
+    await resources.manager.deleteDiagram('abc123de', extra.id, extra.revision, { action: 'deleted', actor: { name: 'Browser', type: 'human' }, id: 'deleted-overlay-target', timestamp: 2 });
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'read_overlay_scene', input: { session_id: 'abc123de', diagram_id: extra.id },
+    })).rejects.toThrow(`Diagram not found: ${extra.id}`);
+  });
+
+  it('uses a raw scene revision for bounded object operations without changing Mermaid revisions or activity', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const sourceBefore = await resources.manager.readDiagram('abc123de', 'main');
+    const sessionBefore = await getSession();
+    const firstRead = await handleMcpToolCall(resources.manager, {
+      tool: 'read_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' },
+    }) as { overlay_revision: string; objects: unknown[]; opaque_objects: unknown[] };
+    expect(firstRead.objects).toEqual([]); expect(firstRead.opaque_objects).toEqual([]);
+    expect([...((await durableParticipants()).entries())]).toEqual([]);
+
+    const created = await handleMcpToolCall(resources.manager, {
+      tool: 'create_overlay_object',
+      input: {
+        session_id: 'abc123de', diagram_id: 'main', expected_overlay_revision: firstRead.overlay_revision,
+        object: overlayObject('agent-note'), actor_name: 'Overlay Agent',
+      },
+    }) as { status: string; overlay_revision: string; object: { id: string } };
+    expect(created).toMatchObject({ status: 'updated', object: { id: 'agent-note' } });
+    expect((await resources.manager.readDiagram('abc123de', 'main')).diagram).toEqual(sourceBefore.diagram);
+    expect(await getSession()).toMatchObject({ revision: sessionBefore.revision });
+    expect((await resources.manager.readSession('abc123de'))?.activity).toEqual([]);
+    expect((await durableParticipants()).get('Overlay Agent')).toEqual({ name: 'Overlay Agent', color: '#7c3aed', type: 'agent' });
+
+    const staleUpdate = await handleMcpToolCall(resources.manager, {
+      tool: 'update_overlay_object',
+      input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'agent-note', expected_overlay_revision: firstRead.overlay_revision, patch: { metadata: { owner: 'stale' } } },
+    }) as { status: string; scene: { overlay_revision: string; objects: Array<{ id: string }> } };
+    expect(staleUpdate).toMatchObject({ status: 'stale', scene: { objects: [{ id: 'agent-note' }] } });
+    const retried = await handleMcpToolCall(resources.manager, {
+      tool: 'update_overlay_object',
+      input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'agent-note', expected_overlay_revision: staleUpdate.scene.overlay_revision, patch: { metadata: { owner: 'merged' } } },
+    }) as { status: string; object: { metadata: Record<string, string> } };
+    expect(retried).toMatchObject({ status: 'updated', object: { metadata: { owner: 'merged' } } });
+  });
+
+  it('makes different-object retries and same-object stale conflicts explicit, including reorder and delete', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await handleMcpToolCall(resources.manager, { tool: 'read_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' } }) as { overlay_revision: string };
+    const first = await handleMcpToolCall(resources.manager, {
+      tool: 'create_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', expected_overlay_revision: initial.overlay_revision, object: overlayObject('left', 'a') },
+    }) as { status: string; overlay_revision: string };
+    const staleDifferent = await handleMcpToolCall(resources.manager, {
+      tool: 'create_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', expected_overlay_revision: initial.overlay_revision, object: overlayObject('right', 'z') },
+    }) as { status: string; scene: { overlay_revision: string } };
+    expect(first.status).toBe('updated'); expect(staleDifferent.status).toBe('stale');
+    const right = await handleMcpToolCall(resources.manager, {
+      tool: 'create_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', expected_overlay_revision: staleDifferent.scene.overlay_revision, object: overlayObject('right', 'z') },
+    }) as { status: string; overlay_revision: string };
+    const staleSame = await handleMcpToolCall(resources.manager, {
+      tool: 'update_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'left', expected_overlay_revision: first.overlay_revision, patch: { metadata: { owner: 'late' } } },
+    }) as { status: string; scene: { overlay_revision: string } };
+    expect(staleSame.status).toBe('stale');
+    const ordered = await handleMcpToolCall(resources.manager, {
+      tool: 'reorder_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'left', expected_overlay_revision: right.overlay_revision, direction: 'front' },
+    }) as { status: string; overlay_revision: string; object: { order_key: string } };
+    expect(ordered).toMatchObject({ status: 'updated', object: { order_key: expect.any(String) } });
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'delete_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'left', expected_overlay_revision: staleSame.scene.overlay_revision },
+    })).resolves.toMatchObject({ status: 'stale' });
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'delete_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'left', expected_overlay_revision: ordered.overlay_revision },
+    })).resolves.toMatchObject({ status: 'updated', deleted_object_id: 'left' });
+  });
+
+  it('lists bounded overlay identities and reads found, opaque, missing, and deleted objects', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await handleMcpToolCall(resources.manager, { tool: 'read_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' } }) as { overlay_revision: string };
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'list_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' },
+    })).resolves.toMatchObject({ objects: [] });
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'read_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'gone' },
+    })).resolves.toMatchObject({ status: 'missing', object_id: 'gone' });
+    expect([...((await durableParticipants()).entries())]).toEqual([]);
+    const created = await handleMcpToolCall(resources.manager, {
+      tool: 'create_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', expected_overlay_revision: initial.overlay_revision, object: overlayObject('visible') },
+    }) as { overlay_revision: string };
+    const transient = await handleMcpToolCall(resources.manager, {
+      tool: 'create_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', expected_overlay_revision: created.overlay_revision, object: overlayObject('deleted') },
+    }) as { overlay_revision: string };
+    await handleMcpToolCall(resources.manager, {
+      tool: 'delete_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'deleted', expected_overlay_revision: transient.overlay_revision },
+    });
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'read_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'deleted' },
+    })).resolves.toMatchObject({ status: 'missing', object_id: 'deleted' });
+    const listed = await handleMcpToolCall(resources.manager, { tool: 'list_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' } }) as { objects: Array<{ id: string; opaque: boolean }> };
+    expect(listed.objects).toEqual([{ id: 'visible', kind: 'foundation.card', version: 1, opaque: false, order_key: 'visible' }]);
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'read_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'visible' },
+    })).resolves.toMatchObject({ status: 'found', object: { id: 'visible' } });
+    const state = await resources.manager.getOrCreateSession('abc123de');
+    state.doc.transact(() => {
+      const object = (state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('visible')!;
+      object.set('kind', 'future.tool');
+    });
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'list_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' },
+    })).resolves.toMatchObject({ writable: false, objects: [{ id: 'visible', opaque: true }] });
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'read_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', object_id: 'visible' },
+    })).resolves.toMatchObject({ status: 'opaque', writable: false, object: { id: 'visible', kind: 'future.tool' } });
+    expect([...((await durableParticipants()).entries())]).toEqual([
+      ['mcp-agent', { name: 'mcp-agent', color: '#7c3aed', type: 'agent' }],
+    ]);
+  });
+
+  it('returns the command-committed object after a later peer deletion races persistence', async () => {
+    const state = await resources.manager.getOrCreateSession('abc123de');
+    const initial = await handleMcpToolCall(resources.manager, { tool: 'read_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' } }) as { overlay_revision: string };
+    const entered = deferred(); const release = deferred();
+    const originalPersist = resources.manager.persistSession.bind(resources.manager);
+    let pauseOnce = true;
+    resources.manager.persistSession = async (...args) => {
+      if (pauseOnce) { pauseOnce = false; entered.resolve(); await release.promise; }
+      return originalPersist(...args);
+    };
+    const mutation = handleMcpToolCall(resources.manager, {
+      tool: 'create_overlay_object', input: { session_id: 'abc123de', diagram_id: 'main', expected_overlay_revision: initial.overlay_revision, object: overlayObject('race') },
+    }) as Promise<{ status: string; overlay_revision: string; object: { id: string } }>;
+    await entered.promise;
+    state.doc.transact(() => (state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).delete('race'));
+    release.resolve();
+    const committed = await mutation;
+    const afterPeerDelete = await handleMcpToolCall(resources.manager, {
+      tool: 'read_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' },
+    }) as { overlay_revision: string; objects: Array<{ id: string }> };
+    expect(committed).toMatchObject({ status: 'updated', object: { id: 'race' }, overlay_revision: expect.any(String) });
+    expect(committed.overlay_revision).not.toBe(afterPeerDelete.overlay_revision);
+    expect(afterPeerDelete.objects).toEqual([]);
+  });
+
+  it('rejects an overlong overlay actor before persisting participant or object state', async () => {
+    await resources.manager.getOrCreateSession('abc123de');
+    const initial = await handleMcpToolCall(resources.manager, { tool: 'read_overlay_scene', input: { session_id: 'abc123de', diagram_id: 'main' } }) as { overlay_revision: string };
+    await expect(handleMcpToolCall(resources.manager, {
+      tool: 'create_overlay_object',
+      input: { session_id: 'abc123de', diagram_id: 'main', expected_overlay_revision: initial.overlay_revision, object: overlayObject('too-long'), actor_name: 'x'.repeat(257) },
+    })).rejects.toThrow('Overlay mutation exceeds collaboration limits');
+    expect((await resources.manager.readMcpOverlayScene('abc123de', 'main')).objects).toEqual([]);
+    expect([...((await durableParticipants()).keys())]).toEqual([]);
   });
 
   it('orients an agent with ordered names and stable IDs, then creates, reads, and writes one exact diagram', async () => {

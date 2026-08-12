@@ -63,6 +63,26 @@ describe('LaserPresencePublisher', () => {
     ]);
   });
 
+  it('continues from the last page-lifetime sequence after a publisher is recreated', () => {
+    const first: Array<{ sequence: number }> = [];
+    const original = new LaserPresencePublisher((laser) => first.push(laser));
+    original.move({ x: 2, y: 4 });
+    original.stop();
+    const resumed: Array<{ sequence: number }> = [];
+    const afterReload = new LaserPresencePublisher((laser) => resumed.push(laser), first.at(-1)?.sequence);
+    afterReload.move({ x: 6, y: 8 });
+    expect(first.at(-1)).toEqual({ active: false, sequence: 2 });
+    expect(resumed).toEqual([{ active: true, point: { x: 6, y: 8 }, sequence: 3 }]);
+  });
+
+  it('does not wrap a near-exhausted sequence into an old laser sample', () => {
+    const published: unknown[] = [];
+    const publisher = new LaserPresencePublisher((laser) => published.push(laser), Number.MAX_SAFE_INTEGER - 1);
+    publisher.move({ x: 2, y: 4 });
+    publisher.stop();
+    expect(published).toEqual([]);
+  });
+
   it('keeps a sustained 12-second gesture below the shared awareness budget with stop headroom', () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

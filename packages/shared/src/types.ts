@@ -173,6 +173,117 @@ export interface OverlaySceneSnapshot {
   layers?: OverlayLayerRecord[];
 }
 
+/**
+ * An MCP read never projects fields from an object version it does not own.
+ * Its id/kind/version remain inspectable, while the raw server-derived
+ * revision still includes every durable field so opaque data cannot vanish
+ * from a concurrent-write check.
+ */
+export interface OpaqueOverlayObject {
+  id: string;
+  kind: string;
+  version: number;
+}
+
+/**
+ * Bounded, operation-oriented MCP projection. A newer scene, or a v1 scene
+ * containing an opaque object, is explicitly read-only rather than being
+ * represented as an empty or partially writable v1 scene.
+ */
+export interface McpOverlayScene {
+  version: number;
+  diagram_id: string;
+  overlay_revision: string;
+  writable: boolean;
+  objects: OverlayObjectRecord[];
+  opaque_objects: OpaqueOverlayObject[];
+  layers?: OverlayLayerRecord[];
+}
+
+/** A bounded discovery row; full payloads are available only through readOverlayObject. */
+export interface McpOverlayObjectSummary {
+  id: string;
+  kind: string;
+  version: number;
+  opaque: boolean;
+  order_key?: string;
+}
+
+export interface McpOverlayObjectList {
+  version: number;
+  diagram_id: string;
+  overlay_revision: string;
+  writable: boolean;
+  objects: McpOverlayObjectSummary[];
+}
+
+export type McpOverlayObjectRead =
+  | { status: 'found'; overlay_revision: string; writable: boolean; object: OverlayObjectRecord }
+  | { status: 'opaque'; overlay_revision: string; writable: false; object: OpaqueOverlayObject }
+  | { status: 'missing'; overlay_revision: string; writable: boolean; object_id: string };
+
+export type OverlayObjectPatch = Partial<Omit<OverlayObjectRecord, 'id' | 'kind' | 'version' | 'order_key'>>;
+
+export interface ReadOverlaySceneInput {
+  session_id: string;
+  diagram_id: string;
+}
+
+export interface ReadOverlaySceneOutput {
+  scene: McpOverlayScene;
+}
+
+export interface ListOverlayObjectsInput {
+  session_id: string;
+  diagram_id: string;
+}
+
+export interface ListOverlayObjectsOutput {
+  scene: McpOverlayObjectList;
+}
+
+export interface ReadOverlayObjectInput {
+  session_id: string;
+  diagram_id: string;
+  object_id: string;
+}
+
+export type ReadOverlayObjectOutput = McpOverlayObjectRead;
+
+export interface CreateOverlayObjectInput {
+  session_id: string;
+  diagram_id: string;
+  expected_overlay_revision: string;
+  object: OverlayObjectRecord;
+}
+
+export interface UpdateOverlayObjectInput {
+  session_id: string;
+  diagram_id: string;
+  object_id: string;
+  expected_overlay_revision: string;
+  patch: OverlayObjectPatch;
+}
+
+export interface ReorderOverlayObjectInput {
+  session_id: string;
+  diagram_id: string;
+  object_id: string;
+  expected_overlay_revision: string;
+  direction: 'front' | 'back' | 'forward' | 'backward';
+}
+
+export interface DeleteOverlayObjectInput {
+  session_id: string;
+  diagram_id: string;
+  object_id: string;
+  expected_overlay_revision: string;
+}
+
+export type OverlayObjectMutationOutput =
+  | { status: 'updated'; overlay_revision: string; object?: OverlayObjectRecord; deleted_object_id?: string }
+  | { status: 'stale'; scene: McpOverlayScene };
+
 export interface ListOverlayHistoryOutput {
   revisions: OverlayRevisionSummary[];
   current_revision: string;

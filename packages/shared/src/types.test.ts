@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ActivityEvent, AwarenessState, Diagram, GetSessionOutput } from './types.js';
+import type { ActivityEvent, AwarenessState, Diagram, GetSessionOutput, McpOverlayScene } from './types.js';
 
 describe('shared types', () => {
   it('supports awareness and activity shapes', () => {
@@ -42,5 +42,18 @@ describe('shared types', () => {
 
     expect(session.diagrams[0]?.name).toBe('Main');
     expect(session.revision).toBe(diagram.revision);
+  });
+
+  it('models an explicit opaque overlay rather than silently projecting it as a v1 object', () => {
+    const scene: McpOverlayScene = {
+      version: 1,
+      diagram_id: 'main',
+      overlay_revision: 'server-derived-raw-revision',
+      writable: true,
+      objects: [],
+      opaque_objects: [{ id: 'future', kind: 'future.card', version: 2 }],
+    };
+
+    expect(scene.opaque_objects[0]?.kind).toBe('future.card');
   });
 });

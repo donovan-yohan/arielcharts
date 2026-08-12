@@ -58,6 +58,62 @@ async function writeDiagram(
   });
 }
 
+type McpOverlayObject = {
+  id: string;
+  kind: string;
+  version: number;
+  orderKey: string;
+  geometry: { x: number; y: number; width: number; height: number; rotation: number };
+  style: Record<string, string | number | boolean | null>;
+  metadata: Record<string, string | number | boolean | null>;
+  payload: Record<string, unknown>;
+};
+
+type McpOverlayScene = { overlayRevision: string; writable: boolean; objects: McpOverlayObject[] };
+
+async function readOverlayScene(mcp: ModernMcpClient, sessionId: string, diagramId: string): Promise<McpOverlayScene> {
+  return mcp.expectContent<{ scene: McpOverlayScene }>(
+    await mcp.tool('readOverlayScene', { sessionId, diagramId }),
+    'readOverlayScene',
+  ).scene;
+}
+
+function overlayObject(id: string, orderKey: string): McpOverlayObject {
+  return {
+    id, kind: 'foundation.card', version: 1, orderKey,
+    geometry: { x: 320, y: 210, width: 120, height: 72, rotation: 0 },
+    style: {}, metadata: {}, payload: { text: id },
+  };
+}
+
+async function expectMcpOverlayCollaboration(mcp: ModernMcpClient, sessionId: string, diagramId: string, page: Page): Promise<void> {
+  const initial = await readOverlayScene(mcp, sessionId, diagramId);
+  assert(initial.writable, 'The initial overlay scene was unexpectedly read-only.');
+  const first = mcp.expectContent<{ overlayRevision: string }>(await mcp.tool('createOverlayObject', {
+    sessionId, diagramId, expectedOverlayRevision: initial.overlayRevision, object: overlayObject('mcp-card-left', 'mcp-a'), actorName: 'Overlay E2E agent', actorType: 'agent',
+  }), 'createOverlayObject');
+  await expect(page.getByTestId('overlay-object-mcp-card-left')).toBeVisible();
+
+  const stale = await mcp.tool('createOverlayObject', {
+    sessionId, diagramId, expectedOverlayRevision: initial.overlayRevision, object: overlayObject('mcp-card-right', 'mcp-z'),
+  });
+  const staleText = stale.result?.content?.map((item) => item.text ?? '').join('\n') ?? '';
+  assert(stale.result?.isError === true && /STALE_OVERLAY_REVISION/u.test(staleText), `MCP overlay stale create was not structured: ${staleText}`);
+  const stalePayload = stale.result?.structuredContent as { error?: { currentOverlayScene?: McpOverlayScene } } | undefined;
+  const current = stalePayload?.error?.currentOverlayScene;
+  assert(current?.overlayRevision && current.objects.some(({ id }) => id === 'mcp-card-left'), 'MCP stale overlay response omitted current bounded scene state.');
+  const second = mcp.expectContent<{ overlayRevision: string }>(await mcp.tool('createOverlayObject', {
+    sessionId, diagramId, expectedOverlayRevision: current.overlayRevision, object: overlayObject('mcp-card-right', 'mcp-z'),
+  }), 'createOverlayObject retry');
+  await expect(page.getByTestId('overlay-object-mcp-card-right')).toBeVisible();
+  mcp.expectContent<{ object: McpOverlayObject; overlayRevision: string }>(await mcp.tool('reorderOverlayObject', {
+    sessionId, diagramId, objectId: 'mcp-card-left', expectedOverlayRevision: second.overlayRevision, direction: 'front',
+  }), 'reorderOverlayObject');
+  const reconnected = await readOverlayScene(mcp, sessionId, diagramId);
+  assert(reconnected.objects.some(({ id }) => id === 'mcp-card-left') && reconnected.objects.some(({ id }) => id === 'mcp-card-right'),
+    'MCP overlay objects did not survive a fresh read after reorder.');
+}
+
 function sourceEditor(page: Page): Locator {
   return page.locator('.cm-content');
 }
@@ -831,6 +887,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await closeSourceFlyout(pageA);
     await Promise.all([waitForFlowchart(pageA), waitForFlowchart(pageB)]);
     await expectCollaborativeAnnotations(pageA, pageB);
+    await expectMcpOverlayCollaboration(mcp, sessionId, main.id, pageB);
     await expectUnifiedCanvasHistory(pageA, pageB);
     await expectCollaborativeInk(pageA, pageB, cdpA);
 
@@ -971,6 +1028,8 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'detached', timeout: 15_000 });
     await pageA.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
     await waitForFlowchart(pageA);
+    await expect(pageA.getByTestId('overlay-object-mcp-card-left')).toBeVisible();
+    await expect(pageA.getByTestId('overlay-object-mcp-card-right')).toBeVisible();
     await pageA.waitForTimeout(1_100);
     assert(await remoteLaserForParticipant(pageB, pageAParticipantName).count() === 0,
       'Laser reappeared after sender socket close/reconnect timeout.');
@@ -1406,6 +1465,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
 
     console.log(`modern MCP stale write rejected=${staleRejected}`);
     console.log(`browser/MCP merged source converged=${merged.mermaidText.includes(HUMAN_EDGE.trim()) && merged.mermaidText.includes(AGENT_EDGE.trim())}`);
+    console.log('MCP overlay create/stale reread-retry/reorder/browser observation/fresh-read persistence passed=true');
     console.log(`remote local-state isolation tab=${activeTabPreserved} flyouts=${sourceFlyoutsPreserved} selection=${localSelectionPreserved} mode=${localConnectModePreserved} camera=${localCameraPreserved}`);
     console.log('remote node editing awareness open/draft/inactive-resume/Escape/commit/history cleanup passed=true');
     console.log('awareness laser world reprojection, mouse/stylus/touch/Escape, a11y media, fade/switch/socket/reconnect cleanup, camera and durable isolation passed=true');

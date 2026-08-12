@@ -12,9 +12,14 @@ import {
   type OverlayMetadata,
   type OverlayLayerRecord,
   type OverlayObjectRecord,
+  type OverlayObjectMutationOutput,
+  type OverlayObjectPatch,
   type OverlayRevision,
   type OverlayRevisionSummary,
   type OverlaySceneSnapshot,
+  type McpOverlayScene,
+  type McpOverlayObjectList,
+  type McpOverlayObjectRead,
   type Participant,
   type RestoreOverlayRevisionResult,
   type RestoreDiagramRevisionResult,
@@ -62,6 +67,16 @@ const TEXT_OVERLAY_KINDS = new Set(['annotation.text', 'annotation.sticky', 'sha
 const OVERLAY_SCENE_KEYS = new Set(['version', 'objects', 'layers']);
 const OVERLAY_LAYER_KEYS = new Set(['id', 'name', 'order_key', 'visible', 'locked', 'export']);
 const OVERLAY_OBJECT_KEYS = new Set(['kind', 'version', 'order_key', 'geometry', 'anchor', 'layer', 'style', 'metadata', 'payload', 'body']);
+// MCP responses are intentionally narrower than the collaborative Yjs envelope.
+// Keep these limits local to the projection: browser peers may retain a valid
+// v1 object that a conservative MCP client must treat as opaque.
+const MCP_OVERLAY_PAYLOAD_DEPTH = 24;
+const MCP_OVERLAY_PAYLOAD_VALUES = 8_192;
+const MCP_OVERLAY_PAYLOAD_ARRAY_ITEMS = COLLABORATION_BUDGETS.strokePointsPerObject;
+const MCP_OVERLAY_PAYLOAD_RECORD_KEYS = 32;
+const MCP_OVERLAY_PAYLOAD_KEY_BYTES = 128;
+const MCP_OVERLAY_PAYLOAD_STRING_BYTES = 8_192;
+const MCP_OVERLAY_PAYLOAD_TOTAL_BYTES = COLLABORATION_BUDGETS.textBytesPerObject;
 
 type DiagramMap = Y.Map<unknown>;
 
@@ -152,6 +167,127 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
     && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 }
 
+function isMcpBoundedIdentifier(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0
+    && Buffer.byteLength(value, 'utf8') <= COLLABORATION_BUDGETS.identifierBytes;
+}
+
+function isMcpOverlayMetadata(value: unknown): value is OverlayMetadata {
+  return isPlainRecord(value) && Object.keys(value).length <= MCP_OVERLAY_PAYLOAD_RECORD_KEYS
+    && Object.entries(value).every(([key, entry]) => Buffer.byteLength(key, 'utf8') <= MCP_OVERLAY_PAYLOAD_KEY_BYTES
+      && (entry === null || typeof entry === 'boolean' || (typeof entry === 'number' && Number.isFinite(entry))
+        || (typeof entry === 'string' && Buffer.byteLength(entry, 'utf8') <= 2_048)));
+}
+
+/**
+ * The MCP transport serializes JSON, so disclose only a bounded JSON payload.
+ * This deliberately differs from browser/Yjs admission, which must preserve
+ * opaque future values without requiring an old client to understand them.
+ */
+function isMcpOverlayPayload(value: unknown): value is Record<string, unknown> {
+  if (!isPlainRecord(value)) return false;
+  const counters = { values: 0, arrayItems: 0, bytes: 0 };
+  const active = new Set<object>();
+  const visit = (entry: unknown, depth: number): boolean => {
+    if (depth > MCP_OVERLAY_PAYLOAD_DEPTH || ++counters.values > MCP_OVERLAY_PAYLOAD_VALUES) return false;
+    if (entry === null || typeof entry === 'boolean') return true;
+    if (typeof entry === 'number') return Number.isFinite(entry);
+    if (typeof entry === 'string') {
+      const bytes = Buffer.byteLength(entry, 'utf8');
+      counters.bytes += bytes;
+      return bytes <= MCP_OVERLAY_PAYLOAD_STRING_BYTES && counters.bytes <= MCP_OVERLAY_PAYLOAD_TOTAL_BYTES;
+    }
+    if (Array.isArray(entry)) {
+      counters.arrayItems += entry.length;
+      if (entry.length > MCP_OVERLAY_PAYLOAD_ARRAY_ITEMS || counters.arrayItems > MCP_OVERLAY_PAYLOAD_ARRAY_ITEMS) return false;
+      return entry.every((child) => visit(child, depth + 1));
+    }
+    if (!isPlainRecord(entry) || active.has(entry)) return false;
+    const entries = Object.entries(entry);
+    if (entries.length > MCP_OVERLAY_PAYLOAD_RECORD_KEYS) return false;
+    active.add(entry);
+    const valid = entries.every(([key, child]) => {
+      const keyBytes = Buffer.byteLength(key, 'utf8');
+      counters.bytes += keyBytes;
+      return keyBytes <= MCP_OVERLAY_PAYLOAD_KEY_BYTES && counters.bytes <= MCP_OVERLAY_PAYLOAD_TOTAL_BYTES && visit(child, depth + 1);
+    });
+    active.delete(entry);
+    return valid;
+  };
+  return visit(value, 0);
+}
+
+/** Inspect plain payload data without calling user getters or Yjs serializers. */
+function isMcpRawJsonValue(value: unknown, depth = 0, active = new Set<object>()): boolean {
+  if (depth > MCP_OVERLAY_PAYLOAD_DEPTH) return false;
+  if (value === null || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'string') return Buffer.byteLength(value, 'utf8') <= MCP_OVERLAY_PAYLOAD_STRING_BYTES;
+  if (value instanceof Y.AbstractType || typeof value !== 'object' || value === undefined) return false;
+  if (active.has(value)) return false;
+  active.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (value.length > MCP_OVERLAY_PAYLOAD_ARRAY_ITEMS) return false;
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = descriptors[String(index)];
+        if (!descriptor || !('value' in descriptor) || !isMcpRawJsonValue(descriptor.value, depth + 1, active)) return false;
+      }
+      return true;
+    }
+    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const entries = Object.entries(descriptors).filter(([, descriptor]) => descriptor.enumerable);
+    if (entries.length > MCP_OVERLAY_PAYLOAD_RECORD_KEYS) return false;
+    return entries.every(([key, descriptor]) => Buffer.byteLength(key, 'utf8') <= MCP_OVERLAY_PAYLOAD_KEY_BYTES
+      && 'value' in descriptor && isMcpRawJsonValue(descriptor.value, depth + 1, active));
+  } finally {
+    active.delete(value);
+  }
+}
+
+function isMcpRawOverlayObjectRepresentable(id: string, value: unknown): boolean {
+  if (!(value instanceof Y.Map) || !isMcpBoundedIdentifier(id)) return false;
+  const kind = value.get('kind'); const version = value.get('version'); const orderKey = value.get('order_key');
+  const geometry = value.get('geometry'); const style = value.get('style'); const metadata = value.get('metadata'); const payload = value.get('payload');
+  const anchor = value.get('anchor'); const layer = value.get('layer'); const body = value.get('body');
+  return typeof kind === 'string' && SUPPORTED_OVERLAY_KINDS.has(kind) && version === 1 && isMcpBoundedIdentifier(kind)
+    && isMcpBoundedIdentifier(orderKey) && isMcpRawJsonValue(geometry) && isMcpRawJsonValue(style)
+    && isMcpRawJsonValue(metadata) && isMcpRawJsonValue(payload) && (anchor === undefined || isMcpRawJsonValue(anchor))
+    && (layer === undefined || isMcpBoundedIdentifier(layer)) && (body === undefined || body instanceof Y.Text);
+}
+
+function isMcpOverlayObjectRepresentable(object: OverlayObjectRecord): boolean {
+  const geometry = object.geometry;
+  const validAnchor = object.anchor === undefined || (isMcpBoundedIdentifier(object.anchor.mermaid_id)
+    && Number.isFinite(object.anchor.offset.x) && Number.isFinite(object.anchor.offset.y)
+    && Number.isFinite(object.anchor.fallback.x) && Number.isFinite(object.anchor.fallback.y));
+  return isMcpBoundedIdentifier(object.id) && isMcpBoundedIdentifier(object.kind)
+    && Number.isInteger(object.version) && object.version > 0 && isMcpBoundedIdentifier(object.order_key)
+    && Number.isFinite(geometry.x) && Number.isFinite(geometry.y) && Number.isFinite(geometry.width) && geometry.width >= 0
+    && Number.isFinite(geometry.height) && geometry.height >= 0 && Number.isFinite(geometry.rotation)
+    && validAnchor && (object.layer === undefined || isMcpBoundedIdentifier(object.layer))
+    && isMcpOverlayMetadata(object.style) && isMcpOverlayMetadata(object.metadata)
+    && isMcpOverlayPayload(object.payload)
+    && (object.body === undefined || (typeof object.body === 'string' && Buffer.byteLength(object.body, 'utf8') <= 8_192));
+}
+
+function opaqueMcpObject(id: string, value: unknown, occupiedIds: Set<string>): import('@arielcharts/shared').OpaqueOverlayObject {
+  const raw = value instanceof Y.Map ? value : undefined;
+  const rawKind = raw?.get('kind'); const rawVersion = raw?.get('version');
+  let handle = `opaque-${createHash('sha256').update(id).digest('base64url').slice(0, 24)}`;
+  for (let attempt = 1; occupiedIds.has(handle); attempt += 1) {
+    handle = `opaque-${createHash('sha256').update(`${id}:${attempt}`).digest('base64url').slice(0, 24)}`;
+  }
+  occupiedIds.add(handle);
+  return {
+    id: isMcpBoundedIdentifier(id) ? id : handle,
+    kind: isMcpBoundedIdentifier(rawKind) ? rawKind : 'opaque',
+    version: typeof rawVersion === 'number' && Number.isInteger(rawVersion) ? rawVersion : 0,
+  };
+}
+
 function overlayRevisionValue(value: unknown, depth = 0): unknown {
   if (depth > 32) return { type: 'depth-limit' };
   if (value instanceof Y.Text) return { type: 'y-text', text: value.toString() };
@@ -168,6 +304,29 @@ function overlayRevisionValue(value: unknown, depth = 0): unknown {
 function rawOverlayRevisionValue(doc: Y.Doc): unknown {
   return [...overlaysMap(doc).entries()].sort(([left], [right]) => left.localeCompare(right))
     .map(([id, scene]) => [id, overlayRevisionValue(scene)]);
+}
+
+/**
+ * MCP revisions use the complete raw scene cell, rather than the v1 reader's
+ * projection. That makes an opaque object or a newer scene a real concurrent
+ * write, even though an older MCP client cannot edit its fields.
+ */
+function mcpOverlayRevisionForScene(doc: Y.Doc, diagramId: string): string {
+  const rawScene = overlaysMap(doc).get(diagramId);
+  const canonical = new Y.Doc({ guid: 'arielcharts:mcp-overlay-revision:v1' });
+  try {
+    // clone() preserves every nested Y shared type. With a fixed client id,
+    // Yjs emits deterministic raw scene bytes without including Mermaid,
+    // presence, awareness, or another diagram's overlay state.
+    canonical.clientID = 1;
+    canonical.getMap<unknown>('overlay').set('scene', rawScene instanceof Y.AbstractType ? rawScene.clone() : rawScene ?? null);
+    return createHash('sha256')
+      .update(diagramId)
+      .update(Y.encodeStateAsUpdate(canonical))
+      .digest('base64url');
+  } finally {
+    canonical.destroy();
+  }
 }
 
 /**
@@ -280,6 +439,148 @@ function readOverlayScene(doc: Y.Doc, diagramId: string): OverlaySceneSnapshot {
   return { version: typeof version === 'number' ? version : OVERLAY_SCENE_SCHEMA_VERSION, diagram_id: diagramId, objects: result, layers };
 }
 
+function readMcpOverlayScene(doc: Y.Doc, diagramId: string): McpOverlayScene {
+  const raw = overlaysMap(doc).get(diagramId);
+  const rawScene = raw instanceof Y.Map ? raw : null;
+  const rawVersion = rawScene?.get('version');
+  const version = typeof rawVersion === 'number' ? rawVersion : 0;
+  const overlayRevision = mcpOverlayRevisionForScene(doc, diagramId);
+  if (version !== OVERLAY_SCENE_SCHEMA_VERSION) {
+    const rawObjects = rawScene?.get('objects');
+    return {
+      version,
+      diagram_id: diagramId,
+      overlay_revision: overlayRevision,
+      writable: false,
+      objects: [],
+      opaque_objects: rawObjects instanceof Y.Map ? (() => {
+        const occupied = new Set([...rawObjects.keys()].filter(isMcpBoundedIdentifier));
+        return [...rawObjects.entries()].sort(([left], [right]) => left.localeCompare(right))
+          .map(([id, value]) => opaqueMcpObject(id, value, occupied));
+      })() : [],
+    };
+  }
+
+  const rawObjects = rawScene?.get('objects');
+  const rawSafeIds = rawObjects instanceof Y.Map
+    ? new Set([...rawObjects.entries()].flatMap(([id, value]) => isMcpRawOverlayObjectRepresentable(id, value) ? [id] : []))
+    : new Set<string>();
+  // Never call readOverlayScene (which clones browser data) until the raw
+  // projection has proven every candidate free of nested shared/opaque values.
+  if (rawObjects instanceof Y.Map && rawSafeIds.size !== rawObjects.size) {
+    const occupied = new Set([...rawObjects.keys()].filter(isMcpBoundedIdentifier));
+    return {
+      version,
+      diagram_id: diagramId,
+      overlay_revision: overlayRevision,
+      writable: false,
+      objects: [],
+      opaque_objects: [...rawObjects.entries()].sort(([left], [right]) => left.localeCompare(right))
+        .map(([id, value]) => opaqueMcpObject(id, value, occupied)),
+      layers: undefined,
+    };
+  }
+  const scene = readOverlayScene(doc, diagramId);
+  const supported = scene.objects.filter((object) => rawSafeIds.has(object.id) && isMcpOverlayObjectRepresentable(object));
+  const knownIds = new Set(supported.map(({ id }) => id));
+  const opaqueObjects = rawObjects instanceof Y.Map
+    ? (() => {
+      const occupied = new Set([...rawObjects.keys()].filter(isMcpBoundedIdentifier));
+      return [...rawObjects.entries()].sort(([left], [right]) => left.localeCompare(right))
+        .flatMap(([id, value]) => knownIds.has(id) ? [] : [opaqueMcpObject(id, value, occupied)]);
+    })()
+    : [];
+  return {
+    version,
+    diagram_id: diagramId,
+    overlay_revision: overlayRevision,
+    writable: opaqueObjects.length === 0,
+    objects: supported,
+    opaque_objects: opaqueObjects,
+    layers: scene.layers,
+  };
+}
+
+function listMcpOverlayObjects(doc: Y.Doc, diagramId: string): McpOverlayObjectList {
+  const scene = readMcpOverlayScene(doc, diagramId);
+  return {
+    version: scene.version,
+    diagram_id: scene.diagram_id,
+    overlay_revision: scene.overlay_revision,
+    writable: scene.writable,
+    objects: [
+      ...scene.objects.map((object) => ({ id: object.id, kind: object.kind, version: object.version, opaque: false, order_key: object.order_key })),
+      ...scene.opaque_objects.map((object) => ({ ...object, opaque: true })),
+    ].sort((left, right) => left.id.localeCompare(right.id)),
+  };
+}
+
+function readMcpOverlayObject(doc: Y.Doc, diagramId: string, objectId: string): McpOverlayObjectRead {
+  const scene = readMcpOverlayScene(doc, diagramId);
+  const object = scene.objects.find(({ id }) => id === objectId);
+  if (object) return { status: 'found', overlay_revision: scene.overlay_revision, writable: scene.writable, object };
+  const opaque = scene.opaque_objects.find(({ id }) => id === objectId);
+  if (opaque) return { status: 'opaque', overlay_revision: scene.overlay_revision, writable: false, object: opaque };
+  return { status: 'missing', overlay_revision: scene.overlay_revision, writable: scene.writable, object_id: objectId };
+}
+
+function writeMcpOverlayObject(target: Y.Map<unknown>, object: OverlayObjectRecord): void {
+  target.set('kind', object.kind);
+  target.set('version', object.version);
+  target.set('order_key', object.order_key);
+  target.set('geometry', structuredClone(object.geometry));
+  if (object.anchor) target.set('anchor', structuredClone(object.anchor)); else target.delete('anchor');
+  if (object.layer) target.set('layer', object.layer); else target.delete('layer');
+  target.set('style', structuredClone(object.style));
+  target.set('metadata', structuredClone(object.metadata));
+  target.set('payload', structuredClone(object.payload));
+  if (object.kind.startsWith('annotation.') || object.kind.startsWith('shape.')) {
+    const body = new Y.Text();
+    if (object.body) body.insert(0, object.body);
+    target.set('body', body);
+  } else {
+    target.delete('body');
+  }
+}
+
+/** Write only fields named by the operation so a future field on a known v1 record survives. */
+function patchMcpOverlayObject(target: Y.Map<unknown>, patch: OverlayObjectPatch): void {
+  if ('geometry' in patch) target.set('geometry', structuredClone(patch.geometry));
+  if ('anchor' in patch) {
+    if (patch.anchor === undefined) target.delete('anchor'); else target.set('anchor', structuredClone(patch.anchor));
+  }
+  if ('layer' in patch) {
+    if (patch.layer === undefined) target.delete('layer'); else target.set('layer', patch.layer);
+  }
+  if ('style' in patch) target.set('style', structuredClone(patch.style));
+  if ('metadata' in patch) target.set('metadata', structuredClone(patch.metadata));
+  if ('payload' in patch) target.set('payload', structuredClone(patch.payload));
+  if ('body' in patch) {
+    const body = target.get('body');
+    if (!(body instanceof Y.Text) || typeof patch.body !== 'string') throw new Error('Overlay object body is not editable.');
+    body.delete(0, body.length);
+    if (patch.body) body.insert(0, patch.body);
+  }
+}
+
+function overlayOrderKeyBetween(lower: string | null, upper: string | null): string {
+  if (lower === null && upper === null) return 'o';
+  if (lower === null) {
+    const first = upper!.charCodeAt(0);
+    return first > 1 ? String.fromCharCode(Math.floor(first / 2)) : `\u0001${upper}`;
+  }
+  if (upper === null) return `${lower}~`;
+  let prefix = '';
+  for (let index = 0; index <= Math.max(lower.length, upper.length); index += 1) {
+    const lowerCode = index < lower.length ? lower.charCodeAt(index) : 1;
+    const upperCode = index < upper.length ? upper.charCodeAt(index) : 126;
+    if (lowerCode === upperCode) { prefix += String.fromCharCode(lowerCode); continue; }
+    if (upperCode - lowerCode > 1) return `${prefix}${String.fromCharCode(Math.floor((lowerCode + upperCode) / 2))}`;
+    prefix += String.fromCharCode(lowerCode);
+  }
+  return `${lower}~`;
+}
+
 function assertSupportedOverlayScene(scene: OverlaySceneSnapshot): void {
   if (scene.version !== OVERLAY_SCENE_SCHEMA_VERSION) {
     throw new Error(`Unsupported overlay scene version: ${scene.version}`);
@@ -292,6 +593,23 @@ function assertSupportedOverlayScene(scene: OverlaySceneSnapshot): void {
 
 function isSupportedOverlayScene(scene: OverlaySceneSnapshot): boolean {
   try { assertSupportedOverlayScene(scene); return true; } catch { return false; }
+}
+
+function isMcpOverlayObjectLocked(scene: OverlaySceneSnapshot, objectId: string): boolean {
+  const byId = new Map(scene.objects.map((object) => [object.id, object]));
+  const layers = new Map((scene.layers ?? []).map((layer) => [layer.id, layer]));
+  const visit = (id: string, visited: Set<string>): boolean => {
+    const object = byId.get(id);
+    if (!object) return true;
+    if (object.metadata.locked === true || layers.get(object.layer ?? 'default')?.locked === true) return true;
+    return scene.objects.some((frame) => {
+      if (frame.kind !== 'frame.section' || !Array.isArray(frame.payload.members) || !frame.payload.members.includes(id)) return false;
+      if (visited.has(frame.id)) return true;
+      const next = new Set(visited); next.add(frame.id);
+      return visit(frame.id, next);
+    });
+  };
+  return visit(objectId, new Set([objectId]));
 }
 
 function assertBoundedOverlayActor(actor: ActivityEvent['actor']): void {
@@ -969,6 +1287,125 @@ export class SessionManager {
     return { scene, revision: overlayRevisionForScene(scene) };
   }
 
+  /** MCP gets an explicit opaque/read-only projection instead of a lossy v1 scene. */
+  async readMcpOverlayScene(sessionId: string, diagramId: string): Promise<McpOverlayScene> {
+    const session = await this.requireSession(sessionId);
+    readDiagram(session.doc, diagramId);
+    return readMcpOverlayScene(session.doc, diagramId);
+  }
+
+  async listMcpOverlayObjects(sessionId: string, diagramId: string): Promise<McpOverlayObjectList> {
+    const session = await this.requireSession(sessionId);
+    readDiagram(session.doc, diagramId);
+    return listMcpOverlayObjects(session.doc, diagramId);
+  }
+
+  async readMcpOverlayObject(sessionId: string, diagramId: string, objectId: string): Promise<McpOverlayObjectRead> {
+    const session = await this.requireSession(sessionId);
+    readDiagram(session.doc, diagramId);
+    return readMcpOverlayObject(session.doc, diagramId, objectId);
+  }
+
+  async createMcpOverlayObject(
+    sessionId: string,
+    diagramId: string,
+    expectedRevision: string,
+    object: OverlayObjectRecord,
+    participants?: Participant[],
+  ): Promise<OverlayObjectMutationOutput> {
+    if (!SUPPORTED_OVERLAY_KINDS.has(object.kind) || object.version !== 1) {
+      throw new Error(`Unsupported overlay object: ${object.kind}@${object.version}`);
+    }
+    return this.mutateMcpOverlayScene(sessionId, diagramId, expectedRevision, participants, (doc) => {
+      const scene = this.requireMcpWritableOverlayScene(doc, diagramId);
+      this.assertMcpOverlayLayerWritable(doc, diagramId, object.layer ?? 'default');
+      const objects = scene.get('objects') as Y.Map<Y.Map<unknown>>;
+      if (objects.has(object.id)) throw new Error(`Overlay object already exists: ${object.id}`);
+      const next = new Y.Map<unknown>();
+      writeMcpOverlayObject(next, object);
+      objects.set(object.id, next);
+    }, (scene) => {
+      const created = scene.objects.find(({ id }) => id === object.id);
+      if (!created) throw new Error('Overlay object was not persisted.');
+      return { object: created };
+    });
+  }
+
+  async updateMcpOverlayObject(
+    sessionId: string,
+    diagramId: string,
+    objectId: string,
+    expectedRevision: string,
+    patch: OverlayObjectPatch,
+    participants?: Participant[],
+  ): Promise<OverlayObjectMutationOutput> {
+    return this.mutateMcpOverlayScene(sessionId, diagramId, expectedRevision, participants, (doc) => {
+      const scene = this.requireMcpWritableOverlayScene(doc, diagramId);
+      const target = (scene.get('objects') as Y.Map<Y.Map<unknown>>).get(objectId);
+      this.assertMcpEditableOverlayObject(target, objectId);
+      this.assertMcpOverlayObjectUnlocked(doc, diagramId, objectId);
+      patchMcpOverlayObject(target, patch);
+    }, (scene) => {
+      const updated = scene.objects.find(({ id }) => id === objectId);
+      if (!updated) throw new Error('Overlay object was not persisted.');
+      return { object: updated };
+    });
+  }
+
+  async reorderMcpOverlayObject(
+    sessionId: string,
+    diagramId: string,
+    objectId: string,
+    expectedRevision: string,
+    direction: 'front' | 'back' | 'forward' | 'backward',
+    participants?: Participant[],
+  ): Promise<OverlayObjectMutationOutput> {
+    return this.mutateMcpOverlayScene(sessionId, diagramId, expectedRevision, participants, (doc) => {
+      const scene = this.requireMcpWritableOverlayScene(doc, diagramId);
+      const objects = scene.get('objects') as Y.Map<Y.Map<unknown>>;
+      const target = objects.get(objectId);
+      this.assertMcpEditableOverlayObject(target, objectId);
+      this.assertMcpOverlayObjectUnlocked(doc, diagramId, objectId);
+      const targetLayer = typeof target.get('layer') === 'string' ? target.get('layer') as string : 'default';
+      // Include opaque peers in the ordering calculation: their fields stay
+      // untouched, but an agent's order change must still land around them.
+      const sameLayer = [...objects.entries()].flatMap(([id, value]) => {
+        if (!(value instanceof Y.Map) || (typeof value.get('layer') === 'string' ? value.get('layer') : 'default') !== targetLayer) return [];
+        const orderKey = value.get('order_key');
+        return typeof orderKey === 'string' ? [{ id, order_key: orderKey }] : [];
+      }).sort((left, right) => left.order_key.localeCompare(right.order_key) || left.id.localeCompare(right.id));
+      const from = sameLayer.findIndex(({ id }) => id === objectId);
+      const to = direction === 'front' ? sameLayer.length - 1 : direction === 'back' ? 0
+        : direction === 'forward' ? Math.min(sameLayer.length - 1, from + 1) : Math.max(0, from - 1);
+      if (to === from) return;
+      const ordered = [...sameLayer]; const [item] = ordered.splice(from, 1); if (!item) return;
+      ordered.splice(to, 0, item);
+      const lower = ordered[to - 1]?.order_key ?? null;
+      const upper = ordered[to + 1]?.order_key ?? null;
+      target.set('order_key', overlayOrderKeyBetween(lower, upper));
+    }, (scene) => {
+      const updated = scene.objects.find(({ id }) => id === objectId);
+      if (!updated) throw new Error('Overlay object was not persisted.');
+      return { object: updated };
+    });
+  }
+
+  async deleteMcpOverlayObject(
+    sessionId: string,
+    diagramId: string,
+    objectId: string,
+    expectedRevision: string,
+    participants?: Participant[],
+  ): Promise<OverlayObjectMutationOutput> {
+    return this.mutateMcpOverlayScene(sessionId, diagramId, expectedRevision, participants, (doc) => {
+      const scene = this.requireMcpWritableOverlayScene(doc, diagramId);
+      const objects = scene.get('objects') as Y.Map<Y.Map<unknown>>;
+      this.assertMcpEditableOverlayObject(objects.get(objectId), objectId);
+      this.assertMcpOverlayObjectUnlocked(doc, diagramId, objectId);
+      objects.delete(objectId);
+    }, () => ({ deleted_object_id: objectId }));
+  }
+
   async listOverlayHistory(sessionId: string, diagramId: string): Promise<{ revisions: OverlayRevisionSummary[]; current_revision: string }> {
     const current = await this.readOverlayScene(sessionId, diagramId);
     const revisions = await this.store.listOverlayHistory(sessionId, diagramId);
@@ -1508,6 +1945,86 @@ export class SessionManager {
         throw new Error(`Diagram name already exists: ${name}`);
       }
     }
+  }
+
+  private requireMcpWritableOverlayScene(doc: Y.Doc, diagramId: string): Y.Map<unknown> {
+    const scene = overlaysMap(doc).get(diagramId);
+    if (!(scene instanceof Y.Map) || scene.get('version') !== OVERLAY_SCENE_SCHEMA_VERSION || !(scene.get('objects') instanceof Y.Map)) {
+      throw new Error('This overlay scene uses a newer or unsupported schema and is read-only through MCP.');
+    }
+    return scene;
+  }
+
+  private assertMcpEditableOverlayObject(value: unknown, objectId: string): asserts value is Y.Map<unknown> {
+    if (!(value instanceof Y.Map) || !SUPPORTED_OVERLAY_KINDS.has(value.get('kind') as string) || value.get('version') !== 1) {
+      throw new Error(`Overlay object not found or opaque: ${objectId}`);
+    }
+  }
+
+  private assertMcpOverlayObjectUnlocked(doc: Y.Doc, diagramId: string, objectId: string): void {
+    if (isMcpOverlayObjectLocked(readOverlayScene(doc, diagramId), objectId)) {
+      throw new Error(`Overlay object is locked: ${objectId}`);
+    }
+  }
+
+  private assertMcpOverlayLayerWritable(doc: Y.Doc, diagramId: string, layerId: string): void {
+    const layer = readOverlayScene(doc, diagramId).layers?.find(({ id }) => id === layerId);
+    if (!layer) throw new Error(`Overlay layer not found: ${layerId}`);
+    if (layer.locked) throw new Error(`Overlay layer is locked: ${layerId}`);
+  }
+
+  /** Reject a malformed/over-budget operation before the authoritative Yjs document changes. */
+  private assertMcpOverlayMutationAdmitted(
+    doc: Y.Doc,
+    diagramId: string,
+    participants: readonly Participant[] | undefined,
+    mutation: (candidate: Y.Doc) => void,
+  ): void {
+    const candidate = createReservedRootDocument();
+    try {
+      Y.applyUpdate(candidate, Y.encodeStateAsUpdate(doc));
+      candidate.transact(() => {
+        if (participants !== undefined) ensureParticipants(candidate, participants);
+        mutation(candidate);
+      }, CATALOG_REPAIR_ORIGIN);
+      const admission = validateDocumentState(candidate);
+      if (!admission.accepted) throw new Error(`Overlay mutation exceeds collaboration limits: ${admission.reason}.`);
+      if (!readMcpOverlayScene(candidate, diagramId).writable) {
+        throw new Error('Overlay mutation would create a non-representable MCP object.');
+      }
+    } finally {
+      candidate.destroy();
+    }
+  }
+
+  private async mutateMcpOverlayScene(
+    sessionId: string,
+    diagramId: string,
+    expectedRevision: string,
+    participants: Participant[] | undefined,
+    mutation: (doc: Y.Doc) => void,
+    result: (scene: McpOverlayScene) => { object?: OverlayObjectRecord; deleted_object_id?: string },
+  ): Promise<OverlayObjectMutationOutput> {
+    const session = await this.requireSession(sessionId);
+    readDiagram(session.doc, diagramId);
+    const current = readMcpOverlayScene(session.doc, diagramId);
+    if (!current.writable) throw new Error('This overlay scene uses a newer or unsupported schema and is read-only through MCP.');
+    if (expectedRevision !== current.overlay_revision) return { status: 'stale', scene: current };
+
+    // No await follows this check. Candidate validation and the live Yjs
+    // transaction are synchronous, so a websocket update cannot interleave a
+    // stale operation between them on the server event loop.
+    this.assertMcpOverlayMutationAdmitted(session.doc, diagramId, participants, mutation);
+    const committedRef: { value?: { overlay_revision: string; result: { object?: OverlayObjectRecord; deleted_object_id?: string } } } = {};
+    const ensuredParticipants = this.mutateWithParticipants(session, participants, () => {
+      mutation(session.doc);
+      const scene = readMcpOverlayScene(session.doc, diagramId);
+      committedRef.value = { overlay_revision: scene.overlay_revision, result: result(scene) };
+    });
+    const committed = committedRef.value;
+    if (!committed) throw new Error('Overlay mutation did not commit.');
+    await this.afterMutation(session, ensuredParticipants);
+    return { status: 'updated', overlay_revision: committed.overlay_revision, ...committed.result };
   }
 
   /** MCP and server-owned source writes use the same bounded durable envelope as raw Yjs ingress. */

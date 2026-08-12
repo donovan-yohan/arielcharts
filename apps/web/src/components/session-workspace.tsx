@@ -159,6 +159,7 @@ import {
   quantizeCanvasCursor,
 } from '../lib/canvas-presence';
 import { LaserPresencePublisher } from '../lib/laser-presence-publisher';
+import { getSafeSessionStorage, readLaserSequenceHighWater, writeLaserSequenceHighWater } from '../lib/laser-sequence-storage';
 import { usePresenterFollow } from '../lib/use-presenter-follow';
 
 const DIAGRAMS_KEY = 'diagrams';
@@ -842,7 +843,15 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   useEffect(() => { publishCanvasPresenceRef.current = publishCanvasPresence; }, [publishCanvasPresence]);
 
   useEffect(() => {
+    const clientId = collaboration?.awareness.clientID;
+    const storage = typeof window === 'undefined' ? null : getSafeSessionStorage(window);
+    const initialSequence = clientId === undefined
+      ? 0
+      : readLaserSequenceHighWater(storage, sessionId, clientId);
     const publisher = new LaserPresencePublisher((laser) => {
+      if (clientId !== undefined) {
+        writeLaserSequenceHighWater(storage, sessionId, clientId, laser.sequence);
+      }
       localLaserRef.current = laser;
       setLocalLaser(laser.active ? laser : null);
       publishCanvasPresenceRef.current(localCanvasCursorRef.current, selectedNodeIdsRef.current);
@@ -850,13 +859,13 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         localLaserRef.current = null;
         publishCanvasPresenceRef.current(localCanvasCursorRef.current, selectedNodeIdsRef.current);
       }
-    });
+    }, initialSequence);
     laserPublisherRef.current = publisher;
     return () => {
       publisher.destroy();
       if (laserPublisherRef.current === publisher) laserPublisherRef.current = null;
     };
-  }, []);
+  }, [collaboration?.awareness.clientID, sessionId]);
 
   const handleLaserChange = useCallback((value: { active: boolean; point?: CanvasWorldPoint }) => {
     if (value.active && value.point) laserPublisherRef.current?.move(value.point);

@@ -223,3 +223,16 @@ export async function waitForInvalidPreview(page: Page): Promise<void> {
 export async function waitForSyncedSource(page: Page): Promise<void> {
   await page.getByTestId('connection-status-badge').filter({ hasText: /^synced$/i }).waitFor({ state: 'visible', timeout: 15_000 });
 }
+
+/**
+ * The provider badge belongs to the source flyout. Fresh browser contexts must
+ * finish their Yjs catch-up before canvas assertions, without changing the
+ * caller's flyout state.
+ */
+export async function waitForWorkspaceProviderSync(page: Page): Promise<void> {
+  const sourceToggle = page.getByTestId('source-flyout-toggle');
+  const sourceWasOpen = await sourceToggle.getAttribute('aria-expanded') === 'true';
+  if (!sourceWasOpen) await ensureFlyout(page, 'source');
+  await waitForSyncedSource(page);
+  if (!sourceWasOpen) await closeFlyout(page, 'source');
+}

@@ -125,7 +125,8 @@ import { addTreemapNode, deleteTreemapNode, editTreemapNode, getTreemapDiagramSn
 import { addVennStyle, addVennSubset, deleteVennStyle, deleteVennSubset, editVennStyle, editVennSubset, getVennDiagramSnapshot, moveVennStyle, moveVennSubset, renameVennSet } from '../lib/venn-mutations';
 import { addWardleyEvolution, addWardleyLink, addWardleyNode, addWardleyNote, addWardleyPipeline, deleteWardleyEvolution, deleteWardleyLink, deleteWardleyNode, deleteWardleyNote, deleteWardleyPipeline, editWardleyEvolution, editWardleyLink, editWardleyNode, editWardleyNote, getWardleyDiagramSnapshot, moveWardleyLink, moveWardleyNode, moveWardleyNote, renameWardleyNode } from '../lib/wardley-mutations';
 import { addZenUmlControl, addZenUmlMessage, addZenUmlParticipant, deleteZenUmlControl, deleteZenUmlMessage, deleteZenUmlParticipant, editZenUmlControl, editZenUmlMessage, editZenUmlParticipant, getZenUmlDiagramSnapshot, moveZenUmlControl, moveZenUmlMessage, moveZenUmlParticipant } from '../lib/zenuml-mutations';
-import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
+import { collaborationOrigins, createSourceEditorUndoManager } from '../lib/collaboration-origins';
+import { CanvasHistoryCoordinator } from '../lib/canvas-history';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
 import { getServerHttpUrl, getWebsocketServerUrl } from '../lib/session';
@@ -141,6 +142,7 @@ import { getActivityFlyoutViewOnOpen, getNextWorkspaceFlyout, type ActivityFlyou
 import { SOURCE_FLYOUT_DEFAULT_WIDTH } from '../lib/source-flyout-resize';
 import { getMcpRoomBearer, getRoomShareUrl, rotateRoomKey } from '../lib/room-access-api';
 import { useOverlayScene } from '../lib/use-overlay-scene';
+import { getOverlayScene } from '../lib/overlay-scene';
 import { getZenUmlRuntimePresentation, getZenUmlRuntimeSnapshot, prepareMermaidRuntimeForSource, subscribeZenUmlRuntime } from '../lib/zenuml-runtime';
 import {
   CANVAS_CURSOR_INTERVAL_MS,
@@ -578,8 +580,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const currentIdentityRef = useRef<LocalIdentity | null>(null);
   const addActivityRef = useRef<((action: ActivityEvent['action'], detail?: string, diagramId?: string) => void) | null>(null);
   const mutationQueueRef = useRef<MutationQueue | null>(null);
-  const undoManagerRef = useRef<Y.UndoManager | null>(null);
+  const canvasHistoryRef = useRef<CanvasHistoryCoordinator | null>(null);
+  const sourceUndoManagerRef = useRef<Y.UndoManager | null>(null);
   const dragCommitterRef = useRef<DragLayoutCommitter | null>(null);
+  const dragHistoryActionRef = useRef<ReturnType<CanvasHistoryCoordinator['beginAction']> | null>(null);
+  const overlayHistoryActionRef = useRef<ReturnType<CanvasHistoryCoordinator['beginAction']> | null>(null);
   const diagramTabRefs = useRef(new Map<string, HTMLButtonElement>());
   const diagramCameraSessionRef = useRef({ cameras: new Map<string, CanvasCameraState>(), sessionId });
   if (diagramCameraSessionRef.current.sessionId !== sessionId) {
@@ -600,6 +605,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const activeDiagramIdRef = useRef<string | null>(null);
   const activeTouchLabelRef = useRef<HTMLElement | null>(null);
   const touchLabelTimeoutRef = useRef<number | null>(null);
+  const canvasHistoryNoticeTimeoutRef = useRef<number | null>(null);
   const selectedNodeIdsRef = useRef<string[]>([]);
   const editingNodeIdRef = useRef<string | null>(null);
   const localCanvasCursorRef = useRef<CanvasWorldPoint | null>(null);
@@ -612,6 +618,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const localLaserRef = useRef<CanvasLaserState | null>(null);
   const localInkPreviewRef = useRef<CanvasInkPreviewState | null>(null);
   const laserPublisherRef = useRef<LaserPresencePublisher | null>(null);
+  const inkPreviewSequenceRef = useRef(0);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
@@ -653,6 +660,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const [restorePending, setRestorePending] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [touchLabelStatus, setTouchLabelStatus] = useState<{ label: string } | null>(null);
+  const [canvasHistoryNotice, setCanvasHistoryNotice] = useState<string | null>(null);
+  const [canvasHistory, setCanvasHistory] = useState<CanvasHistoryCoordinator | null>(null);
   const selectPresentedDiagram = useCallback((diagramId: string) => { setActiveDiagramId(diagramId); }, []);
   const presenterFollow = usePresenterFollow(collaboration?.awareness ?? null, activeDiagramId, selectPresentedDiagram);
   const handleCanvasCameraChange = useCallback((camera: CanvasCameraState) => {
@@ -687,7 +696,46 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     () => getActiveDiagramState(collaboration, activeDiagramId),
     [activeDiagramId, activeDiagramIdentityVersion, collaboration],
   );
-  const overlayController = useOverlayScene(collaboration?.doc ?? null, activeDiagramId);
+  const overlayController = useOverlayScene(collaboration?.doc ?? null, activeDiagramId, canvasHistory);
+  // The coordinator is scoped to this concrete Y.Map, not merely an id. An
+  // import can replace the scene map under a stable diagram id.
+  const overlaySceneIdentity = useMemo(() => {
+    if (!collaboration || !activeDiagramId) return null;
+    return getOverlayScene(collaboration.doc, activeDiagramId)?.scene ?? null;
+  }, [activeDiagramId, collaboration, overlayController?.scene]);
+
+  useEffect(() => {
+    sourceUndoManagerRef.current?.destroy();
+    sourceUndoManagerRef.current = null;
+    if (!activeDiagram || !collaboration) return;
+    const manager = createSourceEditorUndoManager(activeDiagram.yText);
+    sourceUndoManagerRef.current = manager;
+    return () => {
+      manager.destroy();
+      if (sourceUndoManagerRef.current === manager) sourceUndoManagerRef.current = null;
+    };
+  }, [activeDiagram, collaboration]);
+
+  useEffect(() => {
+    canvasHistoryRef.current?.destroy();
+    canvasHistoryRef.current = null;
+    if (!activeDiagram || !collaboration) return;
+    // Scene replacement is an import boundary: detach the old journal without
+    // touching CodeMirror's source-owned history.
+    getOverlayScene(collaboration.doc, activeDiagram.id, true);
+    const history = new CanvasHistoryCoordinator(collaboration.doc, activeDiagram.id, activeDiagram.yText, activeDiagram.nodePositionsMap);
+    canvasHistoryRef.current = history;
+    setCanvasHistory(history);
+    return () => {
+      if (dragHistoryActionRef.current) history.cancelAction(dragHistoryActionRef.current);
+      if (overlayHistoryActionRef.current) history.cancelAction(overlayHistoryActionRef.current);
+      dragHistoryActionRef.current = null;
+      overlayHistoryActionRef.current = null;
+      history.destroy();
+      if (canvasHistoryRef.current === history) canvasHistoryRef.current = null;
+      setCanvasHistory((current) => current === history ? null : current);
+    };
+  }, [activeDiagram, collaboration, overlaySceneIdentity]);
 
   useEffect(() => {
     activeDiagramIdRef.current = activeDiagramId;
@@ -768,14 +816,17 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     collaboration.awareness.setLocalStateField('canvas', next);
   }, [collaboration]);
 
+  const publishCanvasPresenceRef = useRef(publishCanvasPresence);
+  useEffect(() => { publishCanvasPresenceRef.current = publishCanvasPresence; }, [publishCanvasPresence]);
+
   useEffect(() => {
     const publisher = new LaserPresencePublisher((laser) => {
       localLaserRef.current = laser;
       setLocalLaser(laser.active ? laser : null);
-      publishCanvasPresence(localCanvasCursorRef.current, selectedNodeIdsRef.current);
+      publishCanvasPresenceRef.current(localCanvasCursorRef.current, selectedNodeIdsRef.current);
       if (!laser.active) {
         localLaserRef.current = null;
-        publishCanvasPresence(localCanvasCursorRef.current, selectedNodeIdsRef.current);
+        publishCanvasPresenceRef.current(localCanvasCursorRef.current, selectedNodeIdsRef.current);
       }
     });
     laserPublisherRef.current = publisher;
@@ -783,17 +834,27 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       publisher.destroy();
       if (laserPublisherRef.current === publisher) laserPublisherRef.current = null;
     };
-  }, [publishCanvasPresence]);
+  }, []);
 
   const handleLaserChange = useCallback((value: { active: boolean; point?: CanvasWorldPoint }) => {
     if (value.active && value.point) laserPublisherRef.current?.move(value.point);
     else laserPublisherRef.current?.stop();
   }, []);
 
+  const handleOverlayToolActivate = useCallback(() => {
+    setInteractionMode('select');
+    handleLaserChange({ active: false });
+  }, [handleLaserChange]);
+
   const handleInkPreviewChange = useCallback((preview: CanvasInkPreviewState | null) => {
     localInkPreviewRef.current = preview;
     publishCanvasPresence(localCanvasCursorRef.current, selectedNodeIdsRef.current);
   }, [publishCanvasPresence]);
+
+  const nextInkPreviewSequence = useCallback(() => {
+    inkPreviewSequenceRef.current += 1;
+    return inkPreviewSequenceRef.current;
+  }, []);
 
   const handleNodeEditingChange = useCallback((nodeId: string | null) => {
     if (editingNodeIdRef.current === nodeId) {
@@ -861,7 +922,6 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       editingNodeIdRef.current = null;
     }
     localCanvasPresenceRef.current = null;
-    laserPublisherRef.current?.destroy();
     localLaserRef.current = null;
     localInkPreviewRef.current = null;
     setLocalLaser(null);
@@ -878,7 +938,6 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     pendingCanvasCursorRef.current = null;
     editingNodeIdRef.current = null;
     localCanvasPresenceRef.current = null;
-    laserPublisherRef.current?.destroy();
     localLaserRef.current = null;
     localInkPreviewRef.current = null;
     setLocalLaser(null);
@@ -982,11 +1041,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       const nextText = mutate(previousText);
       setMutationError(null);
       if (nextText === previousText) return { applied: true };
-      undoManagerRef.current?.stopCapturing();
       collaboration.doc.transact(() => {
         applyDiff(activeDiagram.yText, nextText, previousText);
       }, collaborationOrigins.visual);
-      undoManagerRef.current?.stopCapturing();
       addActivityRef.current?.('edited', detail, activeDiagram.id);
       return { applied: true };
     } catch (error) {
@@ -1261,13 +1318,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     setRestoreCandidate(null);
     setRestoreError(null);
     setDiagramHistory(null);
-    if (!activeDiagram) {
+    if (!activeDiagram || !collaboration) {
       dragCommitterRef.current?.destroy();
       dragCommitterRef.current = null;
-      if (undoManagerRef.current) {
-        destroyDiagramUndoManager(undoManagerRef.current);
-        undoManagerRef.current = null;
-      }
       mutationQueueRef.current = null;
       setMermaidText('');
       setNodePositions({});
@@ -1286,8 +1339,6 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     const syncNodePositions = () => {
       setNodePositions(readNodePositions(activeDiagram.nodePositionsMap));
     };
-    const undoManager = createDiagramUndoManager(activeDiagram.yText, activeDiagram.nodePositionsMap);
-    undoManagerRef.current = undoManager;
     mutationQueueRef.current = new MutationQueue(activeDiagram.yText, {
       onAfterApplyError: (error) => {
         setMutationError(error instanceof Error ? error.message : 'The diagram update could not be fully applied.');
@@ -1295,9 +1346,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       transactionOrigin: collaborationOrigins.visual,
     });
     const dragCommitter = new DragLayoutCommitter((positions) => {
-      collaboration?.doc.transact(() => {
+      const commit = () => collaboration?.doc.transact(() => {
         writeNodePositions(activeDiagram.nodePositionsMap, positions, 'merge');
       }, collaborationOrigins.visualLayout);
+      const action = dragHistoryActionRef.current;
+      if (action) canvasHistoryRef.current?.runAction(action, commit); else commit();
     });
     dragCommitterRef.current = dragCommitter;
     syncText();
@@ -1316,16 +1369,12 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       if (dragCommitterRef.current === dragCommitter) {
         dragCommitterRef.current = null;
       }
-      destroyDiagramUndoManager(undoManager);
-      if (undoManagerRef.current === undoManager) {
-        undoManagerRef.current = null;
-      }
       mutationQueueRef.current = null;
     };
   }, [activeDiagram, applySourceLayoutPolicy, collaboration]);
 
   useEffect(() => {
-    const undoManager = undoManagerRef.current;
+    const undoManager = sourceUndoManagerRef.current;
     if (openFlyout !== 'source' || !collaboration || !activeDiagram || !editorHostRef.current || !undoManager) {
       return;
     }
@@ -1979,11 +2028,9 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
   const handleNodeDragStart = useCallback((positions: DiagramNodePositions) => {
     const accepted = dragCommitterRef.current?.begin(Object.keys(positions)) ?? false;
-    if (accepted) {
-      undoManagerRef.current?.stopCapturing();
-    }
+    if (accepted) dragHistoryActionRef.current = canvasHistoryRef.current?.beginAction() ?? null;
     return accepted;
-  }, []);
+  }, [collaboration]);
 
   const handleNodeDrag = useCallback((positions: DiagramNodePositions) => {
     const committer = dragCommitterRef.current;
@@ -1995,13 +2042,15 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
   const handleNodeDragStop = useCallback((positions: DiagramNodePositions) => {
     const committer = dragCommitterRef.current;
-    if (committer?.finish(positions)) {
-      undoManagerRef.current?.stopCapturing();
+    const finished = committer?.finish(positions) ?? false;
+    if (dragHistoryActionRef.current) canvasHistoryRef.current?.endAction(dragHistoryActionRef.current);
+    dragHistoryActionRef.current = null;
+    if (finished) {
       if (activeDiagramId) {
         addActivityRef.current?.('edited', 'Moved diagram nodes', activeDiagramId);
       }
     }
-  }, [activeDiagramId]);
+  }, [activeDiagramId, collaboration]);
 
   const handleAddConnectedNode = useCallback((source: string, label: string, shape: DiagramNodeShape, position: NodePosition, type: DiagramLinkType) => {
     const queue = mutationQueueRef.current;
@@ -2010,22 +2059,23 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     if (!queue || !diagram || !collaboration || !actor) {
       return;
     }
-    const mutation = queue.addConnectedNode(source, label, { shape, type });
+    const history = canvasHistoryRef.current;
+    const historyAction = history?.beginAction() ?? null;
+    const mutation = queue.addConnectedNode(source, label, { shape, type }, (apply) => {
+      if (historyAction) history?.runAction(historyAction, apply); else apply();
+    });
     runMutation(mutation.then((result) => {
-      if (result.nodeId) {
-        commitLayoutActivityCheckpoint(
-          collaboration.doc,
-          collaboration.activityArray,
-          diagram.nodePositionsMap,
-          { [result.nodeId]: position },
-          'merge',
-          createActivityEvent(actor, 'edited', 'Updated the diagram on canvas', diagram.id),
-          collaborationOrigins.visualLayout,
+      if (typeof result.nodeId === 'string') {
+        const nodeId = result.nodeId;
+        const commit = () => commitLayoutActivityCheckpoint(
+          collaboration.doc, collaboration.activityArray, diagram.nodePositionsMap, { [nodeId]: position }, 'merge',
+          createActivityEvent(actor, 'edited', 'Updated the diagram on canvas', diagram.id), collaborationOrigins.visualLayout,
         );
-        setSelectedNodeIds([result.nodeId]);
+        if (historyAction) history?.runAction(historyAction, commit); else commit();
+        setSelectedNodeIds([nodeId]);
       }
       return result;
-    }));
+    }).finally(() => { if (historyAction) history?.endAction(historyAction); }));
   }, [activeDiagram, collaboration, runMutation]);
 
   const handlePasteClipboard = useCallback((clipboard: DiagramClipboardPayload, offset: DiagramClipboardPoint) => {
@@ -2035,26 +2085,23 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     if (!queue || !diagram || !collaboration || !actor) {
       return;
     }
+    const history = canvasHistoryRef.current;
+    const historyAction = history?.beginAction() ?? null;
 
-    undoManagerRef.current?.stopCapturing();
     const mutation = queue.pasteClipboard(clipboard, {
       onApplied: (result) => {
-        commitLayoutActivityCheckpoint(
-          collaboration.doc,
-          collaboration.activityArray,
-          diagram.nodePositionsMap,
-          getPastedClipboardPositions(clipboard, result.idMap, offset),
-          'merge',
-          createActivityEvent(actor, 'edited', 'Pasted diagram nodes on canvas', diagram.id),
-          collaborationOrigins.visualLayout,
+        const commit = () => commitLayoutActivityCheckpoint(
+          collaboration.doc, collaboration.activityArray, diagram.nodePositionsMap, getPastedClipboardPositions(clipboard, result.idMap, offset), 'merge',
+          createActivityEvent(actor, 'edited', 'Pasted diagram nodes on canvas', diagram.id), collaborationOrigins.visualLayout,
         );
+        if (historyAction) history?.runAction(historyAction, commit); else commit();
       },
-    });
+    }, (apply) => { if (historyAction) history?.runAction(historyAction, apply); else apply(); });
 
     runMutation(mutation.then((result) => {
       setSelectedNodeIds(result.pastedNodeIds);
       return result;
-    }));
+    }).finally(() => { if (historyAction) history?.endAction(historyAction); }));
   }, [activeDiagram, collaboration, runMutation]);
 
   const handleResetSharedLayout = useCallback(() => {
@@ -2075,19 +2122,34 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     );
   }, [activeDiagram, collaboration]);
 
+  const showCanvasHistoryNotice = useCallback((message: string) => {
+    if (canvasHistoryNoticeTimeoutRef.current !== null) window.clearTimeout(canvasHistoryNoticeTimeoutRef.current);
+    setCanvasHistoryNotice(message);
+    canvasHistoryNoticeTimeoutRef.current = window.setTimeout(() => {
+      canvasHistoryNoticeTimeoutRef.current = null;
+      setCanvasHistoryNotice(null);
+    }, 3_200);
+  }, []);
+
+  useEffect(() => () => {
+    if (canvasHistoryNoticeTimeoutRef.current !== null) window.clearTimeout(canvasHistoryNoticeTimeoutRef.current);
+  }, []);
+
   const handleCanvasUndo = useCallback(() => {
     if (historyPreview !== null) {
       return;
     }
-    undoManagerRef.current?.undo();
-  }, [historyPreview]);
+    const result = canvasHistoryRef.current?.undo();
+    if (result === 'stale') showCanvasHistoryNotice('Could not undo — this item changed since your edit.');
+  }, [historyPreview, showCanvasHistoryNotice]);
 
   const handleCanvasRedo = useCallback(() => {
     if (historyPreview !== null) {
       return;
     }
-    undoManagerRef.current?.redo();
-  }, [historyPreview]);
+    const result = canvasHistoryRef.current?.redo();
+    if (result === 'stale') showCanvasHistoryNotice('Could not redo — this item changed since your edit.');
+  }, [historyPreview, showCanvasHistoryNotice]);
 
   useEffect(() => {
     if (!activeDiagramId) {
@@ -2476,7 +2538,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
               onDistribute: overlayController.distribute,
               onPaste: overlayController.paste,
               onReorder: overlayController.reorder,
-              onUndo: overlayController.undo,
+              onUndo: handleCanvasUndo,
+              onRedo: handleCanvasRedo,
               onUpdate: overlayController.update,
               onEditText: overlayController.editText,
               onDuplicate: overlayController.duplicate,
@@ -2484,6 +2547,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
               onCommitComposition: overlayController.commitComposition,
               onAddStroke: overlayController.addStroke,
               onInkPreview: historyPreview === null ? handleInkPreviewChange : () => undefined,
+              onToolActivate: handleOverlayToolActivate,
+              onHistoryActionBegin: () => { overlayHistoryActionRef.current = canvasHistoryRef.current?.beginAction() ?? null; },
+              onHistoryActionEnd: () => { if (overlayHistoryActionRef.current) canvasHistoryRef.current?.endAction(overlayHistoryActionRef.current); overlayHistoryActionRef.current = null; },
+              onHistoryActionRun: (run) => { if (overlayHistoryActionRef.current) canvasHistoryRef.current?.runAction(overlayHistoryActionRef.current, run); else run(); },
+              nextInkPreviewSequence,
               remoteInkPreviews: historyPreview === null ? remoteCanvasPresence.flatMap((presence) => presence.canvas.ink_preview ? [{ id: String(presence.client_id), color: presence.participant.color, preview: presence.canvas.ink_preview }] : []) : [],
             } : undefined}
             preserveCamera={historyPreviewCameraLock}
@@ -2975,6 +3043,14 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         data-testid="workspace-touch-label-status"
         role="status"
       >{touchLabelStatus?.label ?? ''}</div>
+
+      <div
+        aria-atomic="true"
+        aria-live="polite"
+        className={`workspace-touch-label-status${canvasHistoryNotice ? ' is-visible' : ''}`}
+        data-testid="canvas-history-status"
+        role="status"
+      >{canvasHistoryNotice ?? ''}</div>
 
       <p aria-live="polite" className="visually-hidden">{roomKeyAnnouncement}</p>
 

@@ -693,11 +693,11 @@ export function getCanvasHistoryShortcut(
   hasModifier: boolean,
   hasShift: boolean,
 ): 'undo' | 'redo' | null {
-  if (!hasModifier || key.toLowerCase() !== 'z') {
+  if (!hasModifier) {
     return null;
   }
-
-  return hasShift ? 'redo' : 'undo';
+  if (key.toLowerCase() === 'z') return hasShift ? 'redo' : 'undo';
+  return key.toLowerCase() === 'y' && !hasShift ? 'redo' : null;
 }
 
 export function shouldRestoreCanvasFocusAfterPaste(activeElementIsInCanvas: boolean, activeElementIsBody: boolean): boolean {
@@ -1778,12 +1778,16 @@ export function DiagramCanvas({
     if (!isFlowchart && nextMode === 'connect') {
       return;
     }
+    if (nextMode !== 'laser') {
+      activeLaserPointerRef.current = null;
+      onLaserChange?.({ active: false });
+    }
     onLocalCanvasInteraction?.();
     onInteractionModeChange?.(nextMode);
     if (interactionMode === undefined) {
       setInternalMode(nextMode);
     }
-  }, [interactionMode, isFlowchart, onInteractionModeChange, onLocalCanvasInteraction]);
+  }, [interactionMode, isFlowchart, onInteractionModeChange, onLaserChange, onLocalCanvasInteraction]);
 
   useEffect(() => {
     if (mode === 'laser') return;
@@ -2226,6 +2230,9 @@ export function DiagramCanvas({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
       if (isTypingElement(event.target)) {
         return;
       }
@@ -2267,6 +2274,7 @@ export function DiagramCanvas({
         setEditingSubgraphId(null);
         setEditingSubgraphLabel('');
         setMode('select');
+        window.dispatchEvent(new Event('arielcharts-overlay-select'));
         canvas?.focus();
       }
 
@@ -2335,6 +2343,13 @@ export function DiagramCanvas({
       if (!isModifierShortcut && canvasOwnsSingleKeyFocus && key === 'l') {
         event.preventDefault();
         setMode(mode === 'laser' ? 'select' : 'laser');
+        return;
+      }
+
+      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && key === 'v') {
+        event.preventDefault();
+        setMode('select');
+        window.dispatchEvent(new Event('arielcharts-overlay-select'));
         return;
       }
 
@@ -2589,6 +2604,7 @@ export function DiagramCanvas({
 
   const handlePointerDownCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (mode === 'laser' && event.button === 0) {
+      if (event.target instanceof Element && event.target.closest('button, input, select, textarea, [contenteditable="true"], [role="dialog"], [data-canvas-pan-exclusion="true"]')) return;
       const canvas = containerRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
@@ -2737,6 +2753,7 @@ export function DiagramCanvas({
     setEditingNodeId(null);
     setSelectedSubgraphId(null);
     setEditingSubgraphId(null);
+    window.dispatchEvent(new Event('arielcharts-overlay-clear-selection'));
   }, [isPanning, setSelection]);
 
   const handleFlowPaneClick = useCallback((event: ReactMouseEvent) => {
@@ -3209,7 +3226,7 @@ export function DiagramCanvas({
     transitionTimingFunction: animateTransform && !useReactFlowRenderer ? 'ease, ease, ease' : undefined,
   }), [animateTransform, dotGridGeometry, useReactFlowRenderer]);
 
-  const canvasCursor = readOnly ? 'default' : isPanning ? 'grabbing' : mode === 'connect' ? 'crosshair' : spacePressed ? 'grab' : 'default';
+  const canvasCursor = readOnly ? 'default' : isPanning ? 'grabbing' : mode === 'connect' || mode === 'laser' ? 'crosshair' : spacePressed ? 'grab' : 'default';
   const hasGraphNodes = (graph?.nodes.length ?? 0) > 0;
   const sequenceEditorControls = isSequence && !readOnly && emptyState === null ? (
     <SequenceEditorControls

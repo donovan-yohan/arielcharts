@@ -1,16 +1,16 @@
 'use client';
 
 import type { OverlayLayerRecord, OverlayObjectRecord, OverlaySceneSnapshot } from '@arielcharts/shared';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import * as Y from 'yjs';
 import { inkGeometry, simplifyInkPoints, type InkMode, type InkPoint } from './freehand-ink';
+import { CanvasHistoryCoordinator } from './canvas-history';
 import {
   addOverlayObject,
   addOverlayLayer,
   beginOverlayTextComposition,
   commitOverlayTextComposition,
   copyOverlayObjects,
-  createOverlayUndoManager,
   deleteOverlayObjects,
   editOverlayText,
   getOverlayScene,
@@ -20,7 +20,7 @@ import {
   moveOverlayObjects,
   pasteOverlayObjects,
   readOverlayScene,
-  setOverlayOrderKey,
+  reorderOverlayObject,
   updateOverlayObject,
   updateOverlayLayer,
   type OverlayTextComposition,
@@ -42,10 +42,9 @@ export interface OverlaySceneController {
   distribute: (ids: readonly string[], axis: 'horizontal' | 'vertical') => void;
   anchor: (id: string, mermaidId: string) => void;
   remove: (ids: readonly string[]) => void;
-  reorder: (id: string, direction: 'front' | 'back') => void;
+  reorder: (id: string, direction: 'front' | 'back' | 'forward' | 'backward') => void;
   copy: (ids: readonly string[]) => void;
   paste: () => void;
-  undo: () => void;
   update: (id: string, patch: Partial<Omit<OverlayObjectRecord, 'id'>>) => void;
   editText: (id: string, index: number, deleteCount: number, insert: string) => void;
   duplicate: (id: string) => void;
@@ -81,18 +80,9 @@ export function updateOverlayControllerObject(
   return true;
 }
 
-export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): OverlaySceneController | null {
+export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, history: CanvasHistoryCoordinator | null = null): OverlaySceneController | null {
   const [scene, setScene] = useState<OverlaySceneSnapshot | null>(null);
   const [clipboard, setClipboard] = useState<OverlayObjectRecord[]>([]);
-  const sceneIdentity = doc && diagramId ? getOverlayScene(doc, diagramId)?.scene ?? null : null;
-  const undoManager = useMemo(() => {
-    if (!doc || !diagramId || !sceneIdentity) return null;
-    const handle = getOverlayScene(doc, diagramId);
-    return handle?.writable && handle.scene === sceneIdentity ? createOverlayUndoManager(doc, diagramId) : null;
-  }, [diagramId, doc, sceneIdentity]);
-
-  useEffect(() => () => undoManager?.destroy(), [undoManager]);
-
   useEffect(() => {
     if (!doc || !diagramId) { setScene(null); return; }
     const root = doc.getMap<Y.Map<unknown>>('overlays');
@@ -150,8 +140,11 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
     if (!doc || !diagramId) return;
     const sceneNow = readOverlayScene(doc, diagramId);
     if (!sceneNow.layers?.some(({ id }) => id === layerId)) return;
-    for (const object of sceneNow.objects.filter((item) => ids.includes(item.id) && !isOverlayObjectLocked(sceneNow, item))) updateOverlayObject(doc, diagramId, object.id, { layer: layerId });
-  }, [diagramId, doc]);
+    const assign = () => {
+      for (const object of sceneNow.objects.filter((item) => ids.includes(item.id) && !isOverlayObjectLocked(sceneNow, item))) updateOverlayObject(doc, diagramId, object.id, { layer: layerId });
+    };
+    if (history) history.withAction(assign); else assign();
+  }, [diagramId, doc, history]);
   const reorderLayer = useCallback((id: string, direction: 'front' | 'back') => {
     if (!doc || !diagramId) return;
     updateOverlayLayer(doc, diagramId, id, { order_key: `${direction === 'back' ? '!' : '~'}${Date.now().toString().padStart(16, '0')}:${doc.clientID}:${id}` });
@@ -160,13 +153,12 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
     if (!doc || !diagramId) return;
     const sceneNow = readOverlayScene(doc, diagramId);
     if (getOverlayTransformTargets(sceneNow, [id])) moveOverlayObjects(doc, diagramId, [id], dx, dy);
-    undoManager?.stopCapturing();
-  }, [diagramId, doc, undoManager]);
+  }, [diagramId, doc]);
   const moveMany = useCallback((ids: readonly string[], dx: number, dy: number) => {
     if (!doc || !diagramId) return;
     const sceneNow = readOverlayScene(doc, diagramId);
-    if (getOverlayTransformTargets(sceneNow, ids)) moveOverlayObjects(doc, diagramId, ids, dx, dy); undoManager?.stopCapturing();
-  }, [diagramId, doc, undoManager]);
+    if (getOverlayTransformTargets(sceneNow, ids)) moveOverlayObjects(doc, diagramId, ids, dx, dy);
+  }, [diagramId, doc]);
   const anchor = useCallback((id: string, mermaidId: string) => {
     if (!doc || !diagramId) return;
     const sceneNow = readOverlayScene(doc, diagramId); const object = sceneNow.objects.find((candidate) => candidate.id === id);
@@ -178,21 +170,20 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
     if (!doc || !diagramId) return;
     const sceneNow = readOverlayScene(doc, diagramId);
     deleteOverlayObjects(doc, diagramId, ids.filter((id) => { const object = sceneNow.objects.find((item) => item.id === id); return object && !isOverlayObjectLocked(sceneNow, object); }));
-    undoManager?.stopCapturing();
-  }, [diagramId, doc, undoManager]);
-  const reorder = useCallback((id: string, direction: 'front' | 'back') => {
+  }, [diagramId, doc]);
+  const reorder = useCallback((id: string, direction: 'front' | 'back' | 'forward' | 'backward') => {
     if (!doc || !diagramId) return;
     const sceneNow = readOverlayScene(doc, diagramId); const object = sceneNow.objects.find((item) => item.id === id); if (!object || isOverlayObjectLocked(sceneNow, object)) return;
-    const key = `${direction === 'back' ? '!' : '~'}${Date.now().toString().padStart(16, '0')}:${doc.clientID}:${id}`;
-    setOverlayOrderKey(doc, diagramId, id, key);
+    reorderOverlayObject(doc, diagramId, id, direction);
   }, [diagramId, doc]);
   const copy = useCallback((ids: readonly string[]) => {
     if (scene) setClipboard(copyOverlayObjects(scene, ids.filter((id) => { const object = scene.objects.find((item) => item.id === id); return object && !isOverlayObjectLocked(scene, object); })));
   }, [scene]);
   const paste = useCallback(() => {
     if (!doc || !diagramId || clipboard.length === 0) return;
-    pasteOverlayObjects(doc, diagramId, clipboard, () => `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`);
-  }, [clipboard, diagramId, doc]);
+    const paste = () => pasteOverlayObjects(doc, diagramId, clipboard, () => `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`);
+    if (history) history.withAction(paste); else paste();
+  }, [clipboard, diagramId, doc, history]);
 
   const update = useCallback((id: string, patch: Partial<Omit<OverlayObjectRecord, 'id'>>) => {
     if (!doc || !diagramId) return;
@@ -215,7 +206,6 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
     // A pointer-up is one user action even when another local overlay action
     // happened inside Yjs' capture window. Keep each immutable stroke as its
     // own undo unit.
-    undoManager?.stopCapturing();
     const id = `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`;
     addOverlayObject(doc, diagramId, {
       id,
@@ -227,8 +217,7 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
       metadata: { export: style.compositeExport ? 'composite-export' : 'arielcharts-only' },
       payload: { points: simplified, mode, composite_export: style.compositeExport },
     });
-    undoManager?.stopCapturing();
-  }, [diagramId, doc, undoManager]);
+  }, [diagramId, doc]);
   const beginComposition = useCallback((id: string) => {
     if (!doc || !diagramId) return null; const sceneNow = readOverlayScene(doc, diagramId); const object = sceneNow.objects.find((item) => item.id === id);
     return object && !isOverlayObjectLocked(sceneNow, object) ? beginOverlayTextComposition(doc, diagramId, id) : null;
@@ -245,16 +234,22 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null): Ov
     const horizontal = ['left', 'center', 'right'].includes(axis);
     const values = items.map((item) => axis === 'left' ? item.geometry.x : axis === 'center' ? item.geometry.x + item.geometry.width / 2 : axis === 'right' ? item.geometry.x + item.geometry.width : axis === 'top' ? item.geometry.y : axis === 'middle' ? item.geometry.y + item.geometry.height / 2 : item.geometry.y + item.geometry.height);
     const target = Math.min(...values);
-    for (const [index, item] of items.entries()) moveOverlayObjects(doc, diagramId, [item.id], horizontal ? target - values[index]! : 0, horizontal ? 0 : target - values[index]!);
-  }, [diagramId, doc]);
+    const align = () => {
+      for (const [index, item] of items.entries()) moveOverlayObjects(doc, diagramId, [item.id], horizontal ? target - values[index]! : 0, horizontal ? 0 : target - values[index]!);
+    };
+    if (history) history.withAction(align); else align();
+  }, [diagramId, doc, history]);
   const distribute = useCallback((ids: readonly string[], axis: 'horizontal' | 'vertical') => {
     if (!doc || !diagramId) return;
     const sceneNow = readOverlayScene(doc, diagramId); if (!getOverlayTransformTargets(sceneNow, ids)) return;
     const items = sceneNow.objects.filter((item) => ids.includes(item.id)).sort((left, right) => (axis === 'horizontal' ? left.geometry.x : left.geometry.y) - (axis === 'horizontal' ? right.geometry.x : right.geometry.y)); if (items.length < 3) return;
     const start = axis === 'horizontal' ? items[0]!.geometry.x : items[0]!.geometry.y; const end = axis === 'horizontal' ? items.at(-1)!.geometry.x : items.at(-1)!.geometry.y; const gap = (end - start) / (items.length - 1);
-    for (const [index, item] of items.entries()) { const target = start + gap * index; moveOverlayObjects(doc, diagramId, [item.id], axis === 'horizontal' ? target - item.geometry.x : 0, axis === 'vertical' ? target - item.geometry.y : 0); }
-  }, [diagramId, doc]);
+    const distribute = () => {
+      for (const [index, item] of items.entries()) { const target = start + gap * index; moveOverlayObjects(doc, diagramId, [item.id], axis === 'horizontal' ? target - item.geometry.x : 0, axis === 'vertical' ? target - item.geometry.y : 0); }
+    };
+    if (history) history.withAction(distribute); else distribute();
+  }, [diagramId, doc, history]);
 
   if (!scene) return null;
-  return { scene, add, addShape, addConnector, addFrame, addLayer, updateLayer, assignLayer, reorderLayer, move, moveMany, align, distribute, anchor, remove, reorder, copy, paste, undo: () => undoManager?.undo(), update, editText, duplicate, beginComposition, commitComposition, addStroke };
+  return { scene, add, addShape, addConnector, addFrame, addLayer, updateLayer, assignLayer, reorderLayer, move, moveMany, align, distribute, anchor, remove, reorder, copy, paste, update, editText, duplicate, beginComposition, commitComposition, addStroke };
 }

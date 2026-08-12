@@ -202,7 +202,7 @@ describe('new semantic families', () => {
     expect(canvasSource).toMatch(/isCynefin && !readOnly && cynefinDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
     expect(workspaceSource).toMatch(/cynefin: \{ seed: 55 \}/u);
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'cynefin'\)/u);
-    expect(workspaceSource).toMatch(/if \(nextText === previousText\) return \{ applied: true \};\s*undoManagerRef\.current\?\.stopCapturing\(\);\s*collaboration\.doc\.transact[^]*?collaborationOrigins\.visual\);\s*undoManagerRef\.current\?\.stopCapturing\(\);/u);
+    expect(workspaceSource).toMatch(/if \(nextText === previousText\) return \{ applied: true \};\s*collaboration\.doc\.transact[^]*?collaborationOrigins\.visual\);/u);
     for (const action of ['AddCynefinItem', 'EditCynefinItem', 'DeleteCynefinItem', 'MoveCynefinItem', 'AddCynefinTransition', 'EditCynefinTransition', 'DeleteCynefinTransition', 'MoveCynefinTransition']) {
       expect(workspaceSource).toMatch(new RegExp(`on${action}[^]*?mutateCanvasSource`, 'u'));
     }
@@ -280,7 +280,7 @@ describe('new semantic families', () => {
     expect(workspaceE2eSource).toMatch(/function expectCatalogStarterMobileSweep[^]*?originalWorkingTabName[^]*?originalWorkingSource[^]*?originalWorkingMode[^]*?originalWorkingCamera[^]*?selectTabByName\(page, originalWorkingTabName\)[^]*?waitForSource\(page, originalWorkingSource\)[^]*?catalog handoff restored camera[^]*?originalWorkingDiagram\.id/u);
     expect(workspaceE2eSource).toMatch(/function expectResponsiveNumericPanel[^]*?selectTabByName\(page, diagramName\)[^]*?intendedSource[^]*?intendedMode[^]*?numeric restored intended-tab camera[^]*?replaceSource\(page, source\)/u);
     expect(workspaceE2eSource).toMatch(/function expectCatalogStarterSweep[^]*?originalWorkingTabName[^]*?originalWorkingSource[^]*?originalWorkingMode[^]*?originalWorkingCamera[^]*?expectRemoteUpdateWithoutAnchorJump[^]*?Restore generated Flowchart catalog starter after representative MCP proof[^]*?for \(const \{ family, id, name \} of catalogDiagrams\)[^]*?selectTabByName\(page, originalWorkingTabName\)[^]*?waitForSource\(page, originalWorkingSource\)[^]*?toHaveText\(originalWorkingMode\)[^]*?catalog handoff original working camera/u);
-    expect(workspaceE2eSource).toMatch(/function assertClosedOverlayToggleBesideError[^]*?assertTouchTarget[^]*?assertContainedInViewport\(page, toggle[^]*?viewportSize\(\)\?\.width[^]*?<= 420[^]*?toggle overlaps its error banner/u);
+    expect(workspaceE2eSource).toMatch(/function assertClosedOverlayToggleBesideError[^]*?hitBelongsToToggle[^]*?width >= 44[^]*?assertContainedInViewport\(page, toggle[^]*?toggleBounds\.y >= canvasBounds\.y \+ 6[^]*?toggle overlaps its error banner/u);
   });
 
   it('keeps unique Packet rows mounted across preceding-width shifts and withholds ambiguous repeated controls', () => {
@@ -384,6 +384,12 @@ describe('sequence semantic editor', () => {
     expect(workspaceSource).toMatch(/onEditSequenceNote[^]*?editSequenceNote/u);
     expect(workspaceSource).toMatch(/onEditSequenceActivation[^]*?editSequenceActivation/u);
     expect(workspaceSource).toMatch(/onEditSequenceFragment[^]*?editSequenceFragment/u);
+  });
+
+  it('keeps short touch sequence controls below the measured overlay toolbar lane', () => {
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/@media \(pointer: coarse\) and \(max-height: 500px\)[^]*?\[data-testid='diagram-canvas'\]\[data-overlay-toolbar-safe-top='true'\] \.canvas-sequence-editor:not\(\.is-centered\)[^]*?top: var\(--overlay-toolbar-safe-top\);/u);
+    expect(css).toMatch(/canvas-sequence-editor:not\(\.is-centered\)[^]*?max-height: calc\(100% - var\(--overlay-toolbar-safe-top\) - 12px\);/u);
   });
 });
 
@@ -569,7 +575,7 @@ describe('getCanvasHistoryShortcut', () => {
     expect(getCanvasHistoryShortcut('z', true, false)).toBe('undo');
     expect(getCanvasHistoryShortcut('Z', true, true)).toBe('redo');
     expect(getCanvasHistoryShortcut('z', false, false)).toBeNull();
-    expect(getCanvasHistoryShortcut('y', true, false)).toBeNull();
+    expect(getCanvasHistoryShortcut('y', true, false)).toBe('redo');
   });
 });
 

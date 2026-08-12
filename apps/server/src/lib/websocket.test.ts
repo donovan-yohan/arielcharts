@@ -863,6 +863,120 @@ describe('SessionWebSocketServer', () => {
     await observer.close();
   });
 
+  it('strips stale transient samples while fanning out fresh canvas presence', async () => {
+    const sessionId = 'abc123de';
+    const sender = await openClient(port, sessionId, roomCookie);
+    const observer = await openClient(port, sessionId, roomCookie);
+    const participant = { name: 'Mixed presence', color: '#7c3aed', type: 'human' };
+    const session = await app.manager.getOrCreateSession(sessionId);
+    const laser = (sequence: number) => ({ active: true, sequence, point: { x: sequence, y: sequence } });
+    const inkPreview = (sequence: number) => ({
+      active: true, sequence, mode: 'pen', color: '#7c3aed', width: 3, opacity: 1,
+      points: [{ x: 1, y: 2 }, { x: 3, y: 4 }],
+    });
+
+    sender.sendAwareness([{
+      clientId: 420,
+      clock: 1,
+      state: { user: participant, canvas: { diagram_id: 'main', laser: laser(5) } },
+    }]);
+    await waitFor(() => expect(observer.awareness.getStates().get(420)).toEqual({
+      user: participant, canvas: { diagram_id: 'main', laser: laser(5) },
+    }));
+    const observerBeforeCursor = observer.awarenessMessageCount;
+    sender.sendAwareness([{
+      clientId: 420,
+      clock: 2,
+      state: { user: participant, canvas: { diagram_id: 'main', cursor: { x: 80, y: 48 }, laser: laser(5) } },
+    }]);
+    const cursorWithCurrentLaser = { user: participant, canvas: { diagram_id: 'main', cursor: { x: 80, y: 48 }, laser: laser(5) } };
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(420)).toEqual(cursorWithCurrentLaser);
+      expect(observer.awareness.getStates().get(420)).toEqual(cursorWithCurrentLaser);
+      expect(observer.awarenessMessageCount).toBeGreaterThan(observerBeforeCursor);
+    });
+
+    sender.sendAwareness([{
+      clientId: 420,
+      clock: 3,
+      state: { user: participant, canvas: { diagram_id: 'main', cursor: { x: 84, y: 52 }, laser: laser(4) } },
+    }]);
+    const cursorOnly = { user: participant, canvas: { diagram_id: 'main', cursor: { x: 84, y: 52 } } };
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(420)).toEqual(cursorOnly);
+      expect(observer.awareness.getStates().get(420)).toEqual(cursorOnly);
+    });
+
+    sender.sendAwareness([{
+      clientId: 420,
+      clock: 4,
+      state: { user: participant, canvas: { diagram_id: 'main', ink_preview: inkPreview(7) } },
+    }]);
+    await waitFor(() => expect(observer.awareness.getStates().get(420)).toEqual({
+      user: participant, canvas: { diagram_id: 'main', ink_preview: inkPreview(7) },
+    }));
+    const observerBeforeSelection = observer.awarenessMessageCount;
+    sender.sendAwareness([{
+      clientId: 420,
+      clock: 5,
+      state: { user: participant, canvas: { diagram_id: 'main', selected_node_ids: ['A', 'B'], ink_preview: inkPreview(7) } },
+    }]);
+    const selectionWithCurrentPreview = { user: participant, canvas: { diagram_id: 'main', selected_node_ids: ['A', 'B'], ink_preview: inkPreview(7) } };
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(420)).toEqual(selectionWithCurrentPreview);
+      expect(observer.awareness.getStates().get(420)).toEqual(selectionWithCurrentPreview);
+      expect(observer.awarenessMessageCount).toBeGreaterThan(observerBeforeSelection);
+    });
+
+    sender.sendAwareness([{
+      clientId: 420,
+      clock: 6,
+      state: { user: participant, canvas: { diagram_id: 'main', selected_node_ids: ['A', 'B'], ink_preview: inkPreview(6) } },
+    }]);
+    const selectionOnly = { user: participant, canvas: { diagram_id: 'main', selected_node_ids: ['A', 'B'] } };
+    await waitFor(() => {
+      expect(session.awareness.getStates().get(420)).toEqual(selectionOnly);
+      expect(observer.awareness.getStates().get(420)).toEqual(selectionOnly);
+    });
+    const freshObserver = await openClient(port, sessionId, roomCookie);
+    await waitFor(() => expect(freshObserver.awareness.getStates().get(420)).toEqual(selectionOnly));
+
+    await freshObserver.close();
+    await sender.close();
+    await observer.close();
+  });
+
+  it('resets reconnect watermarks while preserving concurrent canvas transients within the shared awareness budget', async () => {
+    const sessionId = 'abc123de';
+    const sender = await openClient(port, sessionId, roomCookie);
+    const observer = await openClient(port, sessionId, roomCookie);
+    const participant = { name: 'Reconnect presence', color: '#2563eb', type: 'human' };
+    const sample = (sequence: number) => ({
+      user: participant,
+      canvas: {
+        cursor: { x: sequence, y: sequence + 1 },
+        diagram_id: 'main',
+        ink_preview: { active: true, color: '#2563eb', mode: 'pen', opacity: 1, points: [{ x: sequence, y: sequence }], sequence, width: 3 },
+        laser: { active: true, point: { x: sequence, y: sequence }, sequence },
+      },
+    });
+    sender.sendAwareness([{ clientId: 421, clock: 1, state: sample(80) }]);
+    await waitFor(() => expect(observer.awareness.getStates().get(421)).toEqual(sample(80)));
+    await sender.close();
+    await waitFor(() => expect(observer.awareness.getStates().has(421)).toBe(false));
+
+    const reconnected = await openClient(port, sessionId, roomCookie);
+    // 81 combined canvas frames stay below the 120-message/10-second budget
+    // while exercising fresh cursor, ink, and laser fan-out after reconnect.
+    for (let sequence = 1; sequence <= 81; sequence += 1) {
+      reconnected.sendAwareness([{ clientId: 421, clock: 100 + sequence, state: sample(sequence) }]);
+    }
+    await waitFor(() => expect(observer.awareness.getStates().get(421)).toEqual(sample(81)));
+    expect(reconnected.socket.readyState).toBe(WebSocket.OPEN);
+    await reconnected.close();
+    await observer.close();
+  });
+
   it('admits the legitimate ten-second laser cadence with stop and collaboration headroom', async () => {
     const sessionId = 'abc123de';
     const sender = await openClient(port, sessionId, roomCookie);

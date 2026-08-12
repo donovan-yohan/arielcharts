@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { chromium, expect, type Browser, type Locator, type Page } from '@playwright/test';
+import { chromium, expect, type Browser, type CDPSession, type Locator, type Page } from '@playwright/test';
 import { WebSocket as NodeWebSocket } from 'ws';
 import {
   assertNoPageErrors,
@@ -94,18 +94,30 @@ async function expectCollaborativeAnnotations(pageA: Page, pageB: Page): Promise
   await overlayList.getByRole('button', { name: /shape\.ellipse:/u }).click({ modifiers: ['Control'] });
   await verifiedOverlayClick(pageA, 'Frame selection');
   await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(4);
-  const frame = pageA.locator('[data-testid^="overlay-object-"]').last();
-  await frame.click(); await verifiedOverlayClick(pageA, 'Lock frame');
-  await expect(pageA.getByRole('button', { name: 'Move right', exact: true })).toBeDisabled();
+  const frameInPalette = overlayList.locator('ul').first().locator('li > button').last();
+  await frameInPalette.scrollIntoViewIfNeeded();
+  await frameInPalette.click(); await verifiedOverlayClick(pageA, 'Lock frame');
+  await expect(pageA.getByRole('button', { name: 'Move right', exact: true })).toHaveCount(0);
   await verifiedOverlayClick(pageA, 'Unlock frame');
   const excludeFrameMembers = pageA.getByRole('button', { name: 'Exclude frame members from composite export', exact: true });
   await expect(excludeFrameMembers).toBeEnabled();
   await verifiedOverlayClick(pageA, 'Exclude frame members from composite export');
   await expect(pageA.getByRole('button', { name: 'Include frame members in composite export', exact: true })).toBeVisible();
+  await Promise.all([verifiedOverlayClick(pageA, 'Close overlay tools'), verifiedOverlayClick(pageB, 'Close overlay tools')]);
+  await Promise.all([verifiedOverlayClick(pageA, 'Overlay tools'), verifiedOverlayClick(pageB, 'Overlay tools')]);
+  const textListA = pageA.getByLabel('ArielCharts overlay list', { exact: true }).getByRole('button', { name: /^Text:/u });
+  const textListB = pageB.getByLabel('ArielCharts overlay list', { exact: true }).getByRole('button', { name: /^Text:/u });
+  await Promise.all([expect(textListA).toHaveCount(1), expect(textListB).toHaveCount(1)]);
+  await Promise.all([textListA.scrollIntoViewIfNeeded(), textListB.scrollIntoViewIfNeeded()]);
+  await Promise.all([textListA.click(), textListB.click()]);
+  await Promise.all([verifiedOverlayClick(pageA, 'Close overlay tools'), verifiedOverlayClick(pageB, 'Close overlay tools')]);
+  const selectedTextA = pageA.locator('[data-testid^="overlay-object-"][data-selected="true"]');
+  const selectedTextB = pageB.locator('[data-testid^="overlay-object-"][data-selected="true"]');
+  await Promise.all([expect(selectedTextA).toHaveCount(1), expect(selectedTextB).toHaveCount(1)]);
+  await Promise.all([selectedTextA.press('Enter'), selectedTextB.press('Enter')]);
   const notesA = pageA.locator('textarea[aria-label="Free text contents"]');
   const notesB = pageB.locator('textarea[aria-label="Free text contents"]');
   await Promise.all([notesA.first().waitFor({ state: 'visible' }), notesB.first().waitFor({ state: 'visible' })]);
-  await Promise.all([verifiedOverlayClick(pageA, 'Close overlay tools'), verifiedOverlayClick(pageB, 'Close overlay tools')]);
   await notesA.first().fill('shared');
   await expect(notesB.first()).toHaveValue('shared');
   await notesA.first().dispatchEvent('compositionstart');
@@ -117,21 +129,172 @@ async function expectCollaborativeAnnotations(pageA: Page, pageB: Page): Promise
   await notesA.first().dispatchEvent('compositionend', { data: '漢' });
   await expect.poll(async () => notesA.first().inputValue()).toContain('peer ');
   await expect.poll(async () => notesB.first().inputValue()).toContain('漢');
-  await verifiedOverlayClick(pageB, 'Overlay tools'); await verifiedOverlayClick(pageB, 'Add sticky note'); await verifiedOverlayClick(pageB, 'Close overlay tools');
+  await verifiedOverlayClick(pageB, 'Overlay tools'); await verifiedOverlayClick(pageB, 'Add sticky note');
+  await expect(pageA.locator('[data-testid^="overlay-object-"]')).toHaveCount(5);
+  await verifiedOverlayClick(pageA, 'Overlay tools');
+  const stickyListA = pageA.getByLabel('ArielCharts overlay list', { exact: true }).getByRole('button', { name: /^Sticky note:/u });
+  const stickyListB = pageB.getByLabel('ArielCharts overlay list', { exact: true }).getByRole('button', { name: /^Sticky note:/u });
+  await Promise.all([expect(stickyListA).toHaveCount(1), expect(stickyListB).toHaveCount(1)]);
+  await Promise.all([stickyListA.scrollIntoViewIfNeeded(), stickyListB.scrollIntoViewIfNeeded()]);
+  await Promise.all([stickyListA.click(), stickyListB.click()]);
+  await Promise.all([verifiedOverlayClick(pageA, 'Close overlay tools'), verifiedOverlayClick(pageB, 'Close overlay tools')]);
+  const selectedStickyA = pageA.locator('[data-testid^="overlay-object-"][data-selected="true"]');
+  const selectedStickyB = pageB.locator('[data-testid^="overlay-object-"][data-selected="true"]');
+  await Promise.all([expect(selectedStickyA).toHaveCount(1), expect(selectedStickyB).toHaveCount(1)]);
+  await Promise.all([selectedStickyA.press('Enter'), selectedStickyB.press('Enter')]);
   const stickyA = pageA.locator('textarea[aria-label="Sticky note contents"]');
   const stickyB = pageB.locator('textarea[aria-label="Sticky note contents"]');
   await Promise.all([stickyA.waitFor({ state: 'visible' }), stickyB.waitFor({ state: 'visible' })]);
   await stickyB.fill('different note'); await expect(stickyA).toHaveValue('different note');
+  await stickyA.blur();
+  await verifiedOverlayClick(pageA, 'Overlay tools');
+  await verifiedOverlayClick(pageA, 'Add overlay');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(6);
+  const undoText = pageA.getByLabel('ArielCharts overlay list', { exact: true }).getByRole('button', { name: /^Text:/u }).last();
+  await undoText.click();
+  await verifiedOverlayClick(pageA, 'Close overlay tools');
+  const undoObject = pageA.locator('[data-testid^="overlay-object-"][data-selected="true"]');
+  await expect(undoObject).toHaveCount(1);
+  await undoObject.focus();
+  const beforeMove = await undoObject.getAttribute('data-world-x');
+  await undoObject.press('ArrowRight');
+  await expect.poll(() => undoObject.getAttribute('data-world-x')).not.toBe(beforeMove);
+  const movedX = await undoObject.getAttribute('data-world-x');
+  await undoObject.press('ControlOrMeta+z');
+  await expect.poll(() => undoObject.getAttribute('data-world-x')).toBe(beforeMove);
+  await undoObject.press('ControlOrMeta+Shift+z');
+  await expect.poll(() => undoObject.getAttribute('data-world-x')).toBe(movedX);
+  await undoObject.press('Delete');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(5);
+  await pageA.getByTestId('diagram-canvas').focus();
+  await pageA.keyboard.press('ControlOrMeta+z');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(6);
+  await pageA.keyboard.press('ControlOrMeta+y');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(5);
   const afterSourceA = await canonicalPageSource(pageA); const afterSourceB = await canonicalPageSource(pageB);
   assert(afterSourceA === sourceA && afterSourceB === sourceB && sourceA === sourceB,
     `Collaborative annotation edits changed byte-identical Mermaid source: ${JSON.stringify({ sourceA, sourceB, afterSourceA, afterSourceB })}`);
 }
 
+/** The canvas owns one local-human chronological history across Mermaid and overlays. */
+async function expectUnifiedCanvasHistory(pageA: Page, pageB: Page): Promise<void> {
+  const canvasA = pageA.getByTestId('diagram-canvas');
+  const sourceBefore = await canonicalPageSource(pageA);
+  const initialOverlayCount = await pageA.locator('[data-testid^="overlay-object-"]').count();
+
+  // draw → node move → draw → semantic canvas source replacement
+  await verifiedOverlayClick(pageA, 'Overlay tools');
+  await verifiedOverlayClick(pageA, 'Add overlay');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(initialOverlayCount + 1);
+  await verifiedOverlayClick(pageA, 'Close overlay tools');
+
+  const nodeId = await nodeIdAt(pageA, 0);
+  const nodeBefore = await getReactFlowNodePosition(nodeById(pageA, nodeId), 'History fixture node was missing.');
+  await nudgeNode(pageA, nodeById(pageA, nodeId), 56, 28);
+  await waitForReactFlowNodePositionMovement(pageA, nodeId, nodeBefore);
+  const nodeMoved = await getReactFlowNodePosition(nodeById(pageA, nodeId), 'History fixture node disappeared after move.');
+  await waitForReactFlowNodePositionMatch(pageB, nodeId, nodeMoved);
+
+  await verifiedOverlayClick(pageA, 'Overlay tools');
+  await verifiedOverlayClick(pageA, 'Rectangle');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(initialOverlayCount + 2);
+  await verifiedOverlayClick(pageA, 'Close overlay tools');
+
+  await pageA.getByRole('button', { name: 'Add node to Mermaid text', exact: true }).click();
+  await expect.poll(() => canonicalPageSource(pageA)).not.toBe(sourceBefore);
+  const canvasSource = await canonicalPageSource(pageA);
+  await waitForSource(pageB, canvasSource);
+
+  await canvasA.focus();
+  await pageA.keyboard.press('ControlOrMeta+z');
+  await waitForSource(pageA, sourceBefore);
+  await waitForSource(pageB, sourceBefore);
+  await canvasA.focus();
+  await pageA.keyboard.press('ControlOrMeta+z');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(initialOverlayCount + 1);
+  await canvasA.focus();
+  await pageA.keyboard.press('ControlOrMeta+z');
+  await waitForReactFlowNodePositionMovement(pageA, nodeId, nodeMoved);
+  const nodeUndone = await getReactFlowNodePosition(nodeById(pageA, nodeId), 'History fixture node disappeared after undo.');
+  await waitForReactFlowNodePositionMatch(pageB, nodeId, nodeUndone);
+  await canvasA.focus();
+  await pageA.keyboard.press('ControlOrMeta+z');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(initialOverlayCount);
+
+  await pageA.keyboard.press('ControlOrMeta+y');
+  await canvasA.focus();
+  await pageA.keyboard.press('ControlOrMeta+y');
+  await waitForReactFlowNodePositionMatch(pageA, nodeId, nodeMoved);
+  await canvasA.focus();
+  await pageA.keyboard.press('ControlOrMeta+y');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(initialOverlayCount + 2);
+  await canvasA.focus();
+  await pageA.keyboard.press('ControlOrMeta+y');
+  await waitForSource(pageA, canvasSource);
+
+  // Source focus is owned by CodeMirror, not the canvas journal.
+  const editor = await ensureSourceFlyoutOpen(pageA);
+  await editor.click();
+  await pageA.keyboard.press('Control+End');
+  await pageA.keyboard.insertText(' ');
+  await expect.poll(() => sourceEditorValue(editor)).not.toBe(canvasSource);
+  await pageA.keyboard.press('ControlOrMeta+z');
+  await waitForSource(pageA, canvasSource);
+  await waitForSource(pageB, canvasSource);
+  await closeSourceFlyout(pageA);
+
+  // A peer's same-node update invalidates only that top local command. The
+  // concise status is announced and the following shortcut reaches the older,
+  // unrelated local draw without clobbering the peer.
+  const safeCount = await pageA.locator('[data-testid^="overlay-object-"]').count();
+  await verifiedOverlayClick(pageA, 'Overlay tools');
+  await verifiedOverlayClick(pageA, 'Add overlay');
+  await verifiedOverlayClick(pageA, 'Close overlay tools');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(safeCount + 1);
+  const beforeLocalMove = await getReactFlowNodePosition(nodeById(pageA, nodeId), 'Stale-history node was missing.');
+  await nudgeNode(pageA, nodeById(pageA, nodeId), 44, 18);
+  await waitForReactFlowNodePositionMovement(pageA, nodeId, beforeLocalMove);
+  const localMove = await getReactFlowNodePosition(nodeById(pageA, nodeId), 'Stale-history local move was missing.');
+  await waitForReactFlowNodePositionMatch(pageB, nodeId, localMove);
+  await nudgeNode(pageB, nodeById(pageB, nodeId), -72, 31);
+  await waitForReactFlowNodePositionMovement(pageB, nodeId, localMove);
+  const peerMove = await getReactFlowNodePosition(nodeById(pageB, nodeId), 'Peer stale-history move was missing.');
+  await waitForReactFlowNodePositionMatch(pageA, nodeId, peerMove);
+  await canvasA.focus();
+  await pageA.keyboard.press('ControlOrMeta+z');
+  await expect(pageA.getByTestId('canvas-history-status')).toHaveText('Could not undo — this item changed since your edit.');
+  await waitForReactFlowNodePositionMatch(pageA, nodeId, peerMove);
+  await pageA.keyboard.press('ControlOrMeta+z');
+  await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(safeCount);
+  // This helper is an isolated canvas-history fixture. Return its semantic
+  // source command to the collaboration suite baseline; the peer's later
+  // same-node move remains untouched and is intentionally not rolled back.
+  await canvasA.focus();
+  await pageA.keyboard.press('ControlOrMeta+z');
+  await waitForSource(pageA, sourceBefore);
+  await waitForSource(pageB, sourceBefore);
+  // The stale-peer drag intentionally selected the node in B. A real blank
+  // pane click clears that local-only selection before the next presence case.
+  const paneB = pageB.locator('.react-flow__pane');
+  await paneB.click({ position: { x: 12, y: 12 } });
+  await expect(pageB.locator('.react-flow__node.selected')).toHaveCount(0);
+}
+
 async function expectCollaborativeInk(
   pageA: Page,
   pageB: Page,
-  cdpA: { send(method: string, params?: Record<string, unknown>): Promise<unknown> },
+  cdpA: CDPSession,
 ): Promise<void> {
+  const inkFrames: Array<{ clock: number; sequence: number }> = [];
+  await cdpA.send('Network.enable');
+  const onFrameSent = (event: { response: { payloadData: string } }) => {
+    // Awareness payloads carry a compact binary envelope with one JSON state
+    // string. Keep only numeric transport facts; never log canvas content.
+    const payload = Buffer.from(event.response.payloadData, 'base64').toString('utf8');
+    const matches = [...payload.matchAll(/"ink_preview":\{"active":true,"sequence":(\d+)/gu)];
+    for (const match of matches) inkFrames.push({ clock: -1, sequence: Number(match[1]) });
+  };
+  cdpA.on('Network.webSocketFrameSent', onFrameSent);
   const sourceBefore = await canonicalPageSource(pageA);
   const canvas = pageA.getByTestId('diagram-canvas');
   const canvasBox = await boxOf(canvas, 'Ink canvas was missing.');
@@ -147,10 +310,18 @@ async function expectCollaborativeInk(
   await pageA.mouse.move(canvasBox.x + 280, canvasBox.y + 230, { steps: 4 });
   // Presence is deliberately coalesced; give one later input event a chance to
   // publish the lossy preview rather than relying on a durable final stroke.
-  await pageA.waitForTimeout(150);
+  // Page A owns a virtual browser clock, so advance that clock instead of
+  // sleeping against wall time and leaving preview coalescing frozen.
+  await pageA.clock.fastForward(150);
   await pageA.mouse.move(canvasBox.x + 292, canvasBox.y + 238);
   const remotePreview = pageB.locator('[data-testid^="ink-preview-"]');
-  await remotePreview.waitFor({ state: 'visible', timeout: 15_000 });
+  try {
+    await remotePreview.waitFor({ state: 'visible', timeout: 15_000 });
+  } catch (error) {
+    throw new Error(`Remote ink preview did not arrive; structural frames=${JSON.stringify(inkFrames)}`, { cause: error });
+  } finally {
+    cdpA.off('Network.webSocketFrameSent', onFrameSent);
+  }
   await pageA.mouse.up();
   await remotePreview.waitFor({ state: 'detached', timeout: 15_000 });
   await Promise.all([
@@ -207,13 +378,17 @@ async function verifiedOverlayClick(page: Page, name: string): Promise<void> {
 
 async function canonicalPageSource(page: Page): Promise<string> {
   const editor = await ensureSourceFlyoutOpen(page);
-  const value = await editor.evaluate((element) => [...element.querySelectorAll('.cm-line')].map((line) => {
+  const value = await sourceEditorValue(editor);
+  await closeSourceFlyout(page);
+  return value;
+}
+
+async function sourceEditorValue(editor: Locator): Promise<string> {
+  return editor.evaluate((element) => [...element.querySelectorAll('.cm-line')].map((line) => {
     const copy = line.cloneNode(true) as HTMLElement;
     copy.querySelectorAll('.cm-ySelectionCaret, .cm-widgetBuffer').forEach((widget) => { widget.remove(); });
     return copy.textContent ?? '';
   }).join('\n'));
-  await closeSourceFlyout(page);
-  return value;
 }
 
 async function replaceSource(page: Page, source: string): Promise<void> {
@@ -224,14 +399,11 @@ async function replaceSource(page: Page, source: string): Promise<void> {
 }
 
 async function waitForSource(page: Page, expected: string): Promise<void> {
-  await page.waitForFunction((source) => {
-    const lines = [...document.querySelectorAll('.cm-line')];
-    return lines.map((line) => {
-      const documentLine = line.cloneNode(true) as HTMLElement;
-      documentLine.querySelectorAll('.cm-ySelectionCaret, .cm-widgetBuffer').forEach((widget) => { widget.remove(); });
-      return documentLine.textContent ?? '';
-    }).join('\n') === source;
-  }, expected, { timeout: 15_000 });
+  const toggle = page.getByTestId('source-flyout-toggle');
+  const wasOpen = await toggle.getAttribute('aria-expanded') === 'true';
+  const editor = await ensureSourceFlyoutOpen(page);
+  await expect.poll(() => sourceEditorValue(editor)).toBe(expected);
+  if (!wasOpen) await closeSourceFlyout(page);
 }
 
 async function waitForFlowchart(page: Page): Promise<void> {
@@ -659,6 +831,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await closeSourceFlyout(pageA);
     await Promise.all([waitForFlowchart(pageA), waitForFlowchart(pageB)]);
     await expectCollaborativeAnnotations(pageA, pageB);
+    await expectUnifiedCanvasHistory(pageA, pageB);
     await expectCollaborativeInk(pageA, pageB, cdpA);
 
     const pageAParticipantName = await getInternalParticipantName(pageA);
@@ -708,6 +881,50 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await remoteLaser.waitFor({ state: 'detached', timeout: 15_000 });
     assert(await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).count() === 1,
       'Escape did not exit the laser tool.');
+
+    const startLaserSample = async () => {
+      await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
+      await pageA.mouse.move(canvasABox.x + 220, canvasABox.y + 180);
+      await pageA.mouse.down();
+      await pageA.mouse.move(canvasABox.x + 240, canvasABox.y + 200);
+      await remoteLaser.waitFor({ state: 'visible', timeout: 15_000 });
+    };
+    const expectLaserExit = async (exit: () => Promise<void>, label: string, options: { releaseBeforeExit?: boolean; restoresCanvasLaserControl?: boolean } = {}) => {
+      if (options.releaseBeforeExit) {
+        await pageA.mouse.up();
+        await remoteLaser.waitFor({ state: 'detached', timeout: 15_000 });
+      }
+      await exit();
+      await pageA.mouse.up();
+      await remoteLaser.waitFor({ state: 'detached', timeout: 15_000 });
+      assert(await pageA.locator('[data-testid="laser-pointer-local"]').count() === 0,
+        `${label} left a local laser sample active.`);
+      if (options.restoresCanvasLaserControl !== false) await expect(pageA.getByRole('button', { name: 'Laser pointer', exact: true })).toHaveCount(1);
+    };
+    await startLaserSample();
+    await expectLaserExit(() => pageA.getByRole('button', { name: 'Exit laser pointer', exact: true }).click(), 'Laser toolbar exit', { releaseBeforeExit: true });
+    await startLaserSample();
+    await expectLaserExit(async () => { await canvasA.focus(); await pageA.keyboard.press('l'); }, 'Laser L exit');
+    await startLaserSample();
+    await expectLaserExit(async () => { await canvasA.focus(); await pageA.keyboard.press('v'); }, 'Laser V exit');
+    for (const overlayTool of ['Select overlay tool', 'Pen', 'Highlighter', 'Erase stroke'] as const) {
+      await startLaserSample();
+      if (overlayTool !== 'Select overlay tool') {
+        // A physical toolbar click ends the held pointer first; prove the sample
+        // reached the peer, then verify that the released canvas can open the
+        // palette before activating its mutually-exclusive drawing tool.
+        await pageA.mouse.up();
+        await remoteLaser.waitFor({ state: 'detached', timeout: 15_000 });
+        await verifiedOverlayClick(pageA, 'Overlay tools');
+        await expect(pageA.getByRole('button', { name: 'Close overlay tools', exact: true })).toHaveCount(1);
+        await expect(pageA.getByLabel('More overlay tools', { exact: true })).toBeVisible();
+      }
+      await expectLaserExit(() => pageA.getByRole('button', { name: overlayTool, exact: true }).click(), `Laser ${overlayTool} exit`, { restoresCanvasLaserControl: false });
+      if (overlayTool !== 'Select overlay tool') await verifiedOverlayClick(pageA, 'Close overlay tools');
+      await canvasA.focus();
+      await pageA.keyboard.press('v');
+      await expect(pageA.getByRole('button', { name: 'Laser pointer', exact: true })).toHaveCount(1);
+    }
 
     await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
     await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 1, pointerType: 'pen', type: 'mousePressed', x: canvasABox.x + 180, y: canvasABox.y + 140 });
@@ -932,10 +1149,15 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await pageA.waitForTimeout(NEGATIVE_OBSERVATION_WINDOW_MS);
     const draftRead = await mcp.readDiagram(sessionId, main.id);
     assert(draftRead.mermaidText === mergedSource, 'A node-label draft streamed through shared Mermaid source before commit.');
+    console.log('E2E canvas-presence: before-focus');
     await pageA.evaluate(() => { window.dispatchEvent(new Event('focus')); });
+    console.log('E2E canvas-presence: after-focus');
     await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
-    await pageA.mouse.move(presenceNodeBox.x + (presenceNodeBox.width / 2), presenceNodeBox.y + (presenceNodeBox.height / 2));
+    const resumedCanvasBox = await boxOf(pageA.getByTestId('diagram-canvas'), 'Canvas was missing after focus.');
+    console.log('E2E canvas-presence: before-fresh-cursor');
+    await pageA.mouse.move(resumedCanvasBox.x + 48, resumedCanvasBox.y + resumedCanvasBox.height - 48);
     await pageARemoteCursor.waitFor({ state: 'visible', timeout: 15_000 });
+    console.log('E2E canvas-presence: fresh-cursor-visible');
     await pageA.keyboard.press('Escape');
     await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
     await pageARemoteCursor.locator('span').waitFor({ state: 'visible', timeout: 15_000 });

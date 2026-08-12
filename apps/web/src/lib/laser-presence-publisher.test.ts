@@ -44,6 +44,25 @@ describe('LaserPresencePublisher', () => {
     expect(published.at(-1)).toEqual({ active: false, sequence: 2 });
   });
 
+  it('keeps sequence monotonic when the live publish callback changes', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const first: unknown[] = [];
+    const second: unknown[] = [];
+    let publish = (laser: unknown) => first.push(laser);
+    const publisher = new LaserPresencePublisher((laser) => publish(laser));
+    publisher.move({ x: 2, y: 4 });
+    publish = (laser: unknown) => second.push(laser);
+    publisher.move({ x: 20, y: 24 });
+    vi.advanceTimersByTime(125);
+    publisher.stop();
+    expect(first).toEqual([{ active: true, point: { x: 2, y: 4 }, sequence: 1 }]);
+    expect(second).toEqual([
+      { active: true, point: { x: 20, y: 24 }, sequence: 2 },
+      { active: false, sequence: 3 },
+    ]);
+  });
+
   it('keeps a sustained 12-second gesture below the shared awareness budget with stop headroom', () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

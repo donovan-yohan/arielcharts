@@ -7,6 +7,11 @@ export const collaborationOrigins = {
   reconciliation: Symbol('arielcharts.source-layout.reconciliation'),
 } as const;
 
+/** CodeMirror owns source-only undo while its editor has focus. */
+export function createSourceEditorUndoManager(yText: Y.Text): Y.UndoManager {
+  return new Y.UndoManager(yText, { trackedOrigins: new Set() });
+}
+
 export function createDiagramUndoManager<T>(yText: Y.Text, nodePositions: Y.Map<T>): Y.UndoManager {
   return new Y.UndoManager([yText, nodePositions], {
     trackedOrigins: new Set([collaborationOrigins.visual, collaborationOrigins.visualLayout]),

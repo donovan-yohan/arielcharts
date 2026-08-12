@@ -3,8 +3,8 @@ const LASER_SEQUENCE_STORAGE_PREFIX = 'arielcharts.laser-sequence.v1:';
 type SessionStorageLike = Pick<Storage, 'getItem' | 'setItem'> | null;
 type SessionStorageOwner = { sessionStorage: Storage };
 
-function storageKey(sessionId: string, clientId: number): string {
-  return `${LASER_SEQUENCE_STORAGE_PREFIX}${sessionId}:${clientId}`;
+function storageKey(sessionId: string): string {
+  return `${LASER_SEQUENCE_STORAGE_PREFIX}${sessionId}`;
 }
 
 export function getSafeSessionStorage(owner: SessionStorageOwner): Storage | null {
@@ -12,19 +12,24 @@ export function getSafeSessionStorage(owner: SessionStorageOwner): Storage | nul
 }
 
 /**
- * This is a local reconnect hint only. The server remains the authority on
- * ownership and stale ordering, so cloned browser storage cannot claim a peer.
+ * This is a local reconnect hint only. It is intentionally session-wide: a
+ * reloaded page can receive a new Yjs client id before its old socket is fully
+ * retired. The server remains the authority on ownership and stale ordering,
+ * so cloned browser storage cannot claim a peer.
  */
-export function readLaserSequenceHighWater(storage: SessionStorageLike, sessionId: string, clientId: number): number {
-  if (!storage || !Number.isSafeInteger(clientId) || clientId < 0) return 0;
+export function readLaserSequenceHighWater(storage: SessionStorageLike, sessionId: string): number {
+  if (!storage) return 0;
   let raw: string | null;
-  try { raw = storage.getItem(storageKey(sessionId, clientId)); } catch { return 0; }
+  try { raw = storage.getItem(storageKey(sessionId)); } catch { return 0; }
   if (raw === null || !/^\d+$/u.test(raw)) return 0;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value >= 0 && value < Number.MAX_SAFE_INTEGER ? value : 0;
 }
 
-export function writeLaserSequenceHighWater(storage: SessionStorageLike, sessionId: string, clientId: number, sequence: number): void {
-  if (!storage || !Number.isSafeInteger(clientId) || clientId < 0 || !Number.isSafeInteger(sequence) || sequence < 0 || sequence >= Number.MAX_SAFE_INTEGER) return;
-  try { storage.setItem(storageKey(sessionId, clientId), String(sequence)); } catch { /* browser storage is optional reconnect state */ }
+export function writeLaserSequenceHighWater(storage: SessionStorageLike, sessionId: string, sequence: number): void {
+  if (!storage || !Number.isSafeInteger(sequence) || sequence < 0 || sequence >= Number.MAX_SAFE_INTEGER) return;
+  try {
+    const current = readLaserSequenceHighWater(storage, sessionId);
+    storage.setItem(storageKey(sessionId), String(Math.max(current, sequence)));
+  } catch { /* browser storage is optional reconnect state */ }
 }

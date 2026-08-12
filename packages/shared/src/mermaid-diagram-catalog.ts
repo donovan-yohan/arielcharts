@@ -3,7 +3,7 @@ export const MERMAID_DIAGRAM_CATALOG_VERSION = '11.16.1';
 
 export type MermaidDiagramEditingModel = 'canvas' | 'semantic-form';
 export type MermaidDiagramStability = 'stable' | 'preview';
-export type MermaidDiagramAvailability = 'available' | 'unavailable-plugin';
+export type MermaidDiagramAvailability = 'available' | 'available-plugin' | 'unavailable-plugin';
 
 export interface MermaidDiagramStarter {
   defaultName: string;
@@ -26,7 +26,8 @@ export interface MermaidDiagramFamilyDescriptor {
 }
 
 export interface ExternalMermaidDiagramFamilyDescriptor {
-  availability: 'unavailable-plugin';
+  availability: 'available-plugin' | 'unavailable-plugin';
+  editingModel?: MermaidDiagramEditingModel;
   help: string;
   helpUrl: string;
   /** Mermaid detector IDs returned after the external plugin is registered. */
@@ -34,6 +35,7 @@ export interface ExternalMermaidDiagramFamilyDescriptor {
   id: string;
   label: string;
   stability: MermaidDiagramStability;
+  starter?: MermaidDiagramStarter;
 }
 
 /**
@@ -95,9 +97,18 @@ export const MERMAID_DIAGRAM_FAMILIES: readonly (typeof mermaidDiagramFamilies[n
   })),
 ) as unknown as readonly (typeof mermaidDiagramFamilies[number] & { helpUrl: string })[];
 
-/** ZenUML remains visible but cannot create or render until issue #56 registers its plugin. */
+/** External families stay separate because the browser owns their lazy runtime. */
 export const EXTERNAL_MERMAID_PLUGIN_FAMILIES = Object.freeze([
-  Object.freeze({ id: 'zenuml', label: 'ZenUML', parserTypes: Object.freeze(['zenuml', 'zenUml']), stability: 'preview', availability: 'unavailable-plugin', help: 'External ZenUML support is not installed in this workspace yet.', helpUrl: 'https://mermaid.js.org/syntax/zenuml.html' }),
+  Object.freeze({
+    id: 'zenuml', label: 'ZenUML', parserTypes: Object.freeze(['zenuml', 'zenUml']),
+    editingModel: 'semantic-form', stability: 'preview', availability: 'available-plugin',
+    help: 'Model code-shaped interactions with the bundled, lazily loaded ZenUML renderer.',
+    helpUrl: 'https://mermaid.js.org/syntax/zenuml.html',
+    starter: Object.freeze({
+      id: 'zenuml', defaultName: 'ZenUML sequence', description: 'A minimal code-shaped service interaction.',
+      source: 'zenuml\n  Client->API: request',
+    }),
+  }),
 ] as const satisfies readonly ExternalMermaidDiagramFamilyDescriptor[]);
 
 export type ExternalMermaidDiagramFamilyId = typeof EXTERNAL_MERMAID_PLUGIN_FAMILIES[number]['id'];

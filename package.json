@@ -6,6 +6,14 @@
   "engines": {
     "node": ">=24.0.0"
   },
+  "pnpm": {
+    "overrides": {
+      "@zenuml/core": "3.50.1",
+      "@zenuml/core>dompurify": "3.4.13",
+      "postcss>nanoid": "3.3.17",
+      "tailwindcss>postcss": "8.5.26"
+    }
+  },
   "scripts": {
     "dev": "pnpm --parallel --filter @arielcharts/server dev --filter @arielcharts/web dev",
     "build": "pnpm -r build",

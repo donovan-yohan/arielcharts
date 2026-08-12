@@ -132,9 +132,9 @@ describe('diagram capability catalog', () => {
 
   it('keeps unknown and future parser types source-only while reserving ZenUML for plugin registration', () => {
     expect(classifyDiagramCapability('future-diagram-v9')).toMatchObject({ family: 'unknown', kind: 'generic', editingMode: 'source-only' });
-    expect(classifyDiagramCapability('zenuml')).toMatchObject({ family: 'zenuml', kind: 'generic', editingMode: 'unavailable-plugin' });
+    expect(classifyDiagramCapability('zenuml')).toMatchObject({ adapter: 'zenuml', family: 'zenuml', kind: 'generic', editingMode: 'semantic-form' });
     expect(EXTERNAL_MERMAID_PLUGIN_FAMILIES).toHaveLength(1);
-    expect(getDiagramCapabilityLabel(classifyDiagramCapability('zenuml'))).toBe('ZenUML · plugin unavailable');
+    expect(getDiagramCapabilityLabel(classifyDiagramCapability('zenuml'), 'zenuml\n  A->B: hi')).toBe('ZenUML · editable · form');
   });
 
   it('fails closed when a family source cannot safely represent a semantic operation', async () => {
@@ -210,6 +210,9 @@ describe('diagram capability catalog', () => {
     expect(getDiagramSourceModelAdapter(treemap).getOperationResult('treemap-beta\n  "Root"\n    "Leaf": 1', 'reparent-node')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(venn).getOperationResult('venn-beta\n  set A: 1\n  set B: 1\n  union A, B: 0.5', 'add-style')).toEqual({ supported: true });
     expect(getDiagramSourceModelAdapter(wardley).getOperationResult('wardley-beta\n  component A [0.5, 0.5]', 'add-node')).toEqual({ supported: true });
+    const zenuml = classifyDiagramCapability('zenuml');
+    expect(getDiagramSourceModelAdapter(zenuml).getOperationResult('zenuml\n  A->B: hi', 'add-message')).toEqual({ supported: true });
+    expect(getDiagramSourceModelAdapter(zenuml).getOperationResult('zenuml\n  title Advanced\n  A->B: hi', 'add-message')).toEqual({ supported: false, reason: 'unrepresentable' });
     for (const operation of ['add-node', 'edit-node', 'delete-node', 'move-node', 'rename-node', 'add-link', 'edit-link', 'delete-link', 'move-link', 'add-evolution', 'edit-evolution', 'delete-evolution', 'add-note', 'edit-note', 'delete-note', 'move-note', 'add-pipeline', 'delete-pipeline']) {
       expect(getDiagramSourceModelAdapter(wardley).getOperationResult('wardley-beta\n  component A [0.5, 0.5]', operation)).toEqual({ supported: true });
     }

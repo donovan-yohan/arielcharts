@@ -18,7 +18,7 @@ describe('starter templates', () => {
     expect(STARTER_TEMPLATE_ALIASES).toHaveLength(6);
     expect(PRIMARY_STARTER_TEMPLATES).toHaveLength(31);
     expect(CHOOSER_STARTER_TEMPLATES).toBe(PRIMARY_STARTER_TEMPLATES);
-    expect(ALL_STARTER_TEMPLATES).toHaveLength(37);
+    expect(ALL_STARTER_TEMPLATES).toHaveLength(38);
     expect(STARTER_TEMPLATES.map((template) => template.id)).toEqual([
       'blank',
       'api-sequence', 'service-flowchart', 'data-model-er', 'state-machine', 'incident-timeline', 'deployment-architecture',
@@ -66,9 +66,9 @@ describe('starter templates', () => {
       for (const parserType of family.parserTypes) expect(getMermaidDiagramFamily(parserType)).toBe(family);
     }
     expect(EXTERNAL_MERMAID_PLUGIN_FAMILIES).toEqual([
-      expect.objectContaining({ availability: 'unavailable-plugin', id: 'zenuml', label: 'ZenUML' }),
+      expect.objectContaining({ availability: 'available-plugin', editingModel: 'semantic-form', id: 'zenuml', label: 'ZenUML' }),
     ]);
-    expect(getStarterTemplate('zenuml')).toBeUndefined();
+    expect(getStarterTemplate('zenuml')).toMatchObject({ diagramType: 'zenuml', source: 'zenuml\n  Client->API: request' });
   });
 
   it('leaves only Blank empty and detect-parses every generated starter with the pinned Mermaid runtime', async () => {

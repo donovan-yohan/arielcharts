@@ -4,7 +4,7 @@ import type { ActivityEvent, AwarenessState, CanvasAwarenessState, CanvasInkPrev
 import { APP_NAME, CHOOSER_STARTER_TEMPLATES, getStarterTemplate } from '@arielcharts/shared';
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { Check, KeyRound, Share2 } from 'lucide-react';
@@ -123,6 +123,7 @@ import { addCynefinItem, addCynefinTransition, deleteCynefinItem, deleteCynefinT
 import { addTreemapNode, deleteTreemapNode, editTreemapNode, getTreemapDiagramSnapshot, moveTreemapNode, reparentTreemapNode } from '../lib/treemap-mutations';
 import { addVennStyle, addVennSubset, deleteVennStyle, deleteVennSubset, editVennStyle, editVennSubset, getVennDiagramSnapshot, moveVennStyle, moveVennSubset, renameVennSet } from '../lib/venn-mutations';
 import { addWardleyEvolution, addWardleyLink, addWardleyNode, addWardleyNote, addWardleyPipeline, deleteWardleyEvolution, deleteWardleyLink, deleteWardleyNode, deleteWardleyNote, deleteWardleyPipeline, editWardleyEvolution, editWardleyLink, editWardleyNode, editWardleyNote, getWardleyDiagramSnapshot, moveWardleyLink, moveWardleyNode, moveWardleyNote, renameWardleyNode } from '../lib/wardley-mutations';
+import { addZenUmlControl, addZenUmlMessage, addZenUmlParticipant, deleteZenUmlControl, deleteZenUmlMessage, deleteZenUmlParticipant, editZenUmlControl, editZenUmlMessage, editZenUmlParticipant, getZenUmlDiagramSnapshot, moveZenUmlControl, moveZenUmlMessage, moveZenUmlParticipant } from '../lib/zenuml-mutations';
 import { collaborationOrigins, createDiagramUndoManager, destroyDiagramUndoManager } from '../lib/collaboration-origins';
 import { DragLayoutCommitter, getDragLayoutTeardownOptions } from '../lib/drag-layout';
 import { getAcceptedGenericSourceLayoutPolicy, getSourceLayoutPolicy, pruneNodePositions, type SourceLayoutPolicy } from '../lib/source-layout-lifecycle';
@@ -139,6 +140,7 @@ import { getActivityFlyoutViewOnOpen, getNextWorkspaceFlyout, type ActivityFlyou
 import { SOURCE_FLYOUT_DEFAULT_WIDTH } from '../lib/source-flyout-resize';
 import { getMcpRoomBearer, getRoomShareUrl, rotateRoomKey } from '../lib/room-access-api';
 import { useOverlayScene } from '../lib/use-overlay-scene';
+import { getZenUmlRuntimePresentation, getZenUmlRuntimeSnapshot, prepareMermaidRuntimeForSource, subscribeZenUmlRuntime } from '../lib/zenuml-runtime';
 import {
   CANVAS_CURSOR_INTERVAL_MS,
   areCanvasAwarenessStatesEqual,
@@ -563,6 +565,7 @@ export function getTemplateDiagramCreation(templateId: StarterTemplateId, diagra
 
 export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey: string | null; sessionId: string }) {
   const { resolvedTheme } = useTheme();
+  const zenUmlRuntime = useSyncExternalStore(subscribeZenUmlRuntime, getZenUmlRuntimeSnapshot, getZenUmlRuntimeSnapshot);
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const editorThemeRef = useRef(new Compartment());
@@ -1454,6 +1457,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       }
 
       try {
+        const runtimePreparation = prepareMermaidRuntimeForSource(source);
+        if (runtimePreparation) await runtimePreparation;
         const sourceIsHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(source);
         const headerOnlyFlowchartSnapshot = sourceIsHeaderOnlyFlowchart
           ? getHeaderOnlyFlowchartSnapshot(source)
@@ -1853,6 +1858,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const isTreemap = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'treemap');
   const isVenn = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'venn');
   const isWardley = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'wardley');
+  const isZenUml = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'zenuml');
   const sequenceParticipants = useMemo(
     () => isSequence ? getSequenceParticipants(renderedMermaidText) : [],
     [isSequence, renderedMermaidText],
@@ -1899,6 +1905,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const treemapDiagram = useMemo(() => isTreemap ? getTreemapDiagramSnapshot(renderedMermaidText) : null, [isTreemap, renderedMermaidText]);
   const vennDiagram = useMemo(() => isVenn ? getVennDiagramSnapshot(renderedMermaidText) : null, [isVenn, renderedMermaidText]);
   const wardleyDiagram = useMemo(() => isWardley ? getWardleyDiagramSnapshot(renderedMermaidText) : null, [isWardley, renderedMermaidText]);
+  const zenUmlDiagram = useMemo(() => isZenUml ? getZenUmlDiagramSnapshot(renderedMermaidText) : null, [isZenUml, renderedMermaidText]);
+  const zenUmlPresentation = getZenUmlRuntimePresentation(renderedMermaidText, zenUmlRuntime);
   const isHeaderOnlyFlowchart = isHeaderOnlyFlowchartSource(renderedMermaidText);
   const emptyState = !renderedMermaidText.trim()
     ? 'chooser' as const
@@ -1907,6 +1915,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       : isSequence && sequenceParticipants.length === 0 ? 'sequence' as const : null;
   const diagramModeLabel = !renderedMermaidText.trim()
     ? 'Choose diagram type'
+    : zenUmlPresentation.modeLabel
+      ? zenUmlPresentation.modeLabel
     : getDiagramCapabilityLabel(
       renderedPreview?.source === renderedMermaidText ? renderedPreview.capability : null,
       renderedMermaidText,
@@ -2334,7 +2344,15 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
       <section aria-labelledby={activeDiagramId ? `diagram-tab-${activeDiagramId}` : undefined} className="workspace-main" data-testid="canvas-first-workspace" id="diagram-workspace" role="tabpanel">
         <article data-testid="preview-root" className="workspace-pane workspace-diagram-pane">
-          {(renderError || historyPreviewError) && openFlyout !== 'source' ? (
+          {zenUmlPresentation.loading && openFlyout !== 'source' ? (
+            <div data-testid="zenuml-loading-banner" className="error-banner is-loading" role="status">
+              <strong>loading ZenUML renderer</strong>
+              <span>The bundled plugin is loading for this diagram only.</span>
+            </div>
+          ) : null}
+          {(renderError || historyPreviewError)
+            && !zenUmlPresentation.loading
+            && openFlyout !== 'source' ? (
             <div data-testid="parse-error-banner" className="error-banner" role="status">
               <strong>preview kept on last valid diagram</strong>
               <span>{historyPreviewError ?? renderError}</span>
@@ -2410,6 +2428,8 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             vennDiagram={vennDiagram}
             isWardley={isWardley}
             wardleyDiagram={wardleyDiagram}
+            isZenUml={isZenUml}
+            zenUmlDiagram={zenUmlDiagram}
             initialCamera={activeDiagramId ? diagramCameraSessionRef.current.cameras.get(activeDiagramId) : undefined}
             nodePositions={renderedNodePositions}
             overlay={overlayController && activeDiagramId ? {
@@ -2792,6 +2812,18 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             onMoveWardleyNote={(identity, direction) => mutateCanvasSourceDetailed((source) => moveWardleyNote(source, identity, direction), 'Reordered Wardley notes')}
             onAddWardleyPipeline={(pipeline) => mutateCanvasSourceDetailed((source) => addWardleyPipeline(source, pipeline), 'Added a Wardley pipeline')}
             onDeleteWardleyPipeline={(identity) => mutateCanvasSourceDetailed((source) => deleteWardleyPipeline(source, identity), 'Deleted a Wardley pipeline')}
+            onAddZenUmlParticipant={(participant) => mutateCanvasSourceDetailed((source) => addZenUmlParticipant(source, participant), 'Added a ZenUML participant')}
+            onEditZenUmlParticipant={(identity, patch) => mutateCanvasSourceDetailed((source) => editZenUmlParticipant(source, identity, patch), 'Edited a ZenUML participant')}
+            onDeleteZenUmlParticipant={(identity) => mutateCanvasSourceDetailed((source) => deleteZenUmlParticipant(source, identity), 'Deleted a ZenUML participant')}
+            onMoveZenUmlParticipant={(identity, direction) => mutateCanvasSourceDetailed((source) => moveZenUmlParticipant(source, identity, direction), 'Reordered ZenUML participants')}
+            onAddZenUmlMessage={(message, parent) => mutateCanvasSourceDetailed((source) => addZenUmlMessage(source, message, parent), 'Added a ZenUML message')}
+            onEditZenUmlMessage={(identity, patch) => mutateCanvasSourceDetailed((source) => editZenUmlMessage(source, identity, patch), 'Edited a ZenUML message')}
+            onDeleteZenUmlMessage={(identity) => mutateCanvasSourceDetailed((source) => deleteZenUmlMessage(source, identity), 'Deleted a ZenUML message')}
+            onMoveZenUmlMessage={(identity, direction) => mutateCanvasSourceDetailed((source) => moveZenUmlMessage(source, identity, direction), 'Reordered ZenUML messages')}
+            onAddZenUmlControl={(control, parent) => mutateCanvasSourceDetailed((source) => addZenUmlControl(source, control, parent), 'Added a ZenUML control')}
+            onEditZenUmlControl={(identity, patch) => mutateCanvasSourceDetailed((source) => editZenUmlControl(source, identity, patch), 'Edited a ZenUML control')}
+            onDeleteZenUmlControl={(identity) => mutateCanvasSourceDetailed((source) => deleteZenUmlControl(source, identity), 'Deleted a ZenUML control')}
+            onMoveZenUmlControl={(identity, direction) => mutateCanvasSourceDetailed((source) => moveZenUmlControl(source, identity, direction), 'Reordered ZenUML controls')}
             onAddConnectedNode={handleAddConnectedNode}
             onCanvasCursorChange={handleCanvasCursorChange}
             onLaserChange={handleLaserChange}

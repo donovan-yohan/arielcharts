@@ -58,7 +58,7 @@ describe('WorkspaceTemplatePicker helpers', () => {
     expect(dialog).toBeTruthy();
     expect(dialog.querySelectorAll('[role="menu"], [role="menuitem"]')).toHaveLength(0);
     const creates = dialog.querySelectorAll<HTMLButtonElement>('[data-testid="starter-template-create"]');
-    expect(creates).toHaveLength(CHOOSER_STARTER_TEMPLATES.length);
+    expect(creates).toHaveLength(CHOOSER_STARTER_TEMPLATES.length + 1);
     expect([...creates].filter((item) => item.tabIndex === 0)).toHaveLength(1);
     const links = dialog.querySelectorAll<HTMLAnchorElement>('a[aria-label^="Learn about"]');
     expect(links).toHaveLength(CHOOSER_STARTER_TEMPLATES.length + 1);

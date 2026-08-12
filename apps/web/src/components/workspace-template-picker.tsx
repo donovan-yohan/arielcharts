@@ -72,10 +72,12 @@ export function getTemplateMenuKeyboardAction(
 
 interface WorkspaceTemplatePickerProps {
   onCreateDiagram: (templateId: StarterTemplateId) => void;
+  onOpenChange?: (open: boolean) => void;
+  openRequest?: number;
   templates: readonly StarterTemplate[];
 }
 
-export function WorkspaceTemplatePicker({ onCreateDiagram, templates }: WorkspaceTemplatePickerProps) {
+export function WorkspaceTemplatePicker({ onCreateDiagram, onOpenChange, openRequest = 0, templates }: WorkspaceTemplatePickerProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -87,6 +89,14 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, templates }: Workspac
     return template ? [template] : [];
   });
   const menuTemplates = [...templateGroups.flatMap((group) => group.templates), ...externalTemplates];
+
+  useEffect(() => {
+    if (openRequest === 0) return;
+    setActiveIndex(0);
+    setOpen(true);
+  }, [openRequest]);
+
+  useEffect(() => { onOpenChange?.(open); }, [onOpenChange, open]);
 
   const closeMenu = useCallback((returnFocus: boolean) => {
     setOpen(false);

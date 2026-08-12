@@ -62,7 +62,9 @@ describe('overlay toolbar safe-lane ownership', () => {
   it('publishes, resizes, and clears the portal-toolbar lane at the canvas boundary', () => {
     const canvas = elementWithBounds(100, 700);
     const shell = elementWithBounds(100, 700);
+    const diagramPane = elementWithBounds(100, 700);
     Object.defineProperty(canvas, 'parentElement', { value: shell });
+    Object.defineProperty(shell, 'parentElement', { value: diagramPane });
     const toolbar = elementWithBounds(0, 146);
 
     expect(syncCanvasToolbarSafeLane(canvas, null)).toBe(false);
@@ -71,6 +73,7 @@ describe('overlay toolbar safe-lane ownership', () => {
     expect(canvas.dataset.overlayToolbarSafeTop).toBe('true');
     expect(canvas.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('54px');
     expect(shell.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('54px');
+    expect(diagramPane.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('54px');
 
     toolbar.getBoundingClientRect = () => ({ bottom: 186, top: 0 }) as DOMRect;
     expect(syncCanvasToolbarSafeLane(canvas, toolbar)).toBe(true);
@@ -81,6 +84,15 @@ describe('overlay toolbar safe-lane ownership', () => {
     expect(canvas.dataset.overlayToolbarSafeTop).toBeUndefined();
     expect(canvas.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('');
     expect(shell.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('');
+    expect(diagramPane.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('');
+  });
+
+  it('does not retain an undefined parent host when a canvas is detached', () => {
+    const canvas = elementWithBounds(100, 700);
+    Object.defineProperty(canvas, 'parentElement', { value: null });
+    const toolbar = elementWithBounds(0, 146);
+    expect(() => syncCanvasToolbarSafeLane(canvas, toolbar)).not.toThrow();
+    expect(canvas.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('54px');
   });
 
   it('keeps portal discovery and measurement with DiagramCanvas, the semantic-layout owner', () => {

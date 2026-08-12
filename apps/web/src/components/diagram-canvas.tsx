@@ -746,7 +746,11 @@ const CANVAS_WHEEL_EXCLUSION_SELECTOR = 'a, button, input, select, textarea, for
 export function syncCanvasToolbarSafeLane(canvas: HTMLElement, toolbar: HTMLElement | null): boolean {
   const next = toolbar ? `${Math.ceil(Math.max(0, toolbar.getBoundingClientRect().bottom - canvas.getBoundingClientRect().top + 8))}px` : '';
   const layoutHost = canvas.parentElement;
-  const hosts = [canvas, layoutHost].filter((host): host is HTMLElement => host !== null);
+  // The canvas shell owns semantic-editor placement, while the onboarding is
+  // its sibling in the diagram pane. Publish the measured portal lane on that
+  // common host so every canvas-owned surface reserves the same fixed chrome.
+  const hosts = [canvas, layoutHost, layoutHost?.parentElement]
+    .filter((host): host is HTMLElement => host != null);
   const current = hosts.map((host) => host.style.getPropertyValue('--overlay-toolbar-safe-top'));
   const marked = canvas.dataset.overlayToolbarSafeTop === 'true';
   if (current.every((value) => value === next) && marked === Boolean(next)) return false;

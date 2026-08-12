@@ -53,7 +53,7 @@ export interface OverlayCanvasLayerProps {
   viewport?: { x: number; y: number; width: number; height: number };
   semanticAnchors: ReadonlyMap<string, OverlayWorldPoint>;
   readOnly: boolean;
-  onAdd: (point: OverlayWorldPoint, kind?: 'annotation.text' | 'annotation.sticky') => void;
+  onAdd: (point: OverlayWorldPoint, kind?: 'annotation.text' | 'annotation.sticky') => unknown;
   onAddShape?: (point: OverlayWorldPoint, kind: 'shape.rectangle' | 'shape.ellipse' | 'shape.diamond' | 'shape.line' | 'shape.arrow') => void;
   onAddConnector?: (startId: string, endId: string) => void;
   onAddFrame?: (point: OverlayWorldPoint, members: readonly string[]) => void;
@@ -85,6 +85,10 @@ export interface OverlayCanvasLayerProps {
   onInkPreview?: (preview: CanvasInkPreviewState | null) => void;
   nextInkPreviewSequence?: () => number;
   remoteInkPreviews?: readonly { id: string; color: string; preview: CanvasInkPreviewState }[];
+  onboardingRequest?: { id: number; action: 'sticky' | 'pen' } | null;
+  onOnboardingRequestComplete?: (requestId: number, createdTextId?: string) => void;
+  requestedTextEditId?: string | null;
+  onRequestedTextEditComplete?: (id: string) => void;
 }
 
 type InkDraft = { mode: InkMode; pointerId: number; points: InkPoint[] };
@@ -164,6 +168,10 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
   const canvasOwnerRef = useRef<HTMLDivElement>(null);
   const controlsOwnerRef = useRef<HTMLDivElement>(null);
   const inkDraftRef = useRef<InkDraft | null>(null);
+  const drawingSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const onboardingRequestCompleteRef = useRef(props.onOnboardingRequestComplete);
+  const pendingOnboardingPenRequestRef = useRef<number | null>(null);
+  const completedOnboardingPenRequestIdsRef = useRef(new Set<number>());
   const inkSequenceRef = useRef(0);
   const lastInkPreviewAtRef = useRef(0);
   const objects = useMemo(() => {
@@ -265,6 +273,46 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     props.onToolActivate?.();
     setInkTool(tool);
   }, [props.onToolActivate]);
+  useEffect(() => { onboardingRequestCompleteRef.current = props.onOnboardingRequestComplete; }, [props.onOnboardingRequestComplete]);
+  useLayoutEffect(() => {
+    const requestId = pendingOnboardingPenRequestRef.current;
+    if (requestId === null || inkTool !== 'pen' || completedOnboardingPenRequestIdsRef.current.has(requestId)) return;
+    pendingOnboardingPenRequestRef.current = null;
+    completedOnboardingPenRequestIdsRef.current.add(requestId);
+    drawingSurfaceRef.current?.focus({ preventScroll: true });
+    onboardingRequestCompleteRef.current?.(requestId);
+  }, [inkTool]);
+  useLayoutEffect(() => {
+    const request = props.onboardingRequest;
+    if (!request || request.action !== 'pen' || completedOnboardingPenRequestIdsRef.current.has(request.id)) return;
+    pendingOnboardingPenRequestRef.current = request.id;
+    if (inkTool === 'pen') {
+      pendingOnboardingPenRequestRef.current = null;
+      completedOnboardingPenRequestIdsRef.current.add(request.id);
+      drawingSurfaceRef.current?.focus({ preventScroll: true });
+      onboardingRequestCompleteRef.current?.(request.id);
+      return;
+    }
+    activateInkTool('pen');
+  }, [activateInkTool, inkTool, props.onboardingRequest]);
+  useEffect(() => {
+    const request = props.onboardingRequest;
+    if (!request || request.action !== 'sticky') return;
+    const id = addAtViewportCenter('annotation.sticky');
+    onboardingRequestCompleteRef.current?.(request.id, id);
+  }, [props.onboardingRequest]);
+  useEffect(() => {
+    const id = props.requestedTextEditId;
+    if (!id || !writable || !objects.some((object) => object.id === id && object.kind.startsWith('annotation.'))) return;
+    setSelectedId(id);
+    setSelectedIds(new Set([id]));
+    setEditingId(id);
+    window.requestAnimationFrame(() => {
+      const editor = canvasOwnerRef.current?.querySelector<HTMLTextAreaElement>(`[data-testid="overlay-object-${id}"] textarea`);
+      editor?.focus();
+    });
+    props.onRequestedTextEditComplete?.(id);
+  }, [objects, props.onRequestedTextEditComplete, props.requestedTextEditId, writable]);
   useEffect(() => () => { props.onInkPreview?.(null); }, [props.onInkPreview]);
   useEffect(() => { if (inkTool === 'select') stopInk(false); }, [inkTool, stopInk]);
   useEffect(() => { stopInk(false); }, [props.diagramId, stopInk]);
@@ -377,12 +425,13 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     const change = incrementalTextChange(previous, next);
     if (change.deleteCount || change.insert) props.onEditText(id, change.index, change.deleteCount, change.insert);
   };
-  const addAtViewportCenter = (kind: 'annotation.text' | 'annotation.sticky') => {
+  const addAtViewportCenter = (kind: 'annotation.text' | 'annotation.sticky'): string | undefined => {
     const bounds = canvasOwnerRef.current?.getBoundingClientRect();
     const point = bounds && bounds.width > 0 && bounds.height > 0
       ? viewportCenterToWorld(bounds.width, bounds.height, props.transform, props.viewport)
       : viewportCenterToWorld(320, 240, props.transform);
-    props.onAdd(point, kind);
+    const created = props.onAdd(point, kind);
+    return typeof created === 'string' ? created : undefined;
   };
   const addShapeAtViewportCenter = (kind: 'shape.rectangle' | 'shape.ellipse' | 'shape.diamond' | 'shape.line' | 'shape.arrow') => {
     const bounds = canvasOwnerRef.current?.getBoundingClientRect();
@@ -422,7 +471,9 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
         onPointerDown={handleInkDown}
         onPointerMove={handleInkMove}
         onPointerUp={handleInkEnd}
+        ref={drawingSurfaceRef}
         style={{ cursor: inkTool === 'eraser' ? 'cell' : 'crosshair', inset: 0, pointerEvents: writable ? 'auto' : 'none', position: 'absolute', touchAction: 'none', zIndex: 2 }}
+        tabIndex={-1}
       /> : null}
       <svg aria-hidden="true" data-testid="ink-overlay-renderer" style={{ height: '100%', inset: 0, overflow: 'visible', pointerEvents: 'none', position: 'absolute', width: '100%' }}>
         {objects.filter((object) => object.kind === 'ink.stroke').map((object) => {

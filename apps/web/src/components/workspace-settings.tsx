@@ -1,7 +1,7 @@
 'use client';
 
 import { Settings } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import React, { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ConnectionState } from '../lib/connection-state';
 import { FOCUSABLE_SELECTOR } from '../lib/focusable';
 import type { ResolvedTheme, ThemePreference } from '../lib/theme';
@@ -23,6 +23,7 @@ export interface WorkspaceSettingsProps {
   displayName: string;
   onConnectAgent: (returnFocusTarget: HTMLButtonElement) => void;
   onDisplayNameSave: (displayName: string) => void;
+  onOpenChange?: (open: boolean) => void;
   onResetRoomKey: () => Promise<void>;
   roomKey: string | null;
 }
@@ -104,6 +105,7 @@ export function WorkspaceSettings({
   displayName,
   onConnectAgent,
   onDisplayNameSave,
+  onOpenChange,
   onResetRoomKey,
   roomKey,
 }: WorkspaceSettingsProps) {
@@ -117,6 +119,8 @@ export function WorkspaceSettings({
   const [keyResetPending, setKeyResetPending] = useState(false);
   const [keyResetMessage, setKeyResetMessage] = useState<string | null>(null);
   const [keyCopyState, setKeyCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+
+  useEffect(() => { onOpenChange?.(isOpen); }, [isOpen, onOpenChange]);
 
   const close = useCallback((returnFocus = true) => {
     setIsOpen(false);

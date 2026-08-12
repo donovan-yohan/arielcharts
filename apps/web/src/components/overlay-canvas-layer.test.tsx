@@ -39,6 +39,38 @@ describe('OverlayCanvasLayer', () => {
     observer.disconnect();
   });
 
+  it('consumes onboarding actions through its real creation and edit paths', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const complete = vi.fn(); const editComplete = vi.fn();
+    const callbacks = { onAdd: vi.fn(() => 'sticky'), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn() };
+    const request = { id: 1, action: 'sticky' as const };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" onOnboardingRequestComplete={complete} onboardingRequest={request} readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} />));
+    expect(callbacks.onAdd).toHaveBeenCalledWith(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }), 'annotation.sticky');
+    expect(complete).toHaveBeenCalledWith(1, 'sticky');
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" onRequestedTextEditComplete={editComplete} readOnly={false} requestedTextEditId="sticky" semanticAnchors={new Map()} sessionId="abc123de" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [{ id: 'sticky', kind: 'annotation.sticky', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 180, height: 120, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: '' }] }} />));
+    expect(host.querySelector<HTMLTextAreaElement>('[data-testid="overlay-object-sticky"] textarea')).not.toBeNull();
+    expect(editComplete).toHaveBeenCalledWith('sticky');
+    await act(async () => root.unmount());
+  });
+
+  it('moves focus to the usable drawing surface for a pen onboarding request', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const complete = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolActivate: vi.fn() };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" onOnboardingRequestComplete={complete} onboardingRequest={{ id: 2, action: 'pen' }} readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} />));
+    await act(async () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())));
+    const surface = host.querySelector<HTMLElement>('[data-testid="ink-drawing-surface"]')!;
+    expect(surface).not.toBeNull();
+    expect(surface.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(surface);
+    expect(complete).toHaveBeenCalledWith(2);
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" onOnboardingRequestComplete={complete} onboardingRequest={{ id: 3, action: 'pen' }} readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} />));
+    expect(document.activeElement).toBe(surface);
+    expect(complete).toHaveBeenCalledWith(3);
+    expect(complete).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount());
+  });
+
   it('identifies its portalled toolbar by diagram without owning semantic layout state', () => {
     const source = readFileSync('src/components/overlay-canvas-layer.tsx', 'utf8');
     expect(source).toContain('data-overlay-diagram-id={props.diagramId}');

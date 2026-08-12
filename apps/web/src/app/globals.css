@@ -2687,6 +2687,127 @@ code {
   }
 }
 
+/* The canvas action strip is intentionally compact: creation stays close at hand
+   while document-affecting actions live behind the explicit more control. */
+.overlay-icon-toolbar {
+  align-items: center;
+  display: grid;
+  justify-items: center;
+  left: 50%;
+  max-width: calc(100% - 24px);
+  pointer-events: none;
+  position: absolute;
+  top: 12px;
+  transform: translateX(-50%);
+  width: max-content;
+  z-index: 2;
+}
+
+.overlay-toolbar-primary,
+.overlay-toolbar-secondary,
+.overlay-toolbar-group {
+  align-items: center;
+  background: color-mix(in srgb, var(--control-surface) 94%, transparent);
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 20%, transparent);
+  display: flex;
+  gap: 3px;
+  max-width: 100%;
+  pointer-events: auto;
+}
+
+.overlay-toolbar-primary {
+  overflow-x: auto;
+  padding: 4px;
+  scrollbar-width: thin;
+}
+
+.overlay-toolbar-secondary {
+  align-items: stretch;
+  flex-direction: column;
+  max-width: min(360px, calc(var(--overlay-toolbar-available-width, 100vw) - 16px));
+  margin-top: 8px;
+  max-height: min(280px, calc(var(--overlay-toolbar-available-height, 100vh) - 76px));
+  overflow: auto;
+  padding: 6px;
+  width: min(360px, calc(var(--overlay-toolbar-available-width, 100vw) - 16px));
+}
+
+.overlay-toolbar-group {
+  box-shadow: none;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  padding: 2px;
+}
+
+.overlay-toolbar-section { align-items: flex-start; display: flex; flex-direction: column; gap: 3px; }
+.overlay-toolbar-section-label { color: var(--ink-muted); font: 600 10px/1.2 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+
+.overlay-toolbar-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+  width: 44px;
+}
+
+.overlay-toolbar-button:hover:not(:disabled),
+.overlay-toolbar-button:focus-visible,
+.overlay-toolbar-button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--selection) 18%, transparent);
+  border-color: var(--selection);
+  outline: none;
+}
+
+.overlay-toolbar-button:disabled { color: var(--ink-muted); cursor: not-allowed; opacity: .48; }
+.overlay-toolbar-description { color: var(--ink-muted); font: 11px/1.2 var(--font-mono); margin: 2px 4px; pointer-events: none; text-align: left; }
+.overlay-toolbar-checkbox { align-items: center; color: var(--ink); display: flex; font: 12px/1.2 var(--font-sans); gap: 6px; min-height: 36px; padding: 0 6px; pointer-events: auto; }
+.overlay-scene-list { border-top: 1px solid var(--control-border); display: grid; gap: 5px; max-width: 100%; padding-top: 6px; }
+.overlay-scene-list p { color: var(--ink-muted); font: 12px/1.2 var(--font-sans); margin: 0; }
+.overlay-scene-list ul { display: grid; gap: 3px; list-style: none; margin: 0; padding: 0; }
+.overlay-scene-list li { align-items: center; display: flex; flex-wrap: wrap; gap: 3px; }
+.overlay-scene-list li > span { flex: 1 1 88px; font: 12px/1.2 var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overlay-scene-list li > button:first-child { max-width: 100%; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.overlay-scene-list label { align-items: center; display: flex; flex-wrap: wrap; font: 12px/1.2 var(--font-sans); gap: 5px; }
+.overlay-scene-list input, .overlay-scene-list select { min-height: 32px; min-width: 0; }
+.overlay-layer-add input { flex: 1 1 120px; }
+.overlay-resize-handle { background: var(--selection); border: 2px solid var(--surface-canvas); border-radius: 50%; bottom: -7px; cursor: nwse-resize; height: 14px; padding: 0; position: absolute; right: -7px; width: 14px; z-index: 3; }
+
+@media (forced-colors: active) {
+  .overlay-toolbar-primary, .overlay-toolbar-secondary, .overlay-toolbar-group { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  .overlay-toolbar-button { border-color: CanvasText; color: CanvasText; forced-color-adjust: none; }
+  .overlay-toolbar-button[aria-pressed='true'], .overlay-toolbar-button:focus-visible { background: Highlight; color: HighlightText; outline: 2px solid Highlight; }
+}
+
+@media (pointer: coarse), (max-width: 420px) {
+  .overlay-icon-toolbar { max-width: calc(100% - 16px); top: 8px; }
+  .overlay-toolbar-primary { justify-content: flex-start; }
+  .overlay-icon-toolbar[data-compact-error='true'] .overlay-toolbar-primary > :not(.overlay-toolbar-more) { display: none; }
+  .overlay-toolbar-button { height: 44px; width: 44px; }
+  .overlay-toolbar-secondary { max-height: max(44px, calc(var(--overlay-toolbar-available-height, 100dvh) - 76px)); max-width: calc(var(--overlay-toolbar-available-width, 100vw) - 16px); width: calc(var(--overlay-toolbar-available-width, 100vw) - 16px); }
+  .overlay-toolbar-checkbox { min-height: 44px; }
+
+  .workspace-diagram-pane[data-overlay-toolbar-error-compact='true'] > .error-banner {
+    box-sizing: border-box;
+    height: 48px;
+    left: 64px;
+    max-height: 48px;
+    padding: 6px 8px;
+    right: 8px;
+    top: 8px;
+    transform: none;
+    width: auto;
+  }
+}
+
 @media (pointer: coarse) {
   .canvas-toolbar-shortcut {
     display: none;
@@ -3139,6 +3260,16 @@ code {
   }
 }
 
+/* On short touch canvases, the fixed centered overlay strip gets a measured
+   lane. Sequence controls scroll beneath it instead of being covered after a
+   lower action is scrolled into view. */
+@media (pointer: coarse) and (max-height: 500px) {
+  [data-testid='diagram-canvas'][data-overlay-toolbar-safe-top='true'] .canvas-sequence-editor:not(.is-centered) {
+    max-height: calc(100% - var(--overlay-toolbar-safe-top) - 12px);
+    top: var(--overlay-toolbar-safe-top);
+  }
+}
+
 /* Connect agent modal */
 
 .modal-backdrop {
@@ -3268,6 +3399,12 @@ code {
 }
 
 @media (max-width: 420px) {
+  .canvas-semantic-editor {
+    /* The overlay toolbar occupies the first 54px of the canvas plus its
+       touch-safe gap. Keep every internally scrollable form below that lane. */
+    top: 72px !important;
+  }
+
   .canvas-treemap-venn-editor {
     left: 8px !important;
     max-height: calc(100% - 84px) !important;

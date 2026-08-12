@@ -646,8 +646,9 @@ export class SessionWebSocketServer {
       if (nextOwnedClientIds.has(entry.clientId)) {
         const authoritativeClock = session.awareness.meta.get(entry.clientId)?.clock;
         if (authoritativeClock !== undefined && entry.clock <= authoritativeClock) continue;
-        if (!this.admitLaserSequence(session, entry) || !this.admitInkPreviewSequence(session, entry) || !this.admitPresenterSequence(session, entry)) continue;
-        allowed.push(entry);
+        const admittedEntry = this.stripStaleCanvasTransients(session, entry);
+        if (!admittedEntry || !this.admitPresenterSequence(session, admittedEntry)) continue;
+        allowed.push(admittedEntry);
         if (entry.state === null) {
           this.laserSequencesBySession.get(session)?.delete(entry.clientId);
           this.inkPreviewSequencesBySession.get(session)?.delete(entry.clientId);
@@ -664,10 +665,11 @@ export class SessionWebSocketServer {
         this.laserSequencesBySession.get(session)?.delete(entry.clientId);
         this.inkPreviewSequencesBySession.get(session)?.delete(entry.clientId);
         this.presenterSequencesBySession.get(session)?.delete(entry.clientId);
-        if (!this.admitLaserSequence(session, entry) || !this.admitInkPreviewSequence(session, entry) || !this.admitPresenterSequence(session, entry)) continue;
+        const admittedEntry = this.stripStaleCanvasTransients(session, entry);
+        if (!admittedEntry || !this.admitPresenterSequence(session, admittedEntry)) continue;
         nextOwnedClientIds.add(entry.clientId);
         claimedClientIds.push(entry.clientId);
-        allowed.push(entry);
+        allowed.push(admittedEntry);
         continue;
       }
 
@@ -688,44 +690,53 @@ export class SessionWebSocketServer {
     return { entries: allowed, claimedClientIds, releasedClientIds };
   }
 
-  private admitLaserSequence(session: SessionState, entry: AwarenessEntry): boolean {
-    let sequences = this.laserSequencesBySession.get(session);
-    if (!sequences) {
-      sequences = new Map();
-      this.laserSequencesBySession.set(session, sequences);
-    }
+  /**
+   * A stale laser or ink packet must not suppress a fresh durable canvas
+   * presence transition carried by the same awareness update. Pure transient
+   * replays remain rejected, so they cannot reappear for existing or new peers.
+   */
+  private stripStaleCanvasTransients(session: SessionState, entry: AwarenessEntry): AwarenessEntry | null {
     const canvas = entry.state?.canvas;
-    const laser = canvas && typeof canvas === 'object' && !Array.isArray(canvas)
-      ? (canvas as Record<string, unknown>).laser
-      : undefined;
-    if (!laser || typeof laser !== 'object' || Array.isArray(laser)) {
-      return true;
+    if (!canvas || typeof canvas !== 'object' || Array.isArray(canvas)) return entry;
+    const nextCanvas = { ...(canvas as Record<string, unknown>) };
+    const carriesFreshCanvasPresence = nextCanvas.cursor !== undefined
+      || nextCanvas.selected_node_ids !== undefined
+      || nextCanvas.editing_node_id !== undefined;
+    let changed = false;
+    const laser = nextCanvas.laser;
+    if (laser && typeof laser === 'object' && !Array.isArray(laser)) {
+      let sequences = this.laserSequencesBySession.get(session);
+      if (!sequences) { sequences = new Map(); this.laserSequencesBySession.set(session, sequences); }
+      const sequence = (laser as { sequence: number }).sequence;
+      const previous = sequences.get(entry.clientId);
+      if (previous !== undefined && sequence <= previous) {
+        const current = session.awareness.getStates().get(entry.clientId) as { canvas?: { laser?: unknown } } | undefined;
+        if (!carriesFreshCanvasPresence || sequence !== previous || !isDeepStrictEqual(laser, current?.canvas?.laser)) {
+          this.recordIngressRejection('stale_laser_sequence');
+          delete nextCanvas.laser;
+          changed = true;
+        }
+      } else sequences.set(entry.clientId, sequence);
     }
-    const candidate = laser as { active: boolean; sequence: number };
-    const previous = sequences.get(entry.clientId);
-    if (previous !== undefined && candidate.sequence <= previous) {
-      this.recordIngressRejection('stale_laser_sequence');
-      return false;
+    const preview = nextCanvas.ink_preview;
+    if (preview && typeof preview === 'object' && !Array.isArray(preview)) {
+      let sequences = this.inkPreviewSequencesBySession.get(session);
+      if (!sequences) { sequences = new Map(); this.inkPreviewSequencesBySession.set(session, sequences); }
+      const sequence = (preview as { sequence: number }).sequence;
+      const previous = sequences.get(entry.clientId);
+      if (previous !== undefined && sequence <= previous) {
+        const current = session.awareness.getStates().get(entry.clientId) as { canvas?: { ink_preview?: unknown } } | undefined;
+        if (!carriesFreshCanvasPresence || sequence !== previous || !isDeepStrictEqual(preview, current?.canvas?.ink_preview)) {
+          this.recordIngressRejection('stale_ink_preview_sequence');
+          delete nextCanvas.ink_preview;
+          changed = true;
+        }
+      } else sequences.set(entry.clientId, sequence);
     }
-    sequences.set(entry.clientId, candidate.sequence);
-    return true;
-  }
-
-  private admitInkPreviewSequence(session: SessionState, entry: AwarenessEntry): boolean {
-    let sequences = this.inkPreviewSequencesBySession.get(session);
-    if (!sequences) { sequences = new Map(); this.inkPreviewSequencesBySession.set(session, sequences); }
-    const canvas = entry.state?.canvas;
-    const preview = canvas && typeof canvas === 'object' && !Array.isArray(canvas)
-      ? (canvas as Record<string, unknown>).ink_preview : undefined;
-    if (!preview || typeof preview !== 'object' || Array.isArray(preview)) return true;
-    const sequence = (preview as { sequence: number }).sequence;
-    const previous = sequences.get(entry.clientId);
-    if (previous !== undefined && sequence <= previous) {
-      this.recordIngressRejection('stale_ink_preview_sequence');
-      return false;
-    }
-    sequences.set(entry.clientId, sequence);
-    return true;
+    if (!changed || !entry.state) return entry;
+    if (!carriesFreshCanvasPresence) return null;
+    const state = { ...entry.state, canvas: nextCanvas };
+    return { ...entry, state, stateJson: JSON.stringify(state) };
   }
 
   private admitPresenterSequence(session: SessionState, entry: AwarenessEntry): boolean {

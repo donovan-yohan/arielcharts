@@ -18,6 +18,7 @@ import {
   moveOverlayObjects,
   pasteOverlayObjects,
   readOverlayScene,
+  reorderOverlayObject,
   setOverlayOrderKey,
   updateOverlayLayer,
   updateOverlayObject,
@@ -36,6 +37,34 @@ function object(id: string, orderKey = 'm') {
 }
 
 describe('overlay scene', () => {
+  it('moves overlay ordering in deterministic adjacent and endpoint steps', () => {
+    const doc = new Y.Doc();
+    addOverlayObject(doc, 'main', object('a', 'a'));
+    addOverlayObject(doc, 'main', object('b', 'b'));
+    addOverlayObject(doc, 'main', object('c', 'c'));
+    reorderOverlayObject(doc, 'main', 'a', 'forward');
+    expect(readOverlayScene(doc, 'main').objects.map(({ id }) => id)).toEqual(['b', 'a', 'c']);
+    reorderOverlayObject(doc, 'main', 'a', 'front');
+    reorderOverlayObject(doc, 'main', 'c', 'backward');
+    expect(readOverlayScene(doc, 'main').objects.map(({ id }) => id)).toEqual(['c', 'b', 'a']);
+    reorderOverlayObject(doc, 'main', 'a', 'back');
+    expect(readOverlayScene(doc, 'main').objects.map(({ id }) => id)).toEqual(['a', 'c', 'b']);
+  });
+  it('reorders only the selected object within its layer without rewriting locked or other-layer peers', () => {
+    const doc = new Y.Doc();
+    addOverlayLayer(doc, 'main', { id: 'notes', name: 'Notes', order_key: 'b', visible: true, locked: false, export: true });
+    addOverlayObject(doc, 'main', { ...object('left', 'a'), layer: 'default' });
+    addOverlayObject(doc, 'main', { ...object('locked', 'b'), layer: 'default', metadata: { locked: true } });
+    addOverlayObject(doc, 'main', { ...object('right', 'c'), layer: 'default' });
+    addOverlayObject(doc, 'main', { ...object('note', 'a'), layer: 'notes' });
+    const before = new Map(readOverlayScene(doc, 'main').objects.map((item) => [item.id, item.order_key]));
+    reorderOverlayObject(doc, 'main', 'left', 'front');
+    const after = readOverlayScene(doc, 'main');
+    expect(after.objects.filter((item) => (item.layer ?? 'default') === 'default').map(({ id }) => id)).toEqual(['locked', 'right', 'left']);
+    expect(after.objects.find((item) => item.id === 'locked')?.order_key).toBe(before.get('locked'));
+    expect(after.objects.find((item) => item.id === 'right')?.order_key).toBe(before.get('right'));
+    expect(after.objects.find((item) => item.id === 'note')?.order_key).toBe(before.get('note'));
+  });
   it('converges same-note character edits and keeps undo peer-local', () => {
     const left = new Y.Doc();
     addOverlayObject(left, 'main', { ...object('note'), kind: 'annotation.sticky', body: 'start' });

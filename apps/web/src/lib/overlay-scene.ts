@@ -217,6 +217,70 @@ function writeObject(target: Y.Map<unknown>, object: OverlayObjectRecord): void 
   } else target.delete('body');
 }
 
+/**
+ * Low-level snapshot helpers used by the canvas-history coordinator. They are
+ * deliberately target-scoped: restoring one overlay must never rewrite an
+ * unrelated collaborator's object or layer.
+ */
+export function readOverlayHistoryTargets(doc: Y.Doc, diagramId: string): {
+  objects: Map<string, OverlayObjectRecord>;
+  layers: Map<string, OverlayLayerRecord>;
+} {
+  const handle = getOverlayScene(doc, diagramId);
+  if (!handle || !handle.writable) return { objects: new Map(), layers: new Map() };
+  const objects = new Map<string, OverlayObjectRecord>();
+  for (const [id, value] of handle.objects.entries()) {
+    const object = readOverlayObject(id, value);
+    if (object && isSupportedOverlayObject(object)) objects.set(id, structuredClone(object));
+  }
+  const layers = new Map<string, OverlayLayerRecord>();
+  if (handle.layers) {
+    for (const [id, value] of handle.layers.entries()) {
+      const layer = value instanceof Y.Map ? Object.fromEntries(value.entries()) : value;
+      if (validLayer(layer) && layer.id === id) layers.set(id, structuredClone(layer));
+    }
+  }
+  return { objects, layers };
+}
+
+export function restoreOverlayHistoryObject(doc: Y.Doc, diagramId: string, objectId: string, object: OverlayObjectRecord | null): void {
+  const handle = object ? requireWritableScene(doc, diagramId) : getOverlayScene(doc, diagramId);
+  if (!handle?.writable) return;
+  if (!object) {
+    handle.objects.delete(objectId);
+    return;
+  }
+  let target = handle.objects.get(objectId);
+  if (!(target instanceof Y.Map)) {
+    target = new Y.Map<unknown>();
+    handle.objects.set(objectId, target);
+  }
+  writeObject(target, structuredClone(object));
+  const body = target.get('body');
+  if (body instanceof Y.Text) {
+    body.delete(0, body.length);
+    if (object.body) body.insert(0, object.body);
+  }
+}
+
+export function restoreOverlayHistoryLayer(doc: Y.Doc, diagramId: string, layerId: string, layer: OverlayLayerRecord | null): void {
+  const handle = layer ? requireWritableScene(doc, diagramId) : getOverlayScene(doc, diagramId);
+  if (!handle?.writable) return;
+  const layers = handle.layers ?? (layer ? ensureWritableLayers(handle) : null);
+  if (!layers) return;
+  if (!layer) {
+    layers.delete(layerId);
+    return;
+  }
+  let target = layers.get(layerId);
+  if (!(target instanceof Y.Map)) {
+    target = new Y.Map<unknown>();
+    layers.set(layerId, target);
+  }
+  for (const key of Array.from(target.keys())) target.delete(key);
+  for (const [key, value] of Object.entries(structuredClone(layer))) target.set(key, value);
+}
+
 function validObjectRecord(object: OverlayObjectRecord): boolean {
   return Boolean(object.id && object.kind && Number.isInteger(object.version) && object.version >= 1
     && object.order_key && validGeometry(object.geometry) && validMetadata(object.style)
@@ -440,6 +504,51 @@ export function deleteOverlayObjects(doc: Y.Doc, diagramId: string, objectIds: I
 export function setOverlayOrderKey(doc: Y.Doc, diagramId: string, objectId: string, orderKey: string): void {
   if (!orderKey) throw new Error('Overlay order key must not be empty.');
   updateOverlayObject(doc, diagramId, objectId, { order_key: orderKey });
+}
+
+function orderKeyBetween(lower: string | null, upper: string | null): string {
+  if (lower === null && upper === null) return 'o';
+  if (lower === null) {
+    const first = upper!.charCodeAt(0);
+    return first > 1 ? String.fromCharCode(Math.floor(first / 2)) : `\u0001${upper}`;
+  }
+  if (upper === null) return `${lower}~`;
+  let prefix = '';
+  for (let index = 0; index <= Math.max(lower.length, upper.length); index += 1) {
+    const lowerCode = index < lower.length ? lower.charCodeAt(index) : 1;
+    const upperCode = index < upper.length ? upper.charCodeAt(index) : 126;
+    if (lowerCode === upperCode) {
+      prefix += String.fromCharCode(lowerCode);
+      continue;
+    }
+    if (upperCode - lowerCode > 1) return `${prefix}${String.fromCharCode(Math.floor((lowerCode + upperCode) / 2))}`;
+    prefix += String.fromCharCode(lowerCode);
+  }
+  return `${lower}~`;
+}
+
+/** Rewrites only supported object ordering in one Yjs transaction so adjacent
+ * moves converge deterministically even when peers apply them in different turns. */
+export function reorderOverlayObject(doc: Y.Doc, diagramId: string, objectId: string, direction: 'front' | 'back' | 'forward' | 'backward'): void {
+  const handle = requireWritableScene(doc, diagramId);
+  const scene = readOverlayScene(doc, diagramId);
+  const target = scene.objects.find(({ id }) => id === objectId);
+  if (!target) return;
+  const targetLayer = target.layer ?? DEFAULT_LAYER_ID;
+  const ordered = sortForLayers(scene.objects.filter((object) => (object.layer ?? DEFAULT_LAYER_ID) === targetLayer), scene.layers ?? [defaultOverlayLayer()]);
+  const from = ordered.findIndex(({ id }) => id === objectId);
+  if (from < 0) return;
+  const to = direction === 'front' ? ordered.length - 1 : direction === 'back' ? 0 : direction === 'forward' ? Math.min(ordered.length - 1, from + 1) : Math.max(0, from - 1);
+  if (to === from) return;
+  const [item] = ordered.splice(from, 1);
+  if (!item) return;
+  ordered.splice(to, 0, item);
+  const lower = ordered[to - 1]?.order_key ?? null;
+  const upper = ordered[to + 1]?.order_key ?? null;
+  doc.transact(() => {
+    const map = handle.objects.get(objectId);
+    if (map instanceof Y.Map) map.set('order_key', orderKeyBetween(lower, upper));
+  }, overlayOrigins.localHuman);
 }
 
 export function copyOverlayObjects(scene: OverlaySceneSnapshot, objectIds: Iterable<string>): OverlayObjectRecord[] {

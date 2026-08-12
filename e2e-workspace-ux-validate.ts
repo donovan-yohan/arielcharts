@@ -65,6 +65,7 @@ import {
   waitForInvalidPreview,
   waitForSource,
   waitForSyncedSource,
+  waitForWorkspaceProviderSync,
 } from './e2e/support/workspace.ts';
 
 const SETTINGS_TRIGGER_TEST_ID = 'workspace-settings-trigger';
@@ -923,7 +924,23 @@ async function expectWheelGestureCameraControls(page: Page, label: string, rende
 async function expectBlankCanvasClickClearsSelection(page: Page): Promise<void> {
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
-  const node = page.locator('.mermaid-flow-node').first();
+  const nodes = page.locator('.mermaid-flow-node');
+  const nodeCount = await nodes.count();
+  let node = nodes.first();
+  let nodeIsReachable = false;
+  for (let index = 0; index < nodeCount; index += 1) {
+    const candidate = nodes.nth(index);
+    const bounds = await candidate.boundingBox();
+    if (!bounds) continue;
+    const center = { x: bounds.x + (bounds.width / 2), y: bounds.y + (bounds.height / 2) };
+    const receivesCenterHit = await candidate.evaluate((element, point) => element.contains(document.elementFromPoint(point.x, point.y)), center);
+    if (receivesCenterHit) {
+      node = candidate;
+      nodeIsReachable = true;
+      break;
+    }
+  }
+  assert(nodeIsReachable, 'Flowchart selection clear did not find a node outside the overlay toolbar hit targets.');
   await verifiedClick(page, node, 'select flowchart node before blank canvas click');
   await expect.poll(() => canonicalSelectedNodeIds(page), { timeout: 5_000 }).not.toEqual([]);
   const [flowchartBlankPoint] = await allowedCanvasGesturePoints(page, 'flowchart blank selection clear', 1, 0);
@@ -3218,6 +3235,29 @@ async function assertAndClickBoardControl(
   await verifiedClick(page, target, label);
 }
 
+async function assertCompactErrorToolbarAndRecovery(page: Page, banner: Locator, recovery: Locator, label: string): Promise<void> {
+  const primary = page.getByTestId('overlay-toolbar-primary');
+  const toggle = page.getByRole('button', { name: 'Overlay tools', exact: true });
+  await expect(primary.locator('button:visible')).toHaveCount(1);
+  await expect(toggle).toBeVisible();
+  await assertClosedOverlayToggleBesideError(page, banner, `${label} compact error toolbar`);
+  await assertBoardControl(page, recovery, `${label} recovery remains hit-testable`);
+}
+
+async function assertNormalMobileOverlayToolbar(page: Page, label: string): Promise<void> {
+  const primary = page.getByTestId('overlay-toolbar-primary');
+  await expect(primary.locator('button:visible')).toHaveCount(3);
+  const [primaryBounds, canvasBounds] = await Promise.all([
+    primary.boundingBox(),
+    page.getByTestId('diagram-canvas').boundingBox(),
+  ]);
+  assert(primaryBounds && canvasBounds, `${label} needs normal toolbar and canvas geometry.`);
+  const primaryCenter = primaryBounds.x + primaryBounds.width / 2;
+  const canvasCenter = canvasBounds.x + canvasBounds.width / 2;
+  assert(Math.abs(primaryCenter - canvasCenter) <= 3,
+    `${label} normal primary toolbar is not centered on the canvas: ${JSON.stringify({ canvasBounds, primaryBounds })}.`);
+}
+
 async function assertBoardControl(page: Page, target: Locator, label: string): Promise<void> {
   await scrollErControlIntoView(target);
   await assertHitTarget(page, target, label);
@@ -3590,7 +3630,37 @@ async function expectPortableWorkspaceExports(page: Page, peer: Page): Promise<v
 async function expectOverlaySceneFoundation(page: Page, diagramName: string): Promise<void> {
   await selectTabByName(page, diagramName);
   await expect(page.getByTestId('source-flyout')).toBeVisible();
-  await verifiedClick(page, page.getByRole('button', { name: 'Overlay tools', exact: true }), 'open overlay tools');
+  const canvas = page.getByTestId('diagram-canvas');
+  const overlayToggle = page.getByRole('button', { name: 'Overlay tools', exact: true });
+  assert(await overlayToggle.getAttribute('aria-expanded') === 'false', 'Overlay toolbar did not start in its compact state.');
+  await saveScreenshot(page, 'issue-110-overlay-toolbar-light-collapsed');
+  await verifiedClick(page, overlayToggle, 'open light overlay toolbar screenshot state');
+  await saveScreenshot(page, 'issue-110-overlay-toolbar-light-expanded');
+  await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), 'close light overlay toolbar screenshot state');
+  await selectThemePreference(page, 'dark');
+  await saveScreenshot(page, 'issue-110-overlay-toolbar-dark-collapsed');
+  await verifiedClick(page, overlayToggle, 'open dark overlay toolbar screenshot state');
+  await saveScreenshot(page, 'issue-110-overlay-toolbar-dark-expanded');
+  await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), 'close dark overlay toolbar screenshot state');
+  await selectThemePreference(page, 'light');
+  const laser = page.getByRole('button', { name: 'Laser pointer', exact: true });
+  await verifiedClick(page, laser, 'activate laser pointer before toolbar interaction');
+  assert(await canvas.evaluate((element) => getComputedStyle(element).cursor) === 'crosshair', 'Laser mode did not expose its crosshair cursor.');
+  await verifiedClick(page, overlayToggle, 'open overlay toolbar while laser is active');
+  await verifiedClick(page, page.getByRole('button', { name: 'Pen', exact: true }), 'activate pen while laser is active');
+  await expect(page.getByTestId('ink-drawing-surface')).toBeVisible();
+  assert(await page.getByTestId('ink-drawing-surface').evaluate((element) => getComputedStyle(element).cursor) === 'crosshair', 'Pen mode did not expose its drawing cursor.');
+  await canvas.focus(); await page.keyboard.press('V');
+  await expect(page.getByTestId('ink-drawing-surface')).toHaveCount(0);
+  assert(await page.getByRole('button', { name: 'Select overlay tool', exact: true }).getAttribute('aria-pressed') === 'true', 'V did not return the overlay tools to Select.');
+  assert(await page.getByRole('button', { name: 'Laser pointer', exact: true }).count() === 1, 'V did not exit laser mode.');
+  await verifiedClick(page, laser, 'activate laser pointer for toolbar exit');
+  await verifiedClick(page, page.getByRole('button', { name: 'Exit laser pointer', exact: true }), 'exit laser pointer by its toolbar control');
+  await verifiedClick(page, laser, 'activate laser pointer for Escape exit');
+  await canvas.focus(); await page.keyboard.press('Escape');
+  assert(await page.getByRole('button', { name: 'Laser pointer', exact: true }).count() === 1, 'Escape did not exit laser mode.');
+  await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), 'close overlay toolbar after laser interaction');
+  await verifiedClick(page, overlayToggle, 'open overlay tools');
   await verifiedClick(page, page.getByRole('button', { name: 'Add overlay', exact: true }), 'add overlay object');
   const objects = page.locator('[data-testid^="overlay-object-"]');
   await expect(objects).toHaveCount(1);
@@ -3601,23 +3671,28 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   assert(Boolean(beforeMove && afterMove && afterMove.x > beforeMove.x), 'Overlay move did not update visible world placement.');
   await verifiedClick(page, page.getByRole('button', { name: 'Bring front', exact: true }), 'reorder overlay object');
   await verifiedClick(page, page.getByRole('button', { name: 'Copy overlay', exact: true }), 'copy overlay object');
-  await verifiedClick(page, page.getByRole('button', { name: 'Paste overlay', exact: true }), 'paste overlay object');
+  const pasteOverlay = page.getByRole('button', { name: 'Paste overlay', exact: true });
+  await pasteOverlay.scrollIntoViewIfNeeded();
+  await verifiedClick(page, pasteOverlay, 'paste overlay object');
   await expect(objects).toHaveCount(2);
   const pastedTestId = await objects.last().getAttribute('data-testid');
   assert(pastedTestId?.startsWith('overlay-object-overlay_'), `Pasted overlay did not expose a stable object id: ${pastedTestId}.`);
-  const pastedObject = page.getByTestId(pastedTestId!);
 
   await selectTabByName(page, 'Main');
   await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(0);
   await selectTabByName(page, diagramName);
   await expect(objects).toHaveCount(2);
   await verifiedClick(page, page.getByRole('button', { name: 'Overlay tools', exact: true }), 'reopen overlay tools after tab switch');
-  await verifiedClick(page, pastedObject, 'reselect topmost pasted overlay object');
+  const overlayList = page.getByLabel('ArielCharts overlay list', { exact: true });
+  const overlayObjectButtons = overlayList.locator('ul').first().locator('li > button');
+  await overlayObjectButtons.last().scrollIntoViewIfNeeded();
+  await verifiedClick(page, overlayObjectButtons.last(), 'reselect topmost pasted overlay object from the palette');
   await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete overlay object');
   await expect(objects).toHaveCount(1);
   await verifiedClick(page, page.getByRole('button', { name: 'Undo overlay', exact: true }), 'undo overlay delete');
   await expect(objects).toHaveCount(2);
-  await verifiedClick(page, pastedObject, 'select pasted overlay before history restore');
+  await overlayObjectButtons.last().scrollIntoViewIfNeeded();
+  await verifiedClick(page, overlayObjectButtons.last(), 'select pasted overlay before history restore');
   await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete overlay before history restore');
   await verifiedClick(page, objects.first(), 'select final overlay before history restore');
   await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete final overlay before history restore');
@@ -3632,7 +3707,9 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   await waitForCanvas(page, 'flowchart');
   await expectOverlayControlGapReachesCanvas(page);
   await verifiedClick(page, topmostObject, 'select topmost overlay for semantic anchor');
-  await verifiedClick(page, page.getByRole('button', { name: 'Anchor first node', exact: true }), 'anchor overlay to first Mermaid node');
+  const anchorFirstNode = page.getByRole('button', { name: 'Anchor first node', exact: true });
+  await anchorFirstNode.scrollIntoViewIfNeeded();
+  await verifiedClick(page, anchorFirstNode, 'anchor overlay to first Mermaid node');
   await expect(topmostObject).not.toHaveAttribute('data-orphaned', 'true');
   const worldBeforePan = await topmostObject.evaluate((element) => ({ x: element.getAttribute('data-world-x'), y: element.getAttribute('data-world-y') }));
   const cameraBeforePan = await readCanvasCameraSnapshot(page, 'overlay pan baseline');
@@ -4616,21 +4693,27 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     await verifiedClick(page, toggle, `${label} open overlay controls`);
     const panel = page.getByLabel('Overlay scene controls', { exact: true });
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
-    const actionNames = ['Add overlay', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow', 'Frame selection', 'Align left', 'Distribute horizontal', 'Move right', 'Anchor first node', 'Bring front', 'Copy overlay', 'Paste overlay', 'Delete overlay', 'Undo overlay', 'Restore overlay', 'Pen', 'Highlighter', 'Erase stroke'] as const;
+    const actionNames = ['Add overlay', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow', 'Paste overlay', 'Undo overlay', 'Restore overlay', 'Pen', 'Highlighter', 'Erase stroke'] as const;
     for (const actionName of actionNames) {
       const action = panel.getByRole('button', { name: actionName, exact: true });
       await action.scrollIntoViewIfNeeded();
       const evidence = await action.evaluate((element) => {
         const actionBounds = element.getBoundingClientRect();
-        const panelBounds = element.parentElement!.getBoundingClientRect();
-        const canvasBounds = element.closest('[data-testid="diagram-canvas"]')!.getBoundingClientRect();
+        const panel = element.closest<HTMLElement>('[aria-label="Overlay scene controls"]');
+        const panelBounds = panel?.getBoundingClientRect();
+        const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+        const canvasBounds = canvas?.getBoundingClientRect();
         const hit = document.elementFromPoint(actionBounds.left + actionBounds.width / 2, actionBounds.top + actionBounds.height / 2);
         return {
-          contained: actionBounds.left >= canvasBounds.left - 0.5 && actionBounds.right <= canvasBounds.right + 0.5
+          action: { bottom: actionBounds.bottom, left: actionBounds.left, right: actionBounds.right, top: actionBounds.top },
+          canvas: canvasBounds && { bottom: canvasBounds.bottom, left: canvasBounds.left, right: canvasBounds.right, top: canvasBounds.top },
+          contained: Boolean(canvasBounds && panelBounds)
+            && actionBounds.left >= canvasBounds.left - 0.5 && actionBounds.right <= canvasBounds.right + 0.5
             && actionBounds.top >= canvasBounds.top - 0.5 && actionBounds.bottom <= canvasBounds.bottom + 0.5
-            && actionBounds.left >= panelBounds.left - 0.5 && actionBounds.right <= panelBounds.right + 0.5
-            && actionBounds.top >= panelBounds.top - 0.5 && actionBounds.bottom <= panelBounds.bottom + 0.5,
+            && actionBounds.left >= panelBounds!.left - 0.5 && actionBounds.right <= panelBounds!.right + 0.5
+            && actionBounds.top >= panelBounds!.top - 0.5 && actionBounds.bottom <= panelBounds!.bottom + 0.5,
           height: actionBounds.height,
+          panel: panelBounds && { bottom: panelBounds.bottom, left: panelBounds.left, right: panelBounds.right, top: panelBounds.top },
           reachable: hit instanceof Node && element.contains(hit),
           width: actionBounds.width,
         };
@@ -4651,7 +4734,8 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     await verifiedClick(page, addOverlay, `${label} add overlay from bounded panel`);
     await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(objectCount + 1);
     await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), `${label} close overlay controls`);
-    await panel.waitFor({ state: 'detached', timeout: 5_000 });
+    await expect(page.getByRole('button', { name: 'Overlay tools', exact: true })).toHaveAttribute('aria-expanded', 'false', { timeout: 5_000 });
+    await page.getByLabel('More overlay tools', { exact: true }).waitFor({ state: 'detached', timeout: 5_000 });
     const object = page.locator('[data-testid^="overlay-object-"]').last();
     const exposedPoint = await object.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
@@ -4667,6 +4751,11 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     await page.mouse.click(exposedPoint.x, exposedPoint.y);
     await expect.poll(async () => object.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe('2px');
     await verifiedClick(page, page.getByRole('button', { name: 'Overlay tools', exact: true }), `${label} reopen overlay controls for cleanup`);
+    for (const actionName of ['Frame selection', 'Move right', 'Bring front', 'Copy overlay', 'Delete overlay'] as const) {
+      const action = page.getByRole('button', { name: actionName, exact: true });
+      await action.scrollIntoViewIfNeeded();
+      await assertTouchTarget(page, action, `${label} selected overlay action ${actionName}`);
+    }
     const deleteOverlay = page.getByRole('button', { name: 'Delete overlay', exact: true });
     await deleteOverlay.scrollIntoViewIfNeeded();
     await verifiedClick(page, deleteOverlay, `${label} delete mobile overlay fixture`);
@@ -4894,8 +4983,8 @@ async function expectResponsiveNumericPanel(
   );
   assert(
     toggleBounds.y >= canvasBounds.y + 6 &&
-      toggleBounds.y <= canvasBounds.y + 12,
-    `${label} closed overlay toggle did not use the reserved top inset: ${JSON.stringify({ canvasBounds, toggleBounds })}.`,
+      toggleBounds.y + toggleBounds.height <= canvasBounds.y + canvasBounds.height - 6,
+    `${label} closed overlay toggle escaped the visible canvas: ${JSON.stringify({ canvasBounds, toggleBounds })}.`,
   );
   assert(
     toggleBounds.x + toggleBounds.width <= inputBounds.x ||
@@ -5272,6 +5361,14 @@ H,I,1`;
     responsiveTreemapBanner,
     `${label} Treemap mutation-error coexistence`,
   );
+  if (label.startsWith('mobile-390') || label.startsWith('mobile-320')) {
+    await assertCompactErrorToolbarAndRecovery(
+      page,
+      responsiveTreemapBanner,
+      leafZero.getByRole('button', { name: 'Save', exact: true }),
+      `${label} Treemap`,
+    );
+  }
   await expect(leafZeroValue).toHaveValue("-1");
   await ensureSourceFlyoutOpen(page);
   await expect
@@ -5286,6 +5383,9 @@ H,I,1`;
   );
   await expect(treemapError).toHaveCount(0);
   await expect(responsiveTreemapBanner).toHaveCount(0);
+  if (label.startsWith('mobile-390') || label.startsWith('mobile-320')) {
+    await assertNormalMobileOverlayToolbar(page, `${label} Treemap error recovery`);
+  }
   const treemapUndo = await focusCurrentDiagramCanvas(
     page,
     `${label} Treemap undo`,
@@ -5386,6 +5486,9 @@ H,I,1`;
     responsiveVennBanner,
     `${label} Venn mutation-error coexistence`,
   );
+  if (label.startsWith('mobile-390') || label.startsWith('mobile-320')) {
+    await assertCompactErrorToolbarAndRecovery(page, responsiveVennBanner, vennAdd, `${label} Venn`);
+  }
   await expect(newVennValue).toHaveValue("-1");
   await ensureSourceFlyoutOpen(page);
   await expect
@@ -5396,6 +5499,9 @@ H,I,1`;
   await assertAndClickBoardControl(page, vennAdd, `${label} Venn recovery`);
   await expect(vennError).toHaveCount(0);
   await expect(responsiveVennBanner).toHaveCount(0);
+  if (label.startsWith('mobile-390') || label.startsWith('mobile-320')) {
+    await assertNormalMobileOverlayToolbar(page, `${label} Venn error recovery`);
+  }
   const vennUndo = await focusCurrentDiagramCanvas(page, `${label} Venn undo`);
   await vennUndo.press("ControlOrMeta+z");
   await vennUndo.press("ControlOrMeta+z");
@@ -5699,17 +5805,48 @@ async function assertMobileErrorBannerScrollability(page: Page, label: string): 
 
 async function assertClosedOverlayToggleBesideError(page: Page, banner: Locator, label: string): Promise<void> {
   const toggle = page.getByRole('button', { name: 'Overlay tools', exact: true });
-  await assertTouchTarget(page, toggle, `${label} closed overlay toggle`);
+  await toggle.waitFor({ state: 'visible', timeout: 15_000 });
+  await page.waitForTimeout(100);
+  const diagnostics = await toggle.evaluate((element) => {
+    const canvas = element.closest('[data-testid="diagram-canvas"]');
+    const toolbar = element.closest('.overlay-icon-toolbar');
+    const controls = element.closest('[data-testid="overlay-controls-owner"]');
+    const header = document.querySelector('.workspace-topbar');
+    const error = document.querySelector('[data-testid="mutation-error-banner"]');
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    const canvasRect = canvas?.getBoundingClientRect();
+    const toolbarRect = toolbar?.getBoundingClientRect();
+    const controlsRect = controls?.getBoundingClientRect();
+    const headerRect = header?.getBoundingClientRect();
+    const errorRect = error?.getBoundingClientRect();
+    const toolbarStyle = toolbar instanceof HTMLElement ? getComputedStyle(toolbar) : null;
+    const controlsStyle = controls instanceof HTMLElement ? getComputedStyle(controls) : null;
+    return {
+      button: { bottom: rect.bottom, height: rect.height, left: rect.left, right: rect.right, top: rect.top, width: rect.width },
+      canvas: canvasRect && { bottom: canvasRect.bottom, height: canvasRect.height, left: canvasRect.left, right: canvasRect.right, top: canvasRect.top, width: canvasRect.width },
+      controls: controlsRect && { bottom: controlsRect.bottom, height: controlsRect.height, left: controlsRect.left, right: controlsRect.right, top: controlsRect.top, width: controlsRect.width },
+      error: errorRect && { bottom: errorRect.bottom, height: errorRect.height, left: errorRect.left, right: errorRect.right, top: errorRect.top, width: errorRect.width },
+      header: headerRect && { bottom: headerRect.bottom, height: headerRect.height, left: headerRect.left, right: headerRect.right, top: headerRect.top, width: headerRect.width },
+      hit: hit instanceof Element ? { className: hit.getAttribute('class'), testId: hit.getAttribute('data-testid'), tag: hit.tagName } : null,
+      hitBelongsToToggle: hit instanceof Node && element.contains(hit),
+      controlsStyle: controlsStyle && { inset: controlsStyle.inset, position: controlsStyle.position, top: controlsStyle.top, transform: controlsStyle.transform, zIndex: controlsStyle.zIndex },
+      toolbar: toolbarRect && { bottom: toolbarRect.bottom, height: toolbarRect.height, left: toolbarRect.left, right: toolbarRect.right, top: toolbarRect.top, width: toolbarRect.width },
+      toolbarStyle: toolbarStyle && { inset: toolbarStyle.inset, position: toolbarStyle.position, top: toolbarStyle.top, transform: toolbarStyle.transform, zIndex: toolbarStyle.zIndex },
+    };
+  });
+  const toggleBoundsForHit = diagnostics.button;
+  assert(toggleBoundsForHit && diagnostics.hitBelongsToToggle, `${label} closed overlay toggle is not its own center hit target: ${JSON.stringify(diagnostics)}.`);
+  assert(toggleBoundsForHit.width >= 44 && toggleBoundsForHit.height >= 44,
+    `${label} closed overlay toggle is ${toggleBoundsForHit.width.toFixed(1)}x${toggleBoundsForHit.height.toFixed(1)}px; phone action targets must be at least 44px.`);
   await assertContainedInViewport(page, toggle, `${label} closed overlay toggle`);
   await assertContainedInViewport(page, banner, `${label} banner`);
   const [toggleBounds, bannerBounds, canvasBounds] = await Promise.all([
     toggle.boundingBox(), banner.boundingBox(), page.getByTestId('diagram-canvas').boundingBox(),
   ]);
   assert(toggleBounds && bannerBounds && canvasBounds, `${label} needs toggle, banner, and canvas bounds.`);
-  if ((page.viewportSize()?.width ?? Number.POSITIVE_INFINITY) <= 420) {
-    assert(toggleBounds.y >= canvasBounds.y + 6 && toggleBounds.y <= canvasBounds.y + 12,
-      `${label} toggle left the reserved top inset: ${JSON.stringify({ canvasBounds, toggleBounds })}.`);
-  }
+  assert(toggleBounds.y >= canvasBounds.y + 6 && toggleBounds.y + toggleBounds.height <= canvasBounds.y + canvasBounds.height - 6,
+    `${label} toggle left the visible canvas: ${JSON.stringify({ canvasBounds, toggleBounds })}.`);
   assert(toggleBounds.x + toggleBounds.width <= bannerBounds.x || bannerBounds.x + bannerBounds.width <= toggleBounds.x
     || toggleBounds.y + toggleBounds.height <= bannerBounds.y || bannerBounds.y + bannerBounds.height <= toggleBounds.y,
   `${label} toggle overlaps its error banner: ${JSON.stringify({ bannerBounds, toggleBounds })}.`);
@@ -6035,7 +6172,17 @@ async function expectCatalogStarterMobileSweep(page: Page, label: 'mobile-390' |
   `${label} catalog handoff changed the original durable diagram.`);
 }
 
+async function seedResponsiveCatalog(mcp: ModernMcpClient, sessionId: string): Promise<void> {
+  for (const family of MERMAID_DIAGRAM_FAMILIES) {
+    const name = `Catalog ${family.label} (${family.id})`;
+    const created = await mcp.createDiagramFromTemplateWithLatestRevision(sessionId, name, family.starter.id);
+    assert(created.name === name && created.mermaidText === family.starter.source,
+      `Responsive fixture did not seed the ${family.label} catalog starter.`);
+  }
+}
+
 async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagramName: string, residuals: string[]): Promise<void> {
+  console.log(`E2E phone ${label}: workspace-open`);
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
   await selectTabByName(page, diagramName);
   await waitForCanvas(page, 'flowchart');
@@ -6047,6 +6194,8 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
     timeout: 15_000,
   }).toBeGreaterThanOrEqual(2);
   await assertPhoneSurface(page, label, 'presence-and-footer');
+
+  console.log(`E2E phone ${label}: source`);
 
   const sourceCamera = await renderedCanvasCameraTransform(page, `${label} source baseline`);
   const sourceToggle = page.getByTestId('source-flyout-toggle');
@@ -6117,6 +6266,7 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
 
   await selectTabByName(page, diagramName);
   await waitForCanvas(page, 'flowchart');
+  console.log(`E2E phone ${label}: settings`);
   const settingsCamera = await renderedCanvasCameraTransform(page, `${label} settings baseline`);
   const settingsTrigger = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
   await tapTarget(page, settingsTrigger, `${label} settings`);
@@ -6141,9 +6291,11 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   assert(await renderedCanvasCameraTransform(page, `${label} history close`) === historyCamera,
     `${label} closing history changed the local canvas camera.`);
 
+  console.log(`E2E phone ${label}: flowchart-controls`);
   await expectTouchCanvasControls(page, label, 'flowchart', residuals);
   await assertPhoneSurface(page, label, 'flowchart-touch-controls');
 
+  console.log(`E2E phone ${label}: sequence-controls`);
   await replaceSource(page, API_SEQUENCE_FIXTURE);
   await waitForSource(page, API_SEQUENCE_FIXTURE);
   await closeFlyout(page, 'source');
@@ -6151,6 +6303,7 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   await expectTouchCanvasControls(page, label, 'sequence', residuals);
   await assertPhoneSurface(page, label, 'sequence-touch-controls');
 
+  console.log(`E2E phone ${label}: invalid-source`);
   await replaceSource(page, INVALID_MERMAID_FIXTURE);
   await waitForInvalidPreview(page);
   const sourceFlyout = page.getByTestId('source-flyout');
@@ -6163,16 +6316,19 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   await assertContainedInViewport(page, sourceParseStatus, `${label} contextual source parse error`);
   await assertPhoneSurface(page, label, 'source-parse-error');
 
-  await closeFlyout(page, 'source');
+  await tapTarget(page, page.getByRole('button', { name: 'Close source panel', exact: true }), `${label} close invalid source panel`);
+  await page.getByTestId('source-flyout').waitFor({ state: 'detached', timeout: 15_000 });
   await waitForInvalidPreview(page);
   await assertMobileErrorBannerScrollability(page, `${label} global Mermaid error`);
 
+  console.log(`E2E phone ${label}: restore-source`);
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForSource(page, FLOWCHART_FIXTURE);
   await sourceParseStatus.waitFor({ state: 'detached', timeout: 15_000 });
   await closeFlyout(page, 'source');
   await waitForCanvas(page, 'flowchart');
   await assertPhoneSurface(page, label, 'flowchart-restored');
+  console.log(`E2E phone ${label}: workspace-complete`);
 }
 
 function historyItem(page: Page, revisionId: string): Locator {
@@ -6766,6 +6922,7 @@ async function expectRevisionHistoryCollaboration(
     ] as const) {
       const { page: responsivePage } = await browser.newPage(viewport);
       await visitWorkspace(responsivePage, baseUrl, sessionId, roomAccess.roomKey);
+      await waitForWorkspaceProviderSync(responsivePage);
       await selectTabByName(responsivePage, diagramName);
       await waitForCanvas(responsivePage, 'flowchart');
       await expectHistoryFlyoutSafety(responsivePage, label, historical.revision.id);
@@ -6869,9 +7026,9 @@ async function validateWorkspaceUx(): Promise<void> {
       await expectOverlaySceneFoundation(page, diagramName);
       record(results, 'durable overlay create, move, order, clipboard, delete, undo, history restore, tab isolation, and SVG/React Flow camera placement');
       const primaryRoomCookie = await currentAuthenticatedRoomCookie(page, serverUrl, sessionId);
-      const { context: exportPeerContext, page: exportPeer } = await browser.newPage(DESKTOP_VIEWPORT);
-      await exportPeerContext.addCookies([primaryRoomCookie]);
-      const installedRoomCookies = (await exportPeerContext.cookies(serverUrl)).filter(({ name }) => name === primaryRoomCookie.name);
+      const { page: exportPeer } = await browser.newPage(DESKTOP_VIEWPORT);
+      await exportPeer.context().addCookies([primaryRoomCookie]);
+      const installedRoomCookies = (await exportPeer.context().cookies(serverUrl)).filter(({ name }) => name === primaryRoomCookie.name);
       assert(installedRoomCookies.length === 1 && installedRoomCookies[0]!.value === primaryRoomCookie.value
         && installedRoomCookies[0]!.domain === primaryRoomCookie.domain && installedRoomCookies[0]!.path === primaryRoomCookie.path
         && installedRoomCookies[0]!.httpOnly === primaryRoomCookie.httpOnly && installedRoomCookies[0]!.sameSite === primaryRoomCookie.sameSite
@@ -6951,34 +7108,61 @@ async function validateWorkspaceUx(): Promise<void> {
       await expectActivityFlyoutFitSafety(activityFitPage);
       record(results, 'activity-open Fit keeps graph and selected toolbar in unobscured canvas');
 
-      for (const [label, viewport] of [
-        ['tablet', TABLET_VIEWPORT],
-        ['mobile-390', MOBILE_VIEWPORT],
-        ['mobile-320', NARROW_MOBILE_VIEWPORT],
-        ['mobile-landscape', MOBILE_LANDSCAPE_VIEWPORT],
-      ] as const) {
-        const { page: responsivePage } = await browser.newPage(
-          viewport,
-          label.startsWith('mobile') ? PHONE_CONTEXT_OPTIONS : undefined,
-        );
-        await visitWorkspace(responsivePage, baseUrl, sessionId, room.roomKey);
-        await expectStableFlyoutAnchors(responsivePage, label);
-        await expectResponsiveControls(responsivePage, label, diagramName);
-        if (label.startsWith('mobile')) {
-          await expectPhoneLiveCodingWorkspace(responsivePage, label, diagramName, mobilePinchResiduals);
-          record(results, `${label} touch viewport, tabs, flyouts, camera, final-state overflow, screenshots, and canvas controls`);
-          if (label === 'mobile-390' || label === 'mobile-320') {
-            await expectCatalogStarterMobileSweep(responsivePage, label, mcp, sessionId);
-            record(results, `${label} generated all-30 catalog chooser targets plus per-family source-panel containment, exact source isolation, and camera stability`);
+      // Responsive acceptance owns viewport behavior, not the unrelated source
+      // mutation churn accumulated by the desktop catalog/history phase.
+      const responsiveRoom = await createRoom(serverUrl, baseUrl);
+      const responsiveRoomAccess = await exchangeRoomAccess(serverUrl, baseUrl, responsiveRoom);
+      const responsiveMcp = new ModernMcpClient(mcpUrl, baseUrl, responsiveRoom);
+      const responsiveSession = await responsiveMcp.getSession(responsiveRoom.sessionId);
+      const responsiveMain = responsiveSession.diagrams.find((diagram) => diagram.name === 'Main');
+      assert(responsiveMain, 'Responsive fixture room did not create its Main diagram.');
+      await responsiveMcp.writeLatest(responsiveRoom.sessionId, responsiveMain.id, FLOWCHART_FIXTURE, 'Responsive fixture seed');
+      await seedResponsiveCatalog(responsiveMcp, responsiveRoom.sessionId);
+      const { context: responsivePeerContext, page: responsivePeer } = await browser.newPage(DESKTOP_VIEWPORT);
+      try {
+        await visitWorkspace(responsivePeer, baseUrl, responsiveRoom.sessionId, responsiveRoom.roomKey);
+        await waitForWorkspaceProviderSync(responsivePeer);
+        for (const [label, viewport] of [
+          ['tablet', TABLET_VIEWPORT],
+          ['mobile-390', MOBILE_VIEWPORT],
+          ['mobile-320', NARROW_MOBILE_VIEWPORT],
+          ['mobile-landscape', MOBILE_LANDSCAPE_VIEWPORT],
+        ] as const) {
+          console.log(`E2E responsive ${label}: open`);
+          const { page: responsivePage } = await browser.newPage(
+            viewport,
+            label.startsWith('mobile') ? PHONE_CONTEXT_OPTIONS : undefined,
+          );
+          await visitWorkspace(responsivePage, baseUrl, responsiveRoom.sessionId, responsiveRoom.roomKey);
+          await waitForWorkspaceProviderSync(responsivePage);
+          console.log(`E2E responsive ${label}: synced`);
+          console.log(`E2E responsive ${label}: visited`);
+          await expectStableFlyoutAnchors(responsivePage, label);
+          console.log(`E2E responsive ${label}: anchors`);
+          await expectResponsiveControls(responsivePage, label, 'Main');
+          console.log(`E2E responsive ${label}: controls`);
+          if (label.startsWith('mobile')) {
+            await expectPhoneLiveCodingWorkspace(responsivePage, label, 'Main', mobilePinchResiduals);
+            console.log(`E2E responsive ${label}: phone workspace`);
+            record(results, `${label} touch viewport, tabs, flyouts, camera, final-state overflow, screenshots, and canvas controls`);
+            if (label === 'mobile-390' || label === 'mobile-320') {
+              await expectCatalogStarterMobileSweep(responsivePage, label, responsiveMcp, responsiveRoom.sessionId);
+              console.log(`E2E responsive ${label}: catalog`);
+              record(results, `${label} generated all-30 catalog chooser targets plus per-family source-panel containment, exact source isolation, and camera stability`);
+            }
+            if (label === 'mobile-390' || label === 'mobile-320') {
+              await expectResponsiveNumericPanel(responsivePage, label, responsiveMcp, mcpUrl, baseUrl, responsiveRoomAccess, responsiveRoom.sessionId, 'Main');
+              console.log(`E2E responsive ${label}: numeric`);
+              record(results, `${label} Treemap/Venn/Wardley exact source, rejection isolation, undo, MCP remote drafts, source-only fallback, scrolled-last 44px targets, and overlay coexistence`);
+            }
           }
-          if (label === 'mobile-390' || label === 'mobile-320') {
-            await expectResponsiveNumericPanel(responsivePage, label, mcp, mcpUrl, baseUrl, roomAccess, sessionId, diagramName);
-            record(results, `${label} Treemap/Venn/Wardley exact source, rejection isolation, undo, MCP remote drafts, source-only fallback, scrolled-last 44px targets, and overlay coexistence`);
-          }
+          await expectNoDevelopmentIndicator(responsivePage);
+          await saveScreenshot(responsivePage, `workspace-ux-${label}`);
+          console.log(`E2E responsive ${label}: complete`);
+          record(results, `${label} anchors and source controls`);
         }
-        await expectNoDevelopmentIndicator(responsivePage);
-        await saveScreenshot(responsivePage, `workspace-ux-${label}`);
-        record(results, `${label} anchors and source controls`);
+      } finally {
+        await responsivePeerContext.close();
       }
     } finally {
       await browser.close();

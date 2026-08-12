@@ -32,11 +32,10 @@ afterEach(() => {
 });
 
 describe('useOverlayScene', () => {
-  it('rebinds undo to an authoritative scene replacement and disposes the detached manager', async () => {
+  it('rebinds to an authoritative scene replacement without retaining detached objects', async () => {
     const doc = new Y.Doc();
     addOverlayObject(doc, 'main', object('old'));
     const oldHandle = getOverlayScene(doc, 'main')!;
-    const destroy = vi.spyOn(Y.UndoManager.prototype, 'destroy');
     const host = document.createElement('div');
     document.body.append(host);
     const root = createRoot(host);
@@ -53,17 +52,12 @@ describe('useOverlayScene', () => {
       addOverlayObject(doc, 'main', object('imported'));
     });
     expect(controller?.scene.objects.map(({ id }) => id)).toEqual(['imported']);
-    expect(destroy).toHaveBeenCalledTimes(1);
 
     await act(async () => controller?.update('imported', { geometry: { x: 88, y: 20, width: 30, height: 40, rotation: 0 } }));
     expect(readOverlayScene(doc, 'main').objects[0]?.geometry.x).toBe(88);
-    await act(async () => controller?.undo());
-    expect(readOverlayScene(doc, 'main').objects[0]?.geometry.x).toBe(10);
-
     doc.transact(() => oldHandle.objects.delete('old'), 'detached-old-scene');
     expect(readOverlayScene(doc, 'main').objects.map(({ id }) => id)).toEqual(['imported']);
     await act(async () => root.unmount());
-    expect(destroy).toHaveBeenCalledTimes(2);
     doc.destroy();
   });
 });

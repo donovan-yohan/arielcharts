@@ -83,6 +83,7 @@ interface QueuedMutation {
   mutate: (currentText: string) => MutationResult;
   reject: (reason?: unknown) => void;
   resolve: (value: MutationResult) => void;
+  transactionRunner?: (apply: () => void) => void;
 }
 
 export interface MutationQueueOptions {
@@ -247,6 +248,7 @@ export class MutationQueue {
   enqueueResult<TResult extends MutationResult>(
     mutate: (currentText: string) => TResult,
     afterApply?: (result: TResult) => void,
+    transactionRunner?: (apply: () => void) => void,
   ): Promise<TResult> {
     return new Promise<TResult>((resolve, reject) => {
       this.queue.push({
@@ -254,6 +256,7 @@ export class MutationQueue {
         mutate,
         reject,
         resolve: (result) => { resolve(result as TResult); },
+        transactionRunner,
       });
       void this.flush();
     });
@@ -294,7 +297,7 @@ export class MutationQueue {
    * effective node id from the same chart snapshot prevents a collaborator
    * claiming the preferred id between a UI gesture and mutation execution.
    */
-  async addConnectedNode(source: string, label = DEFAULT_NODE_LABEL, options: AddConnectedNodeOptions = {}): Promise<MutationResult> {
+  async addConnectedNode(source: string, label = DEFAULT_NODE_LABEL, options: AddConnectedNodeOptions = {}, transactionRunner?: (apply: () => void) => void): Promise<MutationResult> {
     return this.enqueueResult((currentText) => {
       const chart = getMutableFlowchart(currentText, { createIfEmpty: true, direction: options.direction });
       const nodeId = ensureUniqueId(chart.nodeIds, options.id ?? createNodeId(label));
@@ -310,12 +313,13 @@ export class MutationQueue {
         previousText: currentText,
         snapshot: getFlowchartSnapshot(chart),
       };
-    });
+    }, undefined, transactionRunner);
   }
 
   async pasteClipboard(
     payload: DiagramClipboardPayload,
     options: PasteClipboardOptions = {},
+    transactionRunner?: (apply: () => void) => void,
   ): Promise<PasteClipboardResult> {
     assertValidClipboardPayload(payload);
 
@@ -354,7 +358,7 @@ export class MutationQueue {
       };
 
       return result;
-    }, options.onApplied);
+    }, options.onApplied, transactionRunner);
   }
 
   async removeNode(nodeId: string): Promise<MutationResult> {
@@ -463,7 +467,8 @@ export class MutationQueue {
           if (result.nextText !== previousText || next.afterApply) {
             const doc = this.yText.doc;
             if (doc) {
-              doc.transact(applyResult, this.options.transactionOrigin);
+              const transact = () => doc.transact(applyResult, this.options.transactionOrigin);
+              if (next.transactionRunner) next.transactionRunner(transact); else transact();
             } else {
               applyResult();
             }

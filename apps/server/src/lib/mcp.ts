@@ -4,6 +4,8 @@ import type {
   DeleteDiagramOutput,
   GetSessionOutput,
   ListDiagramsOutput,
+  OverlayObjectPatch,
+  OverlayObjectRecord,
   Participant,
   ReadDiagramOutput,
   RenameDiagramOutput,
@@ -29,6 +31,81 @@ function readNonEmptyString(value: unknown, field: string): string {
 function readString(value: unknown, field: string): string {
   if (typeof value !== 'string') throw new Error(`Expected string field: ${field}`);
   return value;
+}
+
+function readFiniteNumber(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`Expected finite number field: ${field}`);
+  return value;
+}
+
+function readRecord(value: unknown, field: string): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error(`Expected object field: ${field}`);
+  return structuredClone(value);
+}
+
+function readOverlayObject(value: unknown, field: string): OverlayObjectRecord {
+  const object = readRecord(value, field);
+  const geometry = readRecord(object.geometry, `${field}.geometry`);
+  const record: OverlayObjectRecord = {
+    id: readNonEmptyString(object.id, `${field}.id`),
+    kind: readNonEmptyString(object.kind, `${field}.kind`),
+    version: readFiniteNumber(object.version, `${field}.version`),
+    order_key: readNonEmptyString(object.order_key, `${field}.order_key`),
+    geometry: {
+      x: readFiniteNumber(geometry.x, `${field}.geometry.x`),
+      y: readFiniteNumber(geometry.y, `${field}.geometry.y`),
+      width: readFiniteNumber(geometry.width, `${field}.geometry.width`),
+      height: readFiniteNumber(geometry.height, `${field}.geometry.height`),
+      rotation: readFiniteNumber(geometry.rotation, `${field}.geometry.rotation`),
+    },
+    style: readRecord(object.style, `${field}.style`) as OverlayObjectRecord['style'],
+    metadata: readRecord(object.metadata, `${field}.metadata`) as OverlayObjectRecord['metadata'],
+    payload: readRecord(object.payload, `${field}.payload`),
+  };
+  if (object.anchor !== undefined) {
+    const anchor = readRecord(object.anchor, `${field}.anchor`);
+    const offset = readRecord(anchor.offset, `${field}.anchor.offset`); const fallback = readRecord(anchor.fallback, `${field}.anchor.fallback`);
+    record.anchor = {
+      mermaid_id: readNonEmptyString(anchor.mermaid_id, `${field}.anchor.mermaid_id`),
+      offset: { x: readFiniteNumber(offset.x, `${field}.anchor.offset.x`), y: readFiniteNumber(offset.y, `${field}.anchor.offset.y`) },
+      fallback: { x: readFiniteNumber(fallback.x, `${field}.anchor.fallback.x`), y: readFiniteNumber(fallback.y, `${field}.anchor.fallback.y`) },
+    };
+  }
+  if (object.layer !== undefined) record.layer = readNonEmptyString(object.layer, `${field}.layer`);
+  if (object.body !== undefined) record.body = readString(object.body, `${field}.body`);
+  return record;
+}
+
+const OVERLAY_PATCH_KEYS = new Set(['geometry', 'anchor', 'layer', 'style', 'metadata', 'payload', 'body']);
+
+function readOverlayPatch(value: unknown, field: string): OverlayObjectPatch {
+  const raw = readRecord(value, field);
+  const keys = Object.keys(raw);
+  if (keys.length === 0 || keys.some((key) => !OVERLAY_PATCH_KEYS.has(key))) throw new Error(`Invalid overlay patch fields: ${field}`);
+  const patch: OverlayObjectPatch = {};
+  if ('geometry' in raw) {
+    const geometry = readRecord(raw.geometry, `${field}.geometry`);
+    patch.geometry = {
+      x: readFiniteNumber(geometry.x, `${field}.geometry.x`), y: readFiniteNumber(geometry.y, `${field}.geometry.y`),
+      width: readFiniteNumber(geometry.width, `${field}.geometry.width`), height: readFiniteNumber(geometry.height, `${field}.geometry.height`),
+      rotation: readFiniteNumber(geometry.rotation, `${field}.geometry.rotation`),
+    };
+  }
+  if ('anchor' in raw) {
+    const anchor = readRecord(raw.anchor, `${field}.anchor`);
+    const offset = readRecord(anchor.offset, `${field}.anchor.offset`); const fallback = readRecord(anchor.fallback, `${field}.anchor.fallback`);
+    patch.anchor = {
+      mermaid_id: readNonEmptyString(anchor.mermaid_id, `${field}.anchor.mermaid_id`),
+      offset: { x: readFiniteNumber(offset.x, `${field}.anchor.offset.x`), y: readFiniteNumber(offset.y, `${field}.anchor.offset.y`) },
+      fallback: { x: readFiniteNumber(fallback.x, `${field}.anchor.fallback.x`), y: readFiniteNumber(fallback.y, `${field}.anchor.fallback.y`) },
+    };
+  }
+  if ('layer' in raw) patch.layer = readNonEmptyString(raw.layer, `${field}.layer`);
+  if ('style' in raw) patch.style = readRecord(raw.style, `${field}.style`) as OverlayObjectRecord['style'];
+  if ('metadata' in raw) patch.metadata = readRecord(raw.metadata, `${field}.metadata`) as OverlayObjectRecord['metadata'];
+  if ('payload' in raw) patch.payload = readRecord(raw.payload, `${field}.payload`);
+  if ('body' in raw) patch.body = readString(raw.body, `${field}.body`);
+  return patch;
 }
 
 function readParticipant(value: unknown): Participant {
@@ -124,6 +201,51 @@ export async function handleMcpToolCall(manager: SessionManager, payload: unknow
       const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
       return manager.readDiagram(sessionId, diagramId) satisfies Promise<ReadDiagramOutput>;
     }
+    case 'read_overlay_scene': {
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
+      return manager.readMcpOverlayScene(sessionId, diagramId);
+    }
+    case 'list_overlay_scene': {
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
+      return manager.listMcpOverlayObjects(sessionId, diagramId);
+    }
+    case 'read_overlay_object': {
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
+      const objectId = readNonEmptyString(input.object_id, 'object_id');
+      return manager.readMcpOverlayObject(sessionId, diagramId, objectId);
+    }
+    case 'create_overlay_object': {
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
+      const expectedRevision = readNonEmptyString(input.expected_overlay_revision, 'expected_overlay_revision');
+      const object = readOverlayObject(input.object, 'object');
+      const { meta } = event(input, 'replaced', diagramId);
+      return manager.createMcpOverlayObject(sessionId, diagramId, expectedRevision, object, meta.participants);
+    }
+    case 'update_overlay_object': {
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
+      const objectId = readNonEmptyString(input.object_id, 'object_id');
+      const expectedRevision = readNonEmptyString(input.expected_overlay_revision, 'expected_overlay_revision');
+      const patch = readOverlayPatch(input.patch, 'patch');
+      const { meta } = event(input, 'replaced', diagramId);
+      return manager.updateMcpOverlayObject(sessionId, diagramId, objectId, expectedRevision, patch, meta.participants);
+    }
+    case 'reorder_overlay_object': {
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
+      const objectId = readNonEmptyString(input.object_id, 'object_id');
+      const expectedRevision = readNonEmptyString(input.expected_overlay_revision, 'expected_overlay_revision');
+      if (input.direction !== 'front' && input.direction !== 'back' && input.direction !== 'forward' && input.direction !== 'backward') {
+        throw new Error('Invalid overlay reorder direction.');
+      }
+      const { meta } = event(input, 'replaced', diagramId);
+      return manager.reorderMcpOverlayObject(sessionId, diagramId, objectId, expectedRevision, input.direction, meta.participants);
+    }
+    case 'delete_overlay_object': {
+      const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
+      const objectId = readNonEmptyString(input.object_id, 'object_id');
+      const expectedRevision = readNonEmptyString(input.expected_overlay_revision, 'expected_overlay_revision');
+      const { meta } = event(input, 'replaced', diagramId);
+      return manager.deleteMcpOverlayObject(sessionId, diagramId, objectId, expectedRevision, meta.participants);
+    }
     case 'list_diagram_history': {
       const { sessionId, diagramId } = readSessionAndDiagram(input, authorizedSessionId);
       return manager.listDiagramHistory(sessionId, diagramId);
@@ -182,6 +304,13 @@ export type McpToolPayload =
   | { tool: 'get_session'; input: { session_id: string } }
   | { tool: 'list_diagrams'; input: { session_id: string } }
   | { tool: 'read_diagram'; input: { session_id: string; diagram_id: string } }
+  | { tool: 'read_overlay_scene'; input: { session_id: string; diagram_id: string } }
+  | { tool: 'list_overlay_scene'; input: { session_id: string; diagram_id: string } }
+  | { tool: 'read_overlay_object'; input: { session_id: string; diagram_id: string; object_id: string } }
+  | { tool: 'create_overlay_object'; input: { session_id: string; diagram_id: string; expected_overlay_revision: string; object: OverlayObjectRecord } }
+  | { tool: 'update_overlay_object'; input: { session_id: string; diagram_id: string; object_id: string; expected_overlay_revision: string; patch: OverlayObjectPatch } }
+  | { tool: 'reorder_overlay_object'; input: { session_id: string; diagram_id: string; object_id: string; expected_overlay_revision: string; direction: 'front' | 'back' | 'forward' | 'backward' } }
+  | { tool: 'delete_overlay_object'; input: { session_id: string; diagram_id: string; object_id: string; expected_overlay_revision: string } }
   | { tool: 'list_diagram_history'; input: { session_id: string; diagram_id: string } }
   | { tool: 'read_diagram_revision'; input: { session_id: string; diagram_id: string; revision_id: string } }
   | { tool: 'create_diagram'; input: CreateDiagramInput }

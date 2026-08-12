@@ -430,6 +430,63 @@ describe('server integration', () => {
     expect((await app.manager.readSession('abc123de'))?.activity).toEqual([]);
   });
 
+  it('serves revision-safe overlay operations with a structured stale reread payload and no Mermaid activity', async () => {
+    const sourceBefore = await app.manager.readDiagram('abc123de', 'main');
+    const read = await mcpRequest({
+      id: 924, method: 'tools/call', toolName: 'readOverlayScene',
+      params: { name: 'readOverlayScene', arguments: { sessionId: 'abc123de', diagramId: 'main' } },
+    });
+    expect(read.status).toBe(200);
+    const readPayload = await read.json() as { result: { structuredContent: { scene: { overlayRevision: string } } } };
+    const initialRevision = readPayload.result.structuredContent.scene.overlayRevision;
+    const object = {
+      id: 'protocol-note', kind: 'foundation.card', version: 1, orderKey: 'a',
+      geometry: { x: 10, y: 20, width: 120, height: 72, rotation: 0 }, style: {}, metadata: {}, payload: { text: 'Protocol' },
+    };
+    const create = await mcpRequest({
+      id: 925, method: 'tools/call', toolName: 'createOverlayObject',
+      params: { name: 'createOverlayObject', arguments: { sessionId: 'abc123de', diagramId: 'main', expectedOverlayRevision: initialRevision, object, actorName: 'Overlay Protocol Agent' } },
+    });
+    expect(create.status).toBe(200);
+    const createPayload = await create.json() as { result: { structuredContent: { overlayRevision: string; object: { id: string } } } };
+    expect(createPayload.result.structuredContent.object).toEqual({ ...object, orderKey: 'a' });
+
+    const stale = await mcpRequest({
+      id: 926, method: 'tools/call', toolName: 'updateOverlayObject',
+      params: { name: 'updateOverlayObject', arguments: { sessionId: 'abc123de', diagramId: 'main', objectId: 'protocol-note', expectedOverlayRevision: initialRevision, patch: { metadata: { owner: 'stale' } } } },
+    });
+    expect(stale.status).toBe(200);
+    const stalePayload = await stale.json() as { result: { isError: boolean; structuredContent: { error: { code: string; currentOverlayScene: { overlayRevision: string; objects: Array<{ id: string }> } } } } };
+    expect(stalePayload.result).toMatchObject({ isError: true, structuredContent: { error: { code: 'STALE_OVERLAY_REVISION', currentOverlayScene: { objects: [{ id: 'protocol-note' }] } } } });
+    const retry = await mcpRequest({
+      id: 927, method: 'tools/call', toolName: 'updateOverlayObject',
+      params: { name: 'updateOverlayObject', arguments: { sessionId: 'abc123de', diagramId: 'main', objectId: 'protocol-note', expectedOverlayRevision: stalePayload.result.structuredContent.error.currentOverlayScene.overlayRevision, patch: { metadata: { owner: 'merged' } } } },
+    });
+    expect(retry.status).toBe(200);
+    await expect(retry.json()).resolves.toMatchObject({ result: { structuredContent: { object: { metadata: { owner: 'merged' } } } } });
+    expect((await app.manager.readDiagram('abc123de', 'main')).diagram).toEqual(sourceBefore.diagram);
+    expect((await app.manager.readSession('abc123de'))?.activity).toEqual([]);
+  });
+
+  it('serves bounded overlay listing and found, opaque, and missing object reads', async () => {
+    const scene = await app.manager.readMcpOverlayScene('abc123de', 'main');
+    await app.manager.createMcpOverlayObject('abc123de', 'main', scene.overlay_revision, {
+      id: 'inspectable', kind: 'foundation.card', version: 1, order_key: 'a',
+      geometry: { x: 0, y: 0, width: 20, height: 20, rotation: 0 }, style: {}, metadata: {}, payload: { safe: true },
+    });
+    const listed = await mcpRequest({ id: 928, method: 'tools/call', toolName: 'listOverlayObjects', params: { name: 'listOverlayObjects', arguments: { sessionId: 'abc123de', diagramId: 'main' } } });
+    await expect(listed.json()).resolves.toMatchObject({ result: { structuredContent: { scene: { writable: true, objects: [{ id: 'inspectable', opaque: false, orderKey: 'a' }] } } } });
+    const found = await mcpRequest({ id: 929, method: 'tools/call', toolName: 'readOverlayObject', params: { name: 'readOverlayObject', arguments: { sessionId: 'abc123de', diagramId: 'main', objectId: 'inspectable' } } });
+    await expect(found.json()).resolves.toMatchObject({ result: { structuredContent: { status: 'found', object: { id: 'inspectable' } } } });
+    const missing = await mcpRequest({ id: 930, method: 'tools/call', toolName: 'readOverlayObject', params: { name: 'readOverlayObject', arguments: { sessionId: 'abc123de', diagramId: 'main', objectId: 'deleted' } } });
+    await expect(missing.json()).resolves.toMatchObject({ result: { structuredContent: { status: 'missing', objectId: 'deleted' } } });
+
+    const state = await app.manager.getOrCreateSession('abc123de');
+    state.doc.transact(() => (state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('inspectable')!.set('kind', 'future.tool'));
+    const opaque = await mcpRequest({ id: 931, method: 'tools/call', toolName: 'readOverlayObject', params: { name: 'readOverlayObject', arguments: { sessionId: 'abc123de', diagramId: 'main', objectId: 'inspectable' } } });
+    await expect(opaque.json()).resolves.toMatchObject({ result: { structuredContent: { status: 'opaque', writable: false, object: { id: 'inspectable', kind: 'future.tool' } } } });
+  });
+
   it('binds each modern MCP request to its current bearer', async () => {
     const otherRoom = await app.createRoom('other123');
     const getSession = (id: number, sessionId: string, authorization?: string) => mcpRequest({
@@ -500,6 +557,13 @@ describe('server integration', () => {
       'getSession',
       'createDiagram',
       'readDiagram',
+      'readOverlayScene',
+      'listOverlayObjects',
+      'readOverlayObject',
+      'createOverlayObject',
+      'updateOverlayObject',
+      'reorderOverlayObject',
+      'deleteOverlayObject',
       'listDiagramHistory',
       'readDiagramRevision',
       'writeDiagram',

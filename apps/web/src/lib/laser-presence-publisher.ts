@@ -2,16 +2,22 @@ import type { CanvasLaserState, CanvasWorldPoint } from '@arielcharts/shared';
 import { CANVAS_LASER_INTERVAL_MS, quantizeLaserPoint } from './canvas-presence';
 
 export class LaserPresencePublisher {
-  private sequence = 0;
+  private sequence: number;
   private lastPublishedAt = 0;
   private pending: CanvasWorldPoint | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
 
-  constructor(private readonly publish: (laser: CanvasLaserState) => void) {}
+  constructor(
+    private readonly publish: (laser: CanvasLaserState) => void,
+    initialSequence = 0,
+  ) {
+    this.sequence = Number.isSafeInteger(initialSequence) && initialSequence >= 0 ? initialSequence : 0;
+  }
 
   move(point: CanvasWorldPoint): void {
+    if (this.sequence >= Number.MAX_SAFE_INTEGER - 1) return;
     this.active = true;
     this.pending = quantizeLaserPoint(point);
     if (this.inactivityTimer !== null) clearTimeout(this.inactivityTimer);
@@ -28,7 +34,9 @@ export class LaserPresencePublisher {
     this.inactivityTimer = null;
     this.pending = null;
     this.active = false;
-    this.publish({ active: false, sequence: ++this.sequence });
+    const sequence = this.nextSequence();
+    if (sequence === null) return;
+    this.publish({ active: false, sequence });
   }
 
   destroy(): void {
@@ -44,8 +52,16 @@ export class LaserPresencePublisher {
     const point = this.pending;
     this.pending = null;
     if (!point) return;
+    const sequence = this.nextSequence();
+    if (sequence === null) return;
     this.lastPublishedAt = Date.now();
-    this.publish({ active: true, point, sequence: ++this.sequence });
+    this.publish({ active: true, point, sequence });
+  }
+
+  private nextSequence(): number | null {
+    if (this.sequence >= Number.MAX_SAFE_INTEGER - 1) return null;
+    this.sequence += 1;
+    return this.sequence;
   }
 
   private cancelTimer(): void {

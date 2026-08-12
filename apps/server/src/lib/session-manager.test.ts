@@ -273,6 +273,161 @@ describe('SessionManager multi-diagram persistence and invariants', () => {
     expect(restoredObject.get('payload')).toEqual({ opaque: { keep: true } });
   });
 
+  it('exposes an opaque v1 sibling but fails closed for every MCP mutation without dropping raw data', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    state.doc.transact(() => {
+      setOverlayObject(state.doc, 'main', 'opaque', 'keep');
+      const opaque = ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('opaque'))!;
+      opaque.set('kind', 'future.tool'); opaque.set('payload', { opaque: { retain: true } }); opaque.set('future_field', { retain: true });
+    });
+    await manager.persistSession(state);
+    const sourceBefore = await manager.readDiagram('abc123de', 'main');
+    const current = await manager.readMcpOverlayScene('abc123de', 'main');
+    expect(current).toMatchObject({ writable: false, objects: [], opaque_objects: [{ id: 'opaque', kind: 'future.tool', version: 1 }] });
+    await expect(manager.createMcpOverlayObject('abc123de', 'main', current.overlay_revision, {
+      id: 'known', kind: 'foundation.card', version: 1, order_key: 'z',
+      geometry: { x: 1, y: 2, width: 40, height: 20, rotation: 0 }, style: {}, metadata: {}, payload: { text: 'known' },
+    })).rejects.toThrow('read-only through MCP');
+    const rawOpaque = ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('opaque'))!;
+    expect(rawOpaque.get('payload')).toEqual({ opaque: { retain: true } });
+    expect(rawOpaque.get('future_field')).toEqual({ retain: true });
+    expect((await manager.readDiagram('abc123de', 'main')).diagram).toEqual(sourceBefore.diagram);
+    await manager.close(); manager = resources.createManager();
+    await expect(manager.readMcpOverlayScene('abc123de', 'main')).resolves.toMatchObject({
+      objects: [], opaque_objects: [{ id: 'opaque', kind: 'future.tool' }],
+    });
+  });
+
+  it('makes browser-valid but MCP-unrepresentable v1 objects opaque without disclosing their raw identifier or payload', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const longId = '😺'.repeat(80);
+    const oversizedPayload = Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`field-${index}`, index]));
+    const largePayloadValue = 'x'.repeat(8_193);
+    const nestedText = new Y.Text('browser-only nested text');
+    const nestedMap = new Y.Map<unknown>(); nestedMap.set('browser', 'only');
+    state.doc.transact(() => {
+      setOverlayObject(state.doc, 'main', longId, 'safe-browser-value');
+      const long = ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get(longId))!;
+      long.set('order_key', 'long-id-order');
+      setOverlayObject(state.doc, 'main', 'many-payload-fields', 'safe-browser-value');
+      ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('many-payload-fields'))!.set('payload', oversizedPayload);
+      setOverlayObject(state.doc, 'main', 'large-payload-value', 'safe-browser-value');
+      ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('large-payload-value'))!.set('payload', { value: largePayloadValue });
+      setOverlayObject(state.doc, 'main', 'nested-y-text', 'safe-browser-value');
+      ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('nested-y-text'))!.set('payload', { nestedText });
+      setOverlayObject(state.doc, 'main', 'nested-y-map', 'safe-browser-value');
+      ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('nested-y-map'))!.set('payload', { nestedMap });
+    });
+
+    const first = await manager.readMcpOverlayScene('abc123de', 'main');
+    expect(first).toMatchObject({ writable: false, objects: [] });
+    expect(first.opaque_objects).toContainEqual({ id: 'many-payload-fields', kind: 'foundation.card', version: 1 });
+    expect(first.opaque_objects).toContainEqual({ id: 'large-payload-value', kind: 'foundation.card', version: 1 });
+    expect(first.opaque_objects).toContainEqual({ id: 'nested-y-text', kind: 'foundation.card', version: 1 });
+    expect(first.opaque_objects).toContainEqual({ id: 'nested-y-map', kind: 'foundation.card', version: 1 });
+    const longMarker = first.opaque_objects.find(({ id }) => id !== 'many-payload-fields')!;
+    expect(Buffer.byteLength(longMarker.id, 'utf8')).toBeLessThanOrEqual(COLLABORATION_BUDGETS.identifierBytes);
+    expect(longMarker.id).not.toBe(longId);
+    expect(JSON.stringify(first)).not.toContain(longId);
+    expect(JSON.stringify(first)).not.toContain('field-32');
+    expect(JSON.stringify(first)).not.toContain(largePayloadValue);
+    expect(JSON.stringify(first)).not.toContain('browser-only nested text');
+    await expect(manager.readMcpOverlayObject('abc123de', 'main', longMarker.id)).resolves.toMatchObject({ status: 'opaque', writable: false, object: { id: longMarker.id } });
+    const listed = await manager.listMcpOverlayObjects('abc123de', 'main');
+    expect(listed.writable).toBe(false);
+    expect(listed.objects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'many-payload-fields', opaque: true }),
+      expect.objectContaining({ id: 'large-payload-value', opaque: true }),
+      expect.objectContaining({ id: 'nested-y-text', opaque: true }),
+      expect.objectContaining({ id: 'nested-y-map', opaque: true }),
+      expect.objectContaining({ id: longMarker.id, opaque: true }),
+    ]));
+    await expect(manager.readMcpOverlayObject('abc123de', 'main', 'large-payload-value')).resolves.toMatchObject({ status: 'opaque', writable: false });
+
+    const beforeRaw = Buffer.from(Y.encodeStateAsUpdate(state.doc));
+    await expect(manager.createMcpOverlayObject('abc123de', 'main', first.overlay_revision, {
+      id: 'agent-object', kind: 'foundation.card', version: 1, order_key: 'agent-object',
+      geometry: { x: 0, y: 0, width: 10, height: 10, rotation: 0 }, style: {}, metadata: {}, payload: {},
+    })).rejects.toThrow('read-only through MCP');
+    expect(Buffer.from(Y.encodeStateAsUpdate(state.doc))).toEqual(beforeRaw);
+
+    const rawLong = ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get(longId))!;
+    rawLong.set('payload', { changed: true });
+    const second = await manager.readMcpOverlayScene('abc123de', 'main');
+    expect(second.overlay_revision).not.toBe(first.overlay_revision);
+    expect(((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('many-payload-fields'))!.get('payload')).toEqual(oversizedPayload);
+    // Nested shared payload data is browser/Yjs-admissible but not supported
+    // by the legacy snapshot serializer used by this fixture's teardown.
+    // Remove only those two probe objects after MCP has proved it never cloned
+    // them; the long-ID and plain oversized browser values remain durable.
+    state.doc.transact(() => {
+      const objects = state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>;
+      objects.delete('nested-y-text'); objects.delete('nested-y-map');
+    });
+  });
+
+  it('changes the raw MCP revision when opaque data changes, without treating it as writable', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    state.doc.transact(() => setOverlayObject(state.doc, 'main', 'opaque', 'first'));
+    const opaque = ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('opaque'))!;
+    opaque.set('kind', 'future.tool'); opaque.set('payload', { opaque: 'first' });
+    const first = await manager.readMcpOverlayScene('abc123de', 'main');
+    opaque.set('payload', { opaque: 'second' });
+    const second = await manager.readMcpOverlayScene('abc123de', 'main');
+    expect(first.writable).toBe(false); expect(second.writable).toBe(false);
+    expect(second.overlay_revision).not.toBe(first.overlay_revision);
+  });
+
+  it('fingerprints opaque nested Y shared types by canonical raw scene bytes', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    state.doc.transact(() => setOverlayObject(state.doc, 'main', 'opaque', 'first'));
+    const opaque = ((state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!.get('objects') as Y.Map<Y.Map<unknown>>).get('opaque'))!;
+    opaque.set('kind', 'future.tool');
+    const future = new Y.XmlElement('future'); future.setAttribute('variant', 'one'); opaque.set('future_shared', future);
+    const first = await manager.readMcpOverlayScene('abc123de', 'main');
+    future.setAttribute('variant', 'two');
+    const second = await manager.readMcpOverlayScene('abc123de', 'main');
+    expect(second.overlay_revision).not.toBe(first.overlay_revision);
+  });
+
+  it('admits the exact participant insertion with an overlay mutation before touching the live scene', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    state.doc.transact(() => {
+      const presence = state.doc.getMap<{ name: string; color: string; type: 'agent' }>('presence');
+      for (let index = 0; index < COLLABORATION_BUDGETS.participantsPerSession; index += 1) {
+        presence.set(`agent-${index}`, { name: `agent-${index}`, color: '#123456', type: 'agent' });
+      }
+    });
+    const current = await manager.readMcpOverlayScene('abc123de', 'main');
+    await expect(manager.createMcpOverlayObject('abc123de', 'main', current.overlay_revision, {
+      id: 'rejected', kind: 'foundation.card', version: 1, order_key: 'a',
+      geometry: { x: 0, y: 0, width: 10, height: 10, rotation: 0 }, style: {}, metadata: {}, payload: {},
+    }, [{ name: 'one-too-many', color: '#654321', type: 'agent' }])).rejects.toThrow('Overlay mutation exceeds collaboration limits');
+    expect((await manager.readMcpOverlayScene('abc123de', 'main')).objects).toEqual([]);
+    expect(state.doc.getMap('presence').has('one-too-many')).toBe(false);
+  });
+
+  it('fails closed for a newer MCP scene and honors browser overlay locks', async () => {
+    const state = await manager.getOrCreateSession('abc123de');
+    const scene = state.doc.getMap<Y.Map<unknown>>('overlays').get('main')!;
+    scene.set('version', 2);
+    const newer = await manager.readMcpOverlayScene('abc123de', 'main');
+    expect(newer).toMatchObject({ version: 2, writable: false, objects: [], opaque_objects: [] });
+    await expect(manager.createMcpOverlayObject('abc123de', 'main', newer.overlay_revision, {
+      id: 'blocked', kind: 'foundation.card', version: 1, order_key: 'a',
+      geometry: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, style: {}, metadata: {}, payload: {},
+    })).rejects.toThrow('read-only through MCP');
+
+    scene.set('version', 1);
+    const layers = scene.get('layers') as Y.Map<Y.Map<unknown>>;
+    layers.get('default')!.set('locked', true);
+    const locked = await manager.readMcpOverlayScene('abc123de', 'main');
+    await expect(manager.createMcpOverlayObject('abc123de', 'main', locked.overlay_revision, {
+      id: 'blocked', kind: 'foundation.card', version: 1, order_key: 'a',
+      geometry: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, style: {}, metadata: {}, payload: {},
+    })).rejects.toThrow('Overlay layer is locked');
+  });
+
   it('does not resurrect an overlay scene when its diagram is deleted during restore history lookup', async () => {
     const state = await manager.getOrCreateSession('abc123de');
     const initial = await manager.getSession('abc123de');

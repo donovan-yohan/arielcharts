@@ -3,6 +3,11 @@ import {
   ALL_STARTER_TEMPLATES,
   type DiagramRevision,
   type DiagramRevisionSummary,
+  type McpOverlayScene,
+  type McpOverlayObjectList,
+  type McpOverlayObjectRead,
+  type OverlayObjectMutationOutput,
+  type OverlayObjectRecord,
   type RestoreDiagramRevisionResult,
   type StarterTemplateId,
 } from '@arielcharts/shared';
@@ -11,6 +16,7 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod/v4';
 import { handleMcpToolCall } from './mcp.js';
+import { COLLABORATION_BUDGETS } from './document-admission.js';
 import type { SessionManager } from './session-manager.js';
 
 const participantSchema = z.object({
@@ -53,10 +59,77 @@ const diagramRevisionSchema = diagramRevisionSummarySchema.extend({
   nodePositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })),
 });
 
+const utf8String = (maximumBytes: number) => z.string().refine((value) => Buffer.byteLength(value, 'utf8') <= maximumBytes, { message: `Must be at most ${maximumBytes} UTF-8 bytes.` });
+const boundedOverlayIdentifier = z.string().min(1).refine((value) => Buffer.byteLength(value, 'utf8') <= COLLABORATION_BUDGETS.identifierBytes, { message: `Must be at most ${COLLABORATION_BUDGETS.identifierBytes} UTF-8 bytes.` });
+const overlayGeometrySchema = z.object({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().nonnegative(), height: z.number().finite().nonnegative(), rotation: z.number().finite() });
+const overlayPointSchema = z.object({ x: z.number().finite(), y: z.number().finite() });
+const overlayMetadataSchema = z.record(utf8String(128), z.union([utf8String(2_048), z.number().finite(), z.boolean(), z.null()])).refine((value) => Object.keys(value).length <= 32, { message: 'Overlay metadata has too many entries.' });
+function isBoundedOverlayPayload(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) return false;
+  const counters = { values: 0, arrayItems: 0, bytes: 0 };
+  const active = new Set<object>();
+  const visit = (entry: unknown, depth: number): boolean => {
+    if (depth > 24 || ++counters.values > 8_192) return false;
+    if (entry === null || typeof entry === 'boolean') return true;
+    if (typeof entry === 'number') return Number.isFinite(entry);
+    if (typeof entry === 'string') {
+      const bytes = Buffer.byteLength(entry, 'utf8'); counters.bytes += bytes;
+      return bytes <= 8_192 && counters.bytes <= COLLABORATION_BUDGETS.textBytesPerObject;
+    }
+    if (Array.isArray(entry)) {
+      counters.arrayItems += entry.length;
+      return entry.length <= COLLABORATION_BUDGETS.strokePointsPerObject && counters.arrayItems <= COLLABORATION_BUDGETS.strokePointsPerObject
+        && entry.every((child) => visit(child, depth + 1));
+    }
+    if (!entry || typeof entry !== 'object' || (Object.getPrototypeOf(entry) !== Object.prototype && Object.getPrototypeOf(entry) !== null) || active.has(entry)) return false;
+    const entries = Object.entries(entry);
+    if (entries.length > 32) return false;
+    active.add(entry);
+    const valid = entries.every(([key, child]) => {
+      const bytes = Buffer.byteLength(key, 'utf8'); counters.bytes += bytes;
+      return bytes <= 128 && counters.bytes <= COLLABORATION_BUDGETS.textBytesPerObject && visit(child, depth + 1);
+    });
+    active.delete(entry);
+    return valid;
+  };
+  return visit(value, 0);
+}
+const overlayPayloadSchema = z.record(utf8String(128), z.unknown())
+  .refine(isBoundedOverlayPayload, { message: 'Overlay payload is not a bounded JSON value.' });
+const overlayAnchorSchema = z.object({ mermaidId: boundedOverlayIdentifier, offset: overlayPointSchema, fallback: overlayPointSchema });
+const overlayObjectInputSchema = z.object({
+  id: boundedOverlayIdentifier, kind: boundedOverlayIdentifier, version: z.number().int().positive(), orderKey: boundedOverlayIdentifier, geometry: overlayGeometrySchema,
+  anchor: overlayAnchorSchema.optional(), layer: boundedOverlayIdentifier.optional(), style: overlayMetadataSchema,
+  metadata: overlayMetadataSchema, payload: overlayPayloadSchema, body: utf8String(8_192).optional(),
+});
+const overlayObjectSchema = overlayObjectInputSchema;
+const overlayObjectPatchInputSchema = z.object({
+  geometry: overlayGeometrySchema.optional(), anchor: overlayAnchorSchema.optional(), layer: boundedOverlayIdentifier.optional(),
+  style: overlayMetadataSchema.optional(), metadata: overlayMetadataSchema.optional(), payload: overlayPayloadSchema.optional(), body: utf8String(8_192).optional(),
+}).refine((patch) => Object.keys(patch).length > 0, { message: 'Supply at least one overlay patch field.' });
+const opaqueOverlayObjectSchema = z.object({ id: boundedOverlayIdentifier, kind: boundedOverlayIdentifier, version: z.number().int() });
+const overlayLayerSchema = z.object({ id: boundedOverlayIdentifier, name: utf8String(2_048), orderKey: boundedOverlayIdentifier, visible: z.boolean(), locked: z.boolean(), export: z.boolean() });
+const mcpOverlaySceneSchema = z.object({
+  version: z.number().int(), diagramId: z.string(), overlayRevision: z.string(), writable: z.boolean(),
+  objects: z.array(overlayObjectSchema).max(COLLABORATION_BUDGETS.objectsPerScene), opaqueObjects: z.array(opaqueOverlayObjectSchema).max(COLLABORATION_BUDGETS.objectsPerScene), layers: z.array(overlayLayerSchema).max(COLLABORATION_BUDGETS.layersPerScene).optional(),
+});
+const mcpOverlayObjectSummarySchema = z.object({ id: boundedOverlayIdentifier, kind: boundedOverlayIdentifier, version: z.number().int(), opaque: z.boolean(), orderKey: boundedOverlayIdentifier.optional() });
+const mcpOverlayObjectListSchema = z.object({ version: z.number().int(), diagramId: z.string(), overlayRevision: z.string(), writable: z.boolean(), objects: z.array(mcpOverlayObjectSummarySchema).max(COLLABORATION_BUDGETS.objectsPerScene) });
+const mcpOverlayObjectReadSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('found'), overlayRevision: z.string(), writable: z.boolean(), object: overlayObjectSchema }),
+  z.object({ status: z.literal('opaque'), overlayRevision: z.string(), writable: z.literal(false), object: opaqueOverlayObjectSchema }),
+  z.object({ status: z.literal('missing'), overlayRevision: z.string(), writable: z.boolean(), objectId: boundedOverlayIdentifier }),
+]);
+
 const actorInputSchema = {
-  actorName: z.string().optional().describe('Optional display name recorded in the ArielCharts activity feed.'),
+  actorName: z.string().max(COLLABORATION_BUDGETS.identifierBytes).optional().describe('Optional display name recorded in the ArielCharts activity feed.'),
   actorType: z.enum(['human', 'agent']).optional().describe('Optional activity-feed actor type. Defaults to agent.'),
-  detail: z.string().optional().describe('Optional concise activity-feed description of the change.'),
+  detail: z.string().max(2_048).optional().describe('Optional concise activity-feed description of the change.'),
+};
+
+const overlayActorInputSchema = {
+  actorName: z.string().max(COLLABORATION_BUDGETS.identifierBytes).optional().describe('Optional durable agent display name. A successful overlay mutation materializes this participant without adding an activity event.'),
+  actorType: z.enum(['human', 'agent']).optional().describe('Optional durable participant type. Defaults to agent.'),
 };
 
 const starterTemplateIds = ALL_STARTER_TEMPLATES.map((template) => template.id) as [StarterTemplateId, ...StarterTemplateId[]];
@@ -79,6 +152,79 @@ function mapDiagram(diagram: { id: string; name: string; revision: string; merma
     revision: diagram.revision,
     ...(diagram.mermaid_text === undefined ? {} : { mermaidText: diagram.mermaid_text }),
   };
+}
+
+function mapOverlayObject(object: OverlayObjectRecord) {
+  return {
+    id: object.id,
+    kind: object.kind,
+    version: object.version,
+    orderKey: object.order_key,
+    geometry: object.geometry,
+    ...(object.anchor === undefined ? {} : {
+      anchor: { mermaidId: object.anchor.mermaid_id, offset: object.anchor.offset, fallback: object.anchor.fallback },
+    }),
+    ...(object.layer === undefined ? {} : { layer: object.layer }),
+    style: object.style,
+    metadata: object.metadata,
+    payload: object.payload,
+    ...(object.body === undefined ? {} : { body: object.body }),
+  };
+}
+
+function mapOverlayObjectInput(object: z.infer<typeof overlayObjectInputSchema>): OverlayObjectRecord {
+  return {
+    id: object.id, kind: object.kind, version: object.version, order_key: object.orderKey, geometry: object.geometry,
+    ...(object.anchor === undefined ? {} : { anchor: { mermaid_id: object.anchor.mermaidId, offset: object.anchor.offset, fallback: object.anchor.fallback } }),
+    ...(object.layer === undefined ? {} : { layer: object.layer }),
+    style: object.style, metadata: object.metadata, payload: object.payload,
+    ...(object.body === undefined ? {} : { body: object.body }),
+  };
+}
+
+function mapOverlayPatchInput(patch: z.infer<typeof overlayObjectPatchInputSchema>) {
+  return {
+    ...(patch.geometry === undefined ? {} : { geometry: patch.geometry }),
+    ...(patch.anchor === undefined ? {} : { anchor: { mermaid_id: patch.anchor.mermaidId, offset: patch.anchor.offset, fallback: patch.anchor.fallback } }),
+    ...(patch.layer === undefined ? {} : { layer: patch.layer }),
+    ...(patch.style === undefined ? {} : { style: patch.style }),
+    ...(patch.metadata === undefined ? {} : { metadata: patch.metadata }),
+    ...(patch.payload === undefined ? {} : { payload: patch.payload }),
+    ...(patch.body === undefined ? {} : { body: patch.body }),
+  };
+}
+
+function mapMcpOverlayScene(scene: McpOverlayScene) {
+  return {
+    version: scene.version,
+    diagramId: scene.diagram_id,
+    overlayRevision: scene.overlay_revision,
+    writable: scene.writable,
+    objects: scene.objects.map(mapOverlayObject),
+    opaqueObjects: scene.opaque_objects,
+    ...(scene.layers === undefined ? {} : {
+      layers: scene.layers.map((layer) => ({ id: layer.id, name: layer.name, orderKey: layer.order_key, visible: layer.visible, locked: layer.locked, export: layer.export })),
+    }),
+  };
+}
+
+function mapMcpOverlayObjectList(scene: McpOverlayObjectList) {
+  return {
+    version: scene.version,
+    diagramId: scene.diagram_id,
+    overlayRevision: scene.overlay_revision,
+    writable: scene.writable,
+    objects: scene.objects.map((object) => ({
+      id: object.id, kind: object.kind, version: object.version, opaque: object.opaque,
+      ...(object.order_key === undefined ? {} : { orderKey: object.order_key }),
+    })),
+  };
+}
+
+function mapMcpOverlayObjectRead(output: McpOverlayObjectRead) {
+  if (output.status === 'found') return { status: output.status, overlayRevision: output.overlay_revision, writable: output.writable, object: mapOverlayObject(output.object) };
+  if (output.status === 'opaque') return { status: output.status, overlayRevision: output.overlay_revision, writable: false as const, object: output.object };
+  return { status: output.status, overlayRevision: output.overlay_revision, writable: output.writable, objectId: output.object_id };
 }
 
 function mapActorInput(input: { actorName?: string; actorType?: 'human' | 'agent'; detail?: string }) {
@@ -122,6 +268,21 @@ function createStaleToolResult(current: { id: string; name: string; revision: st
       code: 'STALE_DIAGRAM_REVISION',
       message: 'The diagram changed before the restore could be applied. Read the current diagram and deliberately reconfirm before retrying.',
       currentDiagram: mapDiagram(current),
+    },
+  };
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
+    structuredContent: payload,
+    isError: true,
+  };
+}
+
+function createStaleOverlayToolResult(scene: McpOverlayScene) {
+  const payload = {
+    error: {
+      code: 'STALE_OVERLAY_REVISION',
+      message: 'The overlay scene changed before this operation could be applied. Read the current overlay scene, merge deliberately, and retry once.',
+      currentOverlayScene: mapMcpOverlayScene(scene),
     },
   };
   return {
@@ -218,6 +379,128 @@ function createMcpServer(manager: SessionManager, authorizedSessionId: string): 
       };
       return createToolResult({ diagram: mapDiagram(output.diagram), participants: output.participants });
     },
+  );
+
+  server.registerTool(
+    'readOverlayScene',
+    {
+      title: 'Read one diagram overlay scene',
+      description: 'Non-mutating. Read the current overlayRevision and bounded canvas-only objects for one exact diagram before an overlay operation. Newer scenes, and v1 scenes containing opaque objects, are explicitly read-only; opaque object markers are retained in the revision and never silently discarded.',
+      inputSchema: z.object({ sessionId: z.string(), diagramId: z.string() }),
+      outputSchema: z.object({ scene: mcpOverlaySceneSchema }),
+    },
+    async ({ sessionId, diagramId }) => {
+      const output = await handleMcpToolCall(manager, {
+        tool: 'read_overlay_scene', input: { session_id: sessionId, diagram_id: diagramId },
+      }, authorizedSessionId) as McpOverlayScene;
+      return createToolResult({ scene: mapMcpOverlayScene(output) });
+    },
+  );
+
+  server.registerTool(
+    'listOverlayObjects',
+    {
+      title: 'List bounded overlay objects',
+      description: 'Non-mutating. Lists bounded object identities and ordering for one diagram without returning object payloads. Opaque markers and a read-only flag make unsupported data explicit; call readOverlayObject for one supported object.',
+      inputSchema: z.object({ sessionId: z.string(), diagramId: z.string() }),
+      outputSchema: z.object({ scene: mcpOverlayObjectListSchema }),
+    },
+    async ({ sessionId, diagramId }) => {
+      const output = await handleMcpToolCall(manager, {
+        tool: 'list_overlay_scene', input: { session_id: sessionId, diagram_id: diagramId },
+      }, authorizedSessionId) as McpOverlayObjectList;
+      return createToolResult({ scene: mapMcpOverlayObjectList(output) });
+    },
+  );
+
+  server.registerTool(
+    'readOverlayObject',
+    {
+      title: 'Read one overlay object',
+      description: 'Non-mutating. Returns one bounded object record, an explicit opaque marker, or an explicit missing result. It never replaces or reinterprets a whole overlay scene.',
+      inputSchema: z.object({ sessionId: z.string(), diagramId: z.string(), objectId: boundedOverlayIdentifier }),
+      outputSchema: mcpOverlayObjectReadSchema,
+    },
+    async ({ sessionId, diagramId, objectId }) => {
+      const output = await handleMcpToolCall(manager, {
+        tool: 'read_overlay_object', input: { session_id: sessionId, diagram_id: diagramId, object_id: objectId },
+      }, authorizedSessionId) as McpOverlayObjectRead;
+      return createToolResult(mapMcpOverlayObjectRead(output));
+    },
+  );
+
+  const overlayMutationResultSchema = z.object({ overlayRevision: z.string(), object: overlayObjectSchema.optional(), deletedObjectId: z.string().optional() });
+  const overlayMutation = async (output: OverlayObjectMutationOutput) => {
+    if (output.status === 'stale') return createStaleOverlayToolResult(output.scene);
+    return createToolResult({
+      overlayRevision: output.overlay_revision,
+      ...(output.object === undefined ? {} : { object: mapOverlayObject(output.object) }),
+      ...(output.deleted_object_id === undefined ? {} : { deletedObjectId: output.deleted_object_id }),
+    });
+  };
+
+  server.registerTool(
+    'createOverlayObject',
+    {
+      title: 'Create one overlay object',
+      description: 'Create one bounded canvas-only overlay object. First call readOverlayScene and pass its exact overlayRevision as expectedOverlayRevision. This never replaces a whole scene or Mermaid source.',
+      inputSchema: z.object({ sessionId: z.string(), diagramId: z.string(), expectedOverlayRevision: z.string(), object: overlayObjectInputSchema, ...overlayActorInputSchema }),
+      outputSchema: overlayMutationResultSchema,
+    },
+    async ({ sessionId, diagramId, expectedOverlayRevision, object, actorName, actorType }) => overlayMutation(
+      await handleMcpToolCall(manager, {
+        tool: 'create_overlay_object',
+        input: { session_id: sessionId, diagram_id: diagramId, expected_overlay_revision: expectedOverlayRevision, object: mapOverlayObjectInput(object), ...mapActorInput({ actorName, actorType }) },
+      }, authorizedSessionId) as OverlayObjectMutationOutput,
+    ),
+  );
+
+  server.registerTool(
+    'updateOverlayObject',
+    {
+      title: 'Update one overlay object',
+      description: 'Update named fields of one existing canvas-only object. Read the scene first and pass expectedOverlayRevision. On a stale result, use currentOverlayScene to merge and retry deliberately; never replace the scene.',
+      inputSchema: z.object({ sessionId: z.string(), diagramId: z.string(), objectId: boundedOverlayIdentifier, expectedOverlayRevision: z.string(), patch: overlayObjectPatchInputSchema, ...overlayActorInputSchema }),
+      outputSchema: overlayMutationResultSchema,
+    },
+    async ({ sessionId, diagramId, objectId, expectedOverlayRevision, patch, actorName, actorType }) => overlayMutation(
+      await handleMcpToolCall(manager, {
+        tool: 'update_overlay_object',
+        input: { session_id: sessionId, diagram_id: diagramId, object_id: objectId, expected_overlay_revision: expectedOverlayRevision, patch: mapOverlayPatchInput(patch), ...mapActorInput({ actorName, actorType }) },
+      }, authorizedSessionId) as OverlayObjectMutationOutput,
+    ),
+  );
+
+  server.registerTool(
+    'reorderOverlayObject',
+    {
+      title: 'Reorder one overlay object',
+      description: 'Move one overlay object within its layer. Read the current scene first and pass expectedOverlayRevision; this changes only the selected object order key.',
+      inputSchema: z.object({ sessionId: z.string(), diagramId: z.string(), objectId: boundedOverlayIdentifier, expectedOverlayRevision: z.string(), direction: z.enum(['front', 'back', 'forward', 'backward']), ...overlayActorInputSchema }),
+      outputSchema: overlayMutationResultSchema,
+    },
+    async ({ sessionId, diagramId, objectId, expectedOverlayRevision, direction, actorName, actorType }) => overlayMutation(
+      await handleMcpToolCall(manager, {
+        tool: 'reorder_overlay_object',
+        input: { session_id: sessionId, diagram_id: diagramId, object_id: objectId, expected_overlay_revision: expectedOverlayRevision, direction, ...mapActorInput({ actorName, actorType }) },
+      }, authorizedSessionId) as OverlayObjectMutationOutput,
+    ),
+  );
+
+  server.registerTool(
+    'deleteOverlayObject',
+    {
+      title: 'Delete one overlay object',
+      description: 'Delete one exact canvas-only object only when explicitly requested. Read the current scene and pass expectedOverlayRevision; locked and opaque objects cannot be deleted through MCP.',
+      inputSchema: z.object({ sessionId: z.string(), diagramId: z.string(), objectId: boundedOverlayIdentifier, expectedOverlayRevision: z.string(), ...overlayActorInputSchema }),
+      outputSchema: overlayMutationResultSchema,
+    },
+    async ({ sessionId, diagramId, objectId, expectedOverlayRevision, actorName, actorType }) => overlayMutation(
+      await handleMcpToolCall(manager, {
+        tool: 'delete_overlay_object',
+        input: { session_id: sessionId, diagram_id: diagramId, object_id: objectId, expected_overlay_revision: expectedOverlayRevision, ...mapActorInput({ actorName, actorType }) },
+      }, authorizedSessionId) as OverlayObjectMutationOutput,
+    ),
   );
 
   server.registerTool(

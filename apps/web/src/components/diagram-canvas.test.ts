@@ -5,7 +5,7 @@ import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
 import { getConnectModeSourceId } from '../lib/diagram-connect-state';
-import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRendererInteractionMode, getSankeyLinkControlLabel, isSameNodeSelection, pruneInactivePersistentDrafts, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste } from './diagram-canvas';
+import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRendererInteractionMode, getSankeyLinkControlLabel, isSameNodeSelection, pruneInactivePersistentDrafts, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste, syncCanvasToolbarSafeLane } from './diagram-canvas';
 import { getDirtyDraftFields, reconcileCanonicalDraft } from '../lib/canonical-draft';
 
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
@@ -42,6 +42,55 @@ describe('canvas pan exclusions', () => {
     expect(canvasSource).toMatch(/return !target\.closest\(CANVAS_PAN_EXCLUSION_SELECTOR\);/u);
     expect(canvasSource).toMatch(/className="diagram-canvas-shell"[^]*?<div[^]*?data-testid="diagram-canvas"[^]*?touchAction: 'none'/u);
     expect(canvasSource).toMatch(/<form className="canvas-sequence-participant-form" data-canvas-pan-exclusion="true"/u);
+  });
+});
+
+describe('overlay toolbar safe-lane ownership', () => {
+  function elementWithBounds(top: number, bottom: number) {
+    const values = new Map<string, string>();
+    return {
+      dataset: {} as DOMStringMap,
+      getBoundingClientRect: () => ({ bottom, top }) as DOMRect,
+      style: {
+        getPropertyValue: (name: string) => values.get(name) ?? '',
+        removeProperty: (name: string) => { values.delete(name); },
+        setProperty: (name: string, value: string) => { values.set(name, value); },
+      },
+    } as unknown as HTMLElement;
+  }
+
+  it('publishes, resizes, and clears the portal-toolbar lane at the canvas boundary', () => {
+    const canvas = elementWithBounds(100, 700);
+    const shell = elementWithBounds(100, 700);
+    Object.defineProperty(canvas, 'parentElement', { value: shell });
+    const toolbar = elementWithBounds(0, 146);
+
+    expect(syncCanvasToolbarSafeLane(canvas, null)).toBe(false);
+    canvas.style.setProperty('--overlay-toolbar-safe-top', '54px');
+    expect(syncCanvasToolbarSafeLane(canvas, toolbar)).toBe(true);
+    expect(canvas.dataset.overlayToolbarSafeTop).toBe('true');
+    expect(canvas.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('54px');
+    expect(shell.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('54px');
+
+    toolbar.getBoundingClientRect = () => ({ bottom: 186, top: 0 }) as DOMRect;
+    expect(syncCanvasToolbarSafeLane(canvas, toolbar)).toBe(true);
+    expect(canvas.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('94px');
+
+    // Toolbar removal and canvas unmount share the same cleanup contract.
+    expect(syncCanvasToolbarSafeLane(canvas, null)).toBe(true);
+    expect(canvas.dataset.overlayToolbarSafeTop).toBeUndefined();
+    expect(canvas.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('');
+    expect(shell.style.getPropertyValue('--overlay-toolbar-safe-top')).toBe('');
+  });
+
+  it('keeps portal discovery and measurement with DiagramCanvas, the semantic-layout owner', () => {
+    expect(canvasSource).toMatch(/function findToolbar\(\)[^]*?toolbar\.dataset\.overlayDiagramId === overlay\.diagramId/u);
+    expect(canvasSource).toMatch(/canvasObserver\.observe\(canvas\);[^]*?documentObserver\.observe\(document\.body, \{ childList: true \}\);/u);
+    expect(canvasSource).toMatch(/const canvasElement: HTMLElement = canvas;[^]*?function update\(\)[^]*?syncCanvasToolbarSafeLane\(canvasElement, toolbar\);/u);
+    expect(canvasSource).toMatch(/const canvasElement: HTMLElement = canvas;[^]*?return \(\) => \{[^]*?syncCanvasToolbarSafeLane\(canvasElement, null\);/u);
+    expect(canvasSource).toMatch(/data-overlay-toolbar-safe-top=\{hasOverlayToolbarSafeLane \|\| undefined\}/u);
+    expect(canvasSource).toMatch(/const sequenceControlsSafeBottom = canvasToolbarVisibility\.controls[^]*?canvasToolbarStack\.bottom \+ controlsToolbarHeight \+ BOTTOM_TOOLBAR_GAP/u);
+    expect(canvasSource).toMatch(/'--canvas-controls-toolbar-safe-bottom': `\$\{Math\.ceil\(sequenceControlsSafeBottom\)\}px`/u);
   });
 });
 
@@ -388,8 +437,10 @@ describe('sequence semantic editor', () => {
 
   it('keeps short touch sequence controls below the measured overlay toolbar lane', () => {
     const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
-    expect(css).toMatch(/@media \(pointer: coarse\) and \(max-height: 500px\)[^]*?\[data-testid='diagram-canvas'\]\[data-overlay-toolbar-safe-top='true'\] \.canvas-sequence-editor:not\(\.is-centered\)[^]*?top: var\(--overlay-toolbar-safe-top\);/u);
-    expect(css).toMatch(/canvas-sequence-editor:not\(\.is-centered\)[^]*?max-height: calc\(100% - var\(--overlay-toolbar-safe-top\) - 12px\);/u);
+    expect(css).toMatch(/@media \(max-height: 500px\)[^]*?\.diagram-canvas-shell\[data-overlay-toolbar-safe-top='true'\] > \.canvas-sequence-editor:not\(\.is-centered\)[^]*?top: var\(--overlay-toolbar-safe-top\);/u);
+    expect(css).toMatch(/canvas-sequence-editor:not\(\.is-centered\)[^]*?bottom: var\(--canvas-controls-toolbar-safe-bottom\);[^]*?max-height: calc\(100% - var\(--overlay-toolbar-safe-top\) - var\(--canvas-controls-toolbar-safe-bottom\)\);/u);
+    expect(css).toMatch(/canvas-sequence-editor:not\(\.is-centered\)[^]*?padding-bottom: calc\(4px \+ var\(--canvas-controls-toolbar-safe-bottom\)\);[^]*?scroll-padding-bottom: var\(--canvas-controls-toolbar-safe-bottom\);/u);
+    expect(css).toMatch(/canvas-sequence-editor:not\(\.is-centered\)[^]*?scroll-padding-top: var\(--overlay-toolbar-safe-top\);/u);
   });
 });
 
@@ -425,11 +476,15 @@ describe('canvas blank-click selection ownership', () => {
 
 describe('canvas wheel ownership', () => {
   it('uses a non-passive native listener so canvas pan and pinch can suppress browser zoom', () => {
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
     expect(canvasSource).toMatch(/container\.addEventListener\('wheel', handleCanvasWheel, \{ passive: false \}\);/u);
     expect(canvasSource).toMatch(/container\.addEventListener\('gesturechange', handleSafariGestureChange, \{ passive: false \}\);/u);
     expect(canvasSource).toMatch(/event\.preventDefault\(\);[^]*?getCanvasWheelGesture\(event/u);
     expect(canvasSource).not.toMatch(/onWheel=\{handleWheel\}/u);
-    expect(canvasSource).toMatch(/function canHandleCanvasWheel[^]*?return !target\.closest\(CANVAS_PAN_EXCLUSION_SELECTOR\);/u);
+    expect(canvasSource).toMatch(/const CANVAS_WHEEL_EXCLUSION_SELECTOR = 'a, button, input, select, textarea, form, \[contenteditable="true"\], \[data-canvas-pan-exclusion/u);
+    expect(canvasSource).toMatch(/function canHandleCanvasWheel[^]*?return !target\.closest\(CANVAS_WHEEL_EXCLUSION_SELECTOR\);/u);
+    expect(canvasSource).toMatch(/getSafariPinchZoomScale\(gesture\.scale, previousScale\)/u);
+    expect(css).toMatch(/\.diagram-canvas\s*\{[^}]*overscroll-behavior:\s*contain;/u);
   });
 
   it('keeps the focus ring available for keyboard navigation but hides it while a Space drag pans', () => {

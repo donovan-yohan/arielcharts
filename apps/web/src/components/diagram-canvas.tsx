@@ -43,7 +43,7 @@ import { getPairedSemanticPanelPlacement, type PairedSemanticPanelPlacement } fr
 import { shouldCanvasHandleEscape } from '../lib/canvas-keyboard-ownership';
 import { getCanvasToolbarStackGeometry, getCanvasToolbarVisibility } from '../lib/canvas-toolbar-stack';
 import { applyCanvasTouchGesture, CanvasTouchGestureController, type CanvasTouchGesture } from '../lib/canvas-touch-gesture';
-import { applyCanvasWheelGesture, getCanvasWheelGesture } from '../lib/canvas-wheel-gesture';
+import { applyCanvasWheelGesture, getCanvasWheelGesture, getSafariPinchZoomScale } from '../lib/canvas-wheel-gesture';
 import { getConnectModeSourceId, getConnectNodeActivation } from '../lib/diagram-connect-state';
 import { getCanvasDotGridGeometry } from '../lib/canvas-dot-grid';
 import { beginCanvasMousePan, CanvasMousePanController } from '../lib/canvas-mouse-pan';
@@ -740,6 +740,25 @@ const TOOLBAR_BUTTON_STYLE: CSSProperties = {
 };
 
 export const CANVAS_PAN_EXCLUSION_SELECTOR = 'a, button, input, select, textarea, form, [contenteditable="true"], [role="button"], [data-canvas-pan-exclusion="true"], [data-subgraph-drag-target="true"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle';
+const CANVAS_WHEEL_EXCLUSION_SELECTOR = 'a, button, input, select, textarea, form, [contenteditable="true"], [data-canvas-pan-exclusion="true"], [data-testid*="toolbar"]';
+
+/** DiagramCanvas owns semantic editor layout, including space beneath fixed portal chrome. */
+export function syncCanvasToolbarSafeLane(canvas: HTMLElement, toolbar: HTMLElement | null): boolean {
+  const next = toolbar ? `${Math.ceil(Math.max(0, toolbar.getBoundingClientRect().bottom - canvas.getBoundingClientRect().top + 8))}px` : '';
+  const layoutHost = canvas.parentElement;
+  const hosts = [canvas, layoutHost].filter((host): host is HTMLElement => host !== null);
+  const current = hosts.map((host) => host.style.getPropertyValue('--overlay-toolbar-safe-top'));
+  const marked = canvas.dataset.overlayToolbarSafeTop === 'true';
+  if (current.every((value) => value === next) && marked === Boolean(next)) return false;
+  if (next) {
+    hosts.forEach((host) => host.style.setProperty('--overlay-toolbar-safe-top', next));
+    canvas.dataset.overlayToolbarSafeTop = 'true';
+  } else {
+    hosts.forEach((host) => host.style.removeProperty('--overlay-toolbar-safe-top'));
+    delete canvas.dataset.overlayToolbarSafeTop;
+  }
+  return true;
+}
 
 function canStartTouchCanvasGesture(target: EventTarget | null, root: HTMLDivElement): boolean {
   if (!(target instanceof Element)) {
@@ -770,7 +789,9 @@ function canHandleCanvasWheel(target: EventTarget | null, root: HTMLDivElement):
     return false;
   }
 
-  return !target.closest(CANVAS_PAN_EXCLUSION_SELECTOR);
+  // Clicking and dragging a flow node/edge remains its own interaction, but a
+  // two-finger trackpad gesture above it still belongs to the canvas camera.
+  return !target.closest(CANVAS_WHEEL_EXCLUSION_SELECTOR);
 }
 
 export function DiagramCanvas({
@@ -1174,6 +1195,7 @@ export function DiagramCanvas({
   const [canvasViewport, setCanvasViewport] = useState<ViewportRect>({ height: 0, width: 0, x: 0, y: 0 });
   const [canvasViewportMeasured, setCanvasViewportMeasured] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ height: 0, width: 0 });
+  const [hasOverlayToolbarSafeLane, setHasOverlayToolbarSafeLane] = useState(false);
   const [addNodeToolbarHeight, setAddNodeToolbarHeight] = useState(0);
   const [controlsToolbarHeight, setControlsToolbarHeight] = useState(0);
   const [uncontrolledNodePositions, setUncontrolledNodePositions] = useState<DiagramNodePositions>({});
@@ -1717,6 +1739,9 @@ export function DiagramCanvas({
     BOTTOM_TOOLBAR_GAP,
     canvasViewportMeasured,
   );
+  const sequenceControlsSafeBottom = canvasToolbarVisibility.controls
+    ? canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP
+    : 0;
   const erEditorBottom = canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP;
   const semanticPanelPlacement = getMeasuredSemanticPanelPlacement(canvasSize, canvasViewport, erEditorBottom);
   const pairedSemanticPanelPlacement = useMemo(
@@ -2073,6 +2098,50 @@ export function DiagramCanvas({
       resizeObserver.disconnect();
     };
   }, []);
+
+  useLayoutEffect(() => {
+    const canvas = containerRef.current;
+    if (!canvas) return;
+    const canvasElement: HTMLElement = canvas;
+
+    let observedToolbar: HTMLElement | null = null;
+    const toolbarObserver = new ResizeObserver(update);
+    const canvasObserver = new ResizeObserver(update);
+    const documentObserver = new MutationObserver(update);
+
+    function findToolbar() {
+      if (!overlay) return null;
+      return Array.from(document.querySelectorAll<HTMLElement>('.overlay-icon-toolbar'))
+        .find((toolbar) => toolbar.dataset.overlayDiagramId === overlay.diagramId) ?? null;
+    }
+
+    function update() {
+      const toolbar = findToolbar();
+      if (toolbar !== observedToolbar) {
+        if (observedToolbar) toolbarObserver.unobserve(observedToolbar);
+        observedToolbar = toolbar;
+        if (observedToolbar) {
+          toolbarObserver.observe(observedToolbar);
+          documentObserver.observe(observedToolbar, { attributeFilter: ['style'], attributes: true });
+        }
+      }
+      syncCanvasToolbarSafeLane(canvasElement, toolbar);
+      setHasOverlayToolbarSafeLane((current) => current === Boolean(toolbar) ? current : Boolean(toolbar));
+    }
+
+    canvasObserver.observe(canvas);
+    // The overlay toolbar is portalled directly to document.body. Observing
+    // that ownership boundary catches insertion/removal without coupling the
+    // semantic editor to OverlayCanvasLayer's local layout effects.
+    documentObserver.observe(document.body, { childList: true });
+    update();
+    return () => {
+      documentObserver.disconnect();
+      toolbarObserver.disconnect();
+      canvasObserver.disconnect();
+      syncCanvasToolbarSafeLane(canvasElement, null);
+    };
+  }, [overlay?.diagramId]);
 
   useLayoutEffect(() => {
     const toolbar = controlsToolbarRef.current;
@@ -2495,7 +2564,7 @@ export function DiagramCanvas({
     setViewport((current) => applyCanvasWheelGesture(current, {
       client,
       kind: 'zoom',
-      scale: Math.pow(gesture.scale / previousScale, 0.4),
+      scale: getSafariPinchZoomScale(gesture.scale, previousScale),
     }, rect, MIN_ZOOM, MAX_ZOOM));
   }, []);
 
@@ -3259,11 +3328,22 @@ export function DiagramCanvas({
   ) : null;
 
   return (
-    <div className="diagram-canvas-shell" style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative' }}>
+    <div
+      className="diagram-canvas-shell"
+      data-overlay-toolbar-safe-top={hasOverlayToolbarSafeLane || undefined}
+      style={{
+        '--canvas-controls-toolbar-safe-bottom': `${Math.ceil(sequenceControlsSafeBottom)}px`,
+        display: 'flex',
+        flex: 1,
+        minHeight: 0,
+        position: 'relative',
+      } as CSSProperties}
+    >
     <div
       aria-label="Interactive diagram canvas"
       className={className}
       data-panning={spacePressed || isPanning || undefined}
+      data-overlay-toolbar-safe-top={hasOverlayToolbarSafeLane || undefined}
       data-selected-node-ids={getCanonicalSelectionAttribute(selection)}
       data-testid="diagram-canvas"
       onClick={(event) => {

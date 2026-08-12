@@ -13,8 +13,21 @@ export type CanvasWheelGesture =
 
 const LINE_SCROLL_PIXELS = 16;
 const PAGE_SCROLL_PIXELS = 800;
-const PINCH_ZOOM_SENSITIVITY = 0.0015;
+/**
+ * macOS reports a trackpad pinch as a sequence of small ctrl-wheel deltas.
+ * A 20px sample should make a visible change without needing a prolonged
+ * gesture, while the per-event clamp and camera bounds still cap spikes.
+ */
+const PINCH_ZOOM_SENSITIVITY = 0.004;
 const MAX_PINCH_DELTA = 60;
+
+export function getSafariPinchZoomScale(currentScale: number, previousScale: number): number {
+  if (!Number.isFinite(currentScale) || currentScale <= 0 || !Number.isFinite(previousScale) || previousScale <= 0) {
+    return 1;
+  }
+
+  return Math.pow(currentScale / previousScale, 0.8);
+}
 
 export function getCanvasWheelGesture(
   event: CanvasWheelInput,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCanvasWheelGesture, getCanvasWheelGesture } from './canvas-wheel-gesture';
+import { applyCanvasWheelGesture, getCanvasWheelGesture, getSafariPinchZoomScale } from './canvas-wheel-gesture';
 
 describe('canvas wheel gestures', () => {
   it('turns ordinary two-finger scrolling into a camera pan without changing zoom', () => {
@@ -18,14 +18,41 @@ describe('canvas wheel gestures', () => {
     )).toEqual({ panX: 12, panY: 6, zoom: 1.5 });
   });
 
-  it('uses the macOS pinch ctrl-wheel signal for a bounded, gentle zoom', () => {
+  it('uses the macOS pinch ctrl-wheel signal for a bounded, practical zoom', () => {
     const gesture = getCanvasWheelGesture(
       { ctrlKey: true, deltaMode: 0, deltaX: 0, deltaY: -500 },
       { x: 150, y: 120 },
     );
 
     expect(gesture).toMatchObject({ client: { x: 150, y: 120 }, kind: 'zoom' });
-    expect(gesture.kind === 'zoom' && gesture.scale).toBeCloseTo(Math.exp(0.09));
+    expect(gesture.kind === 'zoom' && gesture.scale).toBeCloseTo(Math.exp(0.24));
+  });
+
+  it('makes ordinary small pinches useful while sustained input remains bounded', () => {
+    const smallPinch = getCanvasWheelGesture(
+      { ctrlKey: true, deltaMode: 0, deltaX: 0, deltaY: -8 },
+      { x: 150, y: 120 },
+    );
+    expect(smallPinch.kind === 'zoom' && smallPinch.scale).toBeGreaterThan(1.03);
+
+    const sustainedPinch = getCanvasWheelGesture(
+      { ctrlKey: true, deltaMode: 0, deltaX: 0, deltaY: -500 },
+      { x: 150, y: 120 },
+    );
+    const next = applyCanvasWheelGesture(
+      { panX: 0, panY: 0, zoom: 3.9 },
+      sustainedPinch,
+      { left: 0, top: 0 },
+      0.1,
+      4,
+    );
+    expect(next.zoom).toBe(4);
+  });
+
+  it('uses an equivalently practical bounded scale for Safari gesture events', () => {
+    expect(getSafariPinchZoomScale(1.1, 1)).toBeCloseTo(Math.pow(1.1, 0.8));
+    expect(getSafariPinchZoomScale(1, 0)).toBe(1);
+    expect(getSafariPinchZoomScale(-1, 1)).toBe(1);
   });
 
   it('keeps the cursor canvas point anchored while zooming', () => {

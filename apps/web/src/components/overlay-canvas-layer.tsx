@@ -100,21 +100,6 @@ export function syncCompactErrorToolbarState(pane: HTMLElement, compactError: bo
   return true;
 }
 
-/** Keep short touch semantic forms below the measured, fixed overlay toolbar. */
-export function syncOverlayToolbarSafeTop(canvas: HTMLElement, top: number | null): boolean {
-  const next = top === null ? '' : `${Math.ceil(top)}px`;
-  const current = canvas.style.getPropertyValue('--overlay-toolbar-safe-top');
-  if (current === next) return false;
-  if (next) {
-    canvas.style.setProperty('--overlay-toolbar-safe-top', next);
-    canvas.dataset.overlayToolbarSafeTop = 'true';
-  } else {
-    canvas.style.removeProperty('--overlay-toolbar-safe-top');
-    delete canvas.dataset.overlayToolbarSafeTop;
-  }
-  return true;
-}
-
 type ToolbarIconButtonProps = {
   children: React.ReactNode;
   className?: string;
@@ -226,13 +211,6 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       const canSitBesideError = errorBounds && errorBounds.left - canvasBounds.left >= 172;
       const top = compactError ? canvasBounds.top + headerInset + 8
         : errorOverlapsTop && !canSitBesideError ? errorBounds.bottom + 8 : defaultTop;
-      const isShortTouchViewport = typeof window.matchMedia === 'function'
-        && window.matchMedia('(pointer: coarse)').matches
-        && window.matchMedia('(max-height: 500px)').matches;
-      syncOverlayToolbarSafeTop(
-        canvas,
-        isShortTouchViewport ? Math.max(0, top - canvasBounds.top + toolbarHeight + 8) : null,
-      );
       const left = compactError ? canvasBounds.left + 35
         : errorOverlapsTop && canSitBesideError ? canvasBounds.left + 86
           : canvasBounds.left + viewportX + (viewportWidth / 2);
@@ -257,7 +235,6 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       observer.disconnect();
       mutationObserver?.disconnect();
       if (pane) delete pane.dataset.overlayToolbarErrorCompact;
-      syncOverlayToolbarSafeTop(canvas, null);
       window.removeEventListener('resize', update);
     };
   }, [props.viewport?.height, props.viewport?.width, props.viewport?.x, props.viewport?.y]);
@@ -546,7 +523,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       })}
     </div>
     {typeof document !== 'undefined' ? createPortal(<div data-testid="overlay-controls-owner" onKeyDownCapture={handleOverlayShortcut} ref={controlsOwnerRef} style={{ inset: 0, pointerEvents: 'none', position: 'fixed', zIndex: 31 }}>
-      <div aria-label="Overlay scene controls" className="overlay-icon-toolbar" data-compact-error={compactErrorToolbar || undefined} data-expanded={toolsOpen || undefined} style={{ '--overlay-toolbar-available-height': `${toolbarPosition.availableHeight}px`, '--overlay-toolbar-available-width': `${toolbarPosition.availableWidth}px`, left: toolbarPosition.left, position: 'fixed', top: toolbarPosition.top } as React.CSSProperties}>
+      <div aria-label="Overlay scene controls" className="overlay-icon-toolbar" data-compact-error={compactErrorToolbar || undefined} data-expanded={toolsOpen || undefined} data-overlay-diagram-id={props.diagramId} style={{ '--overlay-toolbar-available-height': `${toolbarPosition.availableHeight}px`, '--overlay-toolbar-available-width': `${toolbarPosition.availableWidth}px`, left: toolbarPosition.left, position: 'fixed', top: toolbarPosition.top } as React.CSSProperties}>
         <div className="overlay-toolbar-primary" data-testid="overlay-toolbar-primary" role="toolbar" aria-label="Overlay creation tools">
           <ToolbarIconButton className="overlay-toolbar-more" expanded={toolsOpen} label={toolsOpen ? 'Close overlay tools' : 'Overlay tools'} onClick={() => setToolsOpen((open) => !open)} pressed={toolsOpen}><>{toolsOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</></ToolbarIconButton>
           <ToolbarIconButton disabled={!writable} label="Select overlay tool" onClick={() => activateInkTool('select')} pressed={inkTool === 'select'}><MousePointer2 size={18} /></ToolbarIconButton>

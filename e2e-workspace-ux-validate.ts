@@ -824,16 +824,37 @@ async function dispatchTrustedCanvasWheel(
   page: Page,
   label: string,
   renderer: 'flowchart' | 'generic',
-  options: { ctrlKey: boolean; deltaX: number; deltaY: number },
+  options: { ctrlKey: boolean; deltaX: number; deltaY: number; point?: CanvasGesturePoint; target?: 'blank' | 'node' },
 ): Promise<{
   browserScale: number;
   defaultPrevented: boolean;
+  defaultPreventedCount: number;
   devicePixelRatio: number;
+  historyLength: number;
   isTrusted: boolean;
   point: CanvasGesturePoint;
+  url: string;
 }> {
-  const [point] = await allowedCanvasGesturePoints(page, `${label} trusted wheel`, 1, 0);
-  assert(point, `${label} did not find a blank canvas point for trusted wheel input.`);
+  const [blankPoint] = await allowedCanvasGesturePoints(page, `${label} trusted wheel`, 1, 0);
+  assert(blankPoint, `${label} did not find a blank canvas point for trusted wheel input.`);
+  let point = options.point ?? blankPoint;
+  if (options.target === 'node') {
+    const nodes = page.locator('.mermaid-flow-node');
+    const nodeCount = await nodes.count();
+    let nodePoint: CanvasGesturePoint | null = null;
+    for (let index = 0; index < nodeCount; index += 1) {
+      const node = nodes.nth(index);
+      const bounds = await node.boundingBox();
+      if (!bounds) continue;
+      const center = { x: bounds.x + (bounds.width / 2), y: bounds.y + (bounds.height / 2) };
+      if (await node.evaluate((element, candidate) => element.contains(document.elementFromPoint(candidate.x, candidate.y)), center)) {
+        nodePoint = center;
+        break;
+      }
+    }
+    assert(nodePoint, `${label} did not find a hit-tested flowchart node for trusted wheel input.`);
+    point = nodePoint;
+  }
   const pointOwnership = await page.evaluate((clientPoint) => {
     const target = document.elementFromPoint(clientPoint.x, clientPoint.y);
     return {
@@ -870,9 +891,12 @@ async function dispatchTrustedCanvasWheel(
     return {
       browserScale: window.visualViewport?.scale ?? 1,
       defaultPrevented: result.defaultPrevented === true,
+      defaultPreventedCount: result.defaultPrevented === true ? 1 : 0,
       devicePixelRatio: window.devicePixelRatio,
+      historyLength: window.history.length,
       isTrusted: result.isTrusted === true,
       point: clientPoint,
+      url: window.location.href,
     };
   }, point);
 }
@@ -883,42 +907,147 @@ async function expectWheelGestureCameraControls(page: Page, label: string, rende
   await verifiedClick(page, page.getByRole('button', { name: 'Zoom out', exact: true }), `${label} wheel headroom`);
   await waitForStableCanvasTransform(page, `${label} wheel headroom`);
   const beforePan = await readCanvasCameraSnapshot(page, `${label} wheel-pan baseline`);
+  const browserBeforePan = await page.evaluate(() => ({ historyLength: window.history.length, url: window.location.href }));
   const normalWheel = await dispatchTrustedCanvasWheel(page, label, renderer, { ctrlKey: false, deltaX: 18, deltaY: 32 });
   const afterPan = await readCanvasCameraSnapshot(page, `${label} wheel-pan result`);
   assert(normalWheel.isTrusted && normalWheel.defaultPrevented, `${label} normal trusted wheel was not owned by the canvas.`);
   assert(afterPan.zoom === beforePan.zoom && (afterPan.panX !== beforePan.panX || afterPan.panY !== beforePan.panY),
     `${label} ordinary two-finger scroll did not pan without zooming: ${JSON.stringify({ beforePan, afterPan })}.`);
+  assert(normalWheel.url === browserBeforePan.url && normalWheel.historyLength === browserBeforePan.historyLength,
+    `${label} ordinary canvas wheel unexpectedly changed browser navigation state: ${JSON.stringify({ browserBeforePan, normalWheel })}.`);
 
-  const beforeZoom = afterPan;
+  const beforeHorizontalPan = afterPan;
+  const horizontalWheel = await dispatchTrustedCanvasWheel(page, label, renderer, { ctrlKey: false, deltaX: 120, deltaY: 18 });
+  const afterHorizontalPan = await readCanvasCameraSnapshot(page, `${label} horizontal-wheel result`);
+  assert(horizontalWheel.isTrusted && horizontalWheel.defaultPrevented,
+    `${label} trusted horizontal canvas wheel was not cancelled before browser history navigation.`);
+  assert(afterHorizontalPan.zoom === beforeHorizontalPan.zoom && afterHorizontalPan.panX !== beforeHorizontalPan.panX,
+    `${label} horizontal canvas wheel did not pan the camera: ${JSON.stringify({ beforeHorizontalPan, afterHorizontalPan })}.`);
+  assert(horizontalWheel.url === browserBeforePan.url && horizontalWheel.historyLength === browserBeforePan.historyLength,
+    `${label} horizontal canvas pan changed browser navigation state: ${JSON.stringify({ browserBeforePan, horizontalWheel })}.`);
+
+  const beforeZoom = afterHorizontalPan;
   const browserBeforeZoom = await page.evaluate(() => ({
     browserScale: window.visualViewport?.scale ?? 1,
     devicePixelRatio: window.devicePixelRatio,
+    historyLength: window.history.length,
+    url: window.location.href,
   }));
-  const pinch = await dispatchTrustedCanvasWheel(page, label, renderer, { ctrlKey: true, deltaX: 0, deltaY: -20 });
+  const pinch = await dispatchTrustedCanvasWheel(page, label, renderer, { ctrlKey: true, deltaX: 0, deltaY: -8 });
   await expect.poll(async () => (await readCanvasCameraSnapshot(page, `${label} ctrl-wheel settle`)).zoom, {
     message: `${label} ctrl-wheel zoom did not settle after trusted input.`,
     timeout: 5_000,
   }).not.toBe(beforeZoom.zoom);
-  const afterZoom = await readCanvasCameraSnapshot(page, `${label} ctrl-wheel result`);
+  const afterSmallZoom = await readCanvasCameraSnapshot(page, `${label} small ctrl-wheel result`);
   const canvasBounds = await canvas.boundingBox();
   assert(canvasBounds, `${label} lost its canvas bounds during ctrl-wheel zoom.`);
-  const anchoredCanvasPoint = {
+  const smallAnchoredCanvasPoint = {
     x: (pinch.point.x - canvasBounds.x - beforeZoom.panX) / beforeZoom.zoom,
     y: (pinch.point.y - canvasBounds.y - beforeZoom.panY) / beforeZoom.zoom,
+  };
+  const smallAnchoredScreenPoint = {
+    x: afterSmallZoom.panX + (smallAnchoredCanvasPoint.x * afterSmallZoom.zoom),
+    y: afterSmallZoom.panY + (smallAnchoredCanvasPoint.y * afterSmallZoom.zoom),
+  };
+  assert(Math.abs(smallAnchoredScreenPoint.x - (pinch.point.x - canvasBounds.x)) < 0.1
+    && Math.abs(smallAnchoredScreenPoint.y - (pinch.point.y - canvasBounds.y)) < 0.1,
+  `${label} small ctrl-wheel pinch did not keep its cursor point anchored: ${JSON.stringify({ afterSmallZoom, smallAnchoredScreenPoint, pinch })}.`);
+  const sustainedPinches = [await dispatchTrustedCanvasWheel(page, label, renderer, {
+    ctrlKey: true,
+    deltaX: 0,
+    deltaY: -20,
+  })];
+  for (let index = 1; index < 3; index += 1) {
+    sustainedPinches.push(await dispatchTrustedCanvasWheel(page, label, renderer, {
+      ctrlKey: true,
+      deltaX: 0,
+      deltaY: -20,
+      point: sustainedPinches[0]!.point,
+    }));
+  }
+  await expect.poll(async () => (await readCanvasCameraSnapshot(page, `${label} sustained ctrl-wheel settle`)).zoom, {
+    message: `${label} sustained ctrl-wheel zoom did not settle after trusted input.`,
+    timeout: 5_000,
+  }).toBeGreaterThan(afterSmallZoom.zoom * 1.2);
+  const afterZoom = await readCanvasCameraSnapshot(page, `${label} sustained ctrl-wheel result`);
+  const anchoredCanvasPoint = {
+    x: (sustainedPinches[0]!.point.x - canvasBounds.x - afterSmallZoom.panX) / afterSmallZoom.zoom,
+    y: (sustainedPinches[0]!.point.y - canvasBounds.y - afterSmallZoom.panY) / afterSmallZoom.zoom,
   };
   const anchoredScreenPoint = {
     x: afterZoom.panX + (anchoredCanvasPoint.x * afterZoom.zoom),
     y: afterZoom.panY + (anchoredCanvasPoint.y * afterZoom.zoom),
   };
-  assert(pinch.isTrusted && pinch.defaultPrevented, `${label} trusted ctrl-wheel pinch was not cancelled before browser zoom.`);
-  assert(afterZoom.zoom > beforeZoom.zoom && afterZoom.zoom < beforeZoom.zoom * 1.1,
-    `${label} ctrl-wheel zoom was missing or too sensitive: ${JSON.stringify({ beforeZoom, afterZoom })}.`);
+  assert(pinch.isTrusted && pinch.defaultPrevented && sustainedPinches.every((sustainedPinch) => sustainedPinch.isTrusted && sustainedPinch.defaultPrevented),
+    `${label} trusted ctrl-wheel pinch was not cancelled before browser zoom.`);
+  assert(sustainedPinches.every((sustainedPinch) => sustainedPinch.defaultPreventedCount === 1),
+    `${label} did not cancel every sustained ctrl-wheel pinch event: ${JSON.stringify(sustainedPinches)}.`);
+  assert(afterSmallZoom.zoom > beforeZoom.zoom * 1.025 && afterSmallZoom.zoom < beforeZoom.zoom * 1.05,
+    `${label} small ctrl-wheel pinch was not practical and bounded: ${JSON.stringify({ beforeZoom, afterSmallZoom })}.`);
+  assert(afterZoom.zoom > afterSmallZoom.zoom * 1.2 && afterZoom.zoom <= 4,
+    `${label} sustained ctrl-wheel zoom was missing or exceeded camera bounds: ${JSON.stringify({ afterSmallZoom, afterZoom })}.`);
   assert(pinch.browserScale === 1 && browserBeforeZoom.browserScale === 1
     && pinch.devicePixelRatio === browserBeforeZoom.devicePixelRatio,
   `${label} ctrl-wheel changed the browser viewport scale: ${JSON.stringify({ browserBeforeZoom, pinch })}.`);
-  assert(Math.abs(anchoredScreenPoint.x - (pinch.point.x - canvasBounds.x)) < 0.1
-    && Math.abs(anchoredScreenPoint.y - (pinch.point.y - canvasBounds.y)) < 0.1,
-  `${label} ctrl-wheel zoom did not keep its blank-pane cursor point anchored: ${JSON.stringify({ afterZoom, anchoredScreenPoint, pinch })}.`);
+  assert(pinch.url === browserBeforeZoom.url && pinch.historyLength === browserBeforeZoom.historyLength
+    && sustainedPinches.every((sustainedPinch) => sustainedPinch.url === browserBeforeZoom.url && sustainedPinch.historyLength === browserBeforeZoom.historyLength),
+  `${label} ctrl-wheel pinch changed browser navigation state: ${JSON.stringify({ browserBeforeZoom, pinch, sustainedPinches })}.`);
+  assert(Math.abs(anchoredScreenPoint.x - (sustainedPinches[0]!.point.x - canvasBounds.x)) < 0.5
+    && Math.abs(anchoredScreenPoint.y - (sustainedPinches[0]!.point.y - canvasBounds.y)) < 0.5,
+  `${label} sustained ctrl-wheel zoom drifted more than half a pixel from its cursor point: ${JSON.stringify({ afterZoom, anchoredScreenPoint, pinch })}.`);
+
+  if (renderer === 'flowchart') {
+    const nodeWheelBefore = afterZoom;
+    const nodeHorizontalWheel = await dispatchTrustedCanvasWheel(page, label, renderer, {
+      ctrlKey: false,
+      deltaX: -96,
+      deltaY: 14,
+      target: 'node',
+    });
+    const nodeWheelAfter = await readCanvasCameraSnapshot(page, `${label} node horizontal-wheel result`);
+    assert(nodeHorizontalWheel.isTrusted && nodeHorizontalWheel.defaultPrevented
+      && nodeHorizontalWheel.url === browserBeforePan.url
+      && nodeHorizontalWheel.historyLength === browserBeforePan.historyLength,
+    `${label} node-target horizontal wheel escaped canvas navigation ownership: ${JSON.stringify(nodeHorizontalWheel)}.`);
+    assert(nodeWheelAfter.panX !== nodeWheelBefore.panX && nodeWheelAfter.zoom === nodeWheelBefore.zoom,
+      `${label} node-target horizontal wheel did not pan the camera: ${JSON.stringify({ nodeWheelBefore, nodeWheelAfter })}.`);
+
+    const nodePinchBefore = nodeWheelAfter;
+    const nodePinch = await dispatchTrustedCanvasWheel(page, label, renderer, {
+      ctrlKey: true,
+      deltaX: 0,
+      deltaY: -8,
+      target: 'node',
+    });
+    await expect.poll(async () => (await readCanvasCameraSnapshot(page, `${label} node ctrl-wheel settle`)).zoom, {
+      message: `${label} node-target ctrl-wheel pinch did not settle after trusted input.`,
+      timeout: 5_000,
+    }).toBeGreaterThan(nodePinchBefore.zoom * 1.025);
+    const nodePinchAfter = await readCanvasCameraSnapshot(page, `${label} node ctrl-wheel result`);
+    const nodeAnchoredCanvasPoint = {
+      x: (nodePinch.point.x - canvasBounds.x - nodePinchBefore.panX) / nodePinchBefore.zoom,
+      y: (nodePinch.point.y - canvasBounds.y - nodePinchBefore.panY) / nodePinchBefore.zoom,
+    };
+    const nodeAnchoredScreenPoint = {
+      x: nodePinchAfter.panX + (nodeAnchoredCanvasPoint.x * nodePinchAfter.zoom),
+      y: nodePinchAfter.panY + (nodeAnchoredCanvasPoint.y * nodePinchAfter.zoom),
+    };
+    assert(nodePinch.isTrusted && nodePinch.defaultPrevented
+      && nodePinch.browserScale === 1
+      && nodePinch.url === browserBeforePan.url
+      && nodePinch.historyLength === browserBeforePan.historyLength,
+    `${label} node-target ctrl-wheel pinch escaped canvas ownership: ${JSON.stringify(nodePinch)}.`);
+    assert(Math.abs(nodeAnchoredScreenPoint.x - (nodePinch.point.x - canvasBounds.x)) < 0.1
+      && Math.abs(nodeAnchoredScreenPoint.y - (nodePinch.point.y - canvasBounds.y)) < 0.1,
+    `${label} node-target ctrl-wheel pinch did not keep its cursor point anchored: ${JSON.stringify({ nodePinchAfter, nodeAnchoredScreenPoint })}.`);
+  }
+
+  // The sustained-pinch proof intentionally changes the local camera much
+  // more than the former gentle sample. Restore the normal test-fixture frame
+  // so later interaction checks still target the diagram, not an offscreen
+  // world coordinate.
+  await triggerCanvasFit(page, `${label} wheel fixture reset`);
+  await waitForStableCanvasTransform(page, `${label} wheel fixture reset`);
 }
 
 async function expectBlankCanvasClickClearsSelection(page: Page): Promise<void> {
@@ -6011,12 +6140,23 @@ async function expectTouchCanvasControls(
     const messageForm = page.locator('form.canvas-sequence-message-form:has([aria-label="Sequence message"])');
     const participantAdd = page.getByRole('button', { name: 'Add sequence participant', exact: true });
     const messageAdd = page.getByRole('button', { name: 'Add sequence message', exact: true });
-    await Promise.all([
-      assertTouchTarget(page, participantAdd, `${label} sequence add participant`),
-      assertTouchTarget(page, messageAdd, `${label} sequence add message`),
-      assertContainedInViewport(page, participantForm, `${label} sequence participant form`),
-      assertContainedInViewport(page, messageForm, `${label} sequence message form`),
-    ]);
+    if (label === 'mobile-landscape') {
+      // This compact editor is intentionally scrollable between fixed top and
+      // bottom canvas lanes. Each action must still become an unobscured 44px
+      // touch target through the normal in-panel scroll route.
+      for (const [target, targetLabel] of [[participantAdd, 'add participant'], [messageAdd, 'add message']] as const) {
+        await target.scrollIntoViewIfNeeded();
+        await assertTouchTarget(page, target, `${label} sequence ${targetLabel}`);
+      }
+      await page.getByTestId('sequence-editor-controls').evaluate((element) => { element.scrollTop = 0; });
+    } else {
+      await Promise.all([
+        assertTouchTarget(page, participantAdd, `${label} sequence add participant`),
+        assertTouchTarget(page, messageAdd, `${label} sequence add message`),
+        assertContainedInViewport(page, participantForm, `${label} sequence participant form`),
+        assertContainedInViewport(page, messageForm, `${label} sequence message form`),
+      ]);
+    }
     await assertDocumentHasNoHorizontalOverflow(page);
     const layout = await page.evaluate(() => {
       const canvas = document.querySelector<HTMLElement>('[data-testid="canvas-first-workspace"]');
@@ -6041,12 +6181,42 @@ async function expectTouchCanvasControls(
       `${label} sequence forms overflowed or overlapped workspace chrome: ${JSON.stringify(layout)}.`);
     if (label === 'mobile-landscape') {
       const editor = page.getByTestId('sequence-editor-controls');
-      const scrollSurface = page.locator('form.canvas-sequence-message-form:has([aria-label="Sequence message"])');
+      let safeLane: { controlsTop: number; editorBottom: number; editorTop: number; safeTop: number; scrollPaddingBottom: string; scrollPaddingTop: string } | null = null;
+      await expect.poll(async () => {
+        safeLane = await page.getByTestId('diagram-canvas').evaluate((canvas) => {
+        const style = getComputedStyle(canvas);
+        const safeTop = Number.parseFloat(style.getPropertyValue('--overlay-toolbar-safe-top'));
+        const editorElement = canvas.parentElement?.querySelector<HTMLElement>('[data-testid="sequence-editor-controls"]');
+        const controls = canvas.querySelector<HTMLElement>('[data-testid="canvas-controls-toolbar"]');
+        if (!editorElement || !controls || !Number.isFinite(safeTop) || safeTop <= 0) return null;
+        const canvasBounds = canvas.getBoundingClientRect();
+        const editorBounds = editorElement.getBoundingClientRect();
+        const controlsBounds = controls.getBoundingClientRect();
+        return {
+          controlsTop: controlsBounds.top,
+          editorBottom: editorBounds.bottom,
+          editorTop: editorBounds.top - canvasBounds.top,
+          safeTop,
+          scrollPaddingBottom: getComputedStyle(editorElement).scrollPaddingBottom,
+          scrollPaddingTop: getComputedStyle(editorElement).scrollPaddingTop,
+        };
+        });
+        return safeLane;
+      }, {
+        message: `${label} sequence editor did not receive the measured overlay toolbar safe lane.`,
+        timeout: 5_000,
+      }).not.toBeNull();
+      assert(safeLane !== null
+        && safeLane.editorTop >= safeLane.safeTop - 1
+        && safeLane.editorBottom <= safeLane.controlsTop - 1
+        && Number.parseFloat(safeLane.scrollPaddingBottom) > 0
+        && Math.abs(Number.parseFloat(safeLane.scrollPaddingTop) - safeLane.safeTop) < 1,
+      `${label} sequence editor did not reserve the measured toolbar lane: ${JSON.stringify(safeLane)}.`);
       const beforeScroll = await editor.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollTop: element.scrollTop }));
       assert(beforeScroll.scrollHeight > beforeScroll.clientHeight,
         `${label} sequence editor did not expose overflow for lower controls: ${JSON.stringify(beforeScroll)}.`);
-      const bounds = await scrollSurface.boundingBox();
-      assert(bounds, `${label} sequence editor has no visible touch-scroll form.`);
+      const bounds = await editor.boundingBox();
+      assert(bounds, `${label} sequence editor has no visible touch-scroll surface.`);
       const session = await page.context().newCDPSession(page);
       const touch = (y: number) => ({ force: 1, id: 1, radiusX: 1, radiusY: 1, x: bounds.x + (bounds.width / 2), y });
       try {
@@ -6954,8 +7124,8 @@ async function validateWorkspaceUx(): Promise<void> {
   const results: string[] = [];
   const mobilePinchResiduals: string[] = [];
   const slice = process.env.ARIELCHARTS_E2E_SLICE;
-  if (slice !== undefined && slice !== 'history' && slice !== 'cynefin-history') {
-    throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history", "cynefin-history", or no slice.`);
+  if (slice !== undefined && slice !== 'history' && slice !== 'cynefin-history' && slice !== 'wheel' && slice !== 'landscape') {
+    throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history", "cynefin-history", "wheel", "landscape", or no slice.`);
   }
   await withOwnedServices(async ({ baseUrl, mcpUrl, serverUrl }) => {
     const browser = await launchBrowserHarness();
@@ -6981,6 +7151,40 @@ async function validateWorkspaceUx(): Promise<void> {
         await closeFlyout(cynefinPage, 'source');
         await expectCynefinSemanticEditor(cynefinPage);
         record(results, 'Cynefin form exposes fixed-domain item and transition lifecycles, deterministic boundaries, recovery, undo/redo, and advanced-source fallback');
+        return;
+      }
+
+      if (slice === 'wheel') {
+        const { page: wheelPage } = await browser.newPage(DESKTOP_VIEWPORT);
+        await visitWorkspace(wheelPage, baseUrl, sessionId, room.roomKey);
+        await replaceSource(wheelPage, FLOWCHART_FIXTURE);
+        await waitForCanvas(wheelPage, 'flowchart');
+        await closeFlyout(wheelPage, 'source');
+        await expectWheelGestureCameraControls(wheelPage, 'flowchart renderer', 'flowchart');
+        await replaceSource(wheelPage, API_SEQUENCE_FIXTURE);
+        await waitForCanvas(wheelPage, 'sequence');
+        await expectWheelGestureCameraControls(wheelPage, 'generic Mermaid renderer', 'generic');
+        record(results, 'ordinary and node-target wheel pan plus practical ctrl-pinch stay canvas-owned across renderers');
+        return;
+      }
+
+      if (slice === 'landscape') {
+        const responsiveSession = await mcp.getSession(sessionId);
+        const responsiveMain = responsiveSession.diagrams.find((diagram) => diagram.name === 'Main');
+        assert(responsiveMain, 'Landscape fixture room did not create its Main diagram.');
+        await mcp.writeLatest(sessionId, responsiveMain.id, FLOWCHART_FIXTURE, 'Landscape fixture seed');
+        await seedResponsiveCatalog(mcp, sessionId);
+        const { context, page: landscapePage } = await browser.newPage(MOBILE_LANDSCAPE_VIEWPORT, PHONE_CONTEXT_OPTIONS);
+        try {
+          await visitWorkspace(landscapePage, baseUrl, sessionId, room.roomKey);
+          await waitForWorkspaceProviderSync(landscapePage);
+          await expectStableFlyoutAnchors(landscapePage, 'mobile-landscape');
+          await expectResponsiveControls(landscapePage, 'mobile-landscape', 'Main');
+          await expectPhoneLiveCodingWorkspace(landscapePage, 'mobile-landscape', 'Main', mobilePinchResiduals);
+          record(results, 'mobile-landscape semantic controls reserve the measured fixed-toolbar lane');
+        } finally {
+          await context.close();
+        }
         return;
       }
 

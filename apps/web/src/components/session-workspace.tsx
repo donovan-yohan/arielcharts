@@ -843,15 +843,10 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   useEffect(() => { publishCanvasPresenceRef.current = publishCanvasPresence; }, [publishCanvasPresence]);
 
   useEffect(() => {
-    const clientId = collaboration?.awareness.clientID;
     const storage = typeof window === 'undefined' ? null : getSafeSessionStorage(window);
-    const initialSequence = clientId === undefined
-      ? 0
-      : readLaserSequenceHighWater(storage, sessionId, clientId);
+    const initialSequence = readLaserSequenceHighWater(storage, sessionId);
     const publisher = new LaserPresencePublisher((laser) => {
-      if (clientId !== undefined) {
-        writeLaserSequenceHighWater(storage, sessionId, clientId, laser.sequence);
-      }
+      writeLaserSequenceHighWater(storage, sessionId, laser.sequence);
       localLaserRef.current = laser;
       setLocalLaser(laser.active ? laser : null);
       publishCanvasPresenceRef.current(localCanvasCursorRef.current, selectedNodeIdsRef.current);

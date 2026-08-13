@@ -8,9 +8,32 @@ import { loadServerEnv } from './env.js';
 import { SessionStore } from './persistence.js';
 import { RoomAccessService } from './room-access.js';
 import { SessionManager } from './session-manager.js';
+import { canonicalWorkspaceJson } from './workspace-import.js';
 
 function request(headers: Record<string, string | string[]> = {}, address = '203.0.113.7'): IncomingMessage {
   return { headers, socket: { remoteAddress: address } } as unknown as IncomingMessage;
+}
+
+function signedWorkspaceBundle() {
+  const payload = {
+    schema_version: 1 as const,
+    order: ['main'],
+    diagrams: [{
+      id: 'main', name: 'Promoted',
+      mermaid: { schema_version: 1 as const, source: 'flowchart TD\n  Local --> Shared' },
+      layout: { schema_version: 1 as const, positions: {} },
+      overlay: {
+        version: 1 as const, diagram_id: 'main', objects: [],
+        layers: [{ id: 'default', name: 'Default', order_key: 'a', visible: true, locked: false, export: true }],
+      },
+    }],
+  };
+  return {
+    format: 'arielcharts.workspace' as const,
+    version: 1 as const,
+    payload,
+    integrity: { algorithm: 'SHA-256' as const, value: createHash('sha256').update(canonicalWorkspaceJson(payload)).digest('hex') },
+  };
 }
 
 describe('RoomAccessService', () => {
@@ -45,6 +68,19 @@ describe('RoomAccessService', () => {
 
     await store.delete('abc123de');
     expect(await store.getRoomAccess('abc123de')).toBeNull();
+  });
+
+  it('rejects an invalid initial workspace without persisting either the room or its access verifier', async () => {
+    const access = new RoomAccessService(store, { cryptoProfile: 'test', cookieSecret: 'test-secret' });
+    const manager = new SessionManager(store);
+    const grant = await access.createGrant();
+    const bundle = signedWorkspaceBundle();
+    bundle.payload.diagrams[0]!.mermaid.source = 'flowchart TD\n  Tampered';
+
+    await expect(manager.createProtectedSession('invalid1', grant.record, bundle)).rejects.toThrow('integrity check failed');
+    expect(await store.get('invalid1')).toBeNull();
+    expect(await store.getRoomAccess('invalid1')).toBeNull();
+    await expect(manager.requireSession('invalid1')).rejects.toThrow('Session not found');
   });
 
   it('uses generic failures for wrong and nonexistent keys, signs room-scoped expiring cookies, and validates derived MCP bearers', async () => {

@@ -14,6 +14,7 @@ interface WorkspaceFooterProps {
   connectionState: 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
   getAvatarText: (participant: Participant) => string;
   getParticipantName: (participant: Participant) => string;
+  isLocalWorkspace?: boolean;
   onActivityToggle: (origin: HTMLButtonElement) => void;
   participants: readonly Participant[];
   saveStatusLabel: string;
@@ -26,6 +27,7 @@ export function WorkspaceFooter({
   connectionState,
   getAvatarText,
   getParticipantName,
+  isLocalWorkspace = false,
   onActivityToggle,
   participants,
   saveStatusLabel,
@@ -38,13 +40,13 @@ export function WorkspaceFooter({
         <button
           aria-controls="activity-flyout"
           aria-expanded={activityOpen}
-          aria-label="Activity and history"
+          aria-label={isLocalWorkspace ? 'Activity' : 'Activity and history'}
           className={`workspace-footer-toggle workspace-touch-label${activityOpen ? ' is-active' : ''}`}
-          data-touch-label="Activity and history"
+          data-touch-label={isLocalWorkspace ? 'Activity' : 'Activity and history'}
           data-testid="activity-flyout-toggle"
           onClick={(event) => { onActivityToggle(event.currentTarget); }}
           type="button"
-        ><Activity aria-hidden="true" size={15} /><span>activity &amp; history</span><b>{activityCount}</b><ChevronDown aria-hidden="true" size={14} /></button>
+        ><Activity aria-hidden="true" size={15} /><span>{isLocalWorkspace ? 'activity' : 'activity & history'}</span><b>{activityCount}</b><ChevronDown aria-hidden="true" size={14} /></button>
         <span className="workspace-collaborator-count">{activityStatusLabel}</span>
         <div aria-label="Active collaborators" className="workspace-footer-avatars">
           {participants.map((participant) => (
@@ -63,7 +65,7 @@ export function WorkspaceFooter({
       </div>
       <div aria-label={saveStatusLabel} aria-live="polite" className="workspace-save-status" data-testid="live-save-status">
         <span aria-hidden="true" className={`workspace-save-dot workspace-save-dot-${connectionState}`} />
-        <span className="workspace-save-status-label">{saveStatusLabel}</span><span className="workspace-live-label">live</span>
+        <span className="workspace-save-status-label">{saveStatusLabel}</span><span className="workspace-live-label">{isLocalWorkspace ? 'device' : 'live'}</span>
       </div>
     </footer>
   );

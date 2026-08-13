@@ -168,12 +168,12 @@ export function createApp(env = loadServerEnv()) {
   });
   const mcpRequestHandler = createModernMcpRequestHandler(manager);
 
-  async function createRoom(requestedSessionId?: string): Promise<{ sessionId: string; roomKey: string; accessVersion: number }> {
+  async function createRoom(requestedSessionId?: string, initialWorkspace?: unknown): Promise<{ sessionId: string; roomKey: string; accessVersion: number }> {
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const sessionId = requestedSessionId ?? randomBytes(16).toString('hex');
       const grant = await roomAccess.createGrant();
       try {
-        await manager.createProtectedSession(sessionId, grant.record);
+        await manager.createProtectedSession(sessionId, grant.record, initialWorkspace);
         return { sessionId, roomKey: grant.roomKey, accessVersion: grant.record.accessVersion };
       } catch (error) {
         if (!(error instanceof Error) || !error.message.startsWith('Session already exists:')) throw error;
@@ -214,14 +214,24 @@ export function createApp(env = loadServerEnv()) {
       }
       try {
         roomAccess.allowRoomCreation(request);
-        const room = await createRoom();
-        sendJson(response, 201, { session_id: room.sessionId, room_key: room.roomKey }, { ...corsHeaders, 'cache-control': 'no-store' });
+        const body = await readJsonBody(request);
+        if (!isRecord(body) || !Object.keys(body).every((key) => key === 'bundle')) {
+          throw new WorkspaceImportError('Expected an optional bundle field.');
+        }
+        const room = await createRoom(undefined, body.bundle);
+        sendJson(response, 201, { session_id: room.sessionId, room_key: room.roomKey }, {
+          ...corsHeaders,
+          ...roomAccess.browserCookieHeaders(room.sessionId, room.accessVersion),
+          'cache-control': 'no-store',
+        });
       } catch (error) {
         if (error instanceof RoomAccessError) {
           sendRoomAccessError(response, error, corsHeaders);
           return;
         }
-        sendJson(response, 500, { error: 'Failed to create room.' }, { ...corsHeaders, 'cache-control': 'no-store' });
+        const message = error instanceof Error ? error.message : 'Failed to create room.';
+        const status = error instanceof RequestBodyTooLargeError ? 413 : error instanceof WorkspaceImportError || error instanceof SyntaxError ? 400 : 500;
+        sendJson(response, status, { error: message }, { ...corsHeaders, 'cache-control': 'no-store' });
       }
       return;
     }

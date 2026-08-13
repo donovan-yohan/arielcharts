@@ -5,6 +5,7 @@ import { APP_NAME, CHOOSER_STARTER_TEMPLATES, getStarterTemplate } from '@arielc
 import { basicSetup } from 'codemirror';
 import mermaid from 'mermaid';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { Check, KeyRound, Share2 } from 'lucide-react';
@@ -147,7 +148,8 @@ import { FOCUSABLE_SELECTOR } from '../lib/focusable';
 import { getMermaidThemeVariables } from '../lib/theme';
 import { getActivityFlyoutViewOnOpen, getNextWorkspaceFlyout, type ActivityFlyoutView, type WorkspaceFlyout } from '../lib/workspace-flyout-state';
 import { SOURCE_FLYOUT_DEFAULT_WIDTH } from '../lib/source-flyout-resize';
-import { getMcpRoomBearer, getRoomShareUrl, rotateRoomKey } from '../lib/room-access-api';
+import { createRoom, getMcpRoomBearer, getRoomSharePath, getRoomShareUrl, rotateRoomKey } from '../lib/room-access-api';
+import { completeLocalWorkspacePromotion, publishLocalWorkspace, createLocalWorkspacePersistence, getLocalWorkspaceLoadingCopy, LocalAwareness, type LocalWorkspacePersistence, type LocalWorkspacePhase } from '../lib/local-workspace';
 import { useOverlayScene } from '../lib/use-overlay-scene';
 import { getOverlayScene } from '../lib/overlay-scene';
 import { getZenUmlRuntimePresentation, getZenUmlRuntimeSnapshot, prepareMermaidRuntimeForSource, subscribeZenUmlRuntime } from '../lib/zenuml-runtime';
@@ -190,8 +192,10 @@ type CollaborationState = {
   diagramOrder: Y.Array<string>;
   doc: Y.Doc;
   presenceMap: Y.Map<Participant>;
-  provider: WebsocketProvider;
 };
+
+export type WorkspaceMode = 'local' | 'online';
+type PromotionState = 'idle' | 'publishing' | 'error';
 
 type DiagramTab = WorkspaceDiagramTab;
 
@@ -574,7 +578,30 @@ export function getTemplateDiagramCreation(templateId: StarterTemplateId, diagra
   };
 }
 
-export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey: string | null; sessionId: string }) {
+function seedBlankDiagramCatalog(doc: Y.Doc, diagramsMap: Y.Map<Y.Map<unknown>>, diagramOrder: Y.Array<string>): void {
+  if (readDiagramTabs(diagramsMap, diagramOrder).length > 0) return;
+  const id = createDiagramId();
+  doc.transact(() => {
+    const diagram = new Y.Map<unknown>();
+    diagram.set(DIAGRAM_NAME_KEY, 'Untitled diagram');
+    diagram.set(DIAGRAM_MERMAID_TEXT_KEY, new Y.Text());
+    diagram.set(DIAGRAM_NODE_POSITIONS_KEY, new Y.Map<NodePosition>());
+    diagramsMap.set(id, diagram);
+    diagramOrder.push([id]);
+    getOverlayScene(doc, id, true);
+  }, 'local-workspace-seed');
+}
+
+export function SessionWorkspace({
+  initialRoomKey,
+  sessionId,
+  workspaceMode = 'online',
+}: {
+  initialRoomKey: string | null;
+  sessionId: string;
+  workspaceMode?: WorkspaceMode;
+}) {
+  const router = useRouter();
   const { resolvedTheme } = useTheme();
   const zenUmlRuntime = useSyncExternalStore(subscribeZenUmlRuntime, getZenUmlRuntimeSnapshot, getZenUmlRuntimeSnapshot);
   const editorHostRef = useRef<HTMLDivElement | null>(null);
@@ -627,9 +654,13 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const localInkPreviewRef = useRef<CanvasInkPreviewState | null>(null);
   const laserPublisherRef = useRef<LaserPresencePublisher | null>(null);
   const inkPreviewSequenceRef = useRef(0);
+  const localPersistenceRef = useRef<LocalWorkspacePersistence | null>(null);
 
   const [collaboration, setCollaboration] = useState<CollaborationState | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const [localWorkspacePhase, setLocalWorkspacePhase] = useState<LocalWorkspacePhase>(workspaceMode === 'local' ? 'restoring' : 'ready');
+  const [promotionState, setPromotionState] = useState<PromotionState>('idle');
+  const [promotionError, setPromotionError] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState('Human');
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [remoteCanvasPresence, setRemoteCanvasPresence] = useState<CanvasPresenceEntry[]>([]);
@@ -1085,6 +1116,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   );
 
   const refreshDiagramHistory = useCallback(async () => {
+    if (workspaceMode === 'local') {
+      setDiagramHistory(null);
+      setHistoryLoading(false);
+      return;
+    }
     if (!activeDiagramId) {
       return;
     }
@@ -1106,7 +1142,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         setHistoryLoading(false);
       }
     }
-  }, [activeDiagramId, sessionId]);
+  }, [activeDiagramId, sessionId, workspaceMode]);
 
   const applySourceLayoutPolicy = useCallback((policy: SourceLayoutPolicy) => {
     const committer = dragCommitterRef.current;
@@ -1193,15 +1229,35 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
   useEffect(() => {
     const doc = new Y.Doc();
-    const provider = new WebsocketProvider(getWebsocketServerUrl(), sessionId, doc, {
+    let persistence: ReturnType<typeof createLocalWorkspacePersistence> | null = null;
+    try {
+      if (workspaceMode === 'local') persistence = createLocalWorkspacePersistence(doc);
+    } catch {
+      setLocalWorkspacePhase('storage-error');
+      doc.destroy();
+      return undefined;
+    }
+    localPersistenceRef.current = persistence;
+    const provider = workspaceMode === 'online' ? new WebsocketProvider(getWebsocketServerUrl(), sessionId, doc, {
       maxBackoffTime: 2_500,
       resyncInterval: 10_000,
-    });
-    const awareness = provider.awareness as AwarenessLike;
+    }) : null;
+    const awareness = (provider?.awareness ?? new LocalAwareness(doc.clientID)) as AwarenessLike;
     const diagramsMap = doc.getMap<Y.Map<unknown>>(DIAGRAMS_KEY);
     const diagramOrder = doc.getArray<string>(DIAGRAM_ORDER_KEY);
     const activityArray = doc.getArray<ActivityEvent>(ACTIVITY_KEY);
     const presenceMap = doc.getMap<Participant>(PRESENCE_KEY);
+    let cancelled = false;
+    let dispose = () => {
+      awareness.setLocalState(null);
+      provider?.destroy();
+      persistence?.destroy();
+      if (localPersistenceRef.current === persistence) localPersistenceRef.current = null;
+      doc.destroy();
+    };
+
+    const initialize = () => {
+      if (cancelled) return;
     const localIdentity = getOrCreateIdentity();
     currentIdentityRef.current = localIdentity;
     setDisplayName(stripParticipantTabSuffix(localIdentity.name));
@@ -1241,7 +1297,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       setRemoteCanvasPresence(nextPresence);
     };
 
-    let hadConnected = false;
+    let hadConnected = workspaceMode === 'local';
+
+    if (workspaceMode === 'local') {
+      setConnectionState('connected');
+    }
 
     const handleStatus = ({ status }: { status: 'connected' | 'connecting' | 'disconnected' }) => {
       if (status === 'connected') {
@@ -1255,11 +1315,11 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         return;
       }
 
-      setConnectionState(provider.shouldConnect ? 'reconnecting' : 'disconnected');
+      setConnectionState(provider?.shouldConnect ? 'reconnecting' : 'disconnected');
     };
 
     const handleReconnectSignal = () => {
-      if (provider.shouldConnect) {
+      if (provider?.shouldConnect) {
         setConnectionState(hadConnected ? 'reconnecting' : 'connecting');
       }
     };
@@ -1287,19 +1347,20 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     presenceMap.observe(syncParticipants);
     awareness.on('change', syncParticipants);
     awareness.on('change', syncRemoteCanvasPresence);
-    provider.on('status', handleStatus);
-    provider.on('connection-close', handleReconnectSignal);
-    provider.on('connection-error', handleReconnectSignal);
-    provider.on('sync', (isSynced: boolean) => {
+    provider?.on('status', handleStatus);
+    provider?.on('connection-close', handleReconnectSignal);
+    provider?.on('connection-error', handleReconnectSignal);
+    provider?.on('sync', (isSynced: boolean) => {
       if (isSynced && !joinedActivityRef.current) {
         joinedActivityRef.current = true;
         addActivityRef.current?.('joined', 'Opened the session');
       }
     });
 
-    setCollaboration({ activityArray, awareness, diagramsMap, diagramOrder, doc, presenceMap, provider });
+    setCollaboration({ activityArray, awareness, diagramsMap, diagramOrder, doc, presenceMap });
+    if (workspaceMode === 'local') setLocalWorkspacePhase('ready');
 
-    return () => {
+    dispose = () => {
       if (editDebounceRef.current !== null) {
         window.clearTimeout(editDebounceRef.current);
       }
@@ -1312,16 +1373,18 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       }
       awareness.off('change', syncParticipants);
       awareness.off('change', syncRemoteCanvasPresence);
-      provider.off('status', handleStatus);
-      provider.off('connection-close', handleReconnectSignal);
-      provider.off('connection-error', handleReconnectSignal);
+      provider?.off('status', handleStatus);
+      provider?.off('connection-close', handleReconnectSignal);
+      provider?.off('connection-error', handleReconnectSignal);
       activityArray.unobserve(syncActivity);
       diagramsMap.unobserveDeep(syncDiagrams);
       diagramsMap.unobserve(syncDiagramMap);
       diagramOrder.unobserve(syncDiagrams);
       presenceMap.unobserve(syncParticipants);
       awareness.setLocalState(null);
-      provider.destroy();
+      provider?.destroy();
+      persistence?.destroy();
+      if (localPersistenceRef.current === persistence) localPersistenceRef.current = null;
       doc.destroy();
       addActivityRef.current = null;
       currentIdentityRef.current = null;
@@ -1332,7 +1395,27 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       setActiveDiagramId(null);
       setRemoteCanvasPresence([]);
     };
-  }, [sessionId]);
+    };
+
+    if (persistence) {
+      setLocalWorkspacePhase('restoring');
+      void persistence.whenSynced.then(() => {
+        if (cancelled) return;
+        seedBlankDiagramCatalog(doc, diagramsMap, diagramOrder);
+        setLocalWorkspacePhase('preparing');
+        window.requestAnimationFrame(initialize);
+      }).catch(() => {
+        if (!cancelled) setLocalWorkspacePhase('storage-error');
+      });
+    } else {
+      initialize();
+    }
+
+    return () => {
+      cancelled = true;
+      dispose();
+    };
+  }, [sessionId, workspaceMode]);
 
   useEffect(() => {
     historyPreviewRequestSequenceRef.current += 1;
@@ -1479,14 +1562,22 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   }, [activeDiagram, collaboration, openFlyout]);
 
   useEffect(() => {
+    if (workspaceMode === 'local' && openFlyout === 'activity' && activityFlyoutView !== 'activity') {
+      setActivityFlyoutView('activity');
+    }
+  }, [activityFlyoutView, openFlyout, workspaceMode]);
+
+  useEffect(() => {
+    if (workspaceMode === 'local') return;
     if (openFlyout !== 'activity' || !activeDiagramId) {
       return;
     }
     historyRefreshCheckpointRef.current = `${activeDiagramId}:${latestDiagramCheckpointId ?? 'none'}`;
     void refreshDiagramHistory();
-  }, [activeDiagramId, openFlyout, refreshDiagramHistory]);
+  }, [activeDiagramId, openFlyout, refreshDiagramHistory, workspaceMode]);
 
   useEffect(() => {
+    if (workspaceMode === 'local') return;
     if (openFlyout !== 'activity' || !activeDiagramId) {
       return;
     }
@@ -1499,7 +1590,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     setHistoryError(null);
     const timeout = window.setTimeout(() => { void refreshDiagramHistory(); }, 180);
     return () => { window.clearTimeout(timeout); };
-  }, [activeDiagramId, latestDiagramCheckpointId, openFlyout, refreshDiagramHistory]);
+  }, [activeDiagramId, latestDiagramCheckpointId, openFlyout, refreshDiagramHistory, workspaceMode]);
 
   useEffect(() => {
     const renderId = renderSequenceRef.current + 1;
@@ -1838,6 +1929,33 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     }
   }, [sessionId]);
 
+  const promoteLocalWorkspace = useCallback(async () => {
+    if (workspaceMode !== 'local' || !collaboration || promotionState === 'publishing') return;
+    setPromotionState('publishing');
+    setPromotionError(null);
+    try {
+      const result = await publishLocalWorkspace(collaboration.doc, createRoom);
+      if (result.status === 'changed-before-request') {
+        setPromotionState('error');
+        setPromotionError('Your workspace changed before publishing started. It remains local and editable; try sharing again when you are ready.');
+        return;
+      }
+      if (result.status === 'changed-during-request') {
+        setPromotionState('error');
+        setPromotionError('Your workspace changed while publishing. It remains local and editable. A secure room was created from the earlier snapshot, but it is not connected to this draft.');
+        return;
+      }
+      // This non-secret pointer is written before navigation. The IndexedDB
+      // document intentionally remains as an archived recovery copy.
+      completeLocalWorkspacePromotion(result.room, (room) => {
+        router.replace(getRoomSharePath(room.sessionId, room.roomKey));
+      });
+    } catch {
+      setPromotionState('error');
+      setPromotionError('Your workspace is still saved on this device. Publishing could not finish, so we did not leave this page. If a secure room was created, reopening ArielCharts will resume it from this browser.');
+    }
+  }, [collaboration, promotionState, router, workspaceMode]);
+
   useEffect(() => {
     if (!showConnectModal) {
       return;
@@ -1918,9 +2036,14 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
   const activeParticipantCount = participants.length;
   const overflowCollaboratorCount = getCompactCollaboratorOverflowCount(activeParticipantCount);
   const connectedAgentCount = countConnectedAgents(participants);
-  const editorStatusLabel = getCompactConnectionLabel(connectionState);
-  const activityStatusLabel = `${activeParticipantCount} collaborator${activeParticipantCount === 1 ? '' : 's'}`;
-  const saveStatusLabel = connectionState === 'connected'
+  const isLocalWorkspace = workspaceMode === 'local';
+  const editorStatusLabel = isLocalWorkspace ? 'saved on device' : getCompactConnectionLabel(connectionState);
+  const activityStatusLabel = isLocalWorkspace
+    ? 'saved on this device'
+    : `${activeParticipantCount} collaborator${activeParticipantCount === 1 ? '' : 's'}`;
+  const saveStatusLabel = isLocalWorkspace
+    ? 'Saved on this device'
+    : connectionState === 'connected'
     ? 'All changes saved'
     : connectionState === 'disconnected'
       ? 'Offline'
@@ -2264,6 +2387,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
       diagram.set(DIAGRAM_NODE_POSITIONS_KEY, new Y.Map<NodePosition>());
       collaboration.diagramsMap.set(creation.id, diagram);
       collaboration.diagramOrder.push([creation.id]);
+      getOverlayScene(collaboration.doc, creation.id, true);
     }, 'tab-create');
     focusDiagramTab(creation.id);
     addActivityRef.current?.('created', `Created ${creation.name}`, creation.id);
@@ -2398,9 +2522,23 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
     }
   }, []);
 
+  if (workspaceMode === 'local' && localWorkspacePhase !== 'ready') {
+    const loadingCopy = getLocalWorkspaceLoadingCopy(localWorkspacePhase);
+    return (
+      <main aria-busy={localWorkspacePhase !== 'storage-error'} aria-live="polite" className="room-gate-shell" data-testid="local-workspace-loader">
+        <section aria-labelledby="local-workspace-loader-title" className="room-gate-card">
+          <p className="eyebrow">{loadingCopy.eyebrow}</p>
+          <h1 id="local-workspace-loader-title">{loadingCopy.title}</h1>
+          <p role={localWorkspacePhase === 'storage-error' ? 'alert' : undefined}>{loadingCopy.detail}</p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main
       className="workspace-shell"
+      inert={promotionState === 'publishing' ? true : undefined}
       onPointerCancelCapture={handleTouchLabelPointerRelease}
       onPointerDownCapture={handleTouchLabelPointerDown}
       onPointerUpCapture={handleTouchLabelPointerRelease}
@@ -2412,7 +2550,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
 
         <div className="workspace-topbar-right">
           <PresenterControls
-            disabled={historyPreview !== null || connectionState !== 'connected'}
+            disabled={isLocalWorkspace || historyPreview !== null || connectionState !== 'connected'}
             followedPeer={presenterFollow.followedPeer}
             incomingSpotlight={presenterFollow.incomingSpotlight}
             onAcceptSpotlight={presenterFollow.acceptSpotlight}
@@ -2425,7 +2563,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             peers={presenterFollow.peers}
             presenting={presenterFollow.presenting}
           />
-          <div data-testid="presence-bar" className="workspace-presence-avatars" aria-label="Session presence">
+          <div data-testid="presence-bar" className="workspace-presence-avatars" aria-label={isLocalWorkspace ? 'This device' : 'Session presence'}>
             {participants.length > 0 ? (
               participants.map((participant, index) => (
                 <div
@@ -2456,17 +2594,17 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             ) : null}
           </div>
           <button
-            aria-label={roomKey ? 'Copy private room link' : 'Room key unavailable. Reset it in Settings to share'}
+            aria-label={isLocalWorkspace ? 'Go online and share this workspace' : roomKey ? 'Copy private room link' : 'Room key unavailable. Reset it in Settings to share'}
             className="workspace-share-button workspace-touch-label"
-            data-touch-label={roomKey ? 'Copy link' : 'Room key unavailable'}
+            data-touch-label={isLocalWorkspace ? 'Go online & share' : roomKey ? 'Copy link' : 'Room key unavailable'}
             data-testid="share-session-button"
-            disabled={!roomKey}
-            title={roomKey ? 'Copy private room link' : 'Reset the room key in Settings before sharing'}
+            disabled={promotionState === 'publishing' || (!isLocalWorkspace && !roomKey)}
+            title={isLocalWorkspace ? 'Create a private online room from this device workspace' : roomKey ? 'Copy private room link' : 'Reset the room key in Settings before sharing'}
             type="button"
-            onClick={handleCopyShareUrl}
+            onClick={isLocalWorkspace ? () => { void promoteLocalWorkspace(); } : handleCopyShareUrl}
           >
-            {roomKey ? <Share2 aria-hidden="true" size={15} /> : <KeyRound aria-hidden="true" size={15} />}
-            <span>{shareButtonLabel}</span>
+            {isLocalWorkspace || roomKey ? <Share2 aria-hidden="true" size={15} /> : <KeyRound aria-hidden="true" size={15} />}
+            <span>{isLocalWorkspace ? promotionState === 'publishing' ? 'Publishing…' : 'Go online & share' : shareButtonLabel}</span>
             {shareCopyState === 'copied' ? <Check aria-hidden="true" size={13} /> : null}
           </button>
           <WorkspaceExportMenu
@@ -2480,19 +2618,26 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
             sessionId={sessionId}
             theme={resolvedTheme}
             workspace={collaboration?.doc ?? null}
+            workspaceMode={workspaceMode}
           />
           <WorkspaceSettings
             agentCount={connectedAgentCount}
             connectionState={connectionState}
             displayName={displayName}
-            onConnectAgent={openConnectModal}
+            onConnectAgent={isLocalWorkspace ? () => { void promoteLocalWorkspace(); } : openConnectModal}
             onDisplayNameSave={saveDisplayName}
             onOpenChange={setSettingsOpen}
             onResetRoomKey={resetRoomKey}
             roomKey={roomKey}
+            workspaceMode={workspaceMode}
+            publishing={promotionState === 'publishing'}
           />
         </div>
       </header>
+
+      {promotionError ? (
+        <p className="workspace-promotion-error" data-testid="workspace-promotion-error" role="alert">{promotionError}</p>
+      ) : null}
 
       <WorkspaceTabStrip
         activeDiagramId={activeDiagramId}
@@ -3113,6 +3258,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
           historyError={historyError}
           historyLoading={historyLoading}
           historyView={activityFlyoutView}
+          historyAvailable={!isLocalWorkspace}
           onCancelPreview={cancelHistoryPreview}
           onCopyGitHubMermaid={handleCopyGitHubMermaid}
           onHistoryViewChange={setActivityFlyoutView}
@@ -3142,6 +3288,7 @@ export function SessionWorkspace({ initialRoomKey, sessionId }: { initialRoomKey
         connectionState={connectionState}
         getAvatarText={getParticipantAvatarText}
         getParticipantName={getParticipantDisplayName}
+        isLocalWorkspace={isLocalWorkspace}
         onActivityToggle={(origin) => { toggleFlyout('activity', origin); }}
         participants={participants}
         saveStatusLabel={saveStatusLabel}

@@ -1,9 +1,12 @@
-import { webcrypto } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
-import { addOverlayObject } from './overlay-scene';
+import { addOverlayObject, getOverlayScene } from './overlay-scene';
 import {
   WorkspaceBundleError,
+  applyWorkspaceBundleLocally,
+  canonicalJson,
+  decodeWorkspaceBundleEnvelope,
   decodeWorkspaceBundle,
   downloadBlob,
   encodeWorkspaceBundle,
@@ -29,6 +32,15 @@ function workspace(): Y.Doc {
 }
 
 describe('workspace bundles', () => {
+  function signPayload(payload: unknown) {
+    return {
+      format: 'arielcharts.workspace' as const,
+      version: 1 as const,
+      payload,
+      integrity: { algorithm: 'SHA-256' as const, value: createHash('sha256').update(canonicalJson(payload)).digest('hex') },
+    };
+  }
+
   it('keeps the download anchor and object URL alive through the browser handoff, then cleans both up', async () => {
     vi.useFakeTimers();
     const anchor = { href: '', download: '', rel: '', click: vi.fn(), remove: vi.fn() } as unknown as HTMLAnchorElement;
@@ -80,6 +92,35 @@ describe('workspace bundles', () => {
     const payload = raw.payload as { diagrams: Array<{ id: string; overlay: { objects: unknown[] } }> };
     payload.diagrams[0]!.id = '../main';
     await expect(decodeWorkspaceBundle(JSON.stringify(raw))).rejects.toThrow(/integrity|catalog|overlay/u);
+  });
+
+  it('applies a validated local import in catalog order', async () => {
+    const source = workspace();
+    const second = new Y.Map<unknown>();
+    second.set('name', 'Second'); second.set('mermaid', new Y.Text('sequenceDiagram'));
+    second.set('nodePositions', new Y.Map<unknown>());
+    source.getMap<Y.Map<unknown>>('diagrams').set('second', second);
+    source.getArray<string>('diagramOrder').push(['second']);
+    getOverlayScene(source, 'second', true);
+    const bundle = await decodeWorkspaceBundleEnvelope(await encodeWorkspaceBundle(snapshotWorkspaceBundle(source)));
+    bundle.payload.order = ['second', 'main'];
+    const target = new Y.Doc();
+    applyWorkspaceBundleLocally(target, bundle);
+    expect(target.getArray<string>('diagramOrder').toArray()).toEqual(['second', 'main']);
+  });
+
+  it('rejects signed empty catalogs and whitespace-only names before local mutation', async () => {
+    const target = workspace();
+    const before = JSON.stringify(snapshotWorkspaceBundle(target));
+    const validPayload = structuredClone(snapshotWorkspaceBundle(workspace()));
+    const empty = { ...validPayload, diagrams: [], order: [] };
+    const whitespace = structuredClone(validPayload);
+    whitespace.diagrams[0]!.name = ' \t ';
+
+    for (const bundle of [signPayload(empty), signPayload(whitespace)]) {
+      await expect(decodeWorkspaceBundleEnvelope(JSON.stringify(bundle))).rejects.toBeInstanceOf(WorkspaceBundleError);
+      expect(JSON.stringify(snapshotWorkspaceBundle(target))).toBe(before);
+    }
   });
 
 });

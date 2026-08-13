@@ -25,7 +25,9 @@ export interface WorkspaceSettingsProps {
   onDisplayNameSave: (displayName: string) => void;
   onOpenChange?: (open: boolean) => void;
   onResetRoomKey: () => Promise<void>;
+  publishing?: boolean;
   roomKey: string | null;
+  workspaceMode?: 'local' | 'online';
 }
 
 export function getSettingsDisplayName(displayName: string): string {
@@ -107,7 +109,9 @@ export function WorkspaceSettings({
   onDisplayNameSave,
   onOpenChange,
   onResetRoomKey,
+  publishing = false,
   roomKey,
+  workspaceMode = 'online',
 }: WorkspaceSettingsProps) {
   const { preference, resolvedTheme, setPreference } = useTheme();
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -281,13 +285,19 @@ export function WorkspaceSettings({
           <section aria-labelledby="workspace-agent-connection-heading" className="workspace-settings-section">
             <h3 id="workspace-agent-connection-heading">Agent connection</h3>
             <p className="workspace-settings-status" data-connection-state={connectionState} data-testid="workspace-agent-status">
-              {getConnectionStatusLabel(connectionState, agentCount)}
+              {workspaceMode === 'local' ? 'Available after you go online' : getConnectionStatusLabel(connectionState, agentCount)}
             </p>
-            <button className="workspace-settings-connect" onClick={handleConnectAgent} type="button">
-              {getConnectionActionLabel(agentCount)}
+            <button className="workspace-settings-connect" disabled={publishing} onClick={handleConnectAgent} type="button">
+              {workspaceMode === 'local' ? publishing ? 'Publishing…' : 'Go online to connect agent' : getConnectionActionLabel(agentCount)}
             </button>
           </section>
 
+          {workspaceMode === 'local' ? (
+            <section aria-labelledby="workspace-local-storage-heading" className="workspace-settings-section">
+              <h3 id="workspace-local-storage-heading">Workspace storage</h3>
+              <p className="workspace-settings-status">Saved on this device. Sharing, presence, revision history, and MCP begin only after you go online.</p>
+            </section>
+          ) : (
           <section aria-labelledby="workspace-room-access-heading" className="workspace-settings-section">
             <h3 id="workspace-room-access-heading">Room access</h3>
             {roomKey ? (
@@ -318,6 +328,7 @@ export function WorkspaceSettings({
             )}
             <p aria-live="polite" className="workspace-settings-status">{keyResetMessage ?? ''}</p>
           </section>
+          )}
 
           <fieldset className="workspace-settings-section workspace-settings-appearance">
             <legend>Appearance</legend>

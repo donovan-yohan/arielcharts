@@ -7,16 +7,15 @@ commands, use [README.md](README.md); for work rules, use [AGENTS.md](AGENTS.md)
 
 ## System at a glance
 
-ArielCharts is a pnpm monorepo for private, collaborative Mermaid workspaces.
-The browser and MCP clients mutate one server-owned Yjs document per room.
-Mermaid source is canonical; rendered SVG, structural editing affordances, and
-most workspace interaction state are derived from it.
+ArielCharts is a pnpm monorepo for local-first Mermaid workspaces. The root route restores one browser-owned Yjs document from IndexedDB and makes no room or server connection. Mermaid source is canonical; rendered SVG, structural editing affordances, and most workspace interaction state are derived from it. Explicit sharing or agent connection atomically promotes the complete local workspace into one protected online room, where browser peers and MCP clients collaborate through the server-owned Yjs document.
 
 ```mermaid
 flowchart LR
   Browser["Browser"] --> Web["Next.js web app\napps/web"]
-  Browser -->|"room cookie: HTTP history/access"| Server
-  Browser -->|"room cookie: Yjs WebSocket"| Server
+  Web --> Local["Local Yjs document\nIndexedDB"]
+  Browser -->|"explicit share or agent connection\nPOST /api/rooms { bundle }"| Server
+  Browser -->|"online room cookie: HTTP history/access"| Server
+  Browser -->|"online room cookie: Yjs WebSocket"| Server
   Agent["MCP client"] -->|"Bearer sessionId.roomKey\nPOST /mcp"| Server
 
   subgraph Server["Node.js server · apps/server"]
@@ -39,7 +38,7 @@ flowchart LR
 | Area | Technology | Responsibility |
 | --- | --- | --- |
 | Package management | pnpm 10.15; Node.js 24+ | Root workspace scripts and reproducible dependency installation. |
-| Browser | Next.js 16, React 19, TypeScript | Landing page, protected session route, local workspace state, and rendering. |
+| Browser | Next.js 16, React 19, TypeScript | Local IndexedDB workspace, protected online session route, and rendering. |
 | Editor and collaboration | CodeMirror 6, Yjs, y-codemirror.next, y-websocket | Collaborative source editing, cursor/presence transport, and document convergence. |
 | Diagram workspace | Mermaid, mermaid-ast, React Flow | Mermaid SVG rendering; scoped flowchart and sequence editing controls. |
 | Server | Node.js HTTP, `ws`, Yjs protocols, Zod | HTTP/WebSocket ingress, access checks, session lifecycle, and MCP schemas. |
@@ -52,13 +51,11 @@ flowchart LR
 | `apps/server` | Raw Node HTTP server, room access, WebSocket replication, MCP endpoint, persistence, and session cleanup. |
 | `packages/shared` | Public TypeScript contracts, source/layout policy, and immutable starter templates. It contains no browser or server behavior. |
 
-## Protected-room access
+## Local workspace and protected-room access
 
-Every room is protected. Creating one generates a raw room key and stores only
-a salted verifier and access version. The browser uses the fragment form once,
-then relies on an HttpOnly cookie. An MCP client supplies the separate bearer
-form on every request. Key rotation advances the access version and terminates
-live room sockets.
+The root route is local-first: it opens a Yjs document persisted in this browser's IndexedDB and uses local-only awareness. It never requests `/api/rooms`, opens `/ws`, creates a cookie, or exposes MCP/history/presence. The UI reports “Saved on this device” while this mode is active.
+
+Every *online* room is protected. Choosing **Go online & share**, or asking to connect an agent, serializes the bounded portable workspace bundle and sends it to `POST /api/rooms`. The server admits the bundle in a detached candidate, then atomically persists the initial document and salted room-key verifier, sets the creator's HttpOnly cookie, and returns credentials. A failure leaves the local workspace intact. If the local document changes during the request, it remains the authoritative editable draft and the unconnected room is not adopted. On an unchanged success the browser records only the session id before navigation; the IndexedDB document is retained as an archived recovery copy, never cleared or reopened as a fork. The returned fragment is the shareable capability for another browser, where the normal fragment-to-cookie exchange occurs. An MCP client supplies the separate bearer form on every request. Key rotation advances the access version and terminates live room sockets.
 
 ```mermaid
 sequenceDiagram
@@ -67,9 +64,10 @@ sequenceDiagram
   participant A as RoomAccessService
   participant D as LevelDB
 
-  B->>S: POST /api/rooms
+  B->>S: POST /api/rooms { bounded local bundle }
+  S->>S: Detached bundle admission
   S->>A: Rate-limit and create room grant
-  A->>D: Store salted verifier and access version
+  S->>D: Atomically persist initial document and verifier
   S-->>B: session_id and raw room_key
 
   B->>S: POST /api/rooms/:id/access with room key
@@ -95,7 +93,8 @@ single Fly client-IP header is the intended trusted source. It does not use
 ## Shared state, writes, and persistence
 
 The root Yjs keys are `diagrams`, `diagramOrder`, `activity`, `presence`, and
-`overlays`.
+`overlays`. The same schema is used by the local document and an online room;
+only the transport and persistence owner change during promotion.
 Each diagram contains a name, Mermaid `Y.Text`, and `nodePositions` `Y.Map`.
 The server repairs the durable catalog and serializes persistence; browser
 selection, camera, toolbar, flyout, drafts, and active drag presentation stay
@@ -103,7 +102,8 @@ local.
 
 ```mermaid
 flowchart TB
-  Browser["Browser: CodeMirror and canvas\nlocal interaction state"] -->|"Yjs updates"| Socket["WebSocket transport"]
+  Local["Browser: local Yjs + IndexedDB\nCodeMirror and canvas"] -->|"explicit bounded snapshot"| Manager["SessionManager"]
+  Browser["Online browser: CodeMirror and canvas\nlocal interaction state"] -->|"Yjs updates"| Socket["WebSocket transport"]
   Agent["MCP tool call"] -->|"fresh expected revision"| Manager["SessionManager"]
   Socket --> Manager
 
@@ -155,7 +155,7 @@ anchor fallbacks into either renderer family.
 
 | Interface | Authentication and role |
 | --- | --- |
-| `POST /api/rooms` | Creates a protected room, subject to origin checks and creation rate limiting. |
+| `POST /api/rooms` | Explicitly creates a protected online room; an optional bounded local workspace bundle is admitted and persisted atomically as its initial document. |
 | `POST`/`GET /api/rooms/:sessionId/access` | Exchanges a room key for, or validates, a browser room cookie. |
 | `POST /api/rooms/:sessionId/rotate` | Cookie-authorized key rotation and immediate socket revocation. |
 | `GET`/`POST /api/sessions/:sessionId/diagrams/...` | Cookie-authorized current diagram and revision-history access. |

@@ -21,6 +21,7 @@ interface WorkspaceFlyoutsProps {
   getActivityDescription: (event: ActivityEvent) => string;
   getTimestampLabel: (timestamp: number) => string;
   history: ListDiagramHistoryOutput | null;
+  historyAvailable?: boolean;
   historyError: string | null;
   historyLoading: boolean;
   historyView: ActivityFlyoutView;
@@ -66,6 +67,7 @@ export function WorkspaceFlyouts({
   getActivityDescription,
   getTimestampLabel,
   history,
+  historyAvailable = true,
   historyError,
   historyLoading,
   historyView,
@@ -193,11 +195,11 @@ export function WorkspaceFlyouts({
             <button aria-label="Close activity and history" className="workspace-icon-button workspace-touch-label" data-touch-label="Close" onClick={closeFlyout} ref={activityCloseRef} type="button"><X aria-hidden="true" size={16} /></button>
           </header>
           <div aria-label="Activity and history view" className="workspace-flyout-switch" role="group">
-            <button aria-pressed={historyView === 'history'} className={historyView === 'history' ? 'is-active' : ''} onClick={() => { onHistoryViewChange('history'); }} type="button">History</button>
+            {historyAvailable ? <button aria-pressed={historyView === 'history'} className={historyView === 'history' ? 'is-active' : ''} onClick={() => { onHistoryViewChange('history'); }} type="button">History</button> : null}
             <button aria-pressed={historyView === 'activity'} className={historyView === 'activity' ? 'is-active' : ''} onClick={() => { onHistoryViewChange('activity'); }} type="button">Activity <span>{activity.length}</span></button>
           </div>
 
-          {historyView === 'activity' ? (
+          {!historyAvailable || historyView === 'activity' ? (
             <>
               <div className="workspace-flyout-meta"><span>Latest activity</span><span>{activity.length}</span></div>
               {activity.length > 0 ? (

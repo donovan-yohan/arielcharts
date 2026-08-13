@@ -35,6 +35,24 @@ describe('room access API', () => {
     });
   });
 
+  it('sends a local workspace snapshot only when publishing it into a new room', async () => {
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ session_id: 'abc123de', room_key: 'raw key' }), { status: 201 }));
+    const bundle = {
+      format: 'arielcharts.workspace' as const,
+      version: 1 as const,
+      integrity: { algorithm: 'SHA-256' as const, value: 'a'.repeat(64) },
+      payload: { schema_version: 1 as const, order: [], diagrams: [] },
+    };
+    await createRoom(bundle);
+    expect(fetchMock).toHaveBeenCalledWith(`${getServerHttpUrl()}/api/rooms`, expect.objectContaining({
+      body: JSON.stringify({ bundle }),
+      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    }));
+  });
+
   it('includes browser credentials on access checks, key exchange, and rotation', async () => {
     vi.stubGlobal('fetch', fetchMock);
     fetchMock

@@ -1,4 +1,5 @@
 import { getServerHttpUrl, isValidSessionId } from './session';
+import type { WorkspaceBundle } from './workspace-bundle';
 
 export type CreatedRoom = {
   roomKey: string;
@@ -36,8 +37,13 @@ async function readRoomCredentials(response: Response): Promise<CreatedRoom> {
   return { roomKey: body.room_key, sessionId: body.session_id };
 }
 
-export async function createRoom(signal?: AbortSignal): Promise<CreatedRoom> {
+/** Creates an online room, optionally atomically seeded from a local workspace snapshot. */
+export async function createRoom(bundle?: WorkspaceBundle, signal?: AbortSignal): Promise<CreatedRoom> {
   const response = await fetch(`${getServerHttpUrl()}/api/rooms`, {
+    ...(bundle ? {
+      body: JSON.stringify({ bundle }),
+      headers: { 'content-type': 'application/json' },
+    } : {}),
     credentials: 'include',
     method: 'POST',
     signal,

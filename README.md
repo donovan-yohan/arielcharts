@@ -1,15 +1,13 @@
 # ArielCharts
 
-ArielCharts is a collaborative Mermaid workspace for people and agents. A
-browser user and an MCP client work on the same named diagrams in real time,
-while Mermaid source remains the canonical representation.
+ArielCharts is a local-first Mermaid workspace for people and agents. A root workspace stays on the current device until the user explicitly shares it or connects an agent; then browser users and MCP clients work on the same named online diagrams in real time. Mermaid source remains canonical throughout.
 
 ## What it does
 
-- Creates private, capability-protected rooms with share links that exchange a
-  fragment-only room key for an HttpOnly browser cookie.
+- Opens quickly from a browser-local Yjs workspace persisted in IndexedDB, with a visible “Saved on this device” status and no initial server connection.
+- On explicit **Go online & share** or agent connection, atomically creates a private, capability-protected room from the bounded local workspace snapshot. Share links exchange a fragment-only room key for an HttpOnly browser cookie.
 - Keeps named diagram tabs, Mermaid source, accepted node positions, activity,
-  and agent membership convergent through Yjs.
+  and agent membership convergent through Yjs after promotion.
 - Provides a canvas-first workspace with CodeMirror source editing, flowchart
   structure controls, sequence participant/message controls, last-valid SVG
   fallback, local camera/selection state, and responsive light/dark themes.
@@ -29,7 +27,7 @@ invariant, scaling, and evidence map. Public shapes live in
 
 | Path | Purpose |
 | --- | --- |
-| `apps/web` | Next.js 16 / React browser workspace, including the editor, canvas, room gate, and local interaction state. |
+| `apps/web` | Next.js 16 / React browser workspace, including local IndexedDB persistence, the editor/canvas, and online room gate. |
 | `apps/server` | Node.js TypeScript HTTP, WebSocket, Yjs, LevelDB, protected-room, history, and MCP service. |
 | `packages/shared` | Browser- and server-neutral contracts, Mermaid/source helpers, and starter-template registry. |
 | `docs` | Current context and architecture documents; `arielcharts-spec.md` is explicitly historical product-planning material. |
@@ -157,13 +155,11 @@ Run `npx tsx e2e-validate.ts` in terminal 3 instead when validating its legacy
 coverage. Inspect `/tmp/arielcharts-sequence.png` and
 `/tmp/arielcharts-sequence-isolation.png` after Mermaid canvas changes.
 
-## Private rooms and MCP workflow
+## Local work, private rooms, and MCP workflow
 
-`POST /api/rooms` creates a protected room and returns a session ID plus room
-key. Share the browser link as `/s/<sessionId>#roomKey=<roomKey>`: the browser
-exchanges the fragment for an HttpOnly cookie and removes it before mounting
-the workspace. The key is a capability; do not put it in query parameters,
-browser storage, logs, or source control.
+The root route restores the local workspace from IndexedDB and does not create a room, open a WebSocket, or start MCP. It is safe to edit there without the server running. The UI reports “Saved on this device.” Sharing, presence, server revision history, and agent connection begin only when the user selects **Go online & share** (or the equivalent agent-connection action).
+
+That action sends a bounded workspace snapshot to `POST /api/rooms`. The server admits the snapshot before atomically persisting the protected room and its access verifier; if it fails, the local workspace remains intact. A successful response sets the creator's HttpOnly cookie and returns a session ID plus room key. Share the browser link as `/s/<sessionId>#roomKey=<roomKey>`: another browser exchanges that fragment for its own HttpOnly cookie and removes it before mounting the online workspace. The key is a capability; do not put it in query parameters, browser storage, logs, or source control.
 
 MCP uses `Authorization: Bearer <sessionId>.<roomKey>` for one room only. It
 has no room-directory capability. Use the tool workflow below whenever an

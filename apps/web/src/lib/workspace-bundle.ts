@@ -2,7 +2,7 @@ import type { OverlayLayerRecord, OverlayObjectRecord, OverlaySceneSnapshot, Wor
 export type { WorkspaceBundle, WorkspaceBundleDiagram, WorkspaceBundlePayload } from '@arielcharts/shared';
 import * as Y from 'yjs';
 import { isNodePosition, type DiagramNodePositions } from './diagram-layout';
-import { defaultOverlayLayer, getOverlayScene, isSupportedOverlayObject, readOverlayScene } from './overlay-scene';
+import { defaultOverlayLayer, getOverlayScene, isSupportedOverlayObject, readOverlayScene, restoreOverlayHistoryLayer, restoreOverlayHistoryObject } from './overlay-scene';
 
 export const WORKSPACE_BUNDLE_VERSION = 1 as const;
 export const WORKSPACE_BUNDLE_MIME = 'application/vnd.arielcharts.workspace+json';
@@ -154,16 +154,52 @@ function validScene(value: unknown, diagramId: string): value is OverlaySceneSna
 }
 
 export function assertWorkspacePayload(value: unknown): asserts value is WorkspaceBundlePayload {
-  if (!isPlainRecord(value) || !onlyKeys(value, ['schema_version', 'order', 'diagrams']) || value.schema_version !== 1 || !Array.isArray(value.order) || !Array.isArray(value.diagrams) || value.diagrams.length > MAX_DIAGRAMS) throw new WorkspaceBundleError('This is not a supported ArielCharts workspace bundle.');
+  if (!isPlainRecord(value) || !onlyKeys(value, ['schema_version', 'order', 'diagrams']) || value.schema_version !== 1 || !Array.isArray(value.order) || !Array.isArray(value.diagrams) || value.diagrams.length === 0 || value.diagrams.length > MAX_DIAGRAMS) throw new WorkspaceBundleError('This is not a supported ArielCharts workspace bundle.');
   const ids = new Set<string>();
   for (const diagram of value.diagrams) {
-    if (!isPlainRecord(diagram) || !onlyKeys(diagram, ['id', 'name', 'mermaid', 'layout', 'overlay']) || !validCatalogId(diagram.id) || ids.has(diagram.id) || typeof diagram.name !== 'string' || bytes(diagram.name) > MAX_NAME_BYTES) throw new WorkspaceBundleError('The workspace bundle has an invalid diagram catalog.');
+    if (!isPlainRecord(diagram) || !onlyKeys(diagram, ['id', 'name', 'mermaid', 'layout', 'overlay']) || !validCatalogId(diagram.id) || ids.has(diagram.id) || typeof diagram.name !== 'string' || !diagram.name.trim() || bytes(diagram.name) > MAX_NAME_BYTES) throw new WorkspaceBundleError('The workspace bundle has an invalid diagram catalog.');
     ids.add(diagram.id);
     if (!isPlainRecord(diagram.mermaid) || !onlyKeys(diagram.mermaid, ['schema_version', 'source']) || diagram.mermaid.schema_version !== 1 || typeof diagram.mermaid.source !== 'string' || bytes(diagram.mermaid.source) > MAX_SOURCE_BYTES) throw new WorkspaceBundleError('The workspace bundle has invalid Mermaid source.');
     if (!isPlainRecord(diagram.layout) || !onlyKeys(diagram.layout, ['schema_version', 'positions']) || diagram.layout.schema_version !== 1 || !isPlainRecord(diagram.layout.positions) || !Object.entries(diagram.layout.positions).every(([id, position]) => validId(id) && isNodePosition(position))) throw new WorkspaceBundleError('The workspace bundle has invalid layout data.');
     if (!validScene(diagram.overlay, diagram.id)) throw new WorkspaceBundleError('The workspace bundle has invalid overlay data.');
   }
   if (value.order.length !== value.diagrams.length || new Set(value.order).size !== value.order.length || !value.order.every((id) => validCatalogId(id) && ids.has(id))) throw new WorkspaceBundleError('The workspace bundle has an invalid diagram order.');
+}
+
+/** Replaces only this browser's local document after the same bounded bundle validation used for server import. */
+export function applyWorkspaceBundleLocally(doc: Y.Doc, bundle: WorkspaceBundle): void {
+  assertWorkspacePayload(bundle.payload);
+  const diagrams = doc.getMap<Y.Map<unknown>>('diagrams');
+  const order = doc.getArray<string>('diagramOrder');
+  const overlays = doc.getMap<Y.Map<unknown>>('overlays');
+  doc.transact(() => {
+    for (const id of [...diagrams.keys()]) diagrams.delete(id);
+    if (order.length) order.delete(0, order.length);
+    for (const id of [...overlays.keys()]) overlays.delete(id);
+
+    const diagramsById = new Map(bundle.payload.diagrams.map((diagram) => [diagram.id, diagram]));
+    for (const diagramId of bundle.payload.order) {
+      const diagramSnapshot = diagramsById.get(diagramId)!;
+      const diagram = new Y.Map<unknown>();
+      diagram.set('name', diagramSnapshot.name);
+      diagram.set('mermaid', new Y.Text(diagramSnapshot.mermaid.source));
+      const positions = new Y.Map<unknown>();
+      for (const [id, position] of Object.entries(diagramSnapshot.layout.positions)) positions.set(id, structuredClone(position));
+      diagram.set('nodePositions', positions);
+      diagrams.set(diagramSnapshot.id, diagram);
+      order.push([diagramSnapshot.id]);
+
+      const scene = getOverlayScene(doc, diagramSnapshot.id, true)!;
+      for (const id of [...scene.objects.keys()]) scene.objects.delete(id);
+      for (const id of [...(scene.layers?.keys() ?? [])]) scene.layers?.delete(id);
+      for (const layer of diagramSnapshot.overlay.layers ?? [defaultOverlayLayer()]) {
+        restoreOverlayHistoryLayer(doc, diagramSnapshot.id, layer.id, layer);
+      }
+      for (const object of diagramSnapshot.overlay.objects) {
+        restoreOverlayHistoryObject(doc, diagramSnapshot.id, object.id, object);
+      }
+    }
+  }, 'local-workspace-import');
 }
 
 export async function decodeWorkspaceBundleEnvelope(encoded: string): Promise<WorkspaceBundle> {

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import * as Y from 'yjs';
-import { ALL_STARTER_TEMPLATES } from '@arielcharts/shared';
+import { ALL_STARTER_TEMPLATES, type WorkspaceBundlePayload } from '@arielcharts/shared';
 import { createApp } from './index.js';
 import { createActivityEvent } from './lib/activity.js';
 import type { ServerEnv } from './lib/types.js';
@@ -106,6 +106,10 @@ describe('server integration', () => {
         },
       }],
     };
+    return signedWorkspacePayload(payload);
+  }
+
+  function signedWorkspacePayload(payload: WorkspaceBundlePayload) {
     return {
       format: 'arielcharts.workspace' as const,
       version: 1 as const,
@@ -121,6 +125,86 @@ describe('server integration', () => {
     expect(response.status).toBe(200);
     return response.json() as Promise<{ revision: string }>;
   }
+
+  it('creates a protected room from one signed workspace bundle and grants the creator a browser cookie', async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/rooms`, {
+      method: 'POST',
+      headers: { origin: 'http://allowed.test', 'content-type': 'application/json' },
+      body: JSON.stringify({ bundle: signedWorkspaceBundle('flowchart TD\n  Local[Local work] --> Shared[Shared room]') }),
+    });
+
+    expect(response.status).toBe(201);
+    const room = await response.json() as { session_id: string; room_key: string };
+    expect(room).toMatchObject({ session_id: expect.stringMatching(/^[a-f0-9]{32}$/u), room_key: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u) });
+    const cookie = response.headers.get('set-cookie');
+    expect(cookie).toContain(`arielcharts_room_${room.session_id}=`);
+    await expect(app.manager.readDiagram(room.session_id, 'main')).resolves.toMatchObject({
+      diagram: { name: 'Imported', mermaid_text: 'flowchart TD\n  Local[Local work] --> Shared[Shared room]' },
+    });
+    const promoted = await app.manager.requireSession(room.session_id);
+    expect(promoted.doc.getMap<Y.Map<unknown>>('diagrams').get('main')?.get('nodePositions')).toBeInstanceOf(Y.Map);
+    expect((promoted.doc.getMap<Y.Map<unknown>>('diagrams').get('main')?.get('nodePositions') as Y.Map<unknown>).toJSON()).toEqual({ A: { x: 12, y: 24 } });
+    await expect(app.manager.readOverlayScene(room.session_id, 'main')).resolves.toMatchObject({ scene: { objects: [{ id: 'note', body: 'Imported note' }] } });
+    await expect(fetch(`http://127.0.0.1:${port}/api/rooms/${room.session_id}/access`, {
+      headers: { origin: 'http://allowed.test', cookie: cookie!.split(';')[0]! },
+    })).resolves.toMatchObject({ status: 204 });
+  });
+
+  it('keeps an empty POST room creation compatible with the blank starter workspace', async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/rooms`, {
+      method: 'POST',
+      headers: { origin: 'http://allowed.test' },
+    });
+
+    expect(response.status).toBe(201);
+    const room = await response.json() as { session_id: string; room_key: string };
+    expect(room).toMatchObject({ session_id: expect.stringMatching(/^[a-f0-9]{32}$/u), room_key: expect.any(String) });
+    await expect(app.manager.readDiagram(room.session_id, 'main')).resolves.toMatchObject({ diagram: { name: 'Main', mermaid_text: '' } });
+    const created = await app.manager.requireSession(room.session_id);
+    expect((created.doc.getMap<Y.Map<unknown>>('diagrams').get('main')?.get('nodePositions') as Y.Map<unknown>).toJSON()).toEqual({});
+  });
+
+  it('rejects an invalid promoted workspace before the attempted room can exist', async () => {
+    const bundle = signedWorkspaceBundle();
+    bundle.payload.diagrams[0]!.mermaid.source = 'flowchart TD\n  Tampered';
+    const createProtectedSession = vi.spyOn(app.manager, 'createProtectedSession');
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/rooms`, {
+        method: 'POST',
+        headers: { origin: 'http://allowed.test', 'content-type': 'application/json' },
+        body: JSON.stringify({ bundle }),
+      });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ error: expect.stringMatching(/integrity check failed/u) });
+      expect(createProtectedSession).toHaveBeenCalledTimes(1);
+      const attemptedSessionId = createProtectedSession.mock.calls[0]![0];
+      await expect(app.manager.readSession(attemptedSessionId)).resolves.toBeNull();
+    } finally {
+      createProtectedSession.mockRestore();
+    }
+  });
+
+  it.each([
+    ['an empty catalog', (payload: ReturnType<typeof signedWorkspaceBundle>['payload']) => ({ ...payload, diagrams: [], order: [] })],
+    ['a whitespace-only diagram name', (payload: ReturnType<typeof signedWorkspaceBundle>['payload']) => ({ ...payload, diagrams: payload.diagrams.map((diagram, index) => index === 0 ? { ...diagram, name: ' \t ' } : diagram) })],
+  ])('rejects signed promoted workspaces with %s before a room can persist', async (_label, alter) => {
+    const valid = signedWorkspaceBundle();
+    const bundle = signedWorkspacePayload(alter(valid.payload));
+    const createProtectedSession = vi.spyOn(app.manager, 'createProtectedSession');
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/rooms`, {
+        method: 'POST',
+        headers: { origin: 'http://allowed.test', 'content-type': 'application/json' },
+        body: JSON.stringify({ bundle }),
+      });
+      expect(response.status).toBe(400);
+      expect(createProtectedSession).toHaveBeenCalledTimes(1);
+      const attemptedSessionId = createProtectedSession.mock.calls[0]![0];
+      await expect(app.manager.readSession(attemptedSessionId)).resolves.toBeNull();
+    } finally {
+      createProtectedSession.mockRestore();
+    }
+  });
 
   it('rejects disallowed origins for the MCP endpoint', async () => {
     const response = await fetch(`http://127.0.0.1:${port}/mcp`, {

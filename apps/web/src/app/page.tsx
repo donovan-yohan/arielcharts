@@ -1,5 +1,6 @@
-import { AutoPrivateWorkspace } from '../components/auto-private-workspace';
+import React from 'react';
+import { LocalWorkspaceGate } from '../components/local-workspace-gate';
 
 export default function LandingPage() {
-  return <AutoPrivateWorkspace />;
+  return <LocalWorkspaceGate />;
 }

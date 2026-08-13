@@ -7120,70 +7120,72 @@ async function expectRevisionHistoryCollaboration(
   }
 }
 
-async function expectAutomaticPrivateWorkspaceEntry(browser: BrowserHarness, baseUrl: string): Promise<void> {
+async function expectLocalFirstWorkspaceEntry(browser: BrowserHarness, baseUrl: string, serverUrl: string): Promise<void> {
   const { page } = await browser.newPage(DESKTOP_VIEWPORT);
-  let createRequests = 0;
-  let issuedRoomKey: string | null = null;
-  let issuedRoomResponse: Promise<void> | null = null;
+  const localSource = `flowchart LR
+  Local[Persisted local source] --> Browser[This device]`;
+  const serverOrigin = new URL(serverUrl).origin;
+  const serverHost = new URL(serverUrl).host;
+  const serverRequests: string[] = [];
+  let roomCreationRequests = 0;
+  let roomWebSockets = 0;
   page.on('request', (request) => {
-    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/rooms') createRequests += 1;
+    const url = new URL(request.url());
+    if (url.origin !== serverOrigin) return;
+    serverRequests.push(`${request.method()} ${url.pathname}`);
+    if (request.method() === 'POST' && url.pathname === '/api/rooms') roomCreationRequests += 1;
   });
-  page.on('response', (response) => {
-    if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/rooms') return;
-    issuedRoomResponse = response.json().then((payload: { room_key?: unknown }) => {
-      issuedRoomKey = typeof payload.room_key === 'string' ? payload.room_key : null;
-    }).catch(() => undefined);
+  page.on('websocket', (socket) => {
+    const url = new URL(socket.url());
+    if (url.host === serverHost && url.pathname.startsWith('/ws/')) roomWebSockets += 1;
   });
+
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByTestId('auto-private-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+  const openingLoader = page.locator('[data-testid="local-workspace-handoff-loader"], [data-testid="local-workspace-loader"]');
+  await openingLoader.waitFor({ state: 'visible', timeout: 5_000 });
+  await expect(openingLoader).toContainText(/Opening your workspace|Restoring work saved on this device|Preparing the canvas/u);
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
-  const workspaceUrl = page.url();
-  const workspacePath = new URL(workspaceUrl).pathname;
-  assert(/^\/s\/[A-Za-z0-9_-]{6,32}$/u.test(workspacePath), `Automatic private workspace did not replace-navigate to a session path: ${workspaceUrl}.`);
-  assert(!workspaceUrl.includes('roomKey'), 'Automatic private workspace leaked the raw room key after the RoomGate exchange.');
-  assert(createRequests === 1, `Automatic private workspace created ${createRequests} rooms for one root visit.`);
-  await issuedRoomResponse;
-  assert(issuedRoomKey, 'Automatic private workspace room creation response did not include a room key.');
-  const storedValues = await page.evaluate(() => [
-    ...Object.values(localStorage),
-    ...Object.values(sessionStorage),
-  ]);
-  assert(!storedValues.some((value) => value.includes(issuedRoomKey!)),
-    'Automatic private workspace persisted the raw room key in browser storage.');
+  await expect(page.getByTestId('live-save-status')).toHaveText(/Saved on this device/u);
+  assert(new URL(page.url()).pathname === '/', `Local-first root unexpectedly navigated away: ${page.url()}.`);
+  assert(serverRequests.length === 0, `Local-first root made server requests before sharing: ${serverRequests.join(', ')}.`);
+  assert(roomCreationRequests === 0, `Local-first root created ${roomCreationRequests} online rooms before sharing.`);
+  assert(roomWebSockets === 0, `Local-first root opened ${roomWebSockets} online WebSockets before sharing.`);
+
+  await replaceSource(page, localSource);
+  await waitForSource(page, localSource);
 
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
-  assert(createRequests === 1, 'Cookie-only workspace reload created another private room.');
-  await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15_000 });
-  assert(new URL(page.url()).pathname !== '/', `Back navigation returned to the auto-create root and could loop: ${page.url()}.`);
-  await page.goForward({ waitUntil: 'domcontentloaded', timeout: 15_000 });
-  await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
-  assert(createRequests === 1, 'Back/forward navigation created another private room.');
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, localSource);
+  await closeFlyout(page, 'source');
+  await expect(page.getByTestId('live-save-status')).toHaveText(/Saved on this device/u);
+  assert(serverRequests.length === 0, `Local workspace reload made server requests: ${serverRequests.join(', ')}.`);
+  assert(roomWebSockets === 0, `Local workspace reload opened ${roomWebSockets} online WebSockets.`);
 
-  const { context: retryContext, page: retryPage } = await browser.newPage(MOBILE_VIEWPORT, { hasTouch: true, isMobile: true });
-  let retryRequests = 0;
-  await retryPage.route('**/api/rooms', async (route) => {
-    retryRequests += 1;
-    if (retryRequests === 1) {
-      await route.fulfill({ body: JSON.stringify({ error: 'private workspace unavailable' }), contentType: 'application/json', status: 503 });
-      return;
-    }
-    await route.continue();
+  const promotionResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === 'POST' && url.origin === serverOrigin && url.pathname === '/api/rooms';
+  }, { timeout: 15_000 });
+  const promotionSocket = page.waitForEvent('websocket', {
+    predicate: (socket) => {
+      const url = new URL(socket.url());
+      return url.host === serverHost && url.pathname.startsWith('/ws/');
+    },
+    timeout: 15_000,
   });
-  try {
-    await retryPage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    const retry = retryPage.getByTestId('retry-auto-private-workspace');
-    await retry.waitFor({ state: 'visible', timeout: 15_000 });
-    await assertTouchTarget(retryPage, retry, 'mobile automatic-private-workspace retry');
-    assert(!retryPage.url().includes('roomKey'), 'Failed automatic room creation leaked a raw room key.');
-    assert(retryRequests === 1, `Failed automatic room creation made ${retryRequests} requests before retry.`);
-    await verifiedClick(retryPage, retry, 'automatic-private-workspace retry');
-    await retryPage.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
-    assert(retryRequests === 2, `Automatic room retry made ${retryRequests} requests instead of exactly one retry request.`);
-    assert(!retryPage.url().includes('roomKey'), 'Retried automatic room creation leaked a raw room key after exchange.');
-  } finally {
-    await retryContext.close();
-  }
+  await verifiedClick(page, page.getByTestId('share-session-button'), 'local workspace promotion');
+  const response = await promotionResponse;
+  assert(response.status() === 201, `Explicit local workspace promotion returned ${response.status()} instead of 201.`);
+  const payload = await response.json() as { session_id?: unknown };
+  assert(typeof payload.session_id === 'string' && /^[A-Za-z0-9_-]{6,64}$/u.test(payload.session_id), 'Explicit local workspace promotion did not return a valid session id.');
+  await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
+  await promotionSocket;
+  await ensureSourceFlyoutOpen(page);
+  await waitForSource(page, localSource);
+  assert(roomCreationRequests === 1, `Explicit share created ${roomCreationRequests} online rooms instead of one.`);
+  assert(roomWebSockets === 1, `Promotion opened ${roomWebSockets} online WebSockets instead of one.`);
+  assert(new URL(page.url()).pathname === `/s/${payload.session_id}`, `Promotion did not navigate to the created online room: ${page.url()}.`);
 }
 
 async function expectWorkspaceOnboarding(browser: BrowserHarness, baseUrl: string, serverUrl: string): Promise<void> {
@@ -7287,8 +7289,8 @@ async function validateWorkspaceUx(): Promise<void> {
   await withOwnedServices(async ({ baseUrl, mcpUrl, serverUrl }) => {
     const browser = await launchBrowserHarness();
     try {
-      await expectAutomaticPrivateWorkspaceEntry(browser, baseUrl);
-      record(results, 'root auto-creates one private workspace with replace navigation, cookie-only reload/back-forward safety, no key storage, and an explicit mobile retry');
+      await expectLocalFirstWorkspaceEntry(browser, baseUrl, serverUrl);
+      record(results, 'root shows state-driven local loading, makes no server request or WebSocket, persists an IndexedDB edit across reload with a saved-on-device status, and starts one protected online promotion containing that edit only after explicit share');
       await expectWorkspaceOnboarding(browser, baseUrl, serverUrl);
       record(results, 'nonmodal blank-canvas onboarding defers Escape to flyouts, persists only per browser/session/diagram dismissal, starts Mermaid/overlay tools through real handlers, focuses editors/canvas, and preserves compact canvas controls');
       const room = await createRoom(serverUrl, baseUrl);

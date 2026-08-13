@@ -42,7 +42,7 @@ export function acquireAutoPrivateRoomRequest(): AutoRoomLease {
       consumers: 0,
       controller,
       pending: true,
-      promise: createRoom(controller.signal),
+      promise: createRoom(undefined, controller.signal),
     };
     request.promise.finally(() => { request.pending = false; }).catch(() => undefined);
     sharedRequest = request;

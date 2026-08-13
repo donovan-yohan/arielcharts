@@ -73,7 +73,7 @@ describe('AutoPrivateWorkspace', () => {
   it('does not navigate from a late response after the route unmounts', async () => {
     const request = deferred<{ roomKey: string; sessionId: string }>();
     let signal: AbortSignal | undefined;
-    mocks.createRoom.mockImplementationOnce((nextSignal?: AbortSignal) => {
+    mocks.createRoom.mockImplementationOnce((_bundle?: unknown, nextSignal?: AbortSignal) => {
       signal = nextSignal;
       return request.promise;
     });

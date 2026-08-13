@@ -52,6 +52,7 @@ import {
 import { SessionStore } from './persistence.js';
 import type { CleanupOptions, DiagramHistoryMetadata, HistoryPersistenceChange, OverlayHistoryMetadata, RoomAccessRecord, SessionRecord, SessionSnapshot, SessionState } from './types.js';
 import { applyWorkspacePayload, canonicalWorkspaceJson, parseWorkspaceBundle, WorkspaceImportError } from './workspace-import.js';
+import type { WorkspaceBundlePayload } from '@arielcharts/shared';
 
 const MANAGED_AWARENESS_ORIGIN = 'session-manager';
 const CATALOG_REPAIR_ORIGIN = 'catalog-repair';
@@ -1103,7 +1104,11 @@ export class SessionManager {
   }
 
   /** Explicit protected-room creation. Network ingress must use requireSession instead. */
-  async createProtectedSession(sessionId: string, access: RoomAccessRecord): Promise<SessionState> {
+  async createProtectedSession(sessionId: string, access: RoomAccessRecord, initialWorkspace?: unknown): Promise<SessionState> {
+    // Parse and admit the candidate before checking or writing any durable
+    // protected-room state. The resulting payload is a detached clone, so the
+    // request body cannot change between admission and persistence.
+    const initialWorkspacePayload = initialWorkspace === undefined ? undefined : this.prepareInitialWorkspace(initialWorkspace);
     if (this.sessions.has(sessionId) || await this.store.get(sessionId)) {
       throw new Error(`Session already exists: ${sessionId}`);
     }
@@ -1112,7 +1117,7 @@ export class SessionManager {
       await loading;
       throw new Error(`Session already exists: ${sessionId}`);
     }
-    const next = this.loadSession(sessionId, { allowCreate: true, initialRoomAccess: access }).then((state) => {
+    const next = this.loadSession(sessionId, { allowCreate: true, initialRoomAccess: access, initialWorkspacePayload }).then((state) => {
       this.sessions.set(sessionId, state);
       this.loadingSessions.delete(sessionId);
       return state;
@@ -1678,7 +1683,7 @@ export class SessionManager {
 
   private async loadSession(
     sessionId: string,
-    options: { allowCreate?: boolean; initialRoomAccess?: RoomAccessRecord } = {},
+    options: { allowCreate?: boolean; initialRoomAccess?: RoomAccessRecord; initialWorkspacePayload?: WorkspaceBundlePayload } = {},
   ): Promise<SessionState> {
     const persisted = await this.store.get(sessionId);
     if (persisted && options.initialRoomAccess) {
@@ -1689,36 +1694,61 @@ export class SessionManager {
     }
     const loaded = persisted ? this.documentFromPersistedRecord(persisted) : { doc: createReservedRootDocument(), repaired: false };
     const doc = loaded.doc;
-    const repairedOnLoad = repairDocument(doc) || loaded.repaired;
-    const admission = validateDocumentState(doc);
-    if (!admission.accepted) {
-      doc.destroy();
-      throw new Error(`Session document rejected: ${admission.reason}`);
-    }
-    const awareness = new Awareness(doc);
-    awareness.setLocalState(null);
-    const now = Date.now();
-    const state: SessionState = {
-      id: sessionId, doc, awareness, sockets: new Set(), socketClientIds: new Map(), managedAwarenessClientIds: new Set(),
-      lastAccessedAt: now, lastPersistedAt: persisted?.updatedAt ?? 0, updatedAt: persisted?.updatedAt ?? now,
-    };
-    awareness.on('update', () => {
-      syncParticipantsFromAwareness(state);
-      state.lastAccessedAt = Date.now();
-    });
-    doc.on('afterTransaction', (transaction) => {
-      if (transaction.origin === MANAGED_AWARENESS_ORIGIN || transaction.origin === CATALOG_REPAIR_ORIGIN) {
-        return;
+    const initialWorkspacePayload = options.initialWorkspacePayload;
+    try {
+      if (!persisted && initialWorkspacePayload) {
+        doc.transact(() => applyWorkspacePayload(doc, initialWorkspacePayload), WORKSPACE_IMPORT_ORIGIN);
       }
-      repairDocument(doc);
-    });
-    if (repairedOnLoad) {
-      state.updatedAt = Date.now();
+      const repairedOnLoad = repairDocument(doc) || loaded.repaired;
+      const admission = validateDocumentState(doc);
+      if (!admission.accepted) {
+        throw new Error(`Session document rejected: ${admission.reason}`);
+      }
+      const awareness = new Awareness(doc);
+      awareness.setLocalState(null);
+      const now = Date.now();
+      const state: SessionState = {
+        id: sessionId, doc, awareness, sockets: new Set(), socketClientIds: new Map(), managedAwarenessClientIds: new Set(),
+        lastAccessedAt: now, lastPersistedAt: persisted?.updatedAt ?? 0, updatedAt: persisted?.updatedAt ?? now,
+      };
+      awareness.on('update', () => {
+        syncParticipantsFromAwareness(state);
+        state.lastAccessedAt = Date.now();
+      });
+      doc.on('afterTransaction', (transaction) => {
+        if (transaction.origin === MANAGED_AWARENESS_ORIGIN || transaction.origin === CATALOG_REPAIR_ORIGIN) {
+          return;
+        }
+        repairDocument(doc);
+      });
+      if (repairedOnLoad) {
+        state.updatedAt = Date.now();
+      }
+      if (repairedOnLoad || persisted || options.initialRoomAccess) {
+        await this.persistSession(state, { recovery: true, initialRoomAccess: options.initialRoomAccess });
+      }
+      return state;
+    } catch (error) {
+      doc.destroy();
+      throw error;
     }
-    if (repairedOnLoad || persisted) {
-      await this.persistSession(state, { recovery: true, initialRoomAccess: options.initialRoomAccess });
+  }
+
+  /** Fully admit a promotion payload before room or capability persistence begins. */
+  private prepareInitialWorkspace(bundle: unknown): WorkspaceBundlePayload {
+    const payload = parseWorkspaceBundle(bundle);
+    const candidate = createReservedRootDocument();
+    try {
+      candidate.transact(() => applyWorkspacePayload(candidate, payload), WORKSPACE_IMPORT_ORIGIN);
+      repairDocument(candidate);
+      const admission = validateDocumentState(candidate);
+      if (!admission.accepted) {
+        throw new WorkspaceImportError(`The workspace bundle exceeds collaboration limits: ${admission.reason}.`);
+      }
+      return payload;
+    } finally {
+      candidate.destroy();
     }
-    return state;
   }
 
   /** Builds and validates a detached persisted candidate before it becomes live. */

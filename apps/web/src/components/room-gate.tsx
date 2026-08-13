@@ -1,7 +1,9 @@
 'use client';
 
 import React, { FormEvent, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { checkRoomAccess, clearRoomKeyFragment, exchangeRoomKey, readRoomKeyFragment, RoomAccessApiError } from '../lib/room-access-api';
+import { clearLocalWorkspaceHandoff, readLocalWorkspaceHandoff } from '../lib/local-workspace';
 import { SessionWorkspace } from './session-workspace';
 
 export type RoomGateState =
@@ -21,13 +23,17 @@ export function RoomGateView({
   gateState,
   isSubmitting,
   onRoomKeyChange,
+  onUseArchivedWorkspace,
   onSubmit,
   roomKeyDraft,
   sessionId,
+  canUseArchivedWorkspace = false,
 }: {
+  canUseArchivedWorkspace?: boolean;
   gateState: RoomGateState;
   isSubmitting: boolean;
   onRoomKeyChange: (value: string) => void;
+  onUseArchivedWorkspace?: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   roomKeyDraft: string;
   sessionId: string;
@@ -75,6 +81,9 @@ export function RoomGateView({
           <button className="primary-button" disabled={isSubmitting || roomKeyDraft.trim().length === 0} type="submit">
             {isSubmitting ? 'Checking…' : 'Open room'}
           </button>
+          {canUseArchivedWorkspace && onUseArchivedWorkspace ? (
+            <button className="secondary-button" type="button" onClick={onUseArchivedWorkspace}>Use archived device workspace</button>
+          ) : null}
         </form>
       </section>
     </main>
@@ -82,6 +91,7 @@ export function RoomGateView({
 }
 
 export function RoomGate({ sessionId }: { sessionId: string }) {
+  const router = useRouter();
   const [gateState, setGateState] = useState<RoomGateState>({ status: 'checking' });
   const [roomKeyDraft, setRoomKeyDraft] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -164,6 +174,13 @@ export function RoomGate({ sessionId }: { sessionId: string }) {
       gateState={gateState}
       isSubmitting={isSubmitting}
       onRoomKeyChange={setRoomKeyDraft}
+      canUseArchivedWorkspace={readLocalWorkspaceHandoff() === sessionId}
+      onUseArchivedWorkspace={() => {
+        // Returning to the archive is deliberately user initiated: access,
+        // network, and key errors must never silently create a local fork.
+        clearLocalWorkspaceHandoff(sessionId);
+        router.replace('/');
+      }}
       onSubmit={(event) => { void submitRoomKey(event); }}
       roomKeyDraft={roomKeyDraft}
       sessionId={sessionId}

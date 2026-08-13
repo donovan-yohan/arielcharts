@@ -9,6 +9,7 @@ import {
   WORKSPACE_BUNDLE_EXTENSION,
   WORKSPACE_BUNDLE_MIME,
   WorkspaceBundleError,
+  applyWorkspaceBundleLocally,
   decodeWorkspaceBundleEnvelope,
   downloadBlob,
   downloadText,
@@ -28,9 +29,10 @@ interface WorkspaceExportMenuProps {
   sessionId: string;
   theme: CompositeTheme;
   workspace: Y.Doc | null;
+  workspaceMode?: 'local' | 'online';
 }
 
-export function WorkspaceExportMenu({ activeDiagramName, mermaidSource, mermaidSvg, onImported, scene, sessionId, theme, workspace }: WorkspaceExportMenuProps) {
+export function WorkspaceExportMenu({ activeDiagramName, mermaidSource, mermaidSvg, onImported, scene, sessionId, theme, workspace, workspaceMode = 'online' }: WorkspaceExportMenuProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [expanded, setExpanded] = useState(false); const [status, setStatus] = useState(''); const [busy, setBusy] = useState(false);
   const name = activeDiagramName ?? 'diagram'; const stem = safeDownloadStem(name);
@@ -47,7 +49,9 @@ export function WorkspaceExportMenu({ activeDiagramName, mermaidSource, mermaidS
     await withBusy(async () => {
       if (file.size > 192 * 1024) throw new WorkspaceBundleError('The selected workspace bundle is too large.');
       const bundle = await decodeWorkspaceBundleEnvelope(await file.text());
-      await importWorkspaceBundle(sessionId, bundle); onImported(); setStatus('Editable workspace imported.');
+      if (workspaceMode === 'local') applyWorkspaceBundleLocally(workspace, bundle);
+      else await importWorkspaceBundle(sessionId, bundle);
+      onImported(); setStatus('Editable workspace imported.');
     });
   };
   return <div className="workspace-export-menu">

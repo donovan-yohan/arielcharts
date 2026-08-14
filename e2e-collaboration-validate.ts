@@ -136,37 +136,38 @@ async function closeSourceFlyout(page: Page): Promise<void> {
 
 async function expectCollaborativeAnnotations(pageA: Page, pageB: Page): Promise<void> {
   const sourceA = await canonicalPageSource(pageA); const sourceB = await canonicalPageSource(pageB);
-  await Promise.all([
-    verifiedOverlayClick(pageA, 'Overlay tools'),
-    verifiedOverlayClick(pageB, 'Overlay tools'),
-  ]);
-  await verifiedOverlayClick(pageA, 'Add overlay');
-  await verifiedOverlayClick(pageA, 'Rectangle');
+  await Promise.all([openOverlayInspector(pageA), openOverlayInspector(pageB)]);
+  await clickOverlayTool(pageA, 'Text');
+  await clickOverlayTool(pageA, 'Rectangle');
   await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(2);
-  await verifiedOverlayClick(pageA, 'Ellipse');
+  await clickOverlayTool(pageA, 'Ellipse');
   await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(3);
   const overlayList = pageA.getByLabel('ArielCharts overlay list', { exact: true });
   await overlayList.getByRole('button', { name: /shape\.rectangle:/u }).click();
   await overlayList.getByRole('button', { name: /shape\.ellipse:/u }).click({ modifiers: ['Control'] });
-  await verifiedOverlayClick(pageA, 'Frame selection');
+  await closeOverlayInspector(pageA);
+  await clickOverlayTool(pageA, 'Frame selection');
   await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(4);
+  await openOverlayInspector(pageA);
   const frameInPalette = overlayList.locator('ul').first().locator('li > button').last();
   await frameInPalette.scrollIntoViewIfNeeded();
-  await frameInPalette.click(); await verifiedOverlayClick(pageA, 'Lock frame');
+  await frameInPalette.click();
+  await closeOverlayInspector(pageA);
+  await clickOverlayTool(pageA, 'Lock frame');
   await expect(pageA.getByRole('button', { name: 'Move right', exact: true })).toHaveCount(0);
-  await verifiedOverlayClick(pageA, 'Unlock frame');
+  await clickOverlayTool(pageA, 'Unlock frame');
   const excludeFrameMembers = pageA.getByRole('button', { name: 'Exclude frame members from composite export', exact: true });
   await expect(excludeFrameMembers).toBeEnabled();
-  await verifiedOverlayClick(pageA, 'Exclude frame members from composite export');
+  await clickOverlayTool(pageA, 'Exclude frame members from composite export');
   await expect(pageA.getByRole('button', { name: 'Include frame members in composite export', exact: true })).toBeVisible();
-  await Promise.all([verifiedOverlayClick(pageA, 'Close overlay tools'), verifiedOverlayClick(pageB, 'Close overlay tools')]);
-  await Promise.all([verifiedOverlayClick(pageA, 'Overlay tools'), verifiedOverlayClick(pageB, 'Overlay tools')]);
+  await Promise.all([closeOverlayInspector(pageA), closeOverlayInspector(pageB)]);
+  await Promise.all([openOverlayInspector(pageA), openOverlayInspector(pageB)]);
   const textListA = pageA.getByLabel('ArielCharts overlay list', { exact: true }).getByRole('button', { name: /^Text:/u });
   const textListB = pageB.getByLabel('ArielCharts overlay list', { exact: true }).getByRole('button', { name: /^Text:/u });
   await Promise.all([expect(textListA).toHaveCount(1), expect(textListB).toHaveCount(1)]);
   await Promise.all([textListA.scrollIntoViewIfNeeded(), textListB.scrollIntoViewIfNeeded()]);
   await Promise.all([textListA.click(), textListB.click()]);
-  await Promise.all([verifiedOverlayClick(pageA, 'Close overlay tools'), verifiedOverlayClick(pageB, 'Close overlay tools')]);
+  await Promise.all([closeOverlayInspector(pageA), closeOverlayInspector(pageB)]);
   const selectedTextA = pageA.locator('[data-testid^="overlay-object-"][data-selected="true"]');
   const selectedTextB = pageB.locator('[data-testid^="overlay-object-"][data-selected="true"]');
   await Promise.all([expect(selectedTextA).toHaveCount(1), expect(selectedTextB).toHaveCount(1)]);
@@ -185,15 +186,15 @@ async function expectCollaborativeAnnotations(pageA: Page, pageB: Page): Promise
   await notesA.first().dispatchEvent('compositionend', { data: '漢' });
   await expect.poll(async () => notesA.first().inputValue()).toContain('peer ');
   await expect.poll(async () => notesB.first().inputValue()).toContain('漢');
-  await verifiedOverlayClick(pageB, 'Overlay tools'); await verifiedOverlayClick(pageB, 'Add sticky note');
+  await openOverlayInspector(pageB); await clickOverlayTool(pageB, 'Sticky note');
   await expect(pageA.locator('[data-testid^="overlay-object-"]')).toHaveCount(5);
-  await verifiedOverlayClick(pageA, 'Overlay tools');
+  await openOverlayInspector(pageA);
   const stickyListA = pageA.getByLabel('ArielCharts overlay list', { exact: true }).getByRole('button', { name: /^Sticky note:/u });
   const stickyListB = pageB.getByLabel('ArielCharts overlay list', { exact: true }).getByRole('button', { name: /^Sticky note:/u });
   await Promise.all([expect(stickyListA).toHaveCount(1), expect(stickyListB).toHaveCount(1)]);
   await Promise.all([stickyListA.scrollIntoViewIfNeeded(), stickyListB.scrollIntoViewIfNeeded()]);
   await Promise.all([stickyListA.click(), stickyListB.click()]);
-  await Promise.all([verifiedOverlayClick(pageA, 'Close overlay tools'), verifiedOverlayClick(pageB, 'Close overlay tools')]);
+  await Promise.all([closeOverlayInspector(pageA), closeOverlayInspector(pageB)]);
   const selectedStickyA = pageA.locator('[data-testid^="overlay-object-"][data-selected="true"]');
   const selectedStickyB = pageB.locator('[data-testid^="overlay-object-"][data-selected="true"]');
   await Promise.all([expect(selectedStickyA).toHaveCount(1), expect(selectedStickyB).toHaveCount(1)]);
@@ -203,12 +204,12 @@ async function expectCollaborativeAnnotations(pageA: Page, pageB: Page): Promise
   await Promise.all([stickyA.waitFor({ state: 'visible' }), stickyB.waitFor({ state: 'visible' })]);
   await stickyB.fill('different note'); await expect(stickyA).toHaveValue('different note');
   await stickyA.blur();
-  await verifiedOverlayClick(pageA, 'Overlay tools');
-  await verifiedOverlayClick(pageA, 'Add overlay');
+  await openOverlayInspector(pageA);
+  await clickOverlayTool(pageA, 'Text');
   await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(6);
   const undoText = pageA.getByLabel('ArielCharts overlay list', { exact: true }).getByRole('button', { name: /^Text:/u }).last();
   await undoText.click();
-  await verifiedOverlayClick(pageA, 'Close overlay tools');
+  await closeOverlayInspector(pageA);
   const undoObject = pageA.locator('[data-testid^="overlay-object-"][data-selected="true"]');
   await expect(undoObject).toHaveCount(1);
   await undoObject.focus();
@@ -239,10 +240,10 @@ async function expectUnifiedCanvasHistory(pageA: Page, pageB: Page): Promise<voi
   const initialOverlayCount = await pageA.locator('[data-testid^="overlay-object-"]').count();
 
   // draw → node move → draw → semantic canvas source replacement
-  await verifiedOverlayClick(pageA, 'Overlay tools');
-  await verifiedOverlayClick(pageA, 'Add overlay');
+  await openOverlayInspector(pageA);
+  await clickOverlayTool(pageA, 'Text');
   await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(initialOverlayCount + 1);
-  await verifiedOverlayClick(pageA, 'Close overlay tools');
+  await closeOverlayInspector(pageA);
 
   const nodeId = await nodeIdAt(pageA, 0);
   const nodeBefore = await getReactFlowNodePosition(nodeById(pageA, nodeId), 'History fixture node was missing.');
@@ -251,10 +252,10 @@ async function expectUnifiedCanvasHistory(pageA: Page, pageB: Page): Promise<voi
   const nodeMoved = await getReactFlowNodePosition(nodeById(pageA, nodeId), 'History fixture node disappeared after move.');
   await waitForReactFlowNodePositionMatch(pageB, nodeId, nodeMoved);
 
-  await verifiedOverlayClick(pageA, 'Overlay tools');
-  await verifiedOverlayClick(pageA, 'Rectangle');
+  await openOverlayInspector(pageA);
+  await clickOverlayTool(pageA, 'Rectangle');
   await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(initialOverlayCount + 2);
-  await verifiedOverlayClick(pageA, 'Close overlay tools');
+  await closeOverlayInspector(pageA);
 
   await pageA.getByRole('button', { name: 'Add node to Mermaid text', exact: true }).click();
   await expect.poll(() => canonicalPageSource(pageA)).not.toBe(sourceBefore);
@@ -303,9 +304,9 @@ async function expectUnifiedCanvasHistory(pageA: Page, pageB: Page): Promise<voi
   // concise status is announced and the following shortcut reaches the older,
   // unrelated local draw without clobbering the peer.
   const safeCount = await pageA.locator('[data-testid^="overlay-object-"]').count();
-  await verifiedOverlayClick(pageA, 'Overlay tools');
-  await verifiedOverlayClick(pageA, 'Add overlay');
-  await verifiedOverlayClick(pageA, 'Close overlay tools');
+  await openOverlayInspector(pageA);
+  await clickOverlayTool(pageA, 'Text');
+  await closeOverlayInspector(pageA);
   await expect(pageB.locator('[data-testid^="overlay-object-"]')).toHaveCount(safeCount + 1);
   const beforeLocalMove = await getReactFlowNodePosition(nodeById(pageA, nodeId), 'Stale-history node was missing.');
   await nudgeNode(pageA, nodeById(pageA, nodeId), 44, 18);
@@ -355,9 +356,7 @@ async function expectCollaborativeInk(
   const canvas = pageA.getByTestId('diagram-canvas');
   const canvasBox = await boxOf(canvas, 'Ink canvas was missing.');
   const enable = async (page: Page, tool: 'Pen' | 'Highlighter' | 'Erase stroke') => {
-    await verifiedOverlayClick(page, 'Overlay tools');
-    await verifiedOverlayClick(page, tool);
-    await verifiedOverlayClick(page, 'Close overlay tools');
+    await clickOverlayTool(page, tool);
   };
   await enable(pageA, 'Pen');
   const surfaceA = pageA.getByTestId('ink-drawing-surface');
@@ -409,27 +408,39 @@ async function expectCollaborativeInk(
   const orderB = await pageB.locator('[data-testid^="ink-stroke-"]').evaluateAll((items) => items.map((item) => item.getAttribute('data-testid')));
   assert(JSON.stringify(orderA) === JSON.stringify(orderB), `Finalized ink did not retain a stable converged order: ${JSON.stringify({ orderA, orderB })}`);
   const firstId = orderA[0]?.replace('ink-stroke-', ''); assert(firstId, 'Finalized ink did not expose a durable overlay id.');
-  await verifiedOverlayClick(pageA, 'Overlay tools'); await verifiedOverlayClick(pageA, 'Highlighter');
+  await clickOverlayTool(pageA, 'Highlighter');
   const firstObject = pageA.getByTestId(`overlay-object-${firstId}`);
   const beforeMove = await firstObject.getAttribute('data-world-x'); await firstObject.click();
-  await verifiedOverlayClick(pageA, 'Move right');
+  await clickOverlayTool(pageA, 'Move right');
   await expect.poll(() => firstObject.getAttribute('data-world-x')).not.toBe(beforeMove);
   // Deliberately separate the independent move and delete undo units.
   await pageA.waitForTimeout(550);
-  await verifiedOverlayClick(pageA, 'Delete overlay'); await expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(2);
-  await verifiedOverlayClick(pageA, 'Undo overlay'); await expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(3);
-  await verifiedOverlayClick(pageA, 'Erase stroke'); await verifiedOverlayClick(pageA, 'Close overlay tools');
+  await clickOverlayTool(pageA, 'Delete overlay'); await expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(2);
+  await clickOverlayTool(pageA, 'Undo overlay'); await expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(3);
+  await clickOverlayTool(pageA, 'Erase stroke');
   const eraseBox = await boxOf(firstObject, 'Ink object was missing for whole-stroke eraser.');
   await pageA.mouse.click(eraseBox.x + eraseBox.width / 2, eraseBox.y + eraseBox.height / 2);
   await expect(pageB.locator('[data-testid^="ink-stroke-"]')).toHaveCount(2);
-  await verifiedOverlayClick(pageA, 'Overlay tools'); await verifiedOverlayClick(pageA, 'Erase stroke'); await verifiedOverlayClick(pageA, 'Close overlay tools');
+  await clickOverlayTool(pageA, 'Erase stroke');
   const sourceAfter = await canonicalPageSource(pageA);
   assert(sourceAfter === sourceBefore, 'Ink creation, move, delete, undo, or erase changed Mermaid source bytes.');
 }
 
-async function verifiedOverlayClick(page: Page, name: string): Promise<void> {
+async function clickOverlayTool(page: Page, name: string): Promise<void> {
   const button = page.getByRole('button', { name, exact: true });
   await button.scrollIntoViewIfNeeded(); await button.click();
+}
+
+async function openOverlayInspector(page: Page): Promise<void> {
+  const inspector = page.getByRole('button', { name: 'Objects and layers', exact: true });
+  if (await inspector.getAttribute('aria-expanded') !== 'true') await clickOverlayTool(page, 'Objects and layers');
+  await page.getByLabel('Overlay objects and layers', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+}
+
+async function closeOverlayInspector(page: Page): Promise<void> {
+  const inspector = page.getByRole('button', { name: 'Objects and layers', exact: true });
+  if (await inspector.getAttribute('aria-expanded') === 'true') await clickOverlayTool(page, 'Objects and layers');
+  await page.getByLabel('Overlay objects and layers', { exact: true }).waitFor({ state: 'detached', timeout: 15_000 });
 }
 
 async function canonicalPageSource(page: Page): Promise<string> {
@@ -968,16 +979,11 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
       await startLaserSample();
       if (overlayTool !== 'Select overlay tool') {
         // A physical toolbar click ends the held pointer first; prove the sample
-        // reached the peer, then verify that the released canvas can open the
-        // palette before activating its mutually-exclusive drawing tool.
+        // reached the peer, then activate its mutually-exclusive drawing tool.
         await pageA.mouse.up();
         await remoteLaser.waitFor({ state: 'detached', timeout: 15_000 });
-        await verifiedOverlayClick(pageA, 'Overlay tools');
-        await expect(pageA.getByRole('button', { name: 'Close overlay tools', exact: true })).toHaveCount(1);
-        await expect(pageA.getByLabel('More overlay tools', { exact: true })).toBeVisible();
       }
       await expectLaserExit(() => pageA.getByRole('button', { name: overlayTool, exact: true }).click(), `Laser ${overlayTool} exit`, { restoresCanvasLaserControl: false });
-      if (overlayTool !== 'Select overlay tool') await verifiedOverlayClick(pageA, 'Close overlay tools');
       await canvasA.focus();
       await pageA.keyboard.press('v');
       await expect(pageA.getByRole('button', { name: 'Laser pointer', exact: true })).toHaveCount(1);

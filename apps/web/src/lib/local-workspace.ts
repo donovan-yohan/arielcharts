@@ -93,18 +93,28 @@ export function createLocalWorkspacePersistence(doc: Y.Doc, name = LOCAL_WORKSPA
 
 type StorageLike = Pick<Storage, 'getItem' | 'removeItem' | 'setItem'>;
 
+function resolveHandoffStorage(storage?: StorageLike): StorageLike | null {
+  if (storage) return storage;
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The marker deliberately contains only a session id. IndexedDB remains an
  * archive until the user explicitly removes it, so a failed navigation can
  * never turn a successful promotion into data loss.
  */
-export function recordLocalWorkspaceHandoff(sessionId: string, storage: StorageLike = window.localStorage): void {
+export function recordLocalWorkspaceHandoff(sessionId: string, storage?: StorageLike): void {
   if (!isValidSessionId(sessionId)) throw new Error('Cannot save an invalid online workspace handoff.');
-  storage.setItem(LOCAL_WORKSPACE_HANDOFF_STORAGE_KEY, JSON.stringify({ session_id: sessionId }));
+  resolveHandoffStorage(storage)?.setItem(LOCAL_WORKSPACE_HANDOFF_STORAGE_KEY, JSON.stringify({ session_id: sessionId }));
 }
 
-export function readLocalWorkspaceHandoff(storage: StorageLike = window.localStorage): string | null {
-  const encoded = storage.getItem(LOCAL_WORKSPACE_HANDOFF_STORAGE_KEY);
+export function readLocalWorkspaceHandoff(storage?: StorageLike): string | null {
+  const encoded = resolveHandoffStorage(storage)?.getItem(LOCAL_WORKSPACE_HANDOFF_STORAGE_KEY);
   if (!encoded) return null;
   try {
     const value = JSON.parse(encoded) as { session_id?: unknown };
@@ -115,9 +125,10 @@ export function readLocalWorkspaceHandoff(storage: StorageLike = window.localSto
 }
 
 /** Only an online room-access failure should clear this routing pointer. */
-export function clearLocalWorkspaceHandoff(sessionId: string, storage: StorageLike = window.localStorage): void {
-  if (readLocalWorkspaceHandoff(storage) === sessionId) {
-    storage.removeItem(LOCAL_WORKSPACE_HANDOFF_STORAGE_KEY);
+export function clearLocalWorkspaceHandoff(sessionId: string, storage?: StorageLike): void {
+  const resolvedStorage = resolveHandoffStorage(storage);
+  if (resolvedStorage && readLocalWorkspaceHandoff(resolvedStorage) === sessionId) {
+    resolvedStorage.removeItem(LOCAL_WORKSPACE_HANDOFF_STORAGE_KEY);
   }
 }
 

@@ -4,6 +4,7 @@ import { getCameraPerturbationKey } from './e2e/support/canvas-camera';
 import { ModernMcpClient } from './e2e/support/mcp';
 import { withOwnedServices, type E2eEndpoints } from './e2e/support/owned-services';
 import { createRoom, exchangeRoomAccess, roomShareUrl } from './e2e/support/room-access';
+import { assertHitTarget } from './e2e/support/interactions';
 import { openYjsSessionObserver } from './e2e/support/yjs-session';
 
 const NESTED_SOURCE = `flowchart TD
@@ -324,6 +325,14 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
     const headerBox = await outerHeader.boundingBox();
     assert(headerBox, 'Outer section header has no draggable bounds.');
     const start = { x: headerBox.x + (headerBox.width / 2), y: headerBox.y + (headerBox.height / 2) };
+    const headerCenterHit = await outerHeader.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(bounds.left + (bounds.width / 2), bounds.top + (bounds.height / 2));
+      return hit === element || Boolean(hit && element.contains(hit));
+    });
+    assert(headerCenterHit, 'The inline toolbar chrome obscured the outer section header center instead of passing its gap through to the canvas.');
+    await assertHitTarget(page, page.getByRole('button', { name: 'Select overlay tool', exact: true }), 'first inline overlay tool');
+    await assertHitTarget(page, page.getByRole('button', { name: 'Objects and layers', exact: true }), 'last inline overlay tool');
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
     await page.mouse.move(start.x + 320, start.y + 180, { steps: 10 });

@@ -87,6 +87,31 @@ const ANCHORS = {
   topbar: '.workspace-topbar',
 };
 
+type CanvasCameraEvidence = {
+  bottom: number;
+  display: string;
+  top: number;
+  visibility: string;
+} | null;
+
+/**
+ * Mirrors the canvas safe-bottom publisher: a hidden or non-intersecting
+ * camera rail reserves no inspector space. The browser callback returns plain
+ * data so this rule is shared by every inspector assertion.
+ */
+function visibleCanvasCameraTop(
+  canvasTop: number | undefined,
+  canvasBottom: number | undefined,
+  camera: CanvasCameraEvidence,
+): number | undefined {
+  if (canvasTop === undefined || canvasBottom === undefined || !camera
+    || camera.display === 'none' || camera.visibility === 'hidden'
+    || camera.bottom <= camera.top || camera.bottom <= canvasTop || camera.top >= canvasBottom) {
+    return undefined;
+  }
+  return Math.max(canvasTop, Math.min(canvasBottom, camera.top));
+}
+
 const SOURCE_OWNED_COLOR_FIXTURE = `flowchart LR
   classDef critical fill:#ffec99,stroke:#d9480f,color:#4a2c00;
   Browser[Browser]:::critical --> Gateway[Gateway]
@@ -1621,6 +1646,58 @@ async function scrollErControlIntoView(control: Locator): Promise<void> {
     element.scrollIntoView({ block: 'center', inline: 'nearest' });
     window.scrollTo(0, 0);
   });
+}
+
+async function centerSequenceEditorTarget(page: Page, target: Locator, label: string): Promise<void> {
+  await target.evaluate((element) => {
+    const editor = element.closest<HTMLElement>('[data-testid="sequence-editor-controls"]');
+    if (!editor) throw new Error('Sequence target has no scrollable editor owner.');
+    const targetBounds = element.getBoundingClientRect();
+    const editorBounds = editor.getBoundingClientRect();
+    const clientTop = editorBounds.top + editor.clientTop;
+    const desiredScrollTop = editor.scrollTop + (targetBounds.top + (targetBounds.height / 2)) - (clientTop + (editor.clientHeight / 2));
+    editor.scrollTop = Math.max(0, Math.min(editor.scrollHeight - editor.clientHeight, desiredScrollTop));
+  });
+  let previousScrollTop = Number.NaN;
+  let stableSamples = 0;
+  await expect.poll(async () => {
+    const scrollTop = await target.evaluate((element) => element.closest<HTMLElement>('[data-testid="sequence-editor-controls"]')?.scrollTop ?? Number.NaN);
+    stableSamples = Math.abs(scrollTop - previousScrollTop) < 0.5 ? stableSamples + 1 : 0;
+    previousScrollTop = scrollTop;
+    return stableSamples;
+  }, {
+    message: `${label} sequence editor did not settle after target centering.`,
+    timeout: 5_000,
+    intervals: [50],
+  }).toBeGreaterThanOrEqual(2);
+  const geometry = await target.evaluate((element) => {
+    const editor = element.closest<HTMLElement>('[data-testid="sequence-editor-controls"]');
+    const controls = document.querySelector<HTMLElement>('[data-testid="canvas-controls-toolbar"]');
+    const footer = document.querySelector<HTMLElement>('[data-testid="workspace-footer"]');
+    if (!editor || !controls || !footer) return null;
+    const targetBounds = element.getBoundingClientRect();
+    const editorBounds = editor.getBoundingClientRect();
+    const clientTop = editorBounds.top + editor.clientTop;
+    const clientBottom = clientTop + editor.clientHeight;
+    return {
+      centered: Math.abs((targetBounds.top + (targetBounds.height / 2)) - (clientTop + (editor.clientHeight / 2))),
+      clientBottom,
+      clientTop,
+      controlsTop: controls.getBoundingClientRect().top,
+      editorBottom: editorBounds.bottom,
+      footerTop: footer.getBoundingClientRect().top,
+      maxScrollTop: editor.scrollHeight - editor.clientHeight,
+      scrollTop: editor.scrollTop,
+      targetBottom: targetBounds.bottom,
+      targetTop: targetBounds.top,
+    };
+  });
+  assert(geometry !== null
+    && geometry.targetTop >= geometry.clientTop - 0.5
+    && geometry.targetBottom <= geometry.clientBottom + 0.5
+    && geometry.editorBottom <= Math.min(geometry.controlsTop, geometry.footerTop) - 1
+    && (geometry.centered <= 1 || geometry.scrollTop <= 0.5 || geometry.scrollTop >= geometry.maxScrollTop - 0.5),
+  `${label} sequence target did not settle inside the editor's camera/footer-safe lane: ${JSON.stringify(geometry)}.`);
 }
 
 async function resetFixedWorkspaceOrigin(page: Page, label: string): Promise<void> {
@@ -3366,16 +3443,19 @@ async function assertAndClickBoardControl(
 
 async function assertCompactErrorToolbarAndRecovery(page: Page, banner: Locator, recovery: Locator, label: string): Promise<void> {
   const primary = page.getByTestId('overlay-toolbar-primary');
-  const toggle = page.getByRole('button', { name: 'Overlay tools', exact: true });
-  await expect(primary.locator('button:visible')).toHaveCount(1);
-  await expect(toggle).toBeVisible();
-  await assertClosedOverlayToggleBesideError(page, banner, `${label} compact error toolbar`);
+  const select = page.getByRole('button', { name: 'Select overlay tool', exact: true });
+  await expect(primary.getByRole('button')).toHaveCount(14);
+  await expect(select).toBeVisible();
+  await assertClosedOverlayToggleBesideError(page, banner, `${label} inline toolbar`);
   await assertBoardControl(page, recovery, `${label} recovery remains hit-testable`);
 }
 
 async function assertNormalMobileOverlayToolbar(page: Page, label: string): Promise<void> {
   const primary = page.getByTestId('overlay-toolbar-primary');
-  await expect(primary.locator('button:visible')).toHaveCount(3);
+  await expect(primary.getByRole('button')).toHaveCount(14);
+  for (const action of ['Select overlay tool', 'Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow', 'Pen', 'Highlighter', 'Erase stroke', 'Undo overlay', 'Redo overlay']) {
+    await expect(primary.getByRole('button', { name: action, exact: true })).toBeVisible();
+  }
   const [primaryBounds, canvasBounds] = await Promise.all([
     primary.boundingBox(),
     page.getByTestId('diagram-canvas').boundingBox(),
@@ -3385,6 +3465,38 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
   const canvasCenter = canvasBounds.x + canvasBounds.width / 2;
   assert(Math.abs(primaryCenter - canvasCenter) <= 3,
     `${label} normal primary toolbar is not centered on the canvas: ${JSON.stringify({ canvasBounds, primaryBounds })}.`);
+  const firstTool = primary.getByRole('button', { name: 'Select overlay tool', exact: true });
+  const lastTool = primary.getByRole('button', { name: 'Objects and layers', exact: true });
+  await primary.evaluate((element) => { element.scrollLeft = 0; });
+  await assertTouchTarget(page, firstTool, `${label} first inline toolbar tool`);
+  const beforeScroll = await primary.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollLeft: element.scrollLeft,
+    scrollWidth: element.scrollWidth,
+  }));
+  const firstBounds = await firstTool.boundingBox();
+  assert(firstBounds, `${label} first inline toolbar tool has no bounds for horizontal scroll.`);
+  await page.mouse.move(firstBounds.x + (firstBounds.width / 2), firstBounds.y + (firstBounds.height / 2));
+  // One trusted, deliberately large horizontal wheel from a real control must
+  // reach the native scroller's measured end without force-clicking the last
+  // action off-screen.
+  await page.mouse.wheel(2_000, 0);
+  await expect.poll(() => primary.evaluate((element, initialScrollLeft) => {
+    const maxScrollLeft = element.scrollWidth - element.clientWidth;
+    return element.scrollLeft > initialScrollLeft && Math.abs(element.scrollLeft - maxScrollLeft) <= 1;
+  }, beforeScroll.scrollLeft), {
+    message: `${label} primary toolbar did not reach its native horizontal end from an interactive tool.`,
+    timeout: 5_000,
+  }).toBe(true);
+  const afterScroll = await primary.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollLeft: element.scrollLeft,
+    scrollWidth: element.scrollWidth,
+  }));
+  assert(afterScroll.scrollLeft > beforeScroll.scrollLeft
+    && Math.abs(afterScroll.scrollLeft - (afterScroll.scrollWidth - afterScroll.clientWidth)) <= 1,
+  `${label} primary toolbar did not reach its measured horizontal end from a visible control: ${JSON.stringify({ afterScroll, beforeScroll })}.`);
+  await assertTouchTarget(page, lastTool, `${label} last inline toolbar tool after horizontal scroll`);
 }
 
 async function assertBoardControl(page: Page, target: Locator, label: string): Promise<void> {
@@ -3760,22 +3872,18 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   await selectTabByName(page, diagramName);
   await expect(page.getByTestId('source-flyout')).toBeVisible();
   const canvas = page.getByTestId('diagram-canvas');
-  const overlayToggle = page.getByRole('button', { name: 'Overlay tools', exact: true });
-  assert(await overlayToggle.getAttribute('aria-expanded') === 'false', 'Overlay toolbar did not start in its compact state.');
-  await saveScreenshot(page, 'issue-110-overlay-toolbar-light-collapsed');
-  await verifiedClick(page, overlayToggle, 'open light overlay toolbar screenshot state');
-  await saveScreenshot(page, 'issue-110-overlay-toolbar-light-expanded');
-  await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), 'close light overlay toolbar screenshot state');
+  const overlayInspector = page.getByRole('button', { name: 'Objects and layers', exact: true });
+  const primaryToolbar = page.getByTestId('overlay-toolbar-primary');
+  await expect(primaryToolbar.getByRole('button')).toHaveCount(14);
+  await expect(page.getByRole('button', { name: 'Overlay tools', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'More overlay tools', exact: true })).toHaveCount(0);
+  await saveScreenshot(page, 'inline-overlay-toolbar-light');
   await selectThemePreference(page, 'dark');
-  await saveScreenshot(page, 'issue-110-overlay-toolbar-dark-collapsed');
-  await verifiedClick(page, overlayToggle, 'open dark overlay toolbar screenshot state');
-  await saveScreenshot(page, 'issue-110-overlay-toolbar-dark-expanded');
-  await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), 'close dark overlay toolbar screenshot state');
+  await saveScreenshot(page, 'inline-overlay-toolbar-dark');
   await selectThemePreference(page, 'light');
   const laser = page.getByRole('button', { name: 'Laser pointer', exact: true });
   await verifiedClick(page, laser, 'activate laser pointer before toolbar interaction');
   assert(await canvas.evaluate((element) => getComputedStyle(element).cursor) === 'crosshair', 'Laser mode did not expose its crosshair cursor.');
-  await verifiedClick(page, overlayToggle, 'open overlay toolbar while laser is active');
   await verifiedClick(page, page.getByRole('button', { name: 'Pen', exact: true }), 'activate pen while laser is active');
   await expect(page.getByTestId('ink-drawing-surface')).toBeVisible();
   assert(await page.getByTestId('ink-drawing-surface').evaluate((element) => getComputedStyle(element).cursor) === 'crosshair', 'Pen mode did not expose its drawing cursor.');
@@ -3788,9 +3896,7 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   await verifiedClick(page, laser, 'activate laser pointer for Escape exit');
   await canvas.focus(); await page.keyboard.press('Escape');
   assert(await page.getByRole('button', { name: 'Laser pointer', exact: true }).count() === 1, 'Escape did not exit laser mode.');
-  await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), 'close overlay toolbar after laser interaction');
-  await verifiedClick(page, overlayToggle, 'open overlay tools');
-  await verifiedClick(page, page.getByRole('button', { name: 'Add overlay', exact: true }), 'add overlay object');
+  await verifiedClick(page, page.getByRole('button', { name: 'Text', exact: true }), 'add overlay object');
   const objects = page.locator('[data-testid^="overlay-object-"]');
   await expect(objects).toHaveCount(1);
   await verifiedClick(page, objects.first(), 'select overlay object');
@@ -3800,38 +3906,53 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   assert(Boolean(beforeMove && afterMove && afterMove.x > beforeMove.x), 'Overlay move did not update visible world placement.');
   await verifiedClick(page, page.getByRole('button', { name: 'Bring front', exact: true }), 'reorder overlay object');
   await verifiedClick(page, page.getByRole('button', { name: 'Copy overlay', exact: true }), 'copy overlay object');
+  await overlayInspector.scrollIntoViewIfNeeded();
+  await verifiedClick(page, overlayInspector, 'open overlay inspector for paste');
   const pasteOverlay = page.getByRole('button', { name: 'Paste overlay', exact: true });
   await pasteOverlay.scrollIntoViewIfNeeded();
   await verifiedClick(page, pasteOverlay, 'paste overlay object');
   await expect(objects).toHaveCount(2);
   const pastedTestId = await objects.last().getAttribute('data-testid');
   assert(pastedTestId?.startsWith('overlay-object-overlay_'), `Pasted overlay did not expose a stable object id: ${pastedTestId}.`);
+  await overlayInspector.scrollIntoViewIfNeeded();
+  await verifiedClick(page, overlayInspector, 'close overlay inspector after paste');
 
   await selectTabByName(page, 'Main');
   await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(0);
   await selectTabByName(page, diagramName);
   await expect(objects).toHaveCount(2);
-  await verifiedClick(page, page.getByRole('button', { name: 'Overlay tools', exact: true }), 'reopen overlay tools after tab switch');
+  await overlayInspector.scrollIntoViewIfNeeded();
+  await verifiedClick(page, overlayInspector, 'open overlay inspector after tab switch');
   const overlayList = page.getByLabel('ArielCharts overlay list', { exact: true });
   const overlayObjectButtons = overlayList.locator('ul').first().locator('li > button');
   await overlayObjectButtons.last().scrollIntoViewIfNeeded();
   await verifiedClick(page, overlayObjectButtons.last(), 'reselect topmost pasted overlay object from the palette');
+  await overlayInspector.scrollIntoViewIfNeeded();
+  await verifiedClick(page, overlayInspector, 'close overlay inspector before contextual delete');
   await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete overlay object');
   await expect(objects).toHaveCount(1);
   await verifiedClick(page, page.getByRole('button', { name: 'Undo overlay', exact: true }), 'undo overlay delete');
   await expect(objects).toHaveCount(2);
+  await overlayInspector.scrollIntoViewIfNeeded();
+  await verifiedClick(page, overlayInspector, 'reopen overlay inspector before palette selection');
   await overlayObjectButtons.last().scrollIntoViewIfNeeded();
   await verifiedClick(page, overlayObjectButtons.last(), 'select pasted overlay before history restore');
+  await overlayInspector.scrollIntoViewIfNeeded();
+  await verifiedClick(page, overlayInspector, 'close overlay inspector before history delete');
   await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete overlay before history restore');
   await verifiedClick(page, objects.first(), 'select final overlay before history restore');
   await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete final overlay before history restore');
   await expect(objects).toHaveCount(0);
+  await overlayInspector.scrollIntoViewIfNeeded();
+  await verifiedClick(page, overlayInspector, 'reopen overlay inspector for history restore');
   await verifiedClick(page, page.getByRole('button', { name: 'Restore overlay', exact: true }), 'restore prior overlay revision');
   await expect(page.getByText('overlay restored', { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(objects).not.toHaveCount(0);
   const topmostTestId = await objects.last().getAttribute('data-testid');
   assert(topmostTestId?.startsWith('overlay-object-overlay_'), `Restored overlay did not expose a stable topmost id: ${topmostTestId}.`);
   const topmostObject = page.getByTestId(topmostTestId!);
+  await overlayInspector.scrollIntoViewIfNeeded();
+  await verifiedClick(page, overlayInspector, 'close overlay inspector before contextual anchor');
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForCanvas(page, 'flowchart');
   await expectOverlayControlGapReachesCanvas(page);
@@ -3875,7 +3996,10 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
     await verifiedClick(page, deleteOverlay, 'delete overlay during scenario cleanup');
   }
   await expect(objects).toHaveCount(0);
-  await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), 'close overlay tools after scenario');
+  if (await overlayInspector.getAttribute('aria-expanded') === 'true') {
+    await overlayInspector.scrollIntoViewIfNeeded();
+    await verifiedClick(page, overlayInspector, 'close overlay inspector after scenario');
+  }
 }
 
 async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
@@ -4810,19 +4934,19 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   await selectTabByName(page, diagramName);
   await waitForCanvas(page, 'flowchart');
   if (label.startsWith('mobile')) {
-    const toggle = page.getByRole('button', { name: 'Overlay tools', exact: true });
+    const toggle = page.getByRole('button', { name: 'Select overlay tool', exact: true });
     const canvas = page.getByTestId('diagram-canvas');
-    await assertHitTarget(page, toggle, `${label} closed overlay toggle`);
+    await toggle.scrollIntoViewIfNeeded();
+    await assertHitTarget(page, toggle, `${label} inline overlay toolbar`);
     const toggleBounds = await toggle.boundingBox();
     const controlsBounds = await page.getByTestId('canvas-controls-toolbar').boundingBox();
     assert(toggleBounds && controlsBounds
       && (toggleBounds.x + toggleBounds.width <= controlsBounds.x || controlsBounds.x + controlsBounds.width <= toggleBounds.x
         || toggleBounds.y + toggleBounds.height <= controlsBounds.y || controlsBounds.y + controlsBounds.height <= toggleBounds.y),
-    `${label} closed overlay toggle overlaps the bottom canvas toolbar.`);
-    await verifiedClick(page, toggle, `${label} open overlay controls`);
+    `${label} inline overlay toolbar overlaps the bottom canvas toolbar.`);
     const panel = page.getByLabel('Overlay scene controls', { exact: true });
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
-    const actionNames = ['Add overlay', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow', 'Paste overlay', 'Undo overlay', 'Restore overlay', 'Pen', 'Highlighter', 'Erase stroke'] as const;
+    const actionNames = ['Select overlay tool', 'Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow', 'Pen', 'Highlighter', 'Erase stroke', 'Undo overlay', 'Redo overlay'] as const;
     for (const actionName of actionNames) {
       const action = panel.getByRole('button', { name: actionName, exact: true });
       await action.scrollIntoViewIfNeeded();
@@ -4850,7 +4974,24 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
       assert(evidence.contained && evidence.reachable && evidence.height >= 44 && evidence.width >= 44,
         `${label} overlay action ${actionName} is not contained, reachable, and touch-sized: ${JSON.stringify(evidence)}.`);
     }
-    const compositeExport = panel.getByLabel('Include ink in composite export', { exact: true });
+    for (const actionName of [actionNames[0]!, actionNames[actionNames.length - 1]!] as const) {
+      const action = panel.getByRole('button', { name: actionName, exact: true });
+      await action.focus();
+      await action.scrollIntoViewIfNeeded();
+      assert(await action.evaluate((element) => document.activeElement === element), `${label} could not focus inline toolbar ${actionName}.`);
+      await assertTouchTarget(page, action, `${label} first-or-last inline toolbar action ${actionName}`);
+    }
+    await panel.getByRole('toolbar', { name: 'Overlay canvas toolbar', exact: true }).evaluate((element) => { element.scrollLeft = 0; });
+    await saveScreenshot(page, `inline-overlay-toolbar-${label}`);
+    const inspector = page.getByRole('button', { name: 'Objects and layers', exact: true });
+    await inspector.scrollIntoViewIfNeeded();
+    await verifiedClick(page, inspector, `${label} open bounded objects inspector`);
+    const inspectorPanel = page.getByLabel('Overlay objects and layers', { exact: true });
+    await assertContainedInViewport(page, inspectorPanel, `${label} bounded objects inspector`);
+    for (const actionName of ['Paste overlay', 'Restore overlay'] as const) {
+      await assertTouchTarget(page, inspectorPanel.getByRole('button', { name: actionName, exact: true }), `${label} inspector action ${actionName}`);
+    }
+    const compositeExport = inspectorPanel.getByLabel('Include ink in composite export', { exact: true });
     await compositeExport.scrollIntoViewIfNeeded();
     await assertHitTarget(page, compositeExport, `${label} composite ink export choice`);
     const compositeExportBounds = await compositeExport.evaluate((input) => input.parentElement?.getBoundingClientRect().toJSON());
@@ -4858,13 +4999,12 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
       `${label} composite ink export choice is not touch-sized: ${JSON.stringify(compositeExportBounds)}.`);
     assert(await compositeExport.isChecked(), `${label} did not default ink composite export to an explicit inclusion choice.`);
     const objectCount = await page.locator('[data-testid^="overlay-object-"]').count();
-    const addOverlay = panel.getByRole('button', { name: 'Add overlay', exact: true });
+    await inspector.scrollIntoViewIfNeeded();
+    await verifiedClick(page, inspector, `${label} close bounded objects inspector`);
+    const addOverlay = panel.getByRole('button', { name: 'Text', exact: true });
     await addOverlay.scrollIntoViewIfNeeded();
-    await verifiedClick(page, addOverlay, `${label} add overlay from bounded panel`);
+    await verifiedClick(page, addOverlay, `${label} add overlay from inline toolbar`);
     await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(objectCount + 1);
-    await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), `${label} close overlay controls`);
-    await expect(page.getByRole('button', { name: 'Overlay tools', exact: true })).toHaveAttribute('aria-expanded', 'false', { timeout: 5_000 });
-    await page.getByLabel('More overlay tools', { exact: true }).waitFor({ state: 'detached', timeout: 5_000 });
     const object = page.locator('[data-testid^="overlay-object-"]').last();
     const exposedPoint = await object.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
@@ -4879,7 +5019,52 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     assert(exposedPoint, `${label} overlay object has no exposed click point after closing controls.`);
     await page.mouse.click(exposedPoint.x, exposedPoint.y);
     await expect.poll(async () => object.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe('2px');
-    await verifiedClick(page, page.getByRole('button', { name: 'Overlay tools', exact: true }), `${label} reopen overlay controls for cleanup`);
+    if (label === 'mobile-landscape') {
+      await expect(page.getByTestId('overlay-toolbar-context')).toBeVisible();
+      await expectSelectedContextSemanticEditorLane(page, label);
+      await assertHitTarget(page, canvas, `${label} selected-context canvas center`);
+      await assertTouchTarget(page, page.getByRole('button', { name: 'Add node to Mermaid text', exact: true }),
+        `${label} selected-context flowchart add-node control`);
+    }
+    // Adding Text intentionally scrolls the bounded primary strip back toward
+    // its creation controls. Bring the disclosure back into the reachable
+    // portion of that same strip before verifying the selection/inspector lane.
+    await inspector.scrollIntoViewIfNeeded();
+    await verifiedClick(page, inspector, `${label} reopen objects inspector with a selected overlay`);
+    const selectedInspector = page.getByLabel('Overlay objects and layers', { exact: true });
+    await assertContainedInViewport(page, selectedInspector, `${label} selected inspector stays within the measured canvas lane`);
+    const selectedInspectorLaneEvidence = await selectedInspector.evaluate((element) => {
+      const inspectorBounds = element.getBoundingClientRect();
+      const canvasBounds = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]')?.getBoundingClientRect();
+      const camera = document.querySelector<HTMLElement>('[data-testid="canvas-controls-toolbar"]');
+      const cameraBounds = camera?.getBoundingClientRect();
+      const cameraStyle = camera ? getComputedStyle(camera) : null;
+      return {
+        camera: cameraBounds && cameraStyle
+          ? { bottom: cameraBounds.bottom, display: cameraStyle.display, top: cameraBounds.top, visibility: cameraStyle.visibility }
+          : null,
+        canvasBottom: canvasBounds?.bottom,
+        canvasLeft: canvasBounds?.left,
+        canvasRight: canvasBounds?.right,
+        canvasTop: canvasBounds?.top,
+        inspector: inspectorBounds.toJSON(),
+      };
+    });
+    const selectedInspectorLane = {
+      ...selectedInspectorLaneEvidence,
+      cameraTop: visibleCanvasCameraTop(
+        selectedInspectorLaneEvidence.canvasTop,
+        selectedInspectorLaneEvidence.canvasBottom,
+        selectedInspectorLaneEvidence.camera,
+      ),
+    };
+    assert(selectedInspectorLane.canvasTop !== undefined && selectedInspectorLane.canvasBottom !== undefined
+      && selectedInspectorLane.inspector.top >= selectedInspectorLane.canvasTop - 0.5
+      && selectedInspectorLane.inspector.bottom <= Math.min(selectedInspectorLane.canvasBottom, (selectedInspectorLane.cameraTop ?? selectedInspectorLane.canvasBottom) - 8) + 0.5,
+    `${label} selection plus inspector escaped the camera-safe canvas lane: ${JSON.stringify(selectedInspectorLane)}.`);
+    await assertHitTarget(page, inspector, `${label} selected inspector disclosure remains a center hit target`);
+    await inspector.scrollIntoViewIfNeeded();
+    await verifiedClick(page, inspector, `${label} close selected objects inspector`);
     for (const actionName of ['Frame selection', 'Move right', 'Bring front', 'Copy overlay', 'Delete overlay'] as const) {
       const action = page.getByRole('button', { name: actionName, exact: true });
       await action.scrollIntoViewIfNeeded();
@@ -4889,11 +5074,10 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     await deleteOverlay.scrollIntoViewIfNeeded();
     await verifiedClick(page, deleteOverlay, `${label} delete mobile overlay fixture`);
     await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(objectCount);
-    await verifiedClick(page, page.getByRole('button', { name: 'Close overlay tools', exact: true }), `${label} close overlay controls after cleanup`);
-    await assertHitTarget(page, page.getByTestId('create-diagram-tab'), `${label} tab action after overlay close`);
-    await assertHitTarget(page, page.getByTestId(SETTINGS_TRIGGER_TEST_ID), `${label} semantic topbar action after overlay close`);
-    await assertHitTarget(page, page.getByRole('button', { name: 'Zoom out', exact: true }), `${label} bottom toolbar action after overlay close`);
-    await assertHitTarget(page, canvas, `${label} canvas after overlay close`);
+    await assertHitTarget(page, page.getByTestId('create-diagram-tab'), `${label} tab action beside inline toolbar`);
+    await assertHitTarget(page, page.getByTestId(SETTINGS_TRIGGER_TEST_ID), `${label} semantic topbar action beside inline toolbar`);
+    await assertHitTarget(page, page.getByRole('button', { name: 'Zoom out', exact: true }), `${label} bottom toolbar action beside inline toolbar`);
+    await assertHitTarget(page, canvas, `${label} canvas beside inline toolbar`);
   }
   const sourceToggle = page.getByTestId('source-flyout-toggle');
   await expect(sourceToggle).toHaveAccessibleName(/^(show|hide) source$/i);
@@ -5013,6 +5197,42 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   }
 }
 
+async function expectSelectedContextSemanticEditorLane(page: Page, label: string): Promise<void> {
+  const context = page.getByTestId('overlay-toolbar-context');
+  await expect(context, `${label} must retain contextual actions while changing semantic form kinds.`).toBeVisible();
+  await replaceSource(page, TREEMAP_DIAGRAM_FIXTURE);
+  await waitForSource(page, TREEMAP_DIAGRAM_FIXTURE);
+  await waitForSemanticMode(page, 'Treemap · editable · form');
+  await closeFlyout(page, 'source');
+  await expect(context, `${label} semantic form change cleared the selected-overlay context.`).toBeVisible();
+  const panel = page.getByTestId('treemap-editor-controls');
+  const topInput = panel.getByLabel('New Treemap node label', { exact: true });
+  const lane = await panel.evaluate((element) => {
+    const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+    const toolbar = document.querySelector<HTMLElement>('[aria-label="Overlay scene controls"]');
+    if (!canvas || !toolbar) return null;
+    const canvasBounds = canvas.getBoundingClientRect();
+    const panelBounds = element.getBoundingClientRect();
+    const toolbarBounds = toolbar.getBoundingClientRect();
+    return {
+      canvasTop: canvasBounds.top,
+      panelTop: panelBounds.top,
+      safeTop: Number.parseFloat(getComputedStyle(canvas).getPropertyValue('--overlay-toolbar-safe-top')),
+      toolbarBottom: toolbarBounds.bottom,
+    };
+  });
+  assert(lane !== null && Number.isFinite(lane.safeTop)
+    && lane.panelTop >= lane.canvasTop + lane.safeTop - 0.5
+    && lane.panelTop >= lane.toolbarBottom - 0.5,
+  `${label} selected-context Treemap semantic editor did not clear the measured toolbar lane: ${JSON.stringify(lane)}.`);
+  await assertTouchTarget(page, topInput, `${label} selected-context Treemap top input`);
+  await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForSource(page, FLOWCHART_FIXTURE);
+  await closeFlyout(page, 'source');
+  await waitForCanvas(page, 'flowchart');
+  await expect(context, `${label} selected-overlay context did not restore after the semantic-form proof.`).toBeVisible();
+}
+
 const PHONE_CONTEXT_OPTIONS = { deviceScaleFactor: 1, hasTouch: true, isMobile: true } as const;
 
 async function expectResponsiveNumericPanel(
@@ -5079,9 +5299,10 @@ async function expectResponsiveNumericPanel(
     `${label} Pie panel did not provide internal scrolling: ${JSON.stringify(geometry)}.`,
   );
   const overlayToggle = page.getByRole("button", {
-    name: "Overlay tools",
+    name: "Select overlay tool",
     exact: true,
   });
+  await overlayToggle.scrollIntoViewIfNeeded();
   await assertTouchTarget(
     page,
     overlayToggle,
@@ -5096,6 +5317,7 @@ async function expectResponsiveNumericPanel(
   await assertTouchTarget(page, add, `${label} Pie add-slice control`);
   await scrollErControlIntoView(input);
   await assertTouchTarget(page, input, `${label} Pie numeric input`);
+  await overlayToggle.scrollIntoViewIfNeeded();
   await assertTouchTarget(
     page,
     overlayToggle,
@@ -5399,6 +5621,7 @@ H,I,1`;
     mobileTransitionDelete,
     `${label} Cynefin scrolled delete control`,
   );
+  await overlayToggle.scrollIntoViewIfNeeded();
   await assertTouchTarget(
     page,
     overlayToggle,
@@ -5649,6 +5872,7 @@ H,I,1`;
     .toBe("Venn · source only");
   await closeFlyout(page, "source");
   await expect(vennPanel).toHaveCount(0);
+  await overlayToggle.scrollIntoViewIfNeeded();
   await assertTouchTarget(
     page,
     overlayToggle,
@@ -5891,7 +6115,7 @@ async function waitForTouchLabelPresentationToClear(page: Page, label: string): 
     `${label} retained an anchored touch label.`).toHaveCount(0);
 }
 
-async function assertMobileErrorBannerScrollability(page: Page, label: string): Promise<void> {
+async function assertMobileErrorBannerScrollability(page: Page, label: string, inspectorAlreadyOpen = false): Promise<void> {
   const banner = page.getByTestId('parse-error-banner');
   await banner.waitFor({ state: 'visible', timeout: 15_000 });
   const behavior = await banner.evaluate((element) => {
@@ -5912,7 +6136,7 @@ async function assertMobileErrorBannerScrollability(page: Page, label: string): 
     if (!bannerElement || !canvas) return false;
     const bannerBounds = bannerElement.getBoundingClientRect();
     const canvasBounds = canvas.getBoundingClientRect();
-    const ratios = [0.1, 0.5, 0.9];
+    const ratios = [0.04, 0.1, 0.5, 0.9, 0.96];
     for (const yRatio of ratios) {
       for (const xRatio of ratios) {
         const x = canvasBounds.left + (canvasBounds.width * xRatio);
@@ -5928,13 +6152,79 @@ async function assertMobileErrorBannerScrollability(page: Page, label: string): 
   assert(canvasReceivesTouchesOutsideBanner,
     `${label} global Mermaid error prevented the canvas receiving pointer hits outside the banner bounds.`);
   if (label.startsWith('mobile-390') || label.startsWith('mobile-320')) {
-    await assertClosedOverlayToggleBesideError(page, banner, `${label} parse-error coexistence`);
+    if (inspectorAlreadyOpen) await assertOpenOverlayInspectorAboveCamera(page, `${label} parse-error coexistence`);
+    else await assertClosedOverlayToggleBesideError(page, banner, `${label} parse-error coexistence`);
   }
 }
 
+async function assertOpenOverlayInspectorAboveCamera(page: Page, label: string): Promise<void> {
+  const inspectorToggle = page.getByRole('button', { name: 'Objects and layers', exact: true });
+  await expect(inspectorToggle, `${label} inspector disclosure was not kept open.`).toHaveAttribute('aria-expanded', 'true');
+  const inspector = page.getByLabel('Overlay objects and layers', { exact: true });
+  const inspectorLaneEvidence = await inspector.evaluate((element) => {
+    const inspectorBounds = element.getBoundingClientRect();
+    const canvasBounds = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]')?.getBoundingClientRect();
+    const camera = document.querySelector<HTMLElement>('[data-testid="canvas-controls-toolbar"]');
+    const cameraBounds = camera?.getBoundingClientRect();
+    const cameraStyle = camera ? getComputedStyle(camera) : null;
+    return {
+      camera: cameraBounds && cameraStyle
+        ? { bottom: cameraBounds.bottom, display: cameraStyle.display, top: cameraBounds.top, visibility: cameraStyle.visibility }
+        : null,
+      canvasBottom: canvasBounds?.bottom,
+      canvasTop: canvasBounds?.top,
+      inspector: inspectorBounds.toJSON(),
+    };
+  });
+  const inspectorLane = {
+    ...inspectorLaneEvidence,
+    cameraTop: visibleCanvasCameraTop(
+      inspectorLaneEvidence.canvasTop,
+      inspectorLaneEvidence.canvasBottom,
+      inspectorLaneEvidence.camera,
+    ),
+  };
+  assert(inspectorLane.canvasTop !== undefined && inspectorLane.canvasBottom !== undefined
+    && inspectorLane.inspector.top >= inspectorLane.canvasTop - 0.5
+    && inspectorLane.inspector.bottom <= Math.min(inspectorLane.canvasBottom, (inspectorLane.cameraTop ?? inspectorLane.canvasBottom) - 8) + 0.5,
+  `${label} inspector escaped the camera-safe canvas lane: ${JSON.stringify(inspectorLane)}.`);
+  const gutterPoints = await page.evaluate((forbiddenSelector) => {
+    const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+    const inspector = document.querySelector<HTMLElement>('[aria-label="Overlay objects and layers"]');
+    if (!canvas || !inspector) return [];
+    const canvasBounds = canvas.getBoundingClientRect();
+    const inspectorBounds = inspector.getBoundingClientRect();
+    const top = Math.max(canvasBounds.top + 4, inspectorBounds.top + 4);
+    const bottom = Math.min(canvasBounds.bottom - 4, inspectorBounds.bottom - 4);
+    if (bottom <= top) return [];
+    const minimumGutter = 20;
+    const xCandidates = [
+      ...(inspectorBounds.left - canvasBounds.left >= minimumGutter
+        ? [(canvasBounds.left + 4 + inspectorBounds.left - 4) / 2] : []),
+      ...(canvasBounds.right - inspectorBounds.right >= minimumGutter
+        ? [(inspectorBounds.right + 4 + canvasBounds.right - 4) / 2] : []),
+    ];
+    const points: CanvasGesturePoint[] = [];
+    for (const x of xCandidates) {
+      for (const ratio of [0.12, 0.3, 0.5, 0.7, 0.88]) {
+        const y = top + ((bottom - top) * ratio);
+        const hit = document.elementFromPoint(x, y);
+        const outsideInspector = x < inspectorBounds.left || x > inspectorBounds.right;
+        if (!outsideInspector || !(hit instanceof Element) || !canvas.contains(hit) || hit.closest(forbiddenSelector)) continue;
+        if (points.every((point) => Math.hypot(point.x - x, point.y - y) >= 48)) points.push({ x, y });
+        if (points.length === 2) return points;
+      }
+    }
+    return points;
+  }, CANVAS_GESTURE_FORBIDDEN_SELECTOR);
+  assert(gutterPoints.length === 2,
+    `${label} inspector did not leave two canvas-owned edge-gutter pan points in its vertical span: ${JSON.stringify(gutterPoints)}.`);
+}
+
 async function assertClosedOverlayToggleBesideError(page: Page, banner: Locator, label: string): Promise<void> {
-  const toggle = page.getByRole('button', { name: 'Overlay tools', exact: true });
+  const toggle = page.getByRole('button', { name: 'Select overlay tool', exact: true });
   await toggle.waitFor({ state: 'visible', timeout: 15_000 });
+  await toggle.scrollIntoViewIfNeeded();
   await page.waitForTimeout(100);
   const diagnostics = await toggle.evaluate((element) => {
     const canvas = element.closest('[data-testid="diagram-canvas"]');
@@ -5979,6 +6269,13 @@ async function assertClosedOverlayToggleBesideError(page: Page, banner: Locator,
   assert(toggleBounds.x + toggleBounds.width <= bannerBounds.x || bannerBounds.x + bannerBounds.width <= toggleBounds.x
     || toggleBounds.y + toggleBounds.height <= bannerBounds.y || bannerBounds.y + bannerBounds.height <= toggleBounds.y,
   `${label} toggle overlaps its error banner: ${JSON.stringify({ bannerBounds, toggleBounds })}.`);
+  const inspectorToggle = page.getByRole('button', { name: 'Objects and layers', exact: true });
+  await inspectorToggle.scrollIntoViewIfNeeded();
+  await verifiedClick(page, inspectorToggle, `${label} open objects inspector after error insertion`);
+  await assertOpenOverlayInspectorAboveCamera(page, `${label} inspector after error insertion`);
+  await inspectorToggle.scrollIntoViewIfNeeded();
+  await verifiedClick(page, inspectorToggle, `${label} close objects inspector before error recovery`);
+  await toggle.scrollIntoViewIfNeeded();
 }
 
 async function waitForCameraChange(page: Page, previous: string, label: string): Promise<string> {
@@ -6001,6 +6298,7 @@ async function waitForCameraChange(page: Page, previous: string, label: string):
 }
 
 type CanvasGesturePoint = { x: number; y: number };
+const CANVAS_GESTURE_FORBIDDEN_SELECTOR = 'a, button, input, label, select, textarea, form, [contenteditable="true"], [role="button"], [data-canvas-pan-exclusion="true"], [data-subgraph-drag-target="true"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle';
 
 async function allowedCanvasGesturePoints(
   page: Page,
@@ -6013,15 +6311,14 @@ async function allowedCanvasGesturePoints(
     const rect = root.getBoundingClientRect();
     // Keep the test's blank-point contract aligned with DiagramCanvas: a drag
     // beginning on a sequence editor form is intentionally not a canvas pan.
-    const forbiddenSelector = 'a, button, input, label, select, textarea, form, [contenteditable="true"], [role="button"], [data-canvas-pan-exclusion="true"], [data-subgraph-drag-target="true"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle';
-    const ratios = [0.12, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.88];
+    const ratios = [0.04, 0.12, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.88, 0.96];
     const candidates: CanvasGesturePoint[] = [];
 
     for (const yRatio of ratios) {
       for (const xRatio of ratios) {
         const point = { x: rect.left + (rect.width * xRatio), y: rect.top + (rect.height * yRatio) };
         const target = document.elementFromPoint(point.x, point.y);
-        if (!(target instanceof Element) || !root.contains(target) || target.closest(forbiddenSelector)) continue;
+        if (!(target instanceof Element) || !root.contains(target) || target.closest(options.forbiddenSelector)) continue;
         if (candidates.every((candidate) => Math.hypot(candidate.x - point.x, candidate.y - point.y) >= options.minimumSeparationPx)) {
           candidates.push(point);
         }
@@ -6029,7 +6326,7 @@ async function allowedCanvasGesturePoints(
       }
     }
     return candidates;
-  }, { count, minimumSeparationPx });
+  }, { count, forbiddenSelector: CANVAS_GESTURE_FORBIDDEN_SELECTOR, minimumSeparationPx });
   assert(points.length === count,
     `${label} found ${points.length} of ${count} required blank canvas touch points at least ${minimumSeparationPx}px apart.`);
   return points;
@@ -6145,7 +6442,7 @@ async function expectTouchCanvasControls(
       // bottom canvas lanes. Each action must still become an unobscured 44px
       // touch target through the normal in-panel scroll route.
       for (const [target, targetLabel] of [[participantAdd, 'add participant'], [messageAdd, 'add message']] as const) {
-        await target.scrollIntoViewIfNeeded();
+        await centerSequenceEditorTarget(page, target, `${label} sequence ${targetLabel}`);
         await assertTouchTarget(page, target, `${label} sequence ${targetLabel}`);
       }
       await page.getByTestId('sequence-editor-controls').evaluate((element) => { element.scrollTop = 0; });
@@ -6181,7 +6478,7 @@ async function expectTouchCanvasControls(
       `${label} sequence forms overflowed or overlapped workspace chrome: ${JSON.stringify(layout)}.`);
     if (label === 'mobile-landscape') {
       const editor = page.getByTestId('sequence-editor-controls');
-      let safeLane: { controlsTop: number; editorBottom: number; editorTop: number; safeTop: number; scrollPaddingBottom: string; scrollPaddingTop: string } | null = null;
+      let safeLane: { controlsTop: number; editorBottom: number; editorTop: number; footerTop?: number; safeTop: number; scrollPaddingBottom: string; scrollPaddingTop: string } | null = null;
       await expect.poll(async () => {
         safeLane = await page.getByTestId('diagram-canvas').evaluate((canvas) => {
         const style = getComputedStyle(canvas);
@@ -6192,10 +6489,12 @@ async function expectTouchCanvasControls(
         const canvasBounds = canvas.getBoundingClientRect();
         const editorBounds = editorElement.getBoundingClientRect();
         const controlsBounds = controls.getBoundingClientRect();
+        const footerBounds = document.querySelector<HTMLElement>('[data-testid="workspace-footer"]')?.getBoundingClientRect();
         return {
           controlsTop: controlsBounds.top,
           editorBottom: editorBounds.bottom,
           editorTop: editorBounds.top - canvasBounds.top,
+          footerTop: footerBounds?.top,
           safeTop,
           scrollPaddingBottom: getComputedStyle(editorElement).scrollPaddingBottom,
           scrollPaddingTop: getComputedStyle(editorElement).scrollPaddingTop,
@@ -6208,7 +6507,7 @@ async function expectTouchCanvasControls(
       }).not.toBeNull();
       assert(safeLane !== null
         && safeLane.editorTop >= safeLane.safeTop - 1
-        && safeLane.editorBottom <= safeLane.controlsTop - 1
+        && safeLane.editorBottom <= Math.min(safeLane.controlsTop, safeLane.footerTop ?? Number.POSITIVE_INFINITY) - 1
         && Number.parseFloat(safeLane.scrollPaddingBottom) > 0
         && Math.abs(Number.parseFloat(safeLane.scrollPaddingTop) - safeLane.safeTop) < 1,
       `${label} sequence editor did not reserve the measured toolbar lane: ${JSON.stringify(safeLane)}.`);
@@ -6474,6 +6773,10 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   await assertPhoneSurface(page, label, 'sequence-touch-controls');
 
   console.log(`E2E phone ${label}: invalid-source`);
+  const invalidSourceInspector = page.getByRole('button', { name: 'Objects and layers', exact: true });
+  await invalidSourceInspector.scrollIntoViewIfNeeded();
+  await verifiedClick(page, invalidSourceInspector, `${label} open inspector before invalid source insertion`);
+  await expect(invalidSourceInspector).toHaveAttribute('aria-expanded', 'true');
   await replaceSource(page, INVALID_MERMAID_FIXTURE);
   await waitForInvalidPreview(page);
   const sourceFlyout = page.getByTestId('source-flyout');
@@ -6489,13 +6792,18 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   await tapTarget(page, page.getByRole('button', { name: 'Close source panel', exact: true }), `${label} close invalid source panel`);
   await page.getByTestId('source-flyout').waitFor({ state: 'detached', timeout: 15_000 });
   await waitForInvalidPreview(page);
-  await assertMobileErrorBannerScrollability(page, `${label} global Mermaid error`);
+  await assertMobileErrorBannerScrollability(page, `${label} global Mermaid error`, true);
 
   console.log(`E2E phone ${label}: restore-source`);
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForSource(page, FLOWCHART_FIXTURE);
   await sourceParseStatus.waitFor({ state: 'detached', timeout: 15_000 });
   await closeFlyout(page, 'source');
+  if (await invalidSourceInspector.getAttribute('aria-expanded') === 'true') {
+    await assertOpenOverlayInspectorAboveCamera(page, `${label} inspector after invalid-source recovery`);
+    await invalidSourceInspector.scrollIntoViewIfNeeded();
+    await verifiedClick(page, invalidSourceInspector, `${label} close inspector after invalid-source recovery`);
+  }
   await waitForCanvas(page, 'flowchart');
   await assertPhoneSurface(page, label, 'flowchart-restored');
   console.log(`E2E phone ${label}: workspace-complete`);
@@ -7283,8 +7591,8 @@ async function validateWorkspaceUx(): Promise<void> {
   const results: string[] = [];
   const mobilePinchResiduals: string[] = [];
   const slice = process.env.ARIELCHARTS_E2E_SLICE;
-  if (slice !== undefined && slice !== 'history' && slice !== 'cynefin-history' && slice !== 'wheel' && slice !== 'landscape') {
-    throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history", "cynefin-history", "wheel", "landscape", or no slice.`);
+  if (slice !== undefined && slice !== 'history' && slice !== 'cynefin-history' && slice !== 'wheel' && slice !== 'landscape' && slice !== 'mobile-390' && slice !== 'mobile-320') {
+    throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history", "cynefin-history", "wheel", "landscape", "mobile-390", "mobile-320", or no slice.`);
   }
   await withOwnedServices(async ({ baseUrl, mcpUrl, serverUrl }) => {
     const browser = await launchBrowserHarness();
@@ -7331,20 +7639,24 @@ async function validateWorkspaceUx(): Promise<void> {
         return;
       }
 
-      if (slice === 'landscape') {
+      if (slice === 'landscape' || slice === 'mobile-390' || slice === 'mobile-320') {
+        const label = slice === 'landscape' ? 'mobile-landscape' : slice;
+        const viewport = slice === 'landscape'
+          ? MOBILE_LANDSCAPE_VIEWPORT
+          : slice === 'mobile-320' ? NARROW_MOBILE_VIEWPORT : MOBILE_VIEWPORT;
         const responsiveSession = await mcp.getSession(sessionId);
         const responsiveMain = responsiveSession.diagrams.find((diagram) => diagram.name === 'Main');
-        assert(responsiveMain, 'Landscape fixture room did not create its Main diagram.');
-        await mcp.writeLatest(sessionId, responsiveMain.id, FLOWCHART_FIXTURE, 'Landscape fixture seed');
+        assert(responsiveMain, `${label} fixture room did not create its Main diagram.`);
+        await mcp.writeLatest(sessionId, responsiveMain.id, FLOWCHART_FIXTURE, `${label} fixture seed`);
         await seedResponsiveCatalog(mcp, sessionId);
-        const { context, page: landscapePage } = await browser.newPage(MOBILE_LANDSCAPE_VIEWPORT, PHONE_CONTEXT_OPTIONS);
+        const { context, page: responsivePage } = await browser.newPage(viewport, PHONE_CONTEXT_OPTIONS);
         try {
-          await visitWorkspace(landscapePage, baseUrl, sessionId, room.roomKey);
-          await waitForWorkspaceProviderSync(landscapePage);
-          await expectStableFlyoutAnchors(landscapePage, 'mobile-landscape');
-          await expectResponsiveControls(landscapePage, 'mobile-landscape', 'Main');
-          await expectPhoneLiveCodingWorkspace(landscapePage, 'mobile-landscape', 'Main', mobilePinchResiduals);
-          record(results, 'mobile-landscape semantic controls reserve the measured fixed-toolbar lane');
+          await visitWorkspace(responsivePage, baseUrl, sessionId, room.roomKey);
+          await waitForWorkspaceProviderSync(responsivePage);
+          await expectStableFlyoutAnchors(responsivePage, label);
+          await expectResponsiveControls(responsivePage, label, 'Main');
+          await expectPhoneLiveCodingWorkspace(responsivePage, label, 'Main', mobilePinchResiduals);
+          record(results, `${label} semantic controls reserve the measured fixed-toolbar lane`);
         } finally {
           await context.close();
         }

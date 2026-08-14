@@ -1607,62 +1607,6 @@ code {
 }
 
 @media (max-width: 420px) {
-  .overlay-tools-toggle {
-    bottom: auto !important;
-    top: 50%;
-    transform: translateY(-50%);
-  }
-
-  .overlay-tools-toggle[aria-expanded="false"] {
-    top: 8px;
-    transform: none;
-    width: 104px;
-  }
-
-  .workspace-diagram-pane:has(.overlay-tools-toggle[aria-expanded="false"]) > .error-banner {
-    left: 128px;
-    right: 12px;
-    transform: none;
-    width: auto;
-  }
-
-  .overlay-scene-controls {
-    bottom: 8px;
-    box-sizing: border-box;
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    left: 132px !important;
-    max-height: calc(100% - 16px);
-    max-width: none !important;
-    min-width: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    right: 8px;
-    top: 8px !important;
-    touch-action: pan-y;
-  }
-
-  .overlay-scene-controls button {
-    min-height: 44px;
-    min-width: 44px;
-  }
-
-  .overlay-scene-controls label {
-    align-items: center;
-    display: flex;
-    min-height: 44px;
-    min-width: 44px;
-  }
-
-  .overlay-scene-list {
-    bottom: 12px !important;
-    left: auto !important;
-    max-width: none !important;
-    right: 12px !important;
-    top: auto !important;
-    width: auto !important;
-  }
-
   .canvas-empty-chooser-card {
     max-width: calc(100% - 16px);
     padding: 12px;
@@ -1688,9 +1632,9 @@ code {
     overscroll-behavior: contain;
     padding-bottom: 4px;
     display: grid;
-    left: 8px;
+    left: 24px;
     max-width: none;
-    right: 8px;
+    right: 24px;
     transform: none;
     width: auto;
   }
@@ -1752,64 +1696,6 @@ code {
 
   .canvas-sequence-message-form button {
     grid-column: 4;
-  }
-}
-
-@media (min-width: 421px) and (max-height: 420px) and (orientation: landscape) {
-  .overlay-tools-toggle {
-    bottom: auto !important;
-    top: 50%;
-    transform: translateY(-50%);
-  }
-
-  .overlay-tools-toggle[aria-expanded="false"] {
-    top: 8px;
-    transform: none;
-    width: 104px;
-  }
-
-  .workspace-diagram-pane:has(.overlay-tools-toggle[aria-expanded="false"]) > .error-banner {
-    left: 128px;
-    right: 12px;
-    transform: none;
-    width: auto;
-  }
-
-  .overlay-scene-controls {
-    bottom: 8px;
-    box-sizing: border-box;
-    display: grid !important;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    left: 132px !important;
-    max-height: calc(100% - 16px);
-    max-width: none !important;
-    min-width: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    right: 8px;
-    top: 8px !important;
-    touch-action: pan-y;
-  }
-
-  .overlay-scene-controls button {
-    min-height: 44px;
-    min-width: 44px;
-  }
-
-  .overlay-scene-controls label {
-    align-items: center;
-    display: flex;
-    min-height: 44px;
-    min-width: 44px;
-  }
-
-  .overlay-scene-list {
-    bottom: 12px !important;
-    left: auto !important;
-    max-width: none !important;
-    right: 12px !important;
-    top: auto !important;
-    width: auto !important;
   }
 }
 
@@ -2153,36 +2039,6 @@ code {
   border-left: 1px solid var(--control-border);
   border-bottom: 1px solid var(--control-border);
   background: var(--surface-overlay);
-}
-
-@media (min-width: 421px) and (min-height: 421px) {
-  .overlay-scene-controls {
-    max-height: calc(100% - 140px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-}
-
-.overlay-scene-list {
-  pointer-events: none !important;
-}
-
-.overlay-scene-list button,
-.overlay-scene-list input,
-.overlay-scene-list label,
-.overlay-scene-list select {
-  pointer-events: auto;
-}
-
-.overlay-scene-controls {
-  pointer-events: none !important;
-}
-
-.overlay-scene-controls button,
-.overlay-scene-controls input,
-.overlay-scene-controls label,
-.overlay-scene-controls select {
-  pointer-events: auto;
 }
 
 .workspace-source-flyout {
@@ -2825,14 +2681,15 @@ code {
   }
 }
 
-/* The canvas action strip is intentionally compact: creation stays close at hand
-   while document-affecting actions live behind the explicit more control. */
+/* Primary canvas tools stay in one direct, horizontal strip. Object operations
+   are contextual and the inspector is intentionally separate from drawing. */
 .overlay-icon-toolbar {
   align-items: center;
   display: grid;
+  gap: 8px;
   justify-items: center;
   left: 50%;
-  max-width: calc(100% - 24px);
+  max-width: min(100% - 24px, var(--overlay-toolbar-available-width, 100vw));
   pointer-events: none;
   position: absolute;
   top: 12px;
@@ -2842,8 +2699,9 @@ code {
 }
 
 .overlay-toolbar-primary,
-.overlay-toolbar-secondary,
-.overlay-toolbar-group {
+.overlay-toolbar-context,
+.overlay-toolbar-inspector,
+.overlay-toolbar-inspector-actions {
   align-items: center;
   background: color-mix(in srgb, var(--control-surface) 94%, transparent);
   border: 1px solid var(--control-border);
@@ -2856,31 +2714,48 @@ code {
 }
 
 .overlay-toolbar-primary {
+  box-sizing: border-box;
+  overflow-x: auto;
+  padding: 4px;
+  /* The toolbar floats over the canvas: only its actual controls may capture
+     a pointer, so its painted padding, gaps, and separators do not mask a
+     canvas node or section header beneath the strip. */
+  pointer-events: none;
+  scrollbar-width: thin;
+  touch-action: pan-x;
+  width: min(100%, 790px);
+}
+
+.overlay-toolbar-primary > .overlay-toolbar-button { pointer-events: auto; }
+
+.overlay-toolbar-context {
+  box-sizing: border-box;
   overflow-x: auto;
   padding: 4px;
   scrollbar-width: thin;
+  width: min(100%, 680px);
 }
 
-.overlay-toolbar-secondary {
+.overlay-toolbar-inspector {
   align-items: stretch;
+  box-sizing: border-box;
   flex-direction: column;
   max-width: min(360px, calc(var(--overlay-toolbar-available-width, 100vw) - 16px));
-  margin-top: 8px;
-  max-height: min(280px, calc(var(--overlay-toolbar-available-height, 100vh) - 76px));
+  max-height: min(280px, var(--overlay-toolbar-inspector-max-height, 0px));
+  min-height: 0;
   overflow: auto;
   padding: 6px;
   width: min(360px, calc(var(--overlay-toolbar-available-width, 100vw) - 16px));
 }
 
-.overlay-toolbar-group {
+.overlay-toolbar-inspector-actions {
   box-shadow: none;
-  flex-wrap: wrap;
   justify-content: flex-start;
   padding: 2px;
 }
 
-.overlay-toolbar-section { align-items: flex-start; display: flex; flex-direction: column; gap: 3px; }
 .overlay-toolbar-section-label { color: var(--ink-muted); font: 600 10px/1.2 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+.overlay-toolbar-divider { background: var(--control-border); flex: 0 0 1px; height: 28px; margin: 0 2px; width: 1px; }
 
 .overlay-toolbar-button {
   align-items: center;
@@ -2920,7 +2795,7 @@ code {
 .overlay-resize-handle { background: var(--selection); border: 2px solid var(--surface-canvas); border-radius: 50%; bottom: -7px; cursor: nwse-resize; height: 14px; padding: 0; position: absolute; right: -7px; width: 14px; z-index: 3; }
 
 @media (forced-colors: active) {
-  .overlay-toolbar-primary, .overlay-toolbar-secondary, .overlay-toolbar-group { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  .overlay-toolbar-primary, .overlay-toolbar-context, .overlay-toolbar-inspector, .overlay-toolbar-inspector-actions { background: Canvas; border-color: CanvasText; box-shadow: none; }
   .overlay-toolbar-button { border-color: CanvasText; color: CanvasText; forced-color-adjust: none; }
   .overlay-toolbar-button[aria-pressed='true'], .overlay-toolbar-button:focus-visible { background: Highlight; color: HighlightText; outline: 2px solid Highlight; }
 }
@@ -2928,21 +2803,51 @@ code {
 @media (pointer: coarse), (max-width: 420px) {
   .overlay-icon-toolbar { max-width: calc(100% - 16px); top: 8px; }
   .overlay-toolbar-primary { justify-content: flex-start; }
-  .overlay-icon-toolbar[data-compact-error='true'] .overlay-toolbar-primary > :not(.overlay-toolbar-more) { display: none; }
   .overlay-toolbar-button { height: 44px; width: 44px; }
-  .overlay-toolbar-secondary { max-height: max(44px, calc(var(--overlay-toolbar-available-height, 100dvh) - 76px)); max-width: calc(var(--overlay-toolbar-available-width, 100vw) - 16px); width: calc(var(--overlay-toolbar-available-width, 100vw) - 16px); }
+  .overlay-toolbar-inspector { max-width: calc(var(--overlay-toolbar-available-width, 100vw) - 48px); width: calc(var(--overlay-toolbar-available-width, 100vw) - 48px); }
   .overlay-toolbar-checkbox { min-height: 44px; }
+}
 
-  .workspace-diagram-pane[data-overlay-toolbar-error-compact='true'] > .error-banner {
+/* A selected object shares the primary row in short landscape. This keeps the
+   fixed toolbar lane to one row, leaving the semantic editor a usable vertical
+   scroll surface below it. */
+@media (min-width: 421px) and (max-height: 500px) {
+  .overlay-icon-toolbar {
     box-sizing: border-box;
-    height: 48px;
-    left: 64px;
-    max-height: 48px;
-    padding: 6px 8px;
-    right: 8px;
-    top: 8px;
-    transform: none;
-    width: auto;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+    width: min(calc(100% - 24px), var(--overlay-toolbar-available-width, 100vw));
+  }
+
+  .overlay-icon-toolbar:not(:has(.overlay-toolbar-context)) > .overlay-toolbar-primary {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    justify-self: center;
+    width: min(100%, 790px);
+  }
+
+  .overlay-icon-toolbar:has(.overlay-toolbar-context) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .overlay-icon-toolbar:has(.overlay-toolbar-context) > .overlay-toolbar-primary,
+  .overlay-icon-toolbar:has(.overlay-toolbar-context) > .overlay-toolbar-context {
+    grid-row: 1;
+    justify-self: stretch;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .overlay-icon-toolbar:has(.overlay-toolbar-context) > .overlay-toolbar-primary { grid-column: 1; }
+  .overlay-icon-toolbar:has(.overlay-toolbar-context) > .overlay-toolbar-context { grid-column: 2; }
+
+  .overlay-icon-toolbar > .overlay-toolbar-inspector {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: end;
+    margin-inline-end: 12px;
+    max-width: min(360px, calc((var(--overlay-toolbar-available-width, 100vw) - 48px) / 2));
+    width: min(360px, calc((var(--overlay-toolbar-available-width, 100vw) - 48px) / 2));
   }
 }
 
@@ -3398,10 +3303,10 @@ code {
   }
 }
 
-/* On short touch canvases, the fixed centered overlay strip gets a measured
-   lane. Sequence controls scroll beneath it instead of being covered after a
-   lower action is scrolled into view. */
-@media (max-height: 500px) {
+/* On narrow or short touch canvases, the fixed centered overlay strip gets a
+   measured lane. Sequence controls scroll beneath it instead of being covered
+   when a contextual toolbar row is present. */
+@media (max-width: 420px), (max-height: 500px) {
   .diagram-canvas-shell[data-overlay-toolbar-safe-top='true'] > .canvas-sequence-editor:not(.is-centered) {
     bottom: var(--canvas-controls-toolbar-safe-bottom);
     max-height: calc(100% - var(--overlay-toolbar-safe-top) - var(--canvas-controls-toolbar-safe-bottom));
@@ -3540,16 +3445,17 @@ code {
   line-height: 1.55;
 }
 
-@media (max-width: 420px) {
+@media (max-width: 420px), (max-height: 500px) {
   .canvas-semantic-editor {
-    /* The overlay toolbar occupies the first 54px of the canvas plus its
-       touch-safe gap. Keep every internally scrollable form below that lane. */
-    top: 72px !important;
+    /* The portalled toolbar can move beneath an error banner. Semantic forms
+       use the same measured lane instead of a stale fixed top inset. */
+    --canvas-semantic-editor-top: max(72px, var(--overlay-toolbar-safe-top, 0px));
+    top: var(--canvas-semantic-editor-top) !important;
   }
 
   .canvas-treemap-venn-editor {
     left: 8px !important;
-    max-height: calc(100% - 84px) !important;
+    max-height: calc(100% - var(--canvas-semantic-editor-top) - 12px) !important;
     overflow-y: auto !important;
     overscroll-behavior: contain;
     right: 8px !important;

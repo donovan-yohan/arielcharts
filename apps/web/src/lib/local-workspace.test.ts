@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { LocalAwareness, LOCAL_WORKSPACE_HANDOFF_STORAGE_KEY, areYjsStateVectorsEqual, clearLocalWorkspaceHandoff, completeLocalWorkspacePromotion, getLocalWorkspaceLoadingCopy, publishLocalWorkspace, readLocalWorkspaceHandoff, recordLocalWorkspaceHandoff } from './local-workspace';
 import { addOverlayObject } from './overlay-scene';
 
 describe('local workspace runtime', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
   function workspace(): Y.Doc {
     const doc = new Y.Doc(); const diagram = new Y.Map<unknown>();
     diagram.set('name', 'Local diagram'); diagram.set('mermaid', new Y.Text('flowchart TD\n  A --> B'));
@@ -42,6 +44,14 @@ describe('local workspace runtime', () => {
     expect(readLocalWorkspaceHandoff(storage)).toBe('abc123de');
     clearLocalWorkspaceHandoff('abc123de', storage);
     expect(readLocalWorkspaceHandoff(storage)).toBeNull();
+  });
+
+  it('returns no handoff during server rendering without touching browser storage', () => {
+    vi.stubGlobal('window', undefined);
+    expect(readLocalWorkspaceHandoff()).toBeNull();
+    expect(() => recordLocalWorkspaceHandoff('abc123de')).not.toThrow();
+    expect(() => recordLocalWorkspaceHandoff('bad')).toThrow('Cannot save an invalid online workspace handoff.');
+    expect(() => clearLocalWorkspaceHandoff('abc123de')).not.toThrow();
   });
 
   it('compares promotion state vectors byte-for-byte', () => {

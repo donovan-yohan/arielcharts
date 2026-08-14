@@ -764,6 +764,95 @@ export function syncCanvasToolbarSafeLane(canvas: HTMLElement, toolbar: HTMLElem
   return true;
 }
 
+export function observeCanvasToolbarSafeLane(
+  canvas: HTMLElement,
+  diagramId: string | undefined,
+  onToolbarPresence: (present: boolean) => void,
+): () => void {
+  let observedToolbar: HTMLElement | null = null;
+
+  function findToolbar() {
+    if (!diagramId) return null;
+    return Array.from(document.querySelectorAll<HTMLElement>('.overlay-icon-toolbar'))
+      .find((toolbar) => toolbar.dataset.overlayDiagramId === diagramId) ?? null;
+  }
+
+  function update() {
+    const toolbar = findToolbar();
+    if (toolbar !== observedToolbar) {
+      if (observedToolbar) toolbarResizeObserver.unobserve(observedToolbar);
+      toolbarMutationObserver.disconnect();
+      observedToolbar = toolbar;
+      if (observedToolbar) {
+        toolbarResizeObserver.observe(observedToolbar);
+        toolbarMutationObserver.observe(observedToolbar, {
+          attributeFilter: ['style'],
+          attributes: true,
+          childList: true,
+          subtree: true,
+        });
+      }
+    }
+    syncCanvasToolbarSafeLane(canvas, toolbar);
+    onToolbarPresence(Boolean(toolbar));
+  }
+
+  const toolbarResizeObserver = new ResizeObserver(update);
+  const canvasResizeObserver = new ResizeObserver(update);
+  const portalMutationObserver = new MutationObserver(update);
+  const toolbarMutationObserver = new MutationObserver(update);
+
+  canvasResizeObserver.observe(canvas);
+  portalMutationObserver.observe(document.body, { childList: true });
+  update();
+  return () => {
+    portalMutationObserver.disconnect();
+    toolbarMutationObserver.disconnect();
+    toolbarResizeObserver.disconnect();
+    canvasResizeObserver.disconnect();
+    syncCanvasToolbarSafeLane(canvas, null);
+  };
+}
+
+export function observeCanvasControlsSafeBottom(
+  canvas: HTMLElement,
+  toolbar: HTMLElement | null,
+  shell: HTMLElement,
+  gap: number,
+): () => void {
+  if (!toolbar) {
+    syncCanvasControlsSafeBottom(shell, 0);
+    return () => { syncCanvasControlsSafeBottom(shell, 0); };
+  }
+  const update = () => {
+    const style = getComputedStyle(toolbar);
+    const toolbarBounds = toolbar.getBoundingClientRect();
+    syncCanvasControlsSafeBottom(shell, getRenderedCanvasControlsSafeBottom(
+      canvas.getBoundingClientRect(),
+      { bottom: toolbarBounds.bottom, display: style.display, top: toolbarBounds.top, visibility: style.visibility },
+      gap,
+    ));
+  };
+  update();
+  const resizeObserver = new ResizeObserver(update);
+  resizeObserver.observe(canvas);
+  resizeObserver.observe(toolbar);
+  const mutationObserver = new MutationObserver(update);
+  mutationObserver.observe(toolbar, { attributes: true, attributeFilter: ['class', 'style'] });
+  return () => {
+    mutationObserver.disconnect();
+    resizeObserver.disconnect();
+    syncCanvasControlsSafeBottom(shell, 0);
+  };
+}
+
+export function syncCanvasControlsSafeBottom(shell: HTMLElement, value: number): boolean {
+  const next = `${Math.ceil(Math.max(0, value))}px`;
+  if (shell.style.getPropertyValue('--canvas-controls-toolbar-safe-bottom') === next) return false;
+  shell.style.setProperty('--canvas-controls-toolbar-safe-bottom', next);
+  return true;
+}
+
 function canStartTouchCanvasGesture(target: EventTarget | null, root: HTMLDivElement): boolean {
   if (!(target instanceof Element)) {
     return false;
@@ -1185,6 +1274,7 @@ export function DiagramCanvas({
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
+  const canvasShellRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgContainerRef = useRef<HTMLDivElement | null>(null);
   const addNodeToolbarRef = useRef<HTMLFormElement | null>(null);
@@ -1743,10 +1833,13 @@ export function DiagramCanvas({
     BOTTOM_TOOLBAR_GAP,
     canvasViewportMeasured,
   );
-  const sequenceControlsSafeBottom = canvasToolbarVisibility.controls
-    ? canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP
-    : 0;
-  const erEditorBottom = canvasToolbarStack.bottom + controlsToolbarHeight + BOTTOM_TOOLBAR_GAP;
+  const semanticControlsSafeBottom = getSemanticControlsSafeBottom(
+    canvasToolbarVisibility.controls,
+    canvasToolbarStack.bottom,
+    controlsToolbarHeight,
+    BOTTOM_TOOLBAR_GAP,
+  );
+  const erEditorBottom = semanticControlsSafeBottom;
   const semanticPanelPlacement = getMeasuredSemanticPanelPlacement(canvasSize, canvasViewport, erEditorBottom);
   const pairedSemanticPanelPlacement = useMemo(
     () => canvasViewportMeasured ? getPairedSemanticPanelPlacement(canvasSize, canvasViewport, erEditorBottom) : null,
@@ -2107,44 +2200,9 @@ export function DiagramCanvas({
     const canvas = containerRef.current;
     if (!canvas) return;
     const canvasElement: HTMLElement = canvas;
-
-    let observedToolbar: HTMLElement | null = null;
-    const toolbarObserver = new ResizeObserver(update);
-    const canvasObserver = new ResizeObserver(update);
-    const documentObserver = new MutationObserver(update);
-
-    function findToolbar() {
-      if (!overlay) return null;
-      return Array.from(document.querySelectorAll<HTMLElement>('.overlay-icon-toolbar'))
-        .find((toolbar) => toolbar.dataset.overlayDiagramId === overlay.diagramId) ?? null;
-    }
-
-    function update() {
-      const toolbar = findToolbar();
-      if (toolbar !== observedToolbar) {
-        if (observedToolbar) toolbarObserver.unobserve(observedToolbar);
-        observedToolbar = toolbar;
-        if (observedToolbar) {
-          toolbarObserver.observe(observedToolbar);
-          documentObserver.observe(observedToolbar, { attributeFilter: ['style'], attributes: true });
-        }
-      }
-      syncCanvasToolbarSafeLane(canvasElement, toolbar);
-      setHasOverlayToolbarSafeLane((current) => current === Boolean(toolbar) ? current : Boolean(toolbar));
-    }
-
-    canvasObserver.observe(canvas);
-    // The overlay toolbar is portalled directly to document.body. Observing
-    // that ownership boundary catches insertion/removal without coupling the
-    // semantic editor to OverlayCanvasLayer's local layout effects.
-    documentObserver.observe(document.body, { childList: true });
-    update();
-    return () => {
-      documentObserver.disconnect();
-      toolbarObserver.disconnect();
-      canvasObserver.disconnect();
-      syncCanvasToolbarSafeLane(canvasElement, null);
-    };
+    return observeCanvasToolbarSafeLane(canvasElement, overlay?.diagramId, (present) => {
+      setHasOverlayToolbarSafeLane((current) => current === present ? current : present);
+    });
   }, [overlay?.diagramId]);
 
   useLayoutEffect(() => {
@@ -2165,6 +2223,14 @@ export function DiagramCanvas({
     observer.observe(toolbar);
     return () => { observer.disconnect(); };
   }, [hasPersistedLayout, isFlowchart, readOnly]);
+
+  useLayoutEffect(() => {
+    const canvas = containerRef.current;
+    const toolbar = controlsToolbarRef.current;
+    const shell = canvasShellRef.current;
+    if (!canvas || !shell) return;
+    return observeCanvasControlsSafeBottom(canvas, toolbar, shell, BOTTOM_TOOLBAR_GAP);
+  }, [canvasToolbarStack.bottom, canvasToolbarVisibility.controls, controlsToolbarHeight, readOnly]);
 
   useLayoutEffect(() => {
     const toolbar = addNodeToolbarRef.current;
@@ -3335,8 +3401,8 @@ export function DiagramCanvas({
     <div
       className="diagram-canvas-shell"
       data-overlay-toolbar-safe-top={hasOverlayToolbarSafeLane || undefined}
+      ref={canvasShellRef}
       style={{
-        '--canvas-controls-toolbar-safe-bottom': `${Math.ceil(sequenceControlsSafeBottom)}px`,
         display: 'flex',
         flex: 1,
         minHeight: 0,
@@ -4969,7 +5035,21 @@ const SEMANTIC_PANEL_STYLE: CSSProperties = {
 const HIERARCHY_CONTROL_STYLE: CSSProperties = { minHeight: 44, minWidth: 44 };
 const SEMANTIC_PANEL_TOP_INSET = 56;
 const SEMANTIC_PANEL_MAX_HEIGHT = 480;
-function getMeasuredSemanticPanelPlacement(canvas: { height: number }, viewport: ViewportRect, requestedBottom: number): { bottom: number; maxHeight: number } {
+export function getRenderedCanvasControlsSafeBottom(
+  canvas: Pick<DOMRect, 'bottom' | 'top'>,
+  toolbar: { bottom: number; display: string; top: number; visibility: string } | null,
+  gap: number,
+): number {
+  if (!toolbar || toolbar.display === 'none' || toolbar.visibility === 'hidden'
+    || toolbar.bottom <= canvas.top || toolbar.top >= canvas.bottom) return 0;
+  const safeTop = Math.max(canvas.top, Math.min(canvas.bottom, toolbar.top));
+  return Math.max(0, canvas.bottom - safeTop + gap);
+}
+
+export function getSemanticControlsSafeBottom(visible: boolean, toolbarBottom: number, toolbarHeight: number, gap: number): number {
+  return visible ? toolbarBottom + toolbarHeight + gap : 0;
+}
+export function getMeasuredSemanticPanelPlacement(canvas: { height: number }, viewport: ViewportRect, requestedBottom: number): { bottom: number; maxHeight: number } {
   const top = Math.max(0, viewport.y) + SEMANTIC_PANEL_TOP_INSET;
   const bottom = Math.min(Math.max(0, requestedBottom), Math.max(0, canvas.height - top - 44));
   return {

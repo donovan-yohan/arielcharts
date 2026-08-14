@@ -11,8 +11,6 @@ import {
   BetweenHorizontalStart,
   ClipboardPaste,
   BringToFront,
-  ChevronDown,
-  ChevronUp,
   Circle,
   Copy,
   CopyPlus,
@@ -96,17 +94,10 @@ type ResizeDraft = { id: string; pointerId: number; origin: { x: number; y: numb
 type MoveDraft = { id: string; pointerId: number; origin: { x: number; y: number; width: number; height: number; rotation: number }; start: InkPoint };
 type InkTool = 'select' | InkMode | 'eraser';
 
-export function syncCompactErrorToolbarState(pane: HTMLElement, compactError: boolean): boolean {
-  const current = pane.dataset.overlayToolbarErrorCompact === 'true';
-  if (current === compactError) return false;
-  if (compactError) pane.dataset.overlayToolbarErrorCompact = 'true';
-  else delete pane.dataset.overlayToolbarErrorCompact;
-  return true;
-}
-
 type ToolbarIconButtonProps = {
   children: React.ReactNode;
   className?: string;
+  controls?: string;
   disabled?: boolean;
   expanded?: boolean;
   label: string;
@@ -114,10 +105,60 @@ type ToolbarIconButtonProps = {
   pressed?: boolean;
 };
 
-function ToolbarIconButton({ children, className, disabled, expanded, label, onClick, pressed }: ToolbarIconButtonProps) {
-  return <button aria-expanded={expanded} aria-label={label} aria-pressed={pressed} className={`overlay-toolbar-button${className ? ` ${className}` : ''}`} disabled={disabled} onClick={onClick} title={label} type="button">
+function ToolbarIconButton({ children, className, controls, disabled, expanded, label, onClick, pressed }: ToolbarIconButtonProps) {
+  return <button aria-controls={controls} aria-expanded={expanded} aria-label={label} aria-pressed={pressed} className={`overlay-toolbar-button${className ? ` ${className}` : ''}`} disabled={disabled} onClick={onClick} title={label} type="button">
     {children}
   </button>;
+}
+
+function ToolbarDivider() {
+  return <span aria-hidden="true" className="overlay-toolbar-divider" />;
+}
+
+function toolbarButtons(toolbar: HTMLElement): HTMLButtonElement[] {
+  return [...toolbar.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+}
+
+export function maintainRovingToolbarFocus(toolbar: HTMLElement, focused: HTMLButtonElement): void {
+  for (const button of toolbarButtons(toolbar)) button.tabIndex = button === focused ? 0 : -1;
+}
+
+export function moveRovingToolbarFocus(toolbar: HTMLElement, key: string): boolean {
+  const buttons = toolbarButtons(toolbar);
+  const current = document.activeElement instanceof HTMLButtonElement ? document.activeElement : null;
+  const index = current ? buttons.indexOf(current) : -1;
+  if (!buttons.length || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) return false;
+  const nextIndex = key === 'Home' ? 0 : key === 'End' ? buttons.length - 1
+    : (index + (key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+  const next = buttons[nextIndex]!;
+  maintainRovingToolbarFocus(toolbar, next);
+  next.focus({ preventScroll: true });
+  next.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' });
+  return true;
+}
+
+/**
+ * CSS may round a fractional max-height up to the next device pixel. Reserve
+ * one whole pixel after flooring so the inspector's border box never reaches
+ * the camera control lane.
+ */
+export function inspectorCapacityPx(inspectorTop: number, safeBottom: number): number {
+  return Math.max(0, Math.floor(safeBottom - inspectorTop) - 1);
+}
+
+export function resolveOverlayToolbarViewport(
+  viewport: OverlayCanvasLayerProps['viewport'],
+  canvasWidth: number,
+  canvasHeight: number,
+): NonNullable<OverlayCanvasLayerProps['viewport']> {
+  if (viewport
+    && Number.isFinite(viewport.x)
+    && Number.isFinite(viewport.y)
+    && Number.isFinite(viewport.width)
+    && Number.isFinite(viewport.height)
+    && viewport.width >= 44
+    && viewport.height >= 44) return viewport;
+  return { height: canvasHeight, width: canvasWidth, x: 0, y: 0 };
 }
 
 function pointsFromPayload(value: unknown): InkPoint[] {
@@ -152,8 +193,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [newLayerName, setNewLayerName] = useState('Layer');
-  const [toolsOpen, setToolsOpen] = useState(false);
-  const [compactErrorToolbar, setCompactErrorToolbar] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [historyStatus, setHistoryStatus] = useState('');
   const [compositionDrafts, setCompositionDrafts] = useState<Record<string, string>>({});
   const [compositions, setCompositions] = useState<Record<string, OverlayTextComposition>>({});
@@ -162,11 +202,14 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
   const [inkCompositeExport, setInkCompositeExport] = useState(true);
   const [inkDraft, setInkDraft] = useState<InkDraft | null>(null);
   const [dragOffset, setDragOffset] = useState<{ id: string; x: number; y: number } | null>(null);
-  const [toolbarPosition, setToolbarPosition] = useState({ availableHeight: 0, availableWidth: 0, left: 0, top: 12 });
+  const [toolbarPosition, setToolbarPosition] = useState({ availableHeight: 0, availableWidth: 0, inspectorMaxHeight: 0, left: 0, top: 12 });
   const resizeDraftRef = useRef<ResizeDraft | null>(null);
   const moveDraftRef = useRef<MoveDraft | null>(null);
   const canvasOwnerRef = useRef<HTMLDivElement>(null);
   const controlsOwnerRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const primaryToolbarRef = useRef<HTMLDivElement>(null);
+  const contextToolbarRef = useRef<HTMLDivElement>(null);
   const inkDraftRef = useRef<InkDraft | null>(null);
   const drawingSurfaceRef = useRef<HTMLDivElement | null>(null);
   const onboardingRequestCompleteRef = useRef(props.onOnboardingRequestComplete);
@@ -188,6 +231,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
   const selectedLocked = selected ? selected.metadata.locked === true || (props.scene.layers ?? []).find(({ id }) => id === (selected.layer ?? 'default'))?.locked === true
     || props.scene.objects.some((frame) => frame.kind === 'frame.section' && frame.metadata.locked === true && Array.isArray(frame.payload.members) && frame.payload.members.includes(selected.id)) : false;
   const writable = !props.readOnly && props.scene.version === 1;
+  const inspectorId = `overlay-inspector-${props.diagramId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   const unobscuredViewport = props.viewport;
   useLayoutEffect(() => {
     const owner = canvasOwnerRef.current;
@@ -195,57 +239,127 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     const canvas = owner.closest<HTMLElement>('[data-testid="diagram-canvas"]') ?? owner;
     const topbar = document.querySelector<HTMLElement>('.workspace-topbar');
     const pane = canvas.closest<HTMLElement>('.workspace-diagram-pane');
-    const update = () => {
+    const canvasStyleHost = canvas.closest<HTMLElement>('.diagram-canvas-shell');
+    let frameId: number | null = null;
+    let observedErrorBanner: HTMLElement | null = null;
+    let geometryObserver: ResizeObserver;
+    const refreshErrorBanner = () => {
+      const nextErrorBanner = pane?.querySelector<HTMLElement>('.error-banner') ?? null;
+      if (observedErrorBanner && observedErrorBanner !== nextErrorBanner) geometryObserver.unobserve(observedErrorBanner);
+      if (nextErrorBanner && nextErrorBanner !== observedErrorBanner) geometryObserver.observe(nextErrorBanner);
+      observedErrorBanner = nextErrorBanner;
+    };
+    const measure = () => {
+      frameId = null;
       const canvasBounds = canvas.getBoundingClientRect();
       const header = topbar?.getBoundingClientRect();
       const headerInset = header && header.bottom > canvasBounds.top && header.top < canvasBounds.bottom ? Math.max(0, header.bottom - canvasBounds.top) : 0;
       const errorBanner = pane?.querySelector<HTMLElement>('.error-banner');
       const errorBounds = errorBanner?.getBoundingClientRect();
-      const errorStyle = errorBanner ? getComputedStyle(errorBanner) : null;
-      const errorIsVisible = Boolean(errorBounds && errorBounds.width > 0 && errorBounds.height > 0
-        && errorStyle?.display !== 'none' && errorStyle?.visibility !== 'hidden');
-      const compactError = errorIsVisible && typeof window.matchMedia === 'function'
-        && window.matchMedia('(max-width: 420px)').matches;
-      if (pane) syncCompactErrorToolbarState(pane, compactError);
-      setCompactErrorToolbar((current) => current === compactError ? current : compactError);
-      const viewport = props.viewport;
-      const viewportX = viewport?.x ?? 0;
-      const viewportY = viewport?.y ?? 0;
-      const viewportWidth = viewport && viewport.width > 0 ? viewport.width : canvasBounds.width;
+      const viewport = resolveOverlayToolbarViewport(props.viewport, canvasBounds.width, canvasBounds.height);
+      const viewportX = viewport.x;
+      const viewportY = viewport.y;
+      const viewportWidth = viewport.width;
       const minimumTop = canvasBounds.top + Math.max(headerInset, viewportY, 0) + 12;
       const defaultTop = Math.max(minimumTop, Math.min(canvasBounds.top + headerInset, header?.bottom ?? canvasBounds.top) + 12);
       const toolbarHeight = 54;
       const errorOverlapsTop = errorBounds && defaultTop < errorBounds.bottom && defaultTop + toolbarHeight > errorBounds.top;
-      const canSitBesideError = errorBounds && errorBounds.left - canvasBounds.left >= 172;
-      const top = compactError ? canvasBounds.top + headerInset + 8
-        : errorOverlapsTop && !canSitBesideError ? errorBounds.bottom + 8 : defaultTop;
-      const left = compactError ? canvasBounds.left + 35
-        : errorOverlapsTop && canSitBesideError ? canvasBounds.left + 86
-          : canvasBounds.left + viewportX + (viewportWidth / 2);
-      setToolbarPosition({
-        availableHeight: Math.max(0, canvasBounds.bottom - top - 8),
-        availableWidth: viewportWidth,
-        left,
-        top,
-      });
+      const top = errorOverlapsTop ? errorBounds.bottom + 8 : defaultTop;
+      const left = canvasBounds.left + viewportX + (viewportWidth / 2);
+      const primaryHeight = primaryToolbarRef.current?.getBoundingClientRect().height || toolbarHeight;
+      const contextHeight = contextToolbarRef.current?.getBoundingClientRect().height ?? 0;
+      const hostControlsSafeBottom = canvasStyleHost
+        ? getComputedStyle(canvasStyleHost).getPropertyValue('--canvas-controls-toolbar-safe-bottom').trim()
+        : '';
+      const canvasControlsSafeBottom = getComputedStyle(canvas).getPropertyValue('--canvas-controls-toolbar-safe-bottom').trim();
+      const publishedControlsSafeBottom = hostControlsSafeBottom || canvasControlsSafeBottom;
+      const controlsSafeBottom = Number.parseFloat(publishedControlsSafeBottom);
+      const hasPublishedControlsSafeBottom = publishedControlsSafeBottom !== ''
+        && Number.isFinite(controlsSafeBottom) && controlsSafeBottom >= 0;
+      const fallbackControlsBounds = canvas.querySelector<HTMLElement>('[data-testid="canvas-controls-toolbar"]')?.getBoundingClientRect();
+      // DiagramCanvas publishes both its present rail and an authoritative
+      // zero when it owns none. Only legacy or invalid publishers consult a
+      // live controls rect, which can otherwise be a stale renderer remnant.
+      const bottomSafeTop = hasPublishedControlsSafeBottom
+        ? controlsSafeBottom > 0 ? canvasBounds.bottom - controlsSafeBottom : canvasBounds.bottom - 8
+        : fallbackControlsBounds && fallbackControlsBounds.top > canvasBounds.top && fallbackControlsBounds.top < canvasBounds.bottom
+          ? fallbackControlsBounds.top - 8 : canvasBounds.bottom - 8;
+      const inspectorTop = top + primaryHeight + (contextHeight ? contextHeight + 8 : 0) + 8;
+      const inspectorMaxHeight = inspectorCapacityPx(inspectorTop, bottomSafeTop);
+      setToolbarPosition((current) => current.availableHeight === Math.max(0, canvasBounds.bottom - top - 8)
+        && current.availableWidth === viewportWidth && current.inspectorMaxHeight === inspectorMaxHeight
+        && current.left === left && current.top === top
+        ? current
+        : {
+          availableHeight: Math.max(0, canvasBounds.bottom - top - 8),
+          availableWidth: viewportWidth,
+          inspectorMaxHeight,
+          left,
+          top,
+        });
     };
+    // Banner mutations and portal geometry can land in the same React commit.
+    // Measure on the following animation frame so toolbar placement and the
+    // inspector's camera-safe capacity are published together from that DOM.
+    const update = () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(measure);
+    };
+    geometryObserver = new ResizeObserver(update);
+    geometryObserver.observe(canvas);
+    if (topbar) geometryObserver.observe(topbar);
+    if (primaryToolbarRef.current) geometryObserver.observe(primaryToolbarRef.current);
+    if (contextToolbarRef.current) geometryObserver.observe(contextToolbarRef.current);
+    refreshErrorBanner();
     update();
-    const observer = new ResizeObserver(update);
-    observer.observe(canvas);
-    if (topbar) observer.observe(topbar);
     // Error banners are inserted/removed below the pane. Attribute records are
-    // intentionally excluded because this effect owns the compact-mode dataset
-    // marker and must not observe its own layout-state write.
-    const mutationObserver = pane ? new MutationObserver(update) : null;
+    // intentionally excluded because this layout observer only responds to
+    // structural placement changes.
+    const mutationObserver = pane ? new MutationObserver(() => {
+      refreshErrorBanner();
+      update();
+    }) : null;
     if (pane && mutationObserver) mutationObserver.observe(pane, { childList: true, subtree: true });
+    // DiagramCanvas publishes the camera reserve as a custom property. Watch
+    // its style host for reserve changes; child mutations remain only as a
+    // legacy fallback when an older canvas does not publish that contract.
+    const canvasMutationObserver = new MutationObserver(update);
+    canvasMutationObserver.observe(canvas, { attributes: true, attributeFilter: ['style'], childList: true, subtree: true });
+    if (canvasStyleHost && canvasStyleHost !== canvas) canvasMutationObserver.observe(canvasStyleHost, { attributes: true, attributeFilter: ['style'] });
     window.addEventListener('resize', update);
     return () => {
-      observer.disconnect();
+      geometryObserver.disconnect();
       mutationObserver?.disconnect();
-      if (pane) delete pane.dataset.overlayToolbarErrorCompact;
+      canvasMutationObserver.disconnect();
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
       window.removeEventListener('resize', update);
     };
-  }, [props.viewport?.height, props.viewport?.width, props.viewport?.x, props.viewport?.y]);
+  }, [props.viewport?.height, props.viewport?.width, props.viewport?.x, props.viewport?.y, inspectorOpen, selectedObjectIds.length]);
+
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    const primary = primaryToolbarRef.current;
+    if (!toolbar || !primary) return;
+    const initializeRoving = () => {
+      for (const rovingToolbar of [primary, contextToolbarRef.current, toolbar.querySelector<HTMLElement>('.overlay-toolbar-inspector-actions')]) {
+        if (!rovingToolbar) continue;
+        const buttons = toolbarButtons(rovingToolbar);
+        if (buttons.length && buttons.filter((button) => button.tabIndex === 0).length !== 1) maintainRovingToolbarFocus(rovingToolbar, buttons[0]!);
+      }
+    };
+    initializeRoving();
+    const rovingObserver = new MutationObserver(initializeRoving);
+    rovingObserver.observe(toolbar, { attributeFilter: ['aria-disabled', 'disabled'], attributes: true, childList: true, subtree: true });
+    return () => rovingObserver.disconnect();
+  }, [inspectorOpen, selectedObjectIds.length]);
+
+  const handleToolbarKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
+    if (moveRovingToolbarFocus(event.currentTarget, event.key)) event.preventDefault();
+  }, []);
+
+  const handleToolbarFocus = useCallback((event: React.FocusEvent<HTMLElement>) => {
+    if (event.target instanceof HTMLButtonElement) maintainRovingToolbarFocus(event.currentTarget, event.target);
+  }, []);
 
   const pointForEvent = useCallback((event: React.PointerEvent<HTMLDivElement>): InkPoint | null => {
     const bounds = canvasOwnerRef.current?.getBoundingClientRect();
@@ -574,33 +688,28 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       })}
     </div>
     {typeof document !== 'undefined' ? createPortal(<div data-testid="overlay-controls-owner" onKeyDownCapture={handleOverlayShortcut} ref={controlsOwnerRef} style={{ inset: 0, pointerEvents: 'none', position: 'fixed', zIndex: 31 }}>
-      <div aria-label="Overlay scene controls" className="overlay-icon-toolbar" data-compact-error={compactErrorToolbar || undefined} data-expanded={toolsOpen || undefined} data-overlay-diagram-id={props.diagramId} style={{ '--overlay-toolbar-available-height': `${toolbarPosition.availableHeight}px`, '--overlay-toolbar-available-width': `${toolbarPosition.availableWidth}px`, left: toolbarPosition.left, position: 'fixed', top: toolbarPosition.top } as React.CSSProperties}>
-        <div className="overlay-toolbar-primary" data-testid="overlay-toolbar-primary" role="toolbar" aria-label="Overlay creation tools">
-          <ToolbarIconButton className="overlay-toolbar-more" expanded={toolsOpen} label={toolsOpen ? 'Close overlay tools' : 'Overlay tools'} onClick={() => setToolsOpen((open) => !open)} pressed={toolsOpen}><>{toolsOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</></ToolbarIconButton>
+      <div aria-label="Overlay scene controls" className="overlay-icon-toolbar" data-overlay-diagram-id={props.diagramId} ref={toolbarRef} style={{ '--overlay-toolbar-available-height': `${toolbarPosition.availableHeight}px`, '--overlay-toolbar-available-width': `${toolbarPosition.availableWidth}px`, '--overlay-toolbar-inspector-max-height': `${toolbarPosition.inspectorMaxHeight}px`, left: toolbarPosition.left, position: 'fixed', top: toolbarPosition.top } as React.CSSProperties}>
+        <div aria-label="Overlay canvas toolbar" className="overlay-toolbar-primary" data-testid="overlay-toolbar-primary" onFocusCapture={handleToolbarFocus} onKeyDown={handleToolbarKeyDown} ref={primaryToolbarRef} role="toolbar">
           <ToolbarIconButton disabled={!writable} label="Select overlay tool" onClick={() => activateInkTool('select')} pressed={inkTool === 'select'}><MousePointer2 size={18} /></ToolbarIconButton>
-          <ToolbarIconButton disabled={!writable} label="Add overlay" onClick={() => addAtViewportCenter('annotation.text')}><Plus size={18} /></ToolbarIconButton>
+          <ToolbarDivider />
+          <ToolbarIconButton disabled={!writable} label="Text" onClick={() => addAtViewportCenter('annotation.text')}><Plus size={18} /></ToolbarIconButton>
+          <ToolbarIconButton disabled={!writable} label="Sticky note" onClick={() => addAtViewportCenter('annotation.sticky')}><StickyNote size={18} /></ToolbarIconButton>
+          <ToolbarIconButton disabled={!writable} label="Rectangle" onClick={() => addShapeAtViewportCenter('shape.rectangle')}><RectangleHorizontal size={18} /></ToolbarIconButton>
+          <ToolbarIconButton disabled={!writable} label="Ellipse" onClick={() => addShapeAtViewportCenter('shape.ellipse')}><Circle size={18} /></ToolbarIconButton>
+          <ToolbarIconButton disabled={!writable} label="Diamond" onClick={() => addShapeAtViewportCenter('shape.diamond')}><Diamond size={18} /></ToolbarIconButton>
+          <ToolbarIconButton disabled={!writable} label="Line" onClick={() => addShapeAtViewportCenter('shape.line')}><LineChart size={18} /></ToolbarIconButton>
+          <ToolbarIconButton disabled={!writable} label="Arrow" onClick={() => addShapeAtViewportCenter('shape.arrow')}><ArrowRight size={18} /></ToolbarIconButton>
+          <ToolbarDivider />
+          <ToolbarIconButton disabled={!writable} label="Pen" onClick={() => activateInkTool(inkTool === 'pen' ? 'select' : 'pen')} pressed={inkTool === 'pen'}><PenLine size={18} /></ToolbarIconButton>
+          <ToolbarIconButton disabled={!writable} label="Highlighter" onClick={() => activateInkTool(inkTool === 'highlighter' ? 'select' : 'highlighter')} pressed={inkTool === 'highlighter'}><Highlighter size={18} /></ToolbarIconButton>
+          <ToolbarIconButton disabled={!writable} label="Erase stroke" onClick={() => activateInkTool(inkTool === 'eraser' ? 'select' : 'eraser')} pressed={inkTool === 'eraser'}><Eraser size={18} /></ToolbarIconButton>
+          <ToolbarDivider />
+          <ToolbarIconButton disabled={!writable} label="Undo overlay" onClick={props.onUndo}><Undo2 size={18} /></ToolbarIconButton>
+          <ToolbarIconButton disabled={!writable} label="Redo overlay" onClick={() => props.onRedo?.()}><Redo2 size={18} /></ToolbarIconButton>
+          <ToolbarDivider />
+          <ToolbarIconButton controls={inspectorId} expanded={inspectorOpen} label="Objects and layers" onClick={() => setInspectorOpen((open) => !open)} pressed={inspectorOpen}><Layers3 size={18} /></ToolbarIconButton>
         </div>
-        {toolsOpen ? <div className="overlay-toolbar-secondary" aria-label="More overlay tools">
-          <p className="overlay-toolbar-description">Canvas-only overlays · not included in Mermaid source</p>
-          <div className="overlay-toolbar-section">
-            <span className="overlay-toolbar-section-label">Create</span>
-            <div className="overlay-toolbar-group" aria-label="Overlay creation actions">
-            {compactErrorToolbar ? <><ToolbarIconButton disabled={!writable} label="Select overlay tool" onClick={() => activateInkTool('select')} pressed={inkTool === 'select'}><MousePointer2 size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Add overlay" onClick={() => addAtViewportCenter('annotation.text')}><Plus size={18} /></ToolbarIconButton></> : null}
-            <ToolbarIconButton disabled={!writable} label="Add sticky note" onClick={() => addAtViewportCenter('annotation.sticky')}><StickyNote size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Rectangle" onClick={() => addShapeAtViewportCenter('shape.rectangle')}><RectangleHorizontal size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Ellipse" onClick={() => addShapeAtViewportCenter('shape.ellipse')}><Circle size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Diamond" onClick={() => addShapeAtViewportCenter('shape.diamond')}><Diamond size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Line" onClick={() => addShapeAtViewportCenter('shape.line')}><LineChart size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Arrow" onClick={() => addShapeAtViewportCenter('shape.arrow')}><ArrowRight size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Pen" onClick={() => activateInkTool(inkTool === 'pen' ? 'select' : 'pen')} pressed={inkTool === 'pen'}><PenLine size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Highlighter" onClick={() => activateInkTool(inkTool === 'highlighter' ? 'select' : 'highlighter')} pressed={inkTool === 'highlighter'}><Highlighter size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Erase stroke" onClick={() => activateInkTool(inkTool === 'eraser' ? 'select' : 'eraser')} pressed={inkTool === 'eraser'}><Eraser size={18} /></ToolbarIconButton>
-            </div>
-          </div>
-          {selectedObjectIds.length > 0 ? <div className="overlay-toolbar-section">
-            <span className="overlay-toolbar-section-label">Selection</span>
-            <div className="overlay-toolbar-group" aria-label="Selection actions">
+        {selectedObjectIds.length > 0 && !inspectorOpen ? <div aria-label="Selected overlay actions" className="overlay-toolbar-context" data-testid="overlay-toolbar-context" onFocusCapture={handleToolbarFocus} onKeyDown={handleToolbarKeyDown} ref={contextToolbarRef} role="toolbar">
               {selectedObjectIds.length === 2 ? <ToolbarIconButton disabled={!writable} label="Connect selection" onClick={() => props.onAddConnector?.(selectedObjectIds[0]!, selectedObjectIds[1]!)}><SquareDashedMousePointer size={18} /></ToolbarIconButton> : null}
               <ToolbarIconButton disabled={!writable} label="Frame selection" onClick={() => { const bounds = canvasOwnerRef.current?.getBoundingClientRect(); const point = bounds ? viewportCenterToWorld(bounds.width, bounds.height, props.transform, props.viewport) : { x: 0, y: 0 }; props.onAddFrame?.(point, selectedObjectIds); }}><Frame size={18} /></ToolbarIconButton>
               {selected ? <>
@@ -622,16 +731,12 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
                 </> : null}
                 {selected.kind === 'frame.section' ? <><ToolbarIconButton disabled={!writable} label={selected.metadata.hidden === true ? 'Show frame members' : 'Hide frame members'} onClick={() => props.onUpdate(selected.id, { metadata: { ...selected.metadata, hidden: selected.metadata.hidden !== true } })}>{selected.metadata.hidden === true ? <Eye size={18} /> : <EyeOff size={18} />}</ToolbarIconButton><ToolbarIconButton disabled={!writable} label={selected.metadata.locked === true ? 'Unlock frame' : 'Lock frame'} onClick={() => props.onUpdate(selected.id, { metadata: { ...selected.metadata, locked: selected.metadata.locked !== true } })}>{selected.metadata.locked === true ? <Unlock size={18} /> : <Lock size={18} />}</ToolbarIconButton>{!selectedLocked ? <ToolbarIconButton disabled={!writable} label={selected.payload.composite_members === false ? 'Include frame members in composite export' : 'Exclude frame members from composite export'} onClick={() => props.onUpdate(selected.id, { payload: { ...selected.payload, composite_members: selected.payload.composite_members !== true } })}><Layers3 size={18} /></ToolbarIconButton> : null}</> : null}
               </> : null}
-            </div>
-          </div> : null}
-          <div className="overlay-toolbar-section">
-            <span className="overlay-toolbar-section-label">History</span>
-            <div className="overlay-toolbar-group" aria-label="Overlay history actions">
-            <ToolbarIconButton disabled={!writable} label="Undo overlay" onClick={props.onUndo}><Undo2 size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Redo overlay" onClick={() => props.onRedo?.()}><Redo2 size={18} /></ToolbarIconButton>
+        </div> : null}
+        {inspectorOpen ? <aside aria-label="Overlay objects and layers" className="overlay-toolbar-inspector" id={inspectorId}>
+          <p className="overlay-toolbar-description">Canvas-only overlays · not included in Mermaid source</p>
+          <div aria-label="Overlay inspector actions" className="overlay-toolbar-inspector-actions" onFocusCapture={handleToolbarFocus} onKeyDown={handleToolbarKeyDown} role="toolbar">
             <ToolbarIconButton disabled={!writable} label="Restore overlay" onClick={() => { void restorePrevious(); }}><RotateCw size={18} /></ToolbarIconButton>
             <ToolbarIconButton disabled={!writable} label="Paste overlay" onClick={props.onPaste}><ClipboardPaste size={18} /></ToolbarIconButton>
-            </div>
           </div>
           <aside aria-label="ArielCharts overlay list" className="overlay-scene-list">
             <span className="overlay-toolbar-section-label">Layers</span>
@@ -643,7 +748,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
           <label className="overlay-toolbar-checkbox"><input checked={inkCompositeExport} disabled={!writable} onChange={(event) => setInkCompositeExport(event.target.checked)} type="checkbox" /> Include ink in composite export</label>
           {props.scene.version !== 1 ? <span role="status">newer overlay scene is read-only</span> : null}
           {historyStatus ? <span role="status">{historyStatus}</span> : null}
-        </div> : null}
+        </aside> : null}
       </div>
     </div>, document.body) : null}
   </>);

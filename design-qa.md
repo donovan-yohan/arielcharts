@@ -1,55 +1,74 @@
-# ArielCharts canvas-first design QA
+# Inline overlay toolbar design QA
 
-> **Historical design-QA artifact — superseded on 2026-08-10.** This is a
-> point-in-time visual comparison for the canvas-first slice, not a current
-> product acceptance report. Its cited issue state, screenshots, browser
-> observations, and "final result" must not be used as present-tense evidence.
-> Use [ARCHITECTURE.md](ARCHITECTURE.md), [docs/context-map.md](docs/context-map.md),
-> current tests, and fresh browser evidence for current behavior.
+## Result
 
-- Source visual truth: `reports/design-reference/canvas-first-history-flyout.png`
-- Browser implementation: `reports/design-qa/activity-flyout.png`
-- Additional states: `reports/design-qa/canvas.png`, `reports/design-qa/source-flyout.png`
-- Full comparison: `reports/design-qa/reference-vs-activity.png`
-- Focused flyout comparison: `reports/design-qa/flyout-detail.png`
-- Viewport and CSS size: 1488 x 1058
-- Device scale factor: 1
-- Source pixels: 1487 x 1058; implementation pixels: 1488 x 1058
-- Density normalization: none required; the one-pixel source-width difference is outside the product layout and was retained in the full comparison.
-- State: dark desktop workspace, populated flowchart, activity flyout open. The source mock includes future revision preview/restore and additional populated tabs; those intentionally remain tracked in issues #17 and #15 and are not represented as working controls in this slice.
+Final result: passed.
 
-## Findings
+The source truth is the undesired anti-reference
+`/home/donovanyohan/.codex/attachments/19c63b96-0dac-4e53-9f4f-a6b1fb33e720/codex-clipboard-6b28a070-0578-4be8-8cc1-f159d358b882.png`
+(868 x 752): it shows a small three-button strip that opens a large dropdown
+palette. The accepted direction is a persistent, centered, Figma-like inline
+icon strip; screenshot fidelity to the anti-reference is explicitly not the
+goal.
 
-No actionable P0, P1, or P2 fidelity findings remain for the selected canvas-first slice.
+## Evidence
 
-- P3: The implemented dot grid is slightly brighter than the reference at full-canvas scale. It remains restrained, meets the bullet-journal direction, and preserves graph contrast.
-- P3: The implementation retains ArielCharts' existing compact monospace utility copy while the reference mock uses slightly larger proportional labels in a few controls. Hierarchy and scanability remain equivalent.
+| State | Evidence | Dimensions | Coverage |
+| --- | --- | --- | --- |
+| Desktop light | `/tmp/arielcharts-inline-overlay-toolbar-light.png` | 1440 x 960 | Full view of the centered primary strip, canvas, source panel, and camera lane. |
+| Desktop dark | `/tmp/arielcharts-inline-overlay-toolbar-dark.png` | 1440 x 960 | Full view of the same persistent strip with dark-theme contrast. |
+| Phone default | `/tmp/arielcharts-inline-overlay-toolbar-mobile-390.png` | 390 x 844 | Full viewport; primary strip is reset to its default left-most tools before capture. |
+| Phone landscape | `/tmp/arielcharts-inline-overlay-toolbar-mobile-landscape.png` | 844 x 390 | Full viewport; direct strip, canvas controls, and bottom lane coexist. |
+| Comparison composite | `/tmp/arielcharts-inline-toolbar-design-comparison.png` | 1440 x 960 | Focused implementation comparison artifact. |
 
-## Required fidelity surfaces
+The focused evidence verifies direct Select, Text, Sticky, Rectangle, Ellipse,
+Diamond, Line, Arrow, Pen, Highlighter, Eraser, Undo, Redo, and Objects/layers
+actions rather than a More/Close palette. The production workspace UX browser
+coverage also verifies 44px phone targets, first/last toolbar reachability,
+roving keyboard behavior, contextual selected-object controls, inspector
+containment above the camera lane, and error-banner coexistence.
 
-- Fonts and typography: logo, tab, flyout, activity, and footer hierarchy are clear and consistent with the existing product language. Labels do not wrap or truncate at the target viewport.
-- Spacing and layout rhythm: top bar, tab rail, full canvas, overlay flyout, and simple footer match the selected composition. The preview root remained exactly `{ x: 0, y: 103, width: 1488, height: 901 }` with the source flyout open, both flyouts closed, and the activity flyout open.
-- Colors and tokens: dark navy surfaces, blue active state, green save state, orange human presence, muted borders, and cyan dot grid preserve the reference's semantic palette and contrast.
-- Image quality and assets: the UI has no photographic or illustrative assets. Product icons use the existing Lucide family and remain sharp at device scale factor 1; the reference image itself is preserved without substitution.
-- Copy and content: source/history labels, flowchart editability, live-save state, activity descriptions, and named tab copy are coherent. Unsupported revision actions are not faked.
-- Accessibility and interaction: the tablist supports arrow-key roving focus and controls a labeled tabpanel. Source and activity are mutually exclusive, Escape closes a flyout, and the tested node-edit/zoom/Fit controls were visible, inside the viewport, unobstructed at their center points, and clickable.
+## Fidelity surfaces
 
-## Browser evidence
-
-- Created a new session and received exactly one `Main` tab.
-- Entered a six-node Mermaid flowchart, renamed the tab to `API request flow`, and verified the source flyout title updated immediately.
-- Opened source, closed it, opened activity, and verified identical preview bounds in all three states.
-- Verified source was absent while activity was open.
-- Clicked the node edit control and the Zoom out, Zoom in, and Fit controls.
-- Created a second blank tab and verified two tabs plus arrow-key tab focus.
-- Console was checked. Chromium emitted one generic development 404 console line, while the captured response list contained no HTTP response with status 400 or higher; no application/runtime errors were observed.
+- Layout: a bounded horizontal strip is centered in the measured canvas lane;
+  phone widths scroll the strip instead of opening a panel.
+- Hierarchy: creation/history controls stay in the primary strip; selected-only
+  actions are contextual; objects/layers are a bounded inspector disclosure.
+- Interaction: there is no default dropdown, More control, or Close-palette
+  state. Tooltips/labels, pressed states, V/Escape Select behavior, and cursor
+  modes remain available.
+- Accessibility: toolbar actions use semantic buttons, one roving tab stop per
+  toolbar, arrow/Home/End navigation, and forced-colors/reduced-motion-aware
+  styling.
+- Responsive safety: the inspector capacity is conservatively floored with a
+  one-pixel rendering reserve, keeping its border box above the camera safe
+  lane even with fractional layout rectangles.
 
 ## Comparison history
 
-1. Initial implementation review found a 64 px bottom gap under the overlay flyout and a stale `Main` label after renaming the active tab. The flyout was extended to the workspace bottom, and the displayed title was rebound to the latest diagram catalog without rebinding CodeMirror.
-2. Focused tests were added for the renamed active title. The implementation was recaptured at the same 1488 x 1058 viewport and compared with the source in the combined full-view and focused flyout images above.
-3. Post-fix browser evidence showed stable geometry, current tab metadata, mutually exclusive flyouts, reachable controls, working tab creation and keyboard focus, and no application console errors.
+1. The prior state was the anti-reference dropdown: compact top controls plus
+   a large palette wall.
+2. The implementation changed that to an always-visible inline icon toolbar.
+3. Review fixes added a measured inspector/camera lane, responsive first/last
+   reachability, roving focus repair, and explicit disclosure semantics.
+4. Final evidence fixes made fractional inspector capacity conservative and
+   reset the actual scrollable primary row before default mobile captures.
 
-Focused comparison was necessary because activity typography, borders, timeline markers, and footer/flyout alignment are too small to judge reliably in the 2975 px-wide full comparison.
+## Validation record
 
-final result: passed
+- Focused component test: `overlay-canvas-layer.test.tsx` passed (17 tests),
+  including fractional inspector-capacity math.
+- Production `mobile-390` workspace UX slice passed, including toolbar,
+  inspector/error lifecycle, touch targets, and safe-lane assertions.
+- The landscape slice exercised the overlay toolbar path and generated its
+  capture, then stopped on an unrelated existing sequence-message control
+  overlap with the canvas zoom-out control. That issue is outside the toolbar
+  scope and is not classified as a toolbar design defect.
+- Browser console output after aborted browser runs contained server-side
+  `window is not defined` teardown noise; it did not accompany a toolbar
+  assertion failure in the green mobile-390 slice.
+
+The crowded phone global header is a pre-existing, out-of-scope follow-up. It
+is not a toolbar P2 finding: the toolbar starts below the tab lane and remains
+readable, directly reachable, and independently verified. There are no
+actionable toolbar P0, P1, or P2 findings.

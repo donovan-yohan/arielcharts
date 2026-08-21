@@ -29,7 +29,6 @@ import {
   Plus,
   RotateCcw,
   ScanSearch,
-  Sparkles,
   Shapes,
   Trash2,
   ZoomIn,
@@ -81,6 +80,7 @@ import {
   type SequenceSvgTextTarget,
 } from '../lib/svg-hit-map';
 import { getSafeToolbarPosition } from '../lib/toolbar-safe-area';
+import type { CanvasTool } from '../lib/canvas-interaction-state';
 import { LaserPointerLayer } from './laser-pointer-layer';
 import { getDirtyDraftFields, reconcileCanonicalDraft, sameCanonicalDraft } from '../lib/canonical-draft';
 import type { SequenceActivationAction, SequenceArrow, SequenceDiagramSnapshot, SequenceFragmentKind, SequenceMessage, SequenceNote, SequenceParticipant, SequenceParticipantKind } from '../lib/sequence-mutations';
@@ -497,6 +497,8 @@ export interface DiagramCanvasProps {
   onEditSubgraphLabel?: (subgraphId: string, newLabel: string) => void;
   onGroupNodes?: (nodeIds: string[], label: string) => void;
   onInteractionModeChange?: (mode: 'select' | 'connect' | 'laser') => void;
+  /** Updates the shared browser-local tool when this renderer owns a shortcut. */
+  onCanvasToolChange?: (tool: CanvasTool) => void;
   onNodeDrag?: (positions: DiagramNodePositions) => void;
   onNodeDragStart?: (positions: DiagramNodePositions) => boolean | void;
   onNodeDragStop?: (positions: DiagramNodePositions) => void;
@@ -661,6 +663,18 @@ export function getRendererInteractionMode(
   return current === 'connect' && !isFlowchart ? 'select' : current;
 }
 
+/** The controlled toolbar starts a fresh connect session only on a mode edge. */
+export function getControlledConnectSessionTransition(
+  previous: 'select' | 'connect' | 'laser',
+  next: 'select' | 'connect' | 'laser',
+  selectedNodeIds: readonly string[],
+): { connectSourceId: string | null; resetPending: boolean } | null {
+  if (previous === next) return null;
+  if (next === 'connect') return { connectSourceId: getConnectModeSourceId(selectedNodeIds), resetPending: true };
+  if (previous === 'connect') return { connectSourceId: null, resetPending: true };
+  return null;
+}
+
 export function shouldHandleCanvasShortcut(
   targetIsInCanvas: boolean,
   activeElementIsInCanvas: boolean,
@@ -812,45 +826,6 @@ export function observeCanvasToolbarSafeLane(
     canvasResizeObserver.disconnect();
     syncCanvasToolbarSafeLane(canvas, null);
   };
-}
-
-export function observeCanvasControlsSafeBottom(
-  canvas: HTMLElement,
-  toolbar: HTMLElement | null,
-  shell: HTMLElement,
-  gap: number,
-): () => void {
-  if (!toolbar) {
-    syncCanvasControlsSafeBottom(shell, 0);
-    return () => { syncCanvasControlsSafeBottom(shell, 0); };
-  }
-  const update = () => {
-    const style = getComputedStyle(toolbar);
-    const toolbarBounds = toolbar.getBoundingClientRect();
-    syncCanvasControlsSafeBottom(shell, getRenderedCanvasControlsSafeBottom(
-      canvas.getBoundingClientRect(),
-      { bottom: toolbarBounds.bottom, display: style.display, top: toolbarBounds.top, visibility: style.visibility },
-      gap,
-    ));
-  };
-  update();
-  const resizeObserver = new ResizeObserver(update);
-  resizeObserver.observe(canvas);
-  resizeObserver.observe(toolbar);
-  const mutationObserver = new MutationObserver(update);
-  mutationObserver.observe(toolbar, { attributes: true, attributeFilter: ['class', 'style'] });
-  return () => {
-    mutationObserver.disconnect();
-    resizeObserver.disconnect();
-    syncCanvasControlsSafeBottom(shell, 0);
-  };
-}
-
-export function syncCanvasControlsSafeBottom(shell: HTMLElement, value: number): boolean {
-  const next = `${Math.ceil(Math.max(0, value))}px`;
-  if (shell.style.getPropertyValue('--canvas-controls-toolbar-safe-bottom') === next) return false;
-  shell.style.setProperty('--canvas-controls-toolbar-safe-bottom', next);
-  return true;
 }
 
 function canStartTouchCanvasGesture(target: EventTarget | null, root: HTMLDivElement): boolean {
@@ -1196,6 +1171,7 @@ export function DiagramCanvas({
   onEditSubgraphLabel,
   onGroupNodes,
   onInteractionModeChange,
+  onCanvasToolChange,
   onNodeDrag,
   onNodeDragStart,
   onNodeDragStop,
@@ -1274,7 +1250,6 @@ export function DiagramCanvas({
   svg,
   theme = 'dark',
 }: DiagramCanvasProps) {
-  const canvasShellRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgContainerRef = useRef<HTMLDivElement | null>(null);
   const addNodeToolbarRef = useRef<HTMLFormElement | null>(null);
@@ -1318,6 +1293,7 @@ export function DiagramCanvas({
     selectionRef.current = selection;
   }, [selection]);
   const [internalMode, setInternalMode] = useState<'select' | 'connect' | 'laser'>(interactionMode ?? 'select');
+  const controlledInteractionModeRef = useRef<'select' | 'connect' | 'laser'>('select');
   const mode = interactionMode ?? internalMode;
   const [viewport, setViewport] = useState<ViewportState>(initialCamera ?? { panX: 24, panY: 24, zoom: 1 });
   const [animateTransform, setAnimateTransform] = useState(false);
@@ -1833,10 +1809,11 @@ export function DiagramCanvas({
     BOTTOM_TOOLBAR_GAP,
     canvasViewportMeasured,
   );
+  const semanticControlsHeight = controlsToolbarHeight > 0 ? controlsToolbarHeight : 54;
   const semanticControlsSafeBottom = getSemanticControlsSafeBottom(
     canvasToolbarVisibility.controls,
     canvasToolbarStack.bottom,
-    controlsToolbarHeight,
+    semanticControlsHeight,
     BOTTOM_TOOLBAR_GAP,
   );
   const erEditorBottom = semanticControlsSafeBottom;
@@ -2091,8 +2068,16 @@ export function DiagramCanvas({
   }, [selectedNodeIds]);
 
   useEffect(() => {
-    if (interactionMode) {
-      setInternalMode(interactionMode);
+    if (interactionMode === undefined) return;
+    const transition = getControlledConnectSessionTransition(controlledInteractionModeRef.current, interactionMode, selectionRef.current);
+    controlledInteractionModeRef.current = interactionMode;
+    setInternalMode(interactionMode);
+    if (!transition) return;
+    setConnectSourceId(transition.connectSourceId);
+    setConnectionPreviewSourceId(null);
+    if (transition.resetPending) {
+      setPendingEdge(null);
+      setPendingEdgeLabel('');
     }
   }, [interactionMode]);
 
@@ -2223,14 +2208,6 @@ export function DiagramCanvas({
     observer.observe(toolbar);
     return () => { observer.disconnect(); };
   }, [hasPersistedLayout, isFlowchart, readOnly]);
-
-  useLayoutEffect(() => {
-    const canvas = containerRef.current;
-    const toolbar = controlsToolbarRef.current;
-    const shell = canvasShellRef.current;
-    if (!canvas || !shell) return;
-    return observeCanvasControlsSafeBottom(canvas, toolbar, shell, BOTTOM_TOOLBAR_GAP);
-  }, [canvasToolbarStack.bottom, canvasToolbarVisibility.controls, controlsToolbarHeight, readOnly]);
 
   useLayoutEffect(() => {
     const toolbar = addNodeToolbarRef.current;
@@ -2413,7 +2390,7 @@ export function DiagramCanvas({
         setEditingSubgraphId(null);
         setEditingSubgraphLabel('');
         setMode('select');
-        window.dispatchEvent(new Event('arielcharts-overlay-select'));
+        onCanvasToolChange?.('select');
         canvas?.focus();
       }
 
@@ -2488,7 +2465,7 @@ export function DiagramCanvas({
       if (!isModifierShortcut && canvasOwnsSingleKeyFocus && key === 'v') {
         event.preventDefault();
         setMode('select');
-        window.dispatchEvent(new Event('arielcharts-overlay-select'));
+        onCanvasToolChange?.('select');
         return;
       }
 
@@ -2892,7 +2869,6 @@ export function DiagramCanvas({
     setEditingNodeId(null);
     setSelectedSubgraphId(null);
     setEditingSubgraphId(null);
-    window.dispatchEvent(new Event('arielcharts-overlay-clear-selection'));
   }, [isPanning, setSelection]);
 
   const handleFlowPaneClick = useCallback((event: ReactMouseEvent) => {
@@ -3401,8 +3377,8 @@ export function DiagramCanvas({
     <div
       className="diagram-canvas-shell"
       data-overlay-toolbar-safe-top={hasOverlayToolbarSafeLane || undefined}
-      ref={canvasShellRef}
       style={{
+        '--canvas-controls-toolbar-safe-bottom': `${semanticControlsSafeBottom}px`,
         display: 'flex',
         flex: 1,
         minHeight: 0,
@@ -3755,6 +3731,8 @@ export function DiagramCanvas({
       {overlay ? (
         <OverlayCanvasLayer
           {...overlay}
+          canConnectMermaidNodes={isFlowchart}
+          controlsSafeBottom={semanticControlsSafeBottom}
           semanticAnchors={overlaySemanticAnchors}
           transform={{ x: viewport.panX, y: viewport.panY, zoom: viewport.zoom }}
           viewport={canvasViewport}
@@ -4131,12 +4109,6 @@ export function DiagramCanvas({
                 <Shapes size={16} />
               </ToolbarButton>
             ) : null}
-            <ToolbarButton label="Connect nodes" onClick={() => {
-              toggleConnectMode();
-              setToolbarOpen(true);
-            }} shortcut="C">
-              <ArrowRightFromLine size={16} />
-            </ToolbarButton>
             {selection.length > 0 ? (
               <ToolbarButton label="Delete selected nodes" onClick={() => { onDeleteNodes?.(selection); }} shortcut="Delete or Backspace" hint="⌫">
                 <Trash2 size={16} />
@@ -4267,11 +4239,6 @@ export function DiagramCanvas({
                 <ClipboardPaste size={16} />
               </ToolbarButton>
             ) : null}
-            <ToolbarButton label={mode === 'laser' ? 'Exit laser pointer' : 'Laser pointer'} onClick={() => {
-              setMode(mode === 'laser' ? 'select' : 'laser');
-            }} shortcut="L">
-              <Sparkles size={16} />
-            </ToolbarButton>
             <ToolbarButton label="Zoom out" onClick={() => { zoomCanvas(0.9); }} shortcut="−">
               <ZoomOut size={16} />
             </ToolbarButton>
@@ -4918,7 +4885,7 @@ function ErEditorControls({
   }), [diagram.entities]);
 
   return (
-    <aside className="canvas-er-editor" data-canvas-pan-exclusion="true" data-testid="er-editor-controls" style={{ background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8, bottom, maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12, width: 'min(400px, calc(100% - 24px))', zIndex: 7 }}>
+  <aside className="canvas-er-editor" data-canvas-pan-exclusion="true" data-testid="er-editor-controls" style={{ background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8, bottom, maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12, width: 'min(400px, calc(100% - 24px))', zIndex: 9 }}>
       <form onSubmit={(event) => { event.preventDefault(); onAddEntity?.(entityName); setEntityName('ENTITY'); }} style={{ display: 'flex', gap: 6 }}>
         <strong style={{ fontSize: 12, whiteSpace: 'nowrap' }}>ER entities</strong>
         <input aria-label="New ER entity" onChange={(event) => { setEntityName(event.target.value); }} value={entityName} />
@@ -5030,21 +4997,11 @@ function ErRelationshipForm({ entities, onDelete, onSave, relationship }: { enti
 const SEMANTIC_PANEL_STYLE: CSSProperties = {
   background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8,
   maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12,
-  width: 'min(400px, calc(100% - 24px))', zIndex: 7,
+  width: 'min(400px, calc(100% - 24px))', zIndex: 9,
 };
 const HIERARCHY_CONTROL_STYLE: CSSProperties = { minHeight: 44, minWidth: 44 };
 const SEMANTIC_PANEL_TOP_INSET = 56;
 const SEMANTIC_PANEL_MAX_HEIGHT = 480;
-export function getRenderedCanvasControlsSafeBottom(
-  canvas: Pick<DOMRect, 'bottom' | 'top'>,
-  toolbar: { bottom: number; display: string; top: number; visibility: string } | null,
-  gap: number,
-): number {
-  if (!toolbar || toolbar.display === 'none' || toolbar.visibility === 'hidden'
-    || toolbar.bottom <= canvas.top || toolbar.top >= canvas.bottom) return 0;
-  const safeTop = Math.max(canvas.top, Math.min(canvas.bottom, toolbar.top));
-  return Math.max(0, canvas.bottom - safeTop + gap);
-}
 
 export function getSemanticControlsSafeBottom(visible: boolean, toolbarBottom: number, toolbarHeight: number, gap: number): number {
   return visible ? toolbarBottom + toolbarHeight + gap : 0;

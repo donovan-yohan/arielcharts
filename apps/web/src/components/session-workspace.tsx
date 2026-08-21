@@ -162,6 +162,7 @@ import {
 } from '../lib/canvas-presence';
 import { LaserPresencePublisher } from '../lib/laser-presence-publisher';
 import { getSafeSessionStorage, readLaserSequenceHighWater, writeLaserSequenceHighWater } from '../lib/laser-sequence-storage';
+import { coerceCanvasToolForRenderer, getMermaidCanvasTool, shouldClearCanvasSelectionForPointerTarget, type CanvasTool } from '../lib/canvas-interaction-state';
 import { usePresenterFollow } from '../lib/use-presenter-follow';
 
 const DIAGRAMS_KEY = 'diagrams';
@@ -592,6 +593,15 @@ function seedBlankDiagramCatalog(doc: Y.Doc, diagramsMap: Y.Map<Y.Map<unknown>>,
   }, 'local-workspace-seed');
 }
 
+export function applyLocalCanvasToolChange(
+  tool: CanvasTool,
+  stopFollowing: () => void,
+  setTool: (tool: CanvasTool) => void,
+): void {
+  stopFollowing();
+  setTool(tool);
+}
+
 export function SessionWorkspace({
   initialRoomKey,
   sessionId,
@@ -619,7 +629,6 @@ export function SessionWorkspace({
   const sourceUndoManagerRef = useRef<Y.UndoManager | null>(null);
   const dragCommitterRef = useRef<DragLayoutCommitter | null>(null);
   const dragHistoryActionRef = useRef<ReturnType<CanvasHistoryCoordinator['beginAction']> | null>(null);
-  const overlayHistoryActionRef = useRef<ReturnType<CanvasHistoryCoordinator['beginAction']> | null>(null);
   const diagramTabRefs = useRef(new Map<string, HTMLButtonElement>());
   const diagramCameraSessionRef = useRef({ cameras: new Map<string, CanvasCameraState>(), sessionId });
   if (diagramCameraSessionRef.current.sessionId !== sessionId) {
@@ -681,7 +690,10 @@ export function SessionWorkspace({
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [nodePositions, setNodePositions] = useState<DiagramNodePositions>({});
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const [interactionMode, setInteractionMode] = useState<'select' | 'connect' | 'laser'>('select');
+  // Canvas intent is browser-local and shared by Mermaid and overlay renderers.
+  // A renderer receives its supported projection; neither renderer owns a
+  // second mode state or relies on window events to switch the other one.
+  const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
   const [renamingDiagramId, setRenamingDiagramId] = useState<string | null>(null);
   const [diagramNameDraft, setDiagramNameDraft] = useState('');
   const [openFlyout, setOpenFlyout] = useState<WorkspaceFlyout>(null);
@@ -709,6 +721,9 @@ export function SessionWorkspace({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const selectPresentedDiagram = useCallback((diagramId: string) => { setActiveDiagramId(diagramId); }, []);
   const presenterFollow = usePresenterFollow(collaboration?.awareness ?? null, activeDiagramId, selectPresentedDiagram);
+  const handleCanvasToolChange = useCallback((tool: CanvasTool) => {
+    applyLocalCanvasToolChange(tool, presenterFollow.stopFollowing, setCanvasTool);
+  }, [presenterFollow.stopFollowing]);
   const handleCanvasCameraChange = useCallback((camera: CanvasCameraState) => {
     if (activeDiagramId) diagramCameraSessionRef.current.cameras.set(activeDiagramId, camera);
     presenterFollow.onCameraChange(camera);
@@ -782,9 +797,7 @@ export function SessionWorkspace({
     setCanvasHistory(history);
     return () => {
       if (dragHistoryActionRef.current) history.cancelAction(dragHistoryActionRef.current);
-      if (overlayHistoryActionRef.current) history.cancelAction(overlayHistoryActionRef.current);
       dragHistoryActionRef.current = null;
-      overlayHistoryActionRef.current = null;
       history.destroy();
       if (canvasHistoryRef.current === history) canvasHistoryRef.current = null;
       setCanvasHistory((current) => current === history ? null : current);
@@ -897,11 +910,6 @@ export function SessionWorkspace({
     if (value.active && value.point) laserPublisherRef.current?.move(value.point);
     else laserPublisherRef.current?.stop();
   }, []);
-
-  const handleOverlayToolActivate = useCallback(() => {
-    setInteractionMode('select');
-    handleLaserChange({ active: false });
-  }, [handleLaserChange]);
 
   const handleInkPreviewChange = useCallback((preview: CanvasInkPreviewState | null) => {
     localInkPreviewRef.current = preview;
@@ -1019,11 +1027,11 @@ export function SessionWorkspace({
 
   useEffect(() => {
     const clearSelectionOutsideCanvas = (event: PointerEvent) => {
-      if (selectedNodeIdsRef.current.length === 0 || !(event.target instanceof Node)) {
+      if (selectedNodeIdsRef.current.length === 0) {
         return;
       }
       const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
-      if (canvas?.contains(event.target)) {
+      if (!shouldClearCanvasSelectionForPointerTarget(event.target, canvas)) {
         return;
       }
       setSelectedNodeIds([]);
@@ -1436,7 +1444,7 @@ export function SessionWorkspace({
       setPreview(null);
       setRenderError(null);
       setSelectedNodeIds([]);
-      setInteractionMode('select');
+      setCanvasTool('select');
       return;
     }
 
@@ -1467,7 +1475,7 @@ export function SessionWorkspace({
     setPreview(previewRegistryRef.current.get(activeDiagram.id));
     setRenderError(previewRegistryRef.current.getError(activeDiagram.id));
     setSelectedNodeIds([]);
-    setInteractionMode('select');
+    setCanvasTool('select');
     activeDiagram.yText.observe(syncText);
     activeDiagram.nodePositionsMap.observe(syncNodePositions);
 
@@ -1624,7 +1632,7 @@ export function SessionWorkspace({
             previewRegistryRef.current.clear(diagramId);
             setRenderError(null);
             setPreview(null);
-            setInteractionMode('select');
+            setCanvasTool('select');
             setAwaitingLivePreviewAfterHistory(false);
             setHistoryPreviewCameraLock((current) => getNextPreviewCameraLock(current, 'live-render-accepted'));
           }
@@ -2050,6 +2058,9 @@ export function SessionWorkspace({
       : 'Saving changes…';
   const isFlowchart = canUseFlowchartControls(renderedMermaidText, renderedPreview);
   const isSequence = canUseSequenceControls(renderedMermaidText, renderedPreview);
+  useEffect(() => {
+    setCanvasTool((current) => coerceCanvasToolForRenderer(current, isFlowchart));
+  }, [isFlowchart]);
   const isEr = canUseErControls(renderedMermaidText, renderedPreview);
   const isClass = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'class');
   const isState = canUseSemanticFamilyControls(renderedMermaidText, renderedPreview, 'state');
@@ -2702,7 +2713,7 @@ export function SessionWorkspace({
             emptyMessage={renderedMermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
             emptyState={onboardingVisible ? null : emptyState}
             graph={renderedPreview?.flowchartSnapshot ?? null}
-            interactionMode={interactionMode}
+            interactionMode={getMermaidCanvasTool(canvasTool, isFlowchart)}
             isFlowchart={isFlowchart}
             mermaidSource={renderedMermaidText}
             isSequence={isSequence}
@@ -2787,16 +2798,15 @@ export function SessionWorkspace({
               onUndo: handleCanvasUndo,
               onRedo: handleCanvasRedo,
               onUpdate: overlayController.update,
+              onTransform: overlayController.transform,
               onEditText: overlayController.editText,
               onDuplicate: overlayController.duplicate,
               onBeginComposition: overlayController.beginComposition,
               onCommitComposition: overlayController.commitComposition,
               onAddStroke: overlayController.addStroke,
               onInkPreview: historyPreview === null ? handleInkPreviewChange : () => undefined,
-              onToolActivate: handleOverlayToolActivate,
-              onHistoryActionBegin: () => { overlayHistoryActionRef.current = canvasHistoryRef.current?.beginAction() ?? null; },
-              onHistoryActionEnd: () => { if (overlayHistoryActionRef.current) canvasHistoryRef.current?.endAction(overlayHistoryActionRef.current); overlayHistoryActionRef.current = null; },
-              onHistoryActionRun: (run) => { if (overlayHistoryActionRef.current) canvasHistoryRef.current?.runAction(overlayHistoryActionRef.current, run); else run(); },
+              tool: coerceCanvasToolForRenderer(canvasTool, isFlowchart),
+              onToolChange: handleCanvasToolChange,
               nextInkPreviewSequence,
               remoteInkPreviews: historyPreview === null ? remoteCanvasPresence.flatMap((presence) => presence.canvas.ink_preview ? [{ id: String(presence.client_id), color: presence.participant.color, preview: presence.canvas.ink_preview }] : []) : [],
               onboardingRequest: onboardingRequest?.diagramId === activeDiagramId ? onboardingRequest : null,
@@ -3216,7 +3226,8 @@ export function SessionWorkspace({
               const queue = mutationQueueRef.current;
               if (queue) runVisualSourceMutation(queue.groupNodes(ids, label));
             }}
-            onInteractionModeChange={setInteractionMode}
+            onInteractionModeChange={handleCanvasToolChange}
+            onCanvasToolChange={handleCanvasToolChange}
             onNodeDrag={handleNodeDrag}
             onNodeDragStart={handleNodeDragStart}
             onNodeDragStop={handleNodeDragStop}

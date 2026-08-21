@@ -1,8 +1,13 @@
 // @vitest-environment happy-dom
 
+import React, { act } from 'react';
+import type { CSSProperties } from 'react';
+import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getSemanticControlsSafeBottom, observeCanvasControlsSafeBottom, observeCanvasToolbarSafeLane } from './diagram-canvas';
+import { getSemanticControlsSafeBottom, observeCanvasToolbarSafeLane } from './diagram-canvas';
 import { inspectorCapacityPx } from './overlay-canvas-layer';
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type ObservedTarget = { options: MutationObserverInit; target: Node };
 
@@ -28,15 +33,22 @@ class TestMutationObserver {
 }
 
 class TestResizeObserver {
-  constructor(_callback: ResizeObserverCallback) {}
-  disconnect() {}
-  observe(_target: Element) {}
-  unobserve(_target: Element) {}
+  static instances: TestResizeObserver[] = [];
+  readonly observed: Element[] = [];
+  readonly unobserved: Element[] = [];
+  disconnected = false;
+
+  constructor(private readonly callback: ResizeObserverCallback) { TestResizeObserver.instances.push(this); }
+  disconnect() { this.disconnected = true; this.observed.length = 0; }
+  observe(target: Element) { this.observed.push(target); }
+  unobserve(target: Element) { this.unobserved.push(target); this.observed.splice(this.observed.indexOf(target), 1); }
+  trigger() { this.callback([], this as unknown as ResizeObserver); }
 }
 
 afterEach(() => {
   document.body.replaceChildren();
   TestMutationObserver.instances = [];
+  TestResizeObserver.instances = [];
   vi.unstubAllGlobals();
 });
 
@@ -87,34 +99,21 @@ describe('mounted canvas toolbar safe-lane observer', () => {
     stop();
   });
 
-  it('republishes the visible recovery rail without making semantic placement observer-driven', () => {
-    vi.stubGlobal('MutationObserver', TestMutationObserver);
-    vi.stubGlobal('ResizeObserver', TestResizeObserver);
-
-    const shell = document.createElement('div');
-    const canvas = document.createElement('div');
-    const controls = document.createElement('div');
-    shell.append(canvas); canvas.append(controls); document.body.append(shell);
-    canvas.getBoundingClientRect = () => ({ bottom: 331, top: 108 }) as DOMRect;
-    controls.getBoundingClientRect = () => ({ bottom: 319, top: 265 }) as DOMRect;
-    controls.style.display = 'flex';
-    controls.style.visibility = 'hidden';
-
-    const stop = observeCanvasControlsSafeBottom(canvas, controls, shell, 8);
+  it('commits the controls safe-bottom declaratively with visibility', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    const CanvasShell = ({ controlsVisible }: { controlsVisible: boolean }) => <div
+      data-testid="canvas-shell"
+      style={{ '--canvas-controls-toolbar-safe-bottom': `${getSemanticControlsSafeBottom(controlsVisible, 12, 54, 8)}px` } as CSSProperties}
+    />;
+    await act(async () => root.render(<CanvasShell controlsVisible={false} />));
+    const shell = host.querySelector<HTMLElement>('[data-testid="canvas-shell"]')!;
     expect(shell.style.getPropertyValue('--canvas-controls-toolbar-safe-bottom')).toBe('0px');
     expect(inspectorCapacityPx(182, 331 - 8)).toBe(140);
-    // Semantic panels keep the current toolbar layout reserve synchronously;
-    // their placement must not wait for this rendered-rail observer.
-    expect(getSemanticControlsSafeBottom(true, 12, 54, 8)).toBe(74);
-
-    controls.style.visibility = 'visible';
-    const controlsObserver = TestMutationObserver.instances.find((observer) => observer.observed.some(({ target }) => target === controls));
-    expect(controlsObserver).toBeDefined();
-    controlsObserver!.trigger();
-    // The writer is synchronous with the observer callback: no component
-    // rerender is required before OverlayCanvasLayer can read this reserve.
+    await act(async () => root.render(<CanvasShell controlsVisible />));
     expect(shell.style.getPropertyValue('--canvas-controls-toolbar-safe-bottom')).toBe('74px');
     expect(inspectorCapacityPx(182, 331 - 74)).toBe(74);
-    stop();
+    await act(async () => root.unmount());
   });
 });

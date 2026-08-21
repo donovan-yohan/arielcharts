@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   areCanvasAwarenessStatesEqual,
+  CANVAS_ACTIVE_SAMPLE_BUDGET_PER_10_SECONDS,
+  CANVAS_CURSOR_INTERVAL_MS,
+  CANVAS_LASER_INTERVAL_MS,
   getRemoteCanvasPresence,
   hasCanvasCursorMovedEnough,
   quantizeCanvasCursor,
 } from './canvas-presence';
 
 describe('canvas presence', () => {
+  it('keeps each sustained active presence channel within its shared ten-second budget', () => {
+    expect(Math.ceil(10_000 / CANVAS_CURSOR_INTERVAL_MS)).toBeLessThanOrEqual(CANVAS_ACTIVE_SAMPLE_BUDGET_PER_10_SECONDS);
+    expect(Math.ceil(10_000 / CANVAS_LASER_INTERVAL_MS)).toBeLessThanOrEqual(CANVAS_ACTIVE_SAMPLE_BUDGET_PER_10_SECONDS);
+  });
+
   it('keeps only active-diagram, remote canvas awareness with stable client ids', () => {
     const states = new Map<number, unknown>([
       [1, { user: { name: 'Local', color: '#0af', type: 'human' }, canvas: { diagram_id: 'main', cursor: { x: 4, y: 8 } } }],

@@ -25,6 +25,24 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+async function assertUnifiedOverlayToolbarDoesNotBlockCanvas(page: Page): Promise<void> {
+  const select = page.getByRole('button', { name: 'Select tool', exact: true });
+  const more = page.getByTestId('overlay-toolbar-more-toggle');
+  await assertHitTarget(page, select, 'unified Select tool');
+  await assertHitTarget(page, more, 'pinned More canvas tools disclosure');
+  assert(await more.getAttribute('aria-expanded') === 'false', 'Pinned More disclosure was unexpectedly expanded before the subgraph drag.');
+  await more.click({ timeout: 15_000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="overlay-toolbar-more-toggle"]')?.getAttribute('aria-expanded') === 'true');
+  const objects = page.getByTestId('overlay-toolbar-secondary').getByRole('button', { name: 'Objects and layers', exact: true });
+  await objects.evaluate((button) => {
+    const actions = button.closest<HTMLElement>('.overlay-toolbar-secondary-actions');
+    if (actions) actions.scrollLeft = Math.max(0, button.offsetLeft - actions.offsetLeft - 4);
+  });
+  await assertHitTarget(page, objects, 'expanded Objects and layers action');
+  await more.click({ timeout: 15_000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="overlay-toolbar-more-toggle"]')?.getAttribute('aria-expanded') === 'false');
+}
+
 const SUBGRAPH_HEADER_KEY_PROBE = '__arielchartsSubgraphHeaderKeyProbe';
 
 type SubgraphHeaderKeyProbe = {
@@ -322,6 +340,7 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
     await outerHeader.waitFor({ state: 'visible', timeout: 15_000 });
     const nodeLocators = ['A', 'B', 'C'].map((id) => page.locator(`.react-flow__node[data-id=${JSON.stringify(id)}]`));
     const before = await Promise.all(nodeLocators.map((node) => node.boundingBox()));
+    await assertUnifiedOverlayToolbarDoesNotBlockCanvas(page);
     const headerBox = await outerHeader.boundingBox();
     assert(headerBox, 'Outer section header has no draggable bounds.');
     const start = { x: headerBox.x + (headerBox.width / 2), y: headerBox.y + (headerBox.height / 2) };
@@ -331,8 +350,6 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
       return hit === element || Boolean(hit && element.contains(hit));
     });
     assert(headerCenterHit, 'The inline toolbar chrome obscured the outer section header center instead of passing its gap through to the canvas.');
-    await assertHitTarget(page, page.getByRole('button', { name: 'Select overlay tool', exact: true }), 'first inline overlay tool');
-    await assertHitTarget(page, page.getByRole('button', { name: 'Objects and layers', exact: true }), 'last inline overlay tool');
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
     await page.mouse.move(start.x + 320, start.y + 180, { steps: 10 });

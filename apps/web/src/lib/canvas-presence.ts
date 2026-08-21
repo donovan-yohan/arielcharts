@@ -1,10 +1,12 @@
 import type { AwarenessState, CanvasAwarenessState, CanvasInkPreviewState, CanvasLaserState, CanvasPresenceEntry, CanvasWorldPoint, Participant } from '@arielcharts/shared';
 
-export const CANVAS_CURSOR_INTERVAL_MS = 75;
+// Cursor and laser each cap sustained active samples at 80 per ten seconds,
+// leaving 40 of the server's shared 120-message budget for stop, selection,
+// and editor-presence transitions.
+export const CANVAS_ACTIVE_SAMPLE_BUDGET_PER_10_SECONDS = 80;
+export const CANVAS_CURSOR_INTERVAL_MS = 125;
 export const CANVAS_CURSOR_GRID_SIZE = 4;
 export const CANVAS_CURSOR_MIN_DISTANCE = 4;
-// 80 active samples/10s leaves one third of the shared awareness budget for
-// immediate stop, cursor, selection, and editor-presence transitions.
 export const CANVAS_LASER_INTERVAL_MS = 125;
 export const CANVAS_LASER_GRID_SIZE = 2;
 export const CANVAS_INK_PREVIEW_MAX_POINTS = 64;

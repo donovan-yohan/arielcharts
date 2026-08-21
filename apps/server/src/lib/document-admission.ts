@@ -221,7 +221,7 @@ function validateOverlayObject(object: unknown): DocumentAdmissionReason | undef
   const layer = object.get('layer');
   const body = object.get('body');
   if (!isBoundedIdentifier(kind) || !Number.isInteger(version) || (version as number) < 1
-    || !isBoundedIdentifier(orderKey) || !isOverlayGeometry(geometry)
+    || !isBoundedIdentifier(orderKey) || !isOverlayGeometry(geometry, kind)
     || (layer !== undefined && (typeof layer !== 'string' || byteLength(layer) > COLLABORATION_BUDGETS.identifierBytes))
     || !isOverlayMetadata(object.get('style')) || !isOverlayMetadata(object.get('metadata'))
     || !isPlainRecord(object.get('payload')) || (anchor !== undefined && !isOverlayAnchor(anchor))
@@ -258,11 +258,12 @@ function isOverlayPoint(value: unknown): boolean {
   return isPlainRecord(value) && Number.isFinite(value.x) && Number.isFinite(value.y);
 }
 
-function isOverlayGeometry(value: unknown): boolean {
+function isOverlayGeometry(value: unknown, kind: unknown): boolean {
   if (!isOverlayPoint(value)) return false;
   const geometry = value as Record<string, unknown>;
-  return Number.isFinite(geometry.width) && (geometry.width as number) >= 0
-    && Number.isFinite(geometry.height) && (geometry.height as number) >= 0 && Number.isFinite(geometry.rotation);
+  const endpointVector = kind === 'shape.line' || kind === 'shape.arrow' || kind === 'connector.overlay';
+  return Number.isFinite(geometry.width) && (endpointVector || (geometry.width as number) >= 0)
+    && Number.isFinite(geometry.height) && (endpointVector || (geometry.height as number) >= 0) && Number.isFinite(geometry.rotation);
 }
 
 /** The immutable final-stroke envelope; previews are awareness-only and never reach this path. */

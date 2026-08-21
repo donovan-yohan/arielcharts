@@ -275,7 +275,6 @@ body {
   gap: 1rem;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
 }
 
 .primary-button,
@@ -2681,10 +2680,10 @@ code {
   }
 }
 
-/* Primary canvas tools stay in one direct, horizontal strip. Object operations
-   are contextual and the inspector is intentionally separate from drawing. */
+/* The primary strip is stable; More grows a measured lane only while active. */
 .overlay-icon-toolbar {
-  align-items: center;
+  --overlay-toolbar-rail-height: 188px;
+  align-items: stretch;
   display: grid;
   gap: 8px;
   justify-items: center;
@@ -2694,14 +2693,15 @@ code {
   position: absolute;
   top: 12px;
   transform: translateX(-50%);
-  width: max-content;
+  width: min(100%, 790px);
   z-index: 2;
 }
 
 .overlay-toolbar-primary,
 .overlay-toolbar-context,
 .overlay-toolbar-inspector,
-.overlay-toolbar-inspector-actions {
+.overlay-toolbar-inspector-actions,
+.overlay-toolbar-secondary-actions {
   align-items: center;
   background: color-mix(in srgb, var(--control-surface) 94%, transparent);
   border: 1px solid var(--control-border);
@@ -2715,37 +2715,85 @@ code {
 
 .overlay-toolbar-primary {
   box-sizing: border-box;
-  overflow-x: auto;
+  overflow: hidden;
   padding: 4px;
-  /* The toolbar floats over the canvas: only its actual controls may capture
-     a pointer, so its painted padding, gaps, and separators do not mask a
-     canvas node or section header beneath the strip. */
+  pointer-events: none;
+  width: 100%;
+}
+
+.overlay-toolbar-primary-tools {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 3px;
+  min-width: 0;
+  overflow-x: auto;
   pointer-events: none;
   scrollbar-width: thin;
   touch-action: pan-x;
-  width: min(100%, 790px);
 }
 
-.overlay-toolbar-primary > .overlay-toolbar-button { pointer-events: auto; }
+.overlay-toolbar-primary-tools > .overlay-toolbar-button,
+.overlay-toolbar-primary > .overlay-toolbar-button {
+  pointer-events: auto;
+  touch-action: pan-x;
+}
 
 .overlay-toolbar-context {
   box-sizing: border-box;
   overflow-x: auto;
   padding: 4px;
+  pointer-events: none;
   scrollbar-width: thin;
-  width: min(100%, 680px);
+  width: 100%;
+}
+
+.overlay-toolbar-context > .overlay-toolbar-button {
+  pointer-events: auto;
+  touch-action: pan-x;
+}
+
+.overlay-toolbar-secondary {
+  align-content: start;
+  display: grid;
+  gap: 6px;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  overflow: clip;
+  pointer-events: none;
+  grid-template-rows: 54px minmax(0, 1fr);
+  visibility: hidden;
+  width: 100%;
+}
+
+.overlay-toolbar-secondary.is-expanded {
+  height: var(--overlay-toolbar-rail-height);
+  min-height: var(--overlay-toolbar-rail-height);
+  pointer-events: none;
+  visibility: visible;
+}
+
+.overlay-toolbar-secondary-actions {
+  box-sizing: border-box;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 4px;
+  scrollbar-width: thin;
+  touch-action: pan-x;
+  width: 100%;
 }
 
 .overlay-toolbar-inspector {
   align-items: stretch;
   box-sizing: border-box;
   flex-direction: column;
-  max-width: min(360px, calc(var(--overlay-toolbar-available-width, 100vw) - 16px));
-  max-height: min(280px, var(--overlay-toolbar-inspector-max-height, 0px));
+  max-width: 100%;
+  max-height: 118px;
   min-height: 0;
   overflow: auto;
   padding: 6px;
-  width: min(360px, calc(var(--overlay-toolbar-available-width, 100vw) - 16px));
+  width: 100%;
 }
 
 .overlay-toolbar-inspector-actions {
@@ -2792,63 +2840,86 @@ code {
 .overlay-scene-list label { align-items: center; display: flex; flex-wrap: wrap; font: 12px/1.2 var(--font-sans); gap: 5px; }
 .overlay-scene-list input, .overlay-scene-list select { min-height: 32px; min-width: 0; }
 .overlay-layer-add input { flex: 1 1 120px; }
-.overlay-resize-handle { background: var(--selection); border: 2px solid var(--surface-canvas); border-radius: 50%; bottom: -7px; cursor: nwse-resize; height: 14px; padding: 0; position: absolute; right: -7px; width: 14px; z-index: 3; }
+.overlay-selection-overlay,
+.overlay-line-selection-overlay {
+  pointer-events: none;
+  position: absolute;
+  z-index: 4;
+}
+
+.overlay-selection-overlay { transform-origin: center; }
+.overlay-line-selection-overlay { inset: 0; }
+
+/* The visible dot remains compact while the control retains a 44px touch hit
+   target. Keeping these outside object clipping lets any selected object be
+   transformed without making its resting canvas rendering noisy. */
+.overlay-transform-handle {
+  background: transparent;
+  border: 0;
+  cursor: nwse-resize;
+  height: 44px;
+  padding: 0;
+  pointer-events: auto;
+  position: absolute;
+  touch-action: none;
+  transform: translate(-50%, -50%);
+  width: 44px;
+}
+
+.overlay-transform-handle::after {
+  background: var(--selection);
+  border: 2px solid var(--surface-canvas);
+  border-radius: 50%;
+  content: '';
+  height: 8px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+}
+
+.overlay-transform-handle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -4px; }
+.overlay-transform-handle.is-nw { cursor: nwse-resize; left: 0; top: 0; }
+.overlay-transform-handle.is-n { cursor: ns-resize; left: 50%; top: 0; }
+.overlay-transform-handle.is-ne { cursor: nesw-resize; left: 100%; top: 0; }
+.overlay-transform-handle.is-e { cursor: ew-resize; left: 100%; top: 50%; }
+.overlay-transform-handle.is-se { cursor: nwse-resize; left: 100%; top: 100%; }
+.overlay-transform-handle.is-s { cursor: ns-resize; left: 50%; top: 100%; }
+.overlay-transform-handle.is-sw { cursor: nesw-resize; left: 0; top: 100%; }
+.overlay-transform-handle.is-w { cursor: ew-resize; left: 0; top: 50%; }
+
+.overlay-rotation-handle { cursor: grab; left: 50%; top: -28px; }
+.overlay-rotation-handle::before { background: var(--selection); content: ''; height: 18px; left: calc(50% - 1px); position: absolute; top: 26px; width: 2px; }
+.overlay-line-endpoint { cursor: crosshair; }
+.overlay-transform-status { background: var(--control-surface); border: 1px solid var(--control-border); border-radius: 8px; color: var(--ink); font: 12px/1.2 var(--font-sans); left: 50%; padding: 6px 8px; pointer-events: none; position: absolute; top: 8px; transform: translateX(-50%); z-index: 5; }
 
 @media (forced-colors: active) {
-  .overlay-toolbar-primary, .overlay-toolbar-context, .overlay-toolbar-inspector, .overlay-toolbar-inspector-actions { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  .overlay-toolbar-primary, .overlay-toolbar-context, .overlay-toolbar-inspector, .overlay-toolbar-inspector-actions, .overlay-toolbar-secondary-actions { background: Canvas; border-color: CanvasText; box-shadow: none; }
   .overlay-toolbar-button { border-color: CanvasText; color: CanvasText; forced-color-adjust: none; }
   .overlay-toolbar-button[aria-pressed='true'], .overlay-toolbar-button:focus-visible { background: Highlight; color: HighlightText; outline: 2px solid Highlight; }
+  .overlay-transform-handle::after { background: Highlight; border-color: Canvas; forced-color-adjust: none; }
+  .overlay-rotation-handle::before { background: Highlight; forced-color-adjust: none; }
+  .overlay-transform-handle:focus-visible { outline-color: Highlight; }
 }
 
 @media (pointer: coarse), (max-width: 420px) {
-  .overlay-icon-toolbar { max-width: calc(100% - 16px); top: 8px; }
+  .overlay-icon-toolbar { --overlay-toolbar-rail-height: 188px; max-width: calc(100% - 16px); top: 8px; width: min(100%, var(--overlay-toolbar-available-width, 100vw)); }
   .overlay-toolbar-primary { justify-content: flex-start; }
   .overlay-toolbar-button { height: 44px; width: 44px; }
-  .overlay-toolbar-inspector { max-width: calc(var(--overlay-toolbar-available-width, 100vw) - 48px); width: calc(var(--overlay-toolbar-available-width, 100vw) - 48px); }
+  .overlay-toolbar-inspector { max-width: max(0px, calc(var(--overlay-toolbar-available-width, 100vw) - 48px)); width: max(0px, calc(var(--overlay-toolbar-available-width, 100vw) - 48px)); }
   .overlay-toolbar-checkbox { min-height: 44px; }
 }
 
-/* A selected object shares the primary row in short landscape. This keeps the
-   fixed toolbar lane to one row, leaving the semantic editor a usable vertical
-   scroll surface below it. */
 @media (min-width: 421px) and (max-height: 500px) {
-  .overlay-icon-toolbar {
-    box-sizing: border-box;
-    grid-template-columns: minmax(0, 1fr);
-    justify-items: stretch;
-    width: min(calc(100% - 24px), var(--overlay-toolbar-available-width, 100vw));
-  }
-
-  .overlay-icon-toolbar:not(:has(.overlay-toolbar-context)) > .overlay-toolbar-primary {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    justify-self: center;
-    width: min(100%, 790px);
-  }
-
-  .overlay-icon-toolbar:has(.overlay-toolbar-context) {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .overlay-icon-toolbar:has(.overlay-toolbar-context) > .overlay-toolbar-primary,
-  .overlay-icon-toolbar:has(.overlay-toolbar-context) > .overlay-toolbar-context {
-    grid-row: 1;
-    justify-self: stretch;
-    min-width: 0;
-    width: 100%;
-  }
-
-  .overlay-icon-toolbar:has(.overlay-toolbar-context) > .overlay-toolbar-primary { grid-column: 1; }
-  .overlay-icon-toolbar:has(.overlay-toolbar-context) > .overlay-toolbar-context { grid-column: 2; }
-
-  .overlay-icon-toolbar > .overlay-toolbar-inspector {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    justify-self: end;
-    margin-inline-end: 12px;
-    max-width: min(360px, calc((var(--overlay-toolbar-available-width, 100vw) - 48px) / 2));
-    width: min(360px, calc((var(--overlay-toolbar-available-width, 100vw) - 48px) / 2));
-  }
+  .overlay-icon-toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 54px; justify-items: stretch; width: min(calc(100% - 24px), var(--overlay-toolbar-available-width, 100vw)); }
+  .overlay-toolbar-primary { grid-column: 1; grid-row: 1; min-width: 0; }
+  .overlay-toolbar-secondary { display: grid; grid-column: 2; grid-row: 1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-width: 0; }
+  .overlay-toolbar-secondary.is-expanded { height: 54px; min-height: 54px; overflow: visible; }
+  .overlay-toolbar-secondary-actions, .overlay-toolbar-secondary > .overlay-toolbar-context { grid-row: 1; height: 54px; min-width: 0; width: 100%; }
+  .overlay-toolbar-secondary-actions { grid-column: 1; }
+  .overlay-toolbar-secondary > .overlay-toolbar-context { grid-column: 2; }
+  .overlay-toolbar-secondary .overlay-toolbar-inspector { max-height: var(--overlay-toolbar-inspector-max-height); max-width: min(320px, calc(50vw - 24px)); position: absolute; right: 24px; top: 62px; width: min(320px, calc(50vw - 24px)); }
 }
 
 @media (pointer: coarse) {
@@ -3303,18 +3374,18 @@ code {
   }
 }
 
-/* On narrow or short touch canvases, the fixed centered overlay strip gets a
-   measured lane. Sequence controls scroll beneath it instead of being covered
-   when a contextual toolbar row is present. */
-@media (max-width: 420px), (max-height: 500px) {
-  .diagram-canvas-shell[data-overlay-toolbar-safe-top='true'] > .canvas-sequence-editor:not(.is-centered) {
-    bottom: var(--canvas-controls-toolbar-safe-bottom);
-    max-height: calc(100% - var(--overlay-toolbar-safe-top) - var(--canvas-controls-toolbar-safe-bottom));
-    padding-bottom: calc(4px + var(--canvas-controls-toolbar-safe-bottom));
-    scroll-padding-bottom: var(--canvas-controls-toolbar-safe-bottom);
-    scroll-padding-top: var(--overlay-toolbar-safe-top);
-    top: var(--overlay-toolbar-safe-top);
-  }
+.diagram-canvas-shell[data-overlay-toolbar-safe-top='true'] > .canvas-sequence-editor:not(.is-centered) {
+  bottom: var(--canvas-controls-toolbar-safe-bottom);
+  max-height: calc(100% - var(--overlay-toolbar-safe-top) - var(--canvas-controls-toolbar-safe-bottom));
+  padding-bottom: calc(4px + var(--canvas-controls-toolbar-safe-bottom));
+  scroll-padding-bottom: var(--canvas-controls-toolbar-safe-bottom);
+  scroll-padding-top: var(--overlay-toolbar-safe-top);
+  top: var(--overlay-toolbar-safe-top);
+}
+
+.diagram-canvas-shell[data-overlay-toolbar-safe-top='true'] > .canvas-semantic-editor {
+  --canvas-semantic-editor-top: max(72px, var(--overlay-toolbar-safe-top, 0px));
+  top: var(--canvas-semantic-editor-top) !important;
 }
 
 /* Connect agent modal */

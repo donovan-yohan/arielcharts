@@ -66,6 +66,8 @@ describe('document admission', () => {
     setScene(doc, 'main', objects);
     const scene = doc.getMap<Y.Map<unknown>>('overlays').get('main')!; const layers = new Y.Map<unknown>(); const defaultLayer = new Y.Map<unknown>(); defaultLayer.set('id', 'default'); defaultLayer.set('name', 'Default'); defaultLayer.set('order_key', 'a'); defaultLayer.set('visible', true); defaultLayer.set('locked', false); defaultLayer.set('export', true); layers.set('default', defaultLayer); scene.set('layers', layers);
     expect(validateDocumentState(doc)).toEqual({ accepted: true });
+    connector.set('geometry', { x: 100, y: 40, width: -100, height: -40, rotation: 0 });
+    expect(validateDocumentState(doc)).toEqual({ accepted: true });
     connector.set('payload', { start_id: 'shape', end_id: 'missing' });
     expect(validateDocumentState(doc)).toEqual({ accepted: false, reason: 'invalid_overlay_schema' });
     connector.set('kind', 'shape.rectangle'); connector.set('payload', {}); connector.delete('body');

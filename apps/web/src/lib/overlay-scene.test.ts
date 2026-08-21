@@ -10,6 +10,7 @@ import {
   createOverlayLocalState,
   createOverlayUndoManager,
   deleteOverlayObjects,
+  DIAMOND_ABSOLUTE_ROTATION_MODEL,
   editOverlayText,
   getOverlayScene,
   getOverlayTransformTargets,
@@ -20,6 +21,7 @@ import {
   readOverlayScene,
   reorderOverlayObject,
   setOverlayOrderKey,
+  transformOverlayObject,
   updateOverlayLayer,
   updateOverlayObject,
 } from './overlay-scene';
@@ -230,6 +232,64 @@ describe('overlay scene', () => {
     moveOverlayObjects(doc, 'main', ['frame'], 40, 20);
     expect(readOverlayScene(doc, 'main').objects.find(({ id }) => id === 'left')?.geometry).toMatchObject({ x: 50, y: 40 });
     expect(readOverlayScene(doc, 'main').objects.find(({ id }) => id === 'right')?.geometry).toMatchObject({ x: 50, y: 40 });
+  });
+
+  it('commits direct geometry only from its expected peer-local starting geometry', () => {
+    const doc = new Y.Doc();
+    addOverlayObject(doc, 'main', { ...object('shape'), kind: 'shape.rectangle', body: 'Shape' });
+    const start = readOverlayScene(doc, 'main').objects[0]!.geometry;
+    const next = { ...start, x: 35, width: 90, rotation: 45 };
+    expect(transformOverlayObject(doc, 'main', 'shape', start, next)).toBe('applied');
+    expect(readOverlayScene(doc, 'main').objects[0]?.geometry).toEqual(next);
+
+    const beforeStale = readOverlayScene(doc, 'main').objects[0]!.geometry;
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    updateOverlayObject(peer, 'main', 'shape', { geometry: { ...beforeStale, y: 99 } });
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)), 'remote-peer');
+    expect(transformOverlayObject(doc, 'main', 'shape', beforeStale, { ...beforeStale, x: 999 })).toBe('stale');
+    expect(readOverlayScene(doc, 'main').objects[0]?.geometry).toEqual({ ...beforeStale, y: 99 });
+
+    const current = readOverlayScene(doc, 'main').objects[0]!.geometry;
+    expect(transformOverlayObject(doc, 'main', 'shape', current, { ...current, width: -1 })).toBe('invalid');
+    expect(readOverlayScene(doc, 'main').objects[0]?.geometry).toEqual(current);
+    addOverlayObject(doc, 'main', { ...object('line'), kind: 'shape.line', geometry: { x: 10, y: 20, width: 30, height: 10, rotation: 0 } });
+    const line = readOverlayScene(doc, 'main').objects.find(({ id }) => id === 'line')!;
+    expect(transformOverlayObject(doc, 'main', 'line', line.geometry, { ...line.geometry, width: -30, height: -10 })).toBe('applied');
+    expect(readOverlayScene(doc, 'main').objects.find(({ id }) => id === 'line')?.geometry).toMatchObject({ width: -30, height: -10 });
+  });
+
+  it('migrates a legacy diamond to an explicit absolute rotation in its first transform only', () => {
+    const doc = new Y.Doc();
+    addOverlayObject(doc, 'main', { ...object('legacy'), kind: 'shape.diamond', geometry: { x: 10, y: 20, width: 80, height: 80, rotation: 0 }, body: 'Legacy' });
+    const legacy = readOverlayScene(doc, 'main').objects[0]!;
+    // The caller compares the persisted pre-migration geometry, but submits
+    // the legacy visual basis (0 + implicit 45) as the new absolute geometry.
+    expect(transformOverlayObject(doc, 'main', legacy.id, legacy.geometry, { ...legacy.geometry, width: 112, rotation: 45 })).toBe('applied');
+    expect(readOverlayScene(doc, 'main').objects[0]).toMatchObject({ geometry: { width: 112, rotation: 45 }, payload: { rotation_model: DIAMOND_ABSOLUTE_ROTATION_MODEL } });
+
+    addOverlayObject(doc, 'main', { ...object('absolute'), kind: 'shape.diamond', geometry: { x: 120, y: 20, width: 80, height: 80, rotation: 0 }, payload: { rotation_model: DIAMOND_ABSOLUTE_ROTATION_MODEL }, body: 'Absolute' });
+    const absolute = readOverlayScene(doc, 'main').objects.find(({ id }) => id === 'absolute')!;
+    expect(transformOverlayObject(doc, 'main', absolute.id, absolute.geometry, absolute.geometry)).toBe('applied');
+    expect(readOverlayScene(doc, 'main').objects.find(({ id }) => id === 'absolute')?.geometry.rotation).toBe(0);
+  });
+
+  it('does not bypass object, layer, or frame-member locks for direct transforms', () => {
+    const doc = new Y.Doc();
+    addOverlayObject(doc, 'main', { ...object('member'), kind: 'shape.rectangle', body: 'Member' });
+    addOverlayObject(doc, 'main', { ...object('frame'), kind: 'frame.section', payload: { members: ['member'] }, metadata: { locked: true } });
+    const member = readOverlayScene(doc, 'main').objects.find(({ id }) => id === 'member')!;
+    expect(transformOverlayObject(doc, 'main', 'member', member.geometry, { ...member.geometry, x: 80 })).toBe('locked');
+    expect(readOverlayScene(doc, 'main').objects.find(({ id }) => id === 'member')?.geometry).toEqual(member.geometry);
+
+    addOverlayLayer(doc, 'main', { id: 'locked-layer', name: 'Locked', order_key: 'z', visible: true, locked: true, export: true });
+    addOverlayObject(doc, 'main', { ...object('layer-member'), kind: 'shape.rectangle', body: 'Layer member', layer: 'locked-layer' });
+    addOverlayObject(doc, 'main', { ...object('self-locked'), kind: 'shape.rectangle', body: 'Self locked', metadata: { locked: true } });
+    const scene = readOverlayScene(doc, 'main');
+    for (const id of ['layer-member', 'self-locked']) {
+      const locked = scene.objects.find((item) => item.id === id)!;
+      expect(transformOverlayObject(doc, 'main', id, locked.geometry, { ...locked.geometry, x: 80 })).toBe('locked');
+    }
   });
 
   it('keeps layer create, edit, and reorder undo/redo peer-local without touching objects or source', () => {

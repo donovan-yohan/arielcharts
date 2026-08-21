@@ -9,6 +9,7 @@ import {
 } from '@arielcharts/shared';
 import * as Y from 'yjs';
 import { validInkObject } from './freehand-ink';
+import { overlayGeometryEqual } from './overlay-transform';
 
 export const overlayOrigins = {
   localHuman: Symbol('arielcharts.local-human.overlay'),
@@ -30,6 +31,19 @@ export interface OverlayLocalState {
   selectedIds: Set<string>;
   draft: unknown | null;
   tool: string;
+}
+
+export type OverlayTransformCommitResult = 'applied' | 'stale' | 'locked' | 'missing' | 'invalid';
+/** Diamonds created before direct transforms implicitly painted at +45°. */
+export const DIAMOND_ABSOLUTE_ROTATION_MODEL = 'absolute';
+
+export function isLegacyDiamondRotation(object: Pick<OverlayObjectRecord, 'kind' | 'payload'>): boolean {
+  return object.kind === 'shape.diamond' && object.payload.rotation_model !== DIAMOND_ABSOLUTE_ROTATION_MODEL;
+}
+
+export function effectiveOverlayGeometry(object: Pick<OverlayObjectRecord, 'kind' | 'payload' | 'geometry'>): OverlayGeometry {
+  if (!isLegacyDiamondRotation(object)) return object.geometry;
+  return { ...object.geometry, rotation: (object.geometry.rotation + 45) % 360 };
 }
 
 const MAX_METADATA_ENTRIES = 32;
@@ -73,12 +87,17 @@ function validPoint(value: unknown): value is OverlayWorldPoint {
   return finite(point.x) && finite(point.y);
 }
 
-function validGeometry(value: unknown): value is OverlayGeometry {
+function lineGeometryKind(kind: string | undefined): boolean {
+  return kind === 'shape.line' || kind === 'shape.arrow' || kind === 'connector.overlay';
+}
+
+function validGeometry(value: unknown, kind?: string): value is OverlayGeometry {
   if (!validPoint(value)) return false;
   const geometry = value as Partial<OverlayGeometry>;
-  return finite(geometry.width) && geometry.width >= 0
-    && finite(geometry.height) && geometry.height >= 0
-    && finite(geometry.rotation);
+  return finite(geometry.width)
+    && finite(geometry.height)
+    && finite(geometry.rotation)
+    && (lineGeometryKind(kind) || (geometry.width >= 0 && geometry.height >= 0));
 }
 
 function validMetadata(value: unknown): value is OverlayMetadata {
@@ -158,7 +177,7 @@ export function readOverlayObject(id: string, value: unknown): OverlayObjectReco
   const layer = value.get('layer');
   const anchor = value.get('anchor');
   if (!id || typeof kind !== 'string' || !kind || !Number.isInteger(version) || (version as number) < 1
-    || typeof orderKey !== 'string' || !orderKey || !validGeometry(geometry)
+    || typeof orderKey !== 'string' || !orderKey || !validGeometry(geometry, kind)
     || !validMetadata(style) || !validMetadata(metadata) || payload === null
     || (layer !== undefined && typeof layer !== 'string')
     || (body !== undefined && !(body instanceof Y.Text))) return null;
@@ -283,7 +302,7 @@ export function restoreOverlayHistoryLayer(doc: Y.Doc, diagramId: string, layerI
 
 function validObjectRecord(object: OverlayObjectRecord): boolean {
   return Boolean(object.id && object.kind && Number.isInteger(object.version) && object.version >= 1
-    && object.order_key && validGeometry(object.geometry) && validMetadata(object.style)
+    && object.order_key && validGeometry(object.geometry, object.kind) && validMetadata(object.style)
     && validMetadata(object.metadata) && cloneJsonRecord(object.payload) !== null
     && (object.layer === undefined || typeof object.layer === 'string')
     && (object.body === undefined || (typeof object.body === 'string' && byteLength(object.body) <= MAX_OVERLAY_TEXT_BYTES))
@@ -429,6 +448,63 @@ export function moveOverlayObjects(doc: Y.Doc, diagramId: string, objectIds: Ite
       writeObject(handle.objects.get(id)!, next);
     }
   }, overlayOrigins.localHuman);
+}
+
+/**
+ * Commits one direct-manipulation geometry at most once. A pointer draft is
+ * based on the geometry it began with; if a peer changed that object before
+ * pointer-up, this is deliberately a no-write rather than a last-writer-wins
+ * overwrite. Frame selection policy is evaluated before the transaction so a
+ * transform never bypasses a locked descendant or ancestor.
+ */
+export function transformOverlayObject(
+  doc: Y.Doc,
+  diagramId: string,
+  objectId: string,
+  expectedGeometry: OverlayGeometry,
+  geometry: OverlayGeometry,
+): OverlayTransformCommitResult {
+  // Pointer-derived previews are not trusted: reject an invalid pointer-up as
+  // a no-write result instead of turning a transient UI calculation into a
+  // thrown event-handler failure.
+  // Pointer-up on a scene removed by a collaborator is a harmless no-write;
+  // direct manipulation must never recreate that deleted scene.
+  const handle = getOverlayScene(doc, diagramId);
+  if (!handle?.writable) return 'missing';
+  const scene = readOverlayScene(doc, diagramId);
+  const object = scene.objects.find((item) => item.id === objectId);
+  if (!object) return 'missing';
+  if (!validGeometry(expectedGeometry, object.kind) || !validGeometry(geometry, object.kind)) return 'invalid';
+  if (!overlayGeometryEqual(object.geometry, expectedGeometry)) return 'stale';
+  if (!getOverlayTransformTargets(scene, [objectId])) return 'locked';
+  const needsDiamondMigration = isLegacyDiamondRotation(object);
+  if (overlayGeometryEqual(object.geometry, geometry) && !needsDiamondMigration) return 'applied';
+  let result: OverlayTransformCommitResult = 'applied';
+  doc.transact(() => {
+    const current = readOverlayObject(objectId, handle.objects.get(objectId));
+    // A synchronous Yjs transaction is atomic locally, but retain this check
+    // at the write boundary so replacing a scene/map cannot create an unsafe
+    // last-writer-wins geometry update.
+    if (!current) { result = 'missing'; return; }
+    if (!overlayGeometryEqual(current.geometry, expectedGeometry)) { result = 'stale'; return; }
+    const latestScene = readOverlayScene(doc, diagramId);
+    if (!getOverlayTransformTargets(latestScene, [objectId])) { result = 'locked'; return; }
+    const next: OverlayObjectRecord = {
+      ...current,
+      geometry: structuredClone(geometry),
+      ...(isLegacyDiamondRotation(current) ? { payload: { ...current.payload, rotation_model: DIAMOND_ABSOLUTE_ROTATION_MODEL } } : {}),
+    };
+    if (current.anchor) {
+      const dx = geometry.x - current.geometry.x; const dy = geometry.y - current.geometry.y;
+      next.anchor = {
+        ...current.anchor,
+        offset: { x: current.anchor.offset.x + dx, y: current.anchor.offset.y + dy },
+        fallback: { x: current.anchor.fallback.x + dx, y: current.anchor.fallback.y + dy },
+      };
+    }
+    writeObject(handle.objects.get(objectId)!, next);
+  }, overlayOrigins.localHuman);
+  return result;
 }
 
 function consumeTextOperation(doc: Y.Doc): void {

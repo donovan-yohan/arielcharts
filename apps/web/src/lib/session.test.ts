@@ -4,6 +4,7 @@ import type { ActivityEvent } from '@arielcharts/shared';
 import { getDefaultMermaidText, getWebsocketServerUrl, isValidSessionId, randomSessionId } from './session';
 import {
   commitLayoutActivityCheckpoint,
+  applyLocalCanvasToolChange,
   getActiveDiagramName,
   getAgentCountLabel,
   getAgentWorkflowPrompt,
@@ -17,6 +18,12 @@ import {
 } from '../components/session-workspace';
 
 describe('session helpers', () => {
+  it('treats unified overlay tool activation as local interaction before changing tools', () => {
+    const events: string[] = [];
+    applyLocalCanvasToolChange('laser', () => events.push('stop-following'), (tool) => events.push(`tool:${tool}`));
+    expect(events).toEqual(['stop-following', 'tool:laser']);
+  });
+
   it('creates session ids in the expected shape', () => {
     expect(randomSessionId()).toMatch(/^[a-z0-9]{8}$/);
   });

@@ -1,6 +1,6 @@
 'use client';
 
-import type { OverlayLayerRecord, OverlayObjectRecord, OverlaySceneSnapshot } from '@arielcharts/shared';
+import type { OverlayGeometry, OverlayLayerRecord, OverlayObjectRecord, OverlaySceneSnapshot } from '@arielcharts/shared';
 import { useCallback, useEffect, useState } from 'react';
 import * as Y from 'yjs';
 import { inkGeometry, simplifyInkPoints, type InkMode, type InkPoint } from './freehand-ink';
@@ -21,9 +21,12 @@ import {
   pasteOverlayObjects,
   readOverlayScene,
   reorderOverlayObject,
+  transformOverlayObject,
   updateOverlayObject,
   updateOverlayLayer,
+  DIAMOND_ABSOLUTE_ROTATION_MODEL,
   type OverlayTextComposition,
+  type OverlayTransformCommitResult,
 } from './overlay-scene';
 
 export interface OverlaySceneController {
@@ -46,6 +49,8 @@ export interface OverlaySceneController {
   copy: (ids: readonly string[]) => void;
   paste: () => void;
   update: (id: string, patch: Partial<Omit<OverlayObjectRecord, 'id'>>) => void;
+  /** Final pointer-up geometry commit. Remote changes make this a no-write stale result. */
+  transform: (id: string, expectedGeometry: OverlayGeometry, geometry: OverlayGeometry) => OverlayTransformCommitResult;
   editText: (id: string, index: number, deleteCount: number, insert: string) => void;
   duplicate: (id: string) => void;
   beginComposition: (id: string) => OverlayTextComposition | null;
@@ -114,9 +119,9 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, his
     const id = nextId(); const isLine = kind === 'shape.line' || kind === 'shape.arrow';
     addOverlayObject(doc, diagramId, {
       id, kind, version: 1, order_key: nextOrder(id), layer: 'default',
-      geometry: { x: point.x, y: point.y, width: isLine ? 180 : 180, height: isLine ? 48 : 112, rotation: 0 },
+      geometry: { x: point.x, y: point.y, width: 180, height: isLine ? 48 : 112, rotation: kind === 'shape.diamond' ? 45 : 0 },
       style: { color: '#2563eb', fill: 'transparent', width: 2 }, metadata: { export: 'composite-export' },
-      payload: { shape: kind.slice('shape.'.length) }, body: isLine ? '' : 'Label',
+      payload: { shape: kind.slice('shape.'.length), ...(kind === 'shape.diamond' ? { rotation_model: DIAMOND_ABSOLUTE_ROTATION_MODEL } : {}) }, body: isLine ? '' : 'Label',
     });
   }, [diagramId, doc, nextId, nextOrder]);
   const addConnector = useCallback((startId: string, endId: string) => {
@@ -190,6 +195,13 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, his
     if (!doc || !diagramId) return;
     updateOverlayControllerObject(doc, diagramId, id, patch);
   }, [diagramId, doc]);
+  const transform = useCallback((id: string, expectedGeometry: OverlayGeometry, geometry: OverlayGeometry): OverlayTransformCommitResult => {
+    if (!doc || !diagramId) return 'missing';
+    let result: OverlayTransformCommitResult = 'missing';
+    const commit = () => { result = transformOverlayObject(doc, diagramId, id, expectedGeometry, geometry); };
+    if (history) history.withAction(commit); else commit();
+    return result;
+  }, [diagramId, doc, history]);
   const editText = useCallback((id: string, index: number, deleteCount: number, insert: string) => {
     if (!doc || !diagramId) return;
     const sceneNow = readOverlayScene(doc, diagramId); const object = sceneNow.objects.find((item) => item.id === id); if (!object || isOverlayObjectLocked(sceneNow, object)) return;
@@ -252,5 +264,5 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, his
   }, [diagramId, doc, history]);
 
   if (!scene) return null;
-  return { scene, add, addShape, addConnector, addFrame, addLayer, updateLayer, assignLayer, reorderLayer, move, moveMany, align, distribute, anchor, remove, reorder, copy, paste, update, editText, duplicate, beginComposition, commitComposition, addStroke };
+  return { scene, add, addShape, addConnector, addFrame, addLayer, updateLayer, assignLayer, reorderLayer, move, moveMany, align, distribute, anchor, remove, reorder, copy, paste, update, transform, editText, duplicate, beginComposition, commitComposition, addStroke };
 }

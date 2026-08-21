@@ -5,7 +5,7 @@ import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
 import { getConnectModeSourceId } from '../lib/diagram-connect-state';
-import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getMeasuredSemanticPanelPlacement, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRenderedCanvasControlsSafeBottom, getRendererInteractionMode, getSankeyLinkControlLabel, getSemanticControlsSafeBottom, isSameNodeSelection, pruneInactivePersistentDrafts, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste, syncCanvasToolbarSafeLane } from './diagram-canvas';
+import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getControlledConnectSessionTransition, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getMeasuredSemanticPanelPlacement, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRendererInteractionMode, getSankeyLinkControlLabel, getSemanticControlsSafeBottom, isSameNodeSelection, pruneInactivePersistentDrafts, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste, syncCanvasToolbarSafeLane } from './diagram-canvas';
 import { getDirtyDraftFields, reconcileCanonicalDraft } from '../lib/canonical-draft';
 
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
@@ -109,23 +109,25 @@ describe('overlay toolbar safe-lane ownership', () => {
     expect(canvasSource).toMatch(/const canvasElement: HTMLElement = canvas;[^]*?return observeCanvasToolbarSafeLane\(canvasElement, overlay\?\.diagramId,/u);
     expect(canvasSource).toMatch(/toolbarMutationObserver\.disconnect\(\);[^]*?toolbarResizeObserver\.disconnect\(\);[^]*?canvasResizeObserver\.disconnect\(\);[^]*?syncCanvasToolbarSafeLane\(canvas, null\);/u);
     expect(canvasSource).toMatch(/data-overlay-toolbar-safe-top=\{hasOverlayToolbarSafeLane \|\| undefined\}/u);
-    expect(canvasSource).toMatch(/const semanticControlsSafeBottom = getSemanticControlsSafeBottom\([^]*?canvasToolbarVisibility\.controls,[^]*?canvasToolbarStack\.bottom,[^]*?controlsToolbarHeight,/u);
+    expect(canvasSource).toMatch(/const semanticControlsHeight = controlsToolbarHeight > 0 \? controlsToolbarHeight : 54;[^]*?const semanticControlsSafeBottom = getSemanticControlsSafeBottom\([^]*?canvasToolbarVisibility\.controls,[^]*?canvasToolbarStack\.bottom,[^]*?semanticControlsHeight,/u);
     expect(canvasSource).toMatch(/const erEditorBottom = semanticControlsSafeBottom;/u);
-    expect(canvasSource).toMatch(/const canvasShellRef = useRef<HTMLDivElement \| null>\(null\);/u);
     expect(canvasSource).not.toMatch(/publishedControlsSafeBottom/u);
-    expect(canvasSource).toMatch(/ref=\{canvasShellRef\}/u);
-    expect(canvasSource).toMatch(/export function observeCanvasControlsSafeBottom\(/u);
-    expect(canvasSource).toMatch(/const style = getComputedStyle\(toolbar\);[^]*?syncCanvasControlsSafeBottom\(shell, getRenderedCanvasControlsSafeBottom\(/u);
-    expect(canvasSource).toMatch(/display: style\.display, top: toolbarBounds\.top, visibility: style\.visibility/u);
-    expect(canvasSource).toMatch(/mutationObserver\.observe\(toolbar, \{ attributes: true, attributeFilter: \['class', 'style'\] \}\);/u);
-    expect(canvasSource).toMatch(/export function syncCanvasControlsSafeBottom\(shell: HTMLElement, value: number\): boolean \{[^]*?const next = `\$\{Math\.ceil\(Math\.max\(0, value\)\)\}px`;[^]*?shell\.style\.setProperty\('--canvas-controls-toolbar-safe-bottom', next\);/u);
-    expect(canvasSource).toMatch(/const shell = canvasShellRef\.current;[^]*?return observeCanvasControlsSafeBottom\(canvas, toolbar, shell, BOTTOM_TOOLBAR_GAP\);/u);
-    expect(canvasSource).toMatch(/resizeObserver\.disconnect\(\);[^]*?syncCanvasControlsSafeBottom\(shell, 0\);/u);
+    expect(canvasSource).not.toMatch(/observeCanvasControlsSafeBottom|syncCanvasControlsSafeBottom|getRenderedCanvasControlsSafeBottom|IntersectionObserver\(update, \{ root: canvas/u);
+    expect(canvasSource).toMatch(/className="diagram-canvas-shell"[^]*?'--canvas-controls-toolbar-safe-bottom': `\$\{semanticControlsSafeBottom\}px`,/u);
+    expect(canvasSource).toMatch(/<OverlayCanvasLayer[^]*?controlsSafeBottom=\{semanticControlsSafeBottom\}/u);
   });
 
   it('routes the supported landscape E2E slice through the full mobile-landscape contract', () => {
     expect(workspaceE2eSource).toMatch(/if \(slice === 'landscape' \|\| slice === 'mobile-390' \|\| slice === 'mobile-320'\) \{[^]*?const label = slice === 'landscape' \? 'mobile-landscape' : slice;[^]*?const viewport = slice === 'landscape'\s*\? MOBILE_LANDSCAPE_VIEWPORT/u);
     expect(workspaceE2eSource).toMatch(/if \(label === 'mobile-landscape'\) \{[^]*?centerSequenceEditorTarget\(page, target, `\$\{label\} sequence \$\{targetLabel\}`\);/u);
+  });
+
+  it('requires settled mobile toolbar controls to be both center-hit and enabled', () => {
+    expect(workspaceE2eSource).toMatch(/async function settleCenterHitPoint\([^]*?enabled:\s*!\(element instanceof HTMLButtonElement && element\.disabled\) && element\.getAttribute\('aria-disabled'\) !== 'true',[^]*?latest\.enabled && latest\.ownsCenterHit && latest\.rect\.width >= 44 && latest\.rect\.height >= 44/u);
+  });
+
+  it('resets the mobile direct toolbar from a prevent-scroll Select focus anchor', () => {
+    expect(workspaceE2eSource).toMatch(/const resetToFirstTool = await firstTool\.evaluate\(async \(button\) => \{[^]*?candidate\.tabIndex = candidate === button \? 0 : -1;[^]*?button\.focus\(\{ preventScroll: true \}\);[^]*?rail\.scrollLeft = 0;[^]*?await new Promise<void>\(\(resolve\) => requestAnimationFrame\(\(\) => resolve\(\)\)\);[^]*?rail\.scrollLeft = 0;[^]*?return document\.activeElement === button;[^]*?\}\);[^]*?assert\(resetToFirstTool,[^]*?await settleCenterHitPoint\(page, firstTool, `\$\{label\} first direct toolbar tool after reset`\);/u);
   });
 
   it('uses visible camera rails intersecting the canvas for inspector camera-safe E2E bounds', () => {
@@ -414,7 +416,6 @@ describe('new semantic families', () => {
 
 describe('ER editor safe area', () => {
   it('keeps the semantic form above the measured canvas controls toolbar', () => {
-    expect(canvasSource).toMatch(/export function getRenderedCanvasControlsSafeBottom\([^]*?toolbar\.display === 'none' \|\| toolbar\.visibility === 'hidden'[^]*?toolbar\.bottom <= canvas\.top \|\| toolbar\.top >= canvas\.bottom[^]*?const safeTop = Math\.max\(canvas\.top, Math\.min\(canvas\.bottom, toolbar\.top\)\);[^]*?return Math\.max\(0, canvas\.bottom - safeTop \+ gap\);/u);
     expect(canvasSource).toMatch(/export function getSemanticControlsSafeBottom\(visible: boolean, toolbarBottom: number, toolbarHeight: number, gap: number\): number \{[^]*?return visible \? toolbarBottom \+ toolbarHeight \+ gap : 0;/u);
     expect(canvasSource).toMatch(/const erEditorBottom = semanticControlsSafeBottom;/u);
     expect(canvasSource).toMatch(/<ErEditorControls\s+bottom=\{erEditorBottom\}/u);
@@ -422,18 +423,13 @@ describe('ER editor safe area', () => {
     expect(canvasSource).toMatch(/canvas-er-editor[^]*?bottom,/u);
   });
 
-  it('republishes the actual controls rail from hidden zero to a 74px recovery reserve', () => {
-    const canvas = { bottom: 331, top: 108 } as Pick<DOMRect, 'bottom' | 'top'>;
-    const hiddenReserve = getRenderedCanvasControlsSafeBottom(canvas, { bottom: 319, display: 'flex', top: 265, visibility: 'hidden' }, 8);
-    const visibleReserve = getRenderedCanvasControlsSafeBottom(canvas, { bottom: 319, display: 'flex', top: 265, visibility: 'visible' }, 8);
-    const semanticReserve = getSemanticControlsSafeBottom(true, 12, 54, 8);
+  it('uses the synchronous controls visibility reserve for camera-safe capacity', () => {
+    const hiddenReserve = getSemanticControlsSafeBottom(false, 12, 54, 8);
+    const visibleReserve = getSemanticControlsSafeBottom(true, 12, 54, 8);
     expect(hiddenReserve).toBe(0);
     expect(visibleReserve).toBe(74);
-    expect(semanticReserve).toBe(74);
-    // The inspector uses this publication as its only camera-safe bound: a
-    // recovery rail must reduce the same 182px inspector start from 140px to 74px.
-    expect(Math.floor((canvas.bottom - (hiddenReserve || 8)) - 182) - 1).toBe(140);
-    expect(Math.floor((canvas.bottom - visibleReserve) - 182) - 1).toBe(74);
+    expect(Math.floor((331 - 8) - 182) - 1).toBe(140);
+    expect(Math.floor((331 - visibleReserve) - 182) - 1).toBe(74);
   });
 });
 
@@ -573,12 +569,19 @@ describe('getRendererInteractionMode', () => {
 });
 
 describe('connect mode entry', () => {
-  it('shares the selected-source contract between the toolbar and keyboard command', () => {
+  it('seeds and clears a controlled connect session at mode transitions without reacting to selection updates', () => {
+    expect(getControlledConnectSessionTransition('select', 'connect', ['source'])).toEqual({ connectSourceId: 'source', resetPending: true });
+    expect(getControlledConnectSessionTransition('connect', 'connect', ['changed-selection'])).toBeNull();
+    expect(getControlledConnectSessionTransition('connect', 'select', ['source'])).toEqual({ connectSourceId: null, resetPending: true });
+  });
+
+  it('keeps direct node context free of duplicate mode controls while retaining its keyboard contract', () => {
     expect(getConnectModeSourceId(['source'])).toBe('source');
     expect(getConnectModeSourceId(['source', 'target'])).toBeNull();
     expect(canvasSource).toMatch(/const toggleConnectMode = useCallback\(\(\) => \{[^]*?getConnectModeSourceId\(selectionRef\.current\)/u);
     expect(canvasSource).toMatch(/key === 'c'[^]*?toggleConnectMode\(\);/u);
-    expect(canvasSource).toMatch(/label="Connect nodes"[^]*?toggleConnectMode\(\);/u);
+    expect(canvasSource).not.toMatch(/label="Connect nodes"/u);
+    expect(canvasSource).not.toMatch(/label=\{mode === 'laser' \? 'Exit laser pointer' : 'Laser pointer'\}/u);
   });
 });
 
@@ -657,6 +660,7 @@ describe('getFlowSelectionChange', () => {
     expect(getFlowSelectionChange([{ id: 'stale' }], ['A', 'B'])).toBeNull();
     expect(getFlowSelectionChange([{ id: 'A' }], ['A', 'B'])).toEqual(['A']);
   });
+
 });
 
 describe('getNodeClickSelection', () => {

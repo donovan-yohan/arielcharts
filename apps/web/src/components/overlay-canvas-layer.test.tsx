@@ -6,13 +6,59 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OverlayGeometry, OverlayObjectRecord } from '@arielcharts/shared';
 import type { CanvasTool } from '../lib/canvas-interaction-state';
-import { getImmediateOverlayInspectorCap, incrementalTextChange, inspectorCapacityPx, moveRovingToolbarFocus, OverlayCanvasLayer, OVERLAY_TOOLBAR_PRIMARY_HEIGHT, OVERLAY_TOOLBAR_SECONDARY_ACTIONS_HEIGHT, OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET, OVERLAY_TOOLBAR_STACKED_INNER_GAP, resolveOverlayInspectorSafeBottomTop, resolveOverlayToolbarViewport, viewportCenterToWorld } from './overlay-canvas-layer';
+import { getImmediateOverlayInspectorCap, getPlatformShortcutTitle, incrementalTextChange, inspectorCapacityPx, moveRovingToolbarFocus, OverlayCanvasLayer, OVERLAY_TOOLBAR_PRIMARY_HEIGHT, OVERLAY_TOOLBAR_SECONDARY_ACTIONS_HEIGHT, OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET, OVERLAY_TOOLBAR_STACKED_INNER_GAP, resolveOverlayInspectorSafeBottomTop, resolveOverlayToolbarViewport, viewportCenterToWorld } from './overlay-canvas-layer';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 describe('OverlayCanvasLayer', () => {
+  it('formats modifier titles with the actual platform glyph while preserving action labels', () => {
+    vi.stubGlobal('navigator', { platform: 'MacIntel' });
+    expect(getPlatformShortcutTitle('Undo Mermaid change', 'Mod+Z')).toBe('Undo Mermaid change — ⌘+Z');
+    vi.stubGlobal('navigator', { platform: 'Linux x86_64' });
+    expect(getPlatformShortcutTitle('Undo Mermaid change', 'Mod+Z')).toBe('Undo Mermaid change — Ctrl+Z');
+  });
+
+  it('keeps overlay selection local for Mod+A, Shift-click, duplicate, locked and hidden objects', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    let copy = 0; const onDuplicate = vi.fn(() => `copy-${++copy}`); const onFitSelection = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate, onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onFitSelection };
+    const object = (id: string, metadata = {}, layer?: string): OverlayObjectRecord => ({ id, kind: 'shape.rectangle', version: 1, order_key: id, geometry: { x: 10, y: 20, width: 30, height: 40, rotation: 0 }, style: {}, metadata, payload: {}, body: '', layer });
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', layers: [{ id: 'hidden', name: 'Hidden', order_key: 'z', visible: false, locked: false, export: true }], objects: [object('a'), object('b'), object('locked', { locked: true }), object('hidden', {}, 'hidden')] }} />));
+    const a = host.querySelector<HTMLElement>('[data-testid="overlay-object-a"]')!; const b = host.querySelector<HTMLElement>('[data-testid="overlay-object-b"]')!;
+    await act(async () => a.click());
+    await act(async () => b.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'd' })));
+    expect(onDuplicate).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[data-selected="true"]')).toBeNull();
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'a' })));
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'Digit2', key: '@', shiftKey: true })));
+    expect(onFitSelection).toHaveBeenCalledWith(expect.objectContaining({ x: 10, y: 20, width: 30, height: 40 }));
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'd' })));
+    expect(onDuplicate).toHaveBeenCalledTimes(4);
+    await act(async () => root.unmount());
+  });
+
+  it('keeps textarea Escape and composing keys out of parent canvas history', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host); const parentKeyDown = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(), onCommitComposition: vi.fn() };
+    const shape: OverlayObjectRecord = { id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 100, height: 60, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Text' };
+    await act(async () => root.render(<div onKeyDown={parentKeyDown}><OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [shape] }} /></div>));
+    const object = host.querySelector<HTMLElement>('[data-testid="overlay-object-shape"]')!;
+    await act(async () => object.click());
+    await act(async () => object.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter' })));
+    const textarea = object.querySelector<HTMLTextAreaElement>('textarea')!;
+    parentKeyDown.mockClear();
+    await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })));
+    expect(parentKeyDown).not.toHaveBeenCalled(); expect(callbacks.onUndo).not.toHaveBeenCalled(); expect(object.querySelector('textarea')).toBeNull();
+    const composing = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, isComposing: true, key: 'h' });
+    await act(async () => object.dispatchEvent(composing));
+    expect(callbacks.onUndo).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
   it('derives one incremental character operation for controlled text edits', () => {
     expect(incrementalTextChange('hello world', 'hello brave world')).toEqual({ index: 6, deleteCount: 0, insert: 'brave ' });
     expect(incrementalTextChange('hello brave world', 'hello world')).toEqual({ index: 6, deleteCount: 6, insert: '' });
@@ -564,12 +610,15 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="primary" sessionId="abc123de" readOnly={false} semanticAnchors={new Map()} transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'primary', objects: [{ id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 180, height: 120, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'A label' }] }} />));
     const primary = document.body.querySelector<HTMLElement>('[data-testid="overlay-toolbar-primary"]')!;
     const select = primary.querySelector<HTMLButtonElement>('[aria-label="Select tool"]')!;
+    const hand = primary.querySelector<HTMLButtonElement>('[aria-label="Hand tool"]')!;
     const text = primary.querySelector<HTMLButtonElement>('[aria-label="Text"]')!;
     const inspector = primary.querySelector<HTMLButtonElement>('[aria-label="More canvas tools"]')!;
     expect([...primary.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.tabIndex === 0)).toHaveLength(1);
     select.focus();
     await act(async () => primary.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })));
-    expect(document.activeElement).toBe(text); expect(text.tabIndex).toBe(0); expect(select.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(hand); expect(hand.tabIndex).toBe(0); expect(select.tabIndex).toBe(-1);
+    await act(async () => primary.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })));
+    expect(document.activeElement).toBe(text); expect(text.tabIndex).toBe(0);
     text.disabled = true;
     await act(async () => { await Promise.resolve(); });
     expect(select.tabIndex).toBe(0);

@@ -1617,7 +1617,10 @@ code {
 
   .workspace-onboarding {
     left: 8px;
+    max-height: calc(100% - max(76px, var(--overlay-toolbar-safe-top, 0px)) - 124px);
     max-width: calc(100% - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 12px;
   }
 
@@ -3200,10 +3203,16 @@ code {
   }
 
   [data-testid='canvas-controls-toolbar'] {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 4px !important;
     justify-content: flex-end;
+    overflow-x: auto;
     padding: 4px !important;
+    scrollbar-width: thin;
+  }
+
+  [data-testid='canvas-controls-toolbar'] .canvas-toolbar-button {
+    flex: 0 0 44px;
   }
 
   .workspace-touch-label {

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { describe, expect, it } from 'vitest';
-import { coerceCanvasToolForRenderer, getCanvasToolCursor, getCanvasToolShortcut, getMermaidCanvasTool, isOverlayPointerTool, shouldClearCanvasSelectionForPointerTarget } from './canvas-interaction-state';
+import { coerceCanvasToolForRenderer, getCanvasToolCursor, getCanvasToolShortcut, getCanvasToolShortcutLabel, getCanvasToolShortcutSummary, getMermaidCanvasTool, isOverlayPointerTool, shouldClearCanvasSelectionForPointerTarget } from './canvas-interaction-state';
 
 describe('canvas interaction state', () => {
   it('keeps browser-local tool intent coherent across Mermaid renderers', () => {
@@ -13,15 +13,28 @@ describe('canvas interaction state', () => {
     expect(coerceCanvasToolForRenderer('connect', false)).toBe('select');
   });
 
-  it('reserves V and Escape for returning the editable canvas to select', () => {
-    expect(getCanvasToolShortcut('v', false)).toBe('select');
+  it('resolves the canonical unmodified canvas tool map and rejects typing and modifiers', () => {
+    expect(Object.entries({ v: 'select', h: 'hand', t: 'text', p: 'pen', e: 'eraser', r: 'rectangle', o: 'ellipse', d: 'diamond', a: 'arrow', l: 'line', k: 'laser', c: 'connect' })).toEqual(
+      expect.arrayContaining([
+        ['v', 'select'], ['h', 'hand'], ['t', 'text'], ['p', 'pen'], ['e', 'eraser'], ['r', 'rectangle'], ['o', 'ellipse'], ['d', 'diamond'], ['a', 'arrow'], ['l', 'line'], ['k', 'laser'], ['c', 'connect'],
+      ]),
+    );
+    for (const [key, tool] of Object.entries({ v: 'select', h: 'hand', t: 'text', p: 'pen', e: 'eraser', r: 'rectangle', o: 'ellipse', d: 'diamond', a: 'arrow', l: 'line', k: 'laser', c: 'connect' })) {
+      expect(getCanvasToolShortcut(key, false)).toBe(tool);
+      expect(getCanvasToolShortcut(key.toUpperCase(), false)).toBe(tool);
+    }
     expect(getCanvasToolShortcut('Escape', false)).toBe('select');
     expect(getCanvasToolShortcut('v', true)).toBeNull();
+    expect(getCanvasToolShortcut('v', false, true)).toBeNull();
+    expect(getCanvasToolShortcutLabel('line')).toBe('L');
+    expect(getCanvasToolShortcutSummary(['connect'])).toContain('L Line');
+    expect(getCanvasToolShortcutSummary(['connect'])).not.toContain('C Connect');
   });
 
   it('only places overlay pointer tools over the scene and gives each a cursor', () => {
     expect(isOverlayPointerTool('rectangle')).toBe(true);
     expect(isOverlayPointerTool('laser')).toBe(false);
+    expect(isOverlayPointerTool('hand')).toBe(false);
     expect(getCanvasToolCursor('rectangle')).toBe('copy');
     expect(getCanvasToolCursor('eraser')).toBe('cell');
   });

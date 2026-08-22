@@ -29,6 +29,7 @@ import {
   Plus,
   RotateCcw,
   ScanSearch,
+  HelpCircle,
   Shapes,
   Trash2,
   ZoomIn,
@@ -80,7 +81,7 @@ import {
   type SequenceSvgTextTarget,
 } from '../lib/svg-hit-map';
 import { getSafeToolbarPosition } from '../lib/toolbar-safe-area';
-import type { CanvasTool } from '../lib/canvas-interaction-state';
+import { getCanvasToolShortcut, getCanvasToolShortcutSummary, type CanvasTool } from '../lib/canvas-interaction-state';
 import { LaserPointerLayer } from './laser-pointer-layer';
 import { getDirtyDraftFields, reconcileCanonicalDraft, sameCanonicalDraft } from '../lib/canonical-draft';
 import type { SequenceActivationAction, SequenceArrow, SequenceDiagramSnapshot, SequenceFragmentKind, SequenceMessage, SequenceNote, SequenceParticipant, SequenceParticipantKind } from '../lib/sequence-mutations';
@@ -102,7 +103,7 @@ import { getMindmapNodeIdentity, type MindmapDiagramSnapshot, type MindmapNode, 
 import { getTreeViewNodeIdentity, type TreeViewDiagramSnapshot, type TreeViewNode, type TreeViewNodeIdentity } from '../lib/treeview-mutations';
 import { getIshikawaCauseIdentity, type IshikawaCause, type IshikawaCauseIdentity, type IshikawaCauseInput, type IshikawaDiagramSnapshot } from '../lib/ishikawa-mutations';
 import { getRailroadRuleIdentity, type RailroadDiagramSnapshot, type RailroadRule, type RailroadRuleIdentity } from '../lib/railroad-mutations';
-import { OverlayCanvasLayer, type OverlayCanvasLayerProps } from './overlay-canvas-layer';
+import { getPlatformModifierLabel, getPlatformShortcutTitle, OverlayCanvasLayer, type OverlayCanvasLayerProps } from './overlay-canvas-layer';
 import { getPieSliceIdentity, type PieDiagramSnapshot, type PieSlice, type PieSliceIdentity } from '../lib/pie-mutations';
 import { getQuadrantPointIdentity, type QuadrantAxis, type QuadrantAxisName, type QuadrantDiagramSnapshot, type QuadrantNumber, type QuadrantPoint, type QuadrantPointIdentity } from '../lib/quadrant-mutations';
 import { getXySeriesIdentity, type XyAxis, type XyChartDiagramSnapshot, type XyChartOrientation, type XySeries, type XySeriesIdentity } from '../lib/xychart-mutations';
@@ -683,6 +684,10 @@ export function shouldHandleCanvasShortcut(
   return !isTyping && (targetIsInCanvas || activeElementIsInCanvas);
 }
 
+export function shouldRejectCanvasShortcut(event: Pick<KeyboardEvent, 'isComposing' | 'key'>): boolean {
+  return event.isComposing || event.key === 'Process';
+}
+
 export function shouldHandleCanvasSingleKeyShortcut(
   targetIsInCanvas: boolean,
   activeElementIsInCanvas: boolean,
@@ -840,7 +845,7 @@ function canStartTouchCanvasGesture(target: EventTarget | null, root: HTMLDivEle
   return root.contains(target);
 }
 
-function canStartMouseCanvasPan(target: EventTarget | null, root: HTMLDivElement): boolean {
+function canStartMouseCanvasPan(target: EventTarget | null, root: HTMLDivElement, handActive = false): boolean {
   if (!(target instanceof Element) || !root.contains(target)) {
     return false;
   }
@@ -849,7 +854,10 @@ function canStartMouseCanvasPan(target: EventTarget | null, root: HTMLDivElement
     return true;
   }
 
-  return !target.closest(CANVAS_PAN_EXCLUSION_SELECTOR);
+  const exclusion = handActive
+    ? 'a, button, input, select, textarea, form, [contenteditable="true"], [role="dialog"], [data-canvas-pan-exclusion="true"], [data-testid*="toolbar"]'
+    : CANVAS_PAN_EXCLUSION_SELECTOR;
+  return !target.closest(exclusion);
 }
 
 function canHandleCanvasWheel(target: EventTarget | null, root: HTMLDivElement): boolean {
@@ -1299,6 +1307,9 @@ export function DiagramCanvas({
   const [animateTransform, setAnimateTransform] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [spacePressed, setSpacePressed] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const shortcutsOriginRef = useRef<HTMLElement | null>(null);
+  const shortcutsDialogRef = useRef<HTMLDivElement | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const [editingSequenceTarget, setEditingSequenceTarget] = useState<SequenceSvgTextTarget | null>(null);
@@ -2346,7 +2357,7 @@ export function DiagramCanvas({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) {
+      if (event.defaultPrevented || shouldRejectCanvasShortcut(event)) {
         return;
       }
       if (isTypingElement(event.target)) {
@@ -2372,6 +2383,17 @@ export function DiagramCanvas({
           document.activeElement !== null && canvas.contains(document.activeElement),
         )
         : false;
+
+      if (shortcutsOpen) {
+        if (event.key === 'Escape' && ownsEscape) {
+          event.preventDefault();
+          setShortcutsOpen(false);
+          queueMicrotask(() => shortcutsOriginRef.current?.focus());
+        } else if (ownsCanvas) {
+          event.preventDefault();
+        }
+        return;
+      }
 
       if (event.key === 'Escape' && ownsEscape) {
         setShapePickerOpen(false);
@@ -2406,6 +2428,18 @@ export function DiagramCanvas({
         isCanvasSingleKeyShortcutExcluded(event.target),
         isCanvasSingleKeyShortcutExcluded(document.activeElement),
       );
+      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && event.key === '?') {
+        event.preventDefault();
+        shortcutsOriginRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : canvas;
+        setShortcutsOpen(true);
+        return;
+      }
+      if (canvasOwnsSingleKeyFocus && event.shiftKey && (event.code === 'Digit1' || event.code === 'Digit2')) {
+        event.preventDefault();
+        if (event.code === 'Digit2' && selectedBounds) fitBoundsToViewport(selectedBounds, true);
+        else fitToDiagram(true);
+        return;
+      }
       const historyShortcut = getCanvasHistoryShortcut(event.key, isModifierShortcut, event.shiftKey);
       if (historyShortcut && !readOnly) {
         event.preventDefault();
@@ -2456,22 +2490,15 @@ export function DiagramCanvas({
         return;
       }
 
-      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && key === 'l') {
+      const shortcutTool = canvasOwnsSingleKeyFocus
+        ? getCanvasToolShortcut(event.key, false, isModifierShortcut || event.altKey)
+        : null;
+      if (shortcutTool) {
         event.preventDefault();
-        setMode(mode === 'laser' ? 'select' : 'laser');
-        return;
-      }
-
-      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && key === 'v') {
-        event.preventDefault();
-        setMode('select');
-        onCanvasToolChange?.('select');
-        return;
-      }
-
-      if (!isModifierShortcut && canvasOwnsSingleKeyFocus && canEditStructure && key === 'c') {
-        event.preventDefault();
-        toggleConnectMode();
+        if (shortcutTool === 'connect' && canEditStructure) setMode('connect');
+        else if (shortcutTool === 'laser') setMode('laser');
+        else setMode('select');
+        onCanvasToolChange?.(shortcutTool === 'connect' && !canEditStructure ? 'select' : shortcutTool);
         return;
       }
 
@@ -2554,7 +2581,11 @@ export function DiagramCanvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [canEditStructure, copySelectedNodes, fitToDiagram, graph, hasPersistedLayout, mode, nodeById, onAddNode, onDeleteEdge, onDeleteNodes, onRedo, onUndo, onUngroupNodes, pasteClipboard, readOnly, selectedCurrentEdgeIdentity, selection, setMode, setSelection, simplifyLayout, toggleConnectMode, zoomCanvas]);
+  }, [canEditStructure, copySelectedNodes, fitBoundsToViewport, fitToDiagram, graph, hasPersistedLayout, nodeById, onAddNode, onCanvasToolChange, onDeleteEdge, onDeleteNodes, onRedo, onUndo, onUngroupNodes, pasteClipboard, readOnly, selectedBounds, selectedCurrentEdgeIdentity, selection, setMode, setSelection, shortcutsOpen, simplifyLayout, zoomCanvas]);
+
+  useEffect(() => {
+    if (shortcutsOpen) shortcutsDialogRef.current?.querySelector<HTMLElement>('button')?.focus();
+  }, [shortcutsOpen]);
 
   useEffect(() => {
     if (viewport.zoom >= EDITOR_MIN_ZOOM) {
@@ -2691,13 +2722,13 @@ export function DiagramCanvas({
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const isMiddleMouse = event.button === 1;
-    const isSpacePrimaryPointer = spacePressed && event.button === 0;
+    const isSpacePrimaryPointer = (spacePressed || overlay?.tool === 'hand') && event.button === 0;
     const canvas = containerRef.current;
     if (
       event.pointerType === 'touch'
       || (!isMiddleMouse && !isSpacePrimaryPointer)
       || !canvas
-      || !canStartMouseCanvasPan(event.target, canvas)
+      || !canStartMouseCanvasPan(event.target, canvas, overlay?.tool === 'hand')
     ) {
       return false;
     }
@@ -2716,7 +2747,7 @@ export function DiagramCanvas({
     event.stopPropagation();
     setIsPanning(true);
     return true;
-  }, [spacePressed, viewport]);
+  }, [overlay?.tool, spacePressed, viewport]);
 
   const handlePointerDownCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (mode === 'laser' && event.button === 0) {
@@ -2856,7 +2887,7 @@ export function DiagramCanvas({
   }, []);
 
   const handleCanvasClick = useCallback(() => {
-    if (isPanning || suppressCanvasClickRef.current) {
+    if (isPanning || suppressCanvasClickRef.current || overlay?.tool === 'hand') {
       suppressCanvasClickRef.current = false;
       return;
     }
@@ -2869,7 +2900,7 @@ export function DiagramCanvas({
     setEditingNodeId(null);
     setSelectedSubgraphId(null);
     setEditingSubgraphId(null);
-  }, [isPanning, setSelection]);
+  }, [isPanning, overlay?.tool, setSelection]);
 
   const handleFlowPaneClick = useCallback((event: ReactMouseEvent) => {
     event.stopPropagation();
@@ -3276,6 +3307,7 @@ export function DiagramCanvas({
   }, []);
 
   const handleNodeKeyDown = useCallback((nodeId: string, event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.nativeEvent.isComposing || event.key === 'Process') return;
     if (event.key === 'ArrowUp') {
       event.preventDefault();
       moveFocus(nodeId, 'up');
@@ -3292,7 +3324,12 @@ export function DiagramCanvas({
       event.preventDefault();
       moveFocus(nodeId, 'right');
     }
-    if (event.key === 'Enter' || event.key === ' ') {
+    if (event.key === 'Enter' && selection.length === 1 && selection[0] === nodeId) {
+      event.preventDefault();
+      event.stopPropagation();
+      const node = nodeById.get(nodeId);
+      if (node && !readOnly) openNodeEditor(node);
+    } else if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       handleNodeClick(nodeId, false);
     }
@@ -3309,7 +3346,7 @@ export function DiagramCanvas({
       setToolbarOpen(false);
       containerRef.current?.focus();
     }
-  }, [handleNodeClick, moveFocus, nodeById, openNodeEditor, readOnly]);
+  }, [handleNodeClick, moveFocus, nodeById, openNodeEditor, readOnly, selection]);
 
   const flowNodeInteraction = useMemo<FlowNodeInteractionContextValue>(() => ({
     connectMode: mode === 'connect',
@@ -3341,7 +3378,7 @@ export function DiagramCanvas({
     transitionTimingFunction: animateTransform && !useReactFlowRenderer ? 'ease, ease, ease' : undefined,
   }), [animateTransform, dotGridGeometry, useReactFlowRenderer]);
 
-  const canvasCursor = readOnly ? 'default' : isPanning ? 'grabbing' : mode === 'connect' || mode === 'laser' ? 'crosshair' : spacePressed ? 'grab' : 'default';
+  const canvasCursor = readOnly ? 'default' : isPanning ? 'grabbing' : mode === 'connect' || mode === 'laser' ? 'crosshair' : spacePressed || overlay?.tool === 'hand' ? 'grab' : 'default';
   const hasGraphNodes = (graph?.nodes.length ?? 0) > 0;
   const sequenceEditorControls = isSequence && !readOnly && emptyState === null ? (
     <SequenceEditorControls
@@ -3388,7 +3425,7 @@ export function DiagramCanvas({
     <div
       aria-label="Interactive diagram canvas"
       className={className}
-      data-panning={spacePressed || isPanning || undefined}
+      data-panning={spacePressed || overlay?.tool === 'hand' || isPanning || undefined}
       data-overlay-toolbar-safe-top={hasOverlayToolbarSafeLane || undefined}
       data-selected-node-ids={getCanonicalSelectionAttribute(selection)}
       data-testid="diagram-canvas"
@@ -3430,6 +3467,30 @@ export function DiagramCanvas({
       }}
       tabIndex={0}
     >
+      {shortcutsOpen ? (
+        <div
+          aria-label="Canvas keyboard shortcuts"
+          aria-modal="true"
+          onKeyDown={(event) => {
+            if (event.key !== 'Tab') return;
+            const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((element) => !element.hasAttribute('disabled'));
+            const edge = event.shiftKey ? focusable[0] : focusable.at(-1);
+            if (edge && document.activeElement === edge) { event.preventDefault(); (event.shiftKey ? focusable.at(-1) : focusable[0])?.focus(); }
+          }}
+          ref={shortcutsDialogRef}
+          role="dialog"
+          style={{ background: 'var(--surface-raised)', border: '1px solid var(--control-border)', borderRadius: 10, boxShadow: '0 12px 36px rgb(0 0 0 / 20%)', left: '50%', maxHeight: 'calc(100% - 32px)', overflow: 'auto', padding: 18, pointerEvents: 'auto', position: 'absolute', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(460px, calc(100% - 32px))', zIndex: 100 }}
+        >
+          <button aria-label="Close keyboard shortcuts" onClick={() => { setShortcutsOpen(false); queueMicrotask(() => shortcutsOriginRef.current?.focus()); }} style={{ float: 'right' }} type="button">Close</button>
+          <h2>Keyboard shortcuts</h2>
+          {([
+            ['Overlay', getCanvasToolShortcutSummary(['connect'])],
+            ['Mermaid', `C Connect · Enter Edit selected node · F2 Edit · ${getPlatformModifierLabel()}+Z Undo · ${getPlatformModifierLabel()}+Shift+Z Redo`],
+            ['Navigation', 'Space+drag Pan · Shift+1 Fit all · Shift+2 Fit selection · +/− Canvas zoom · Browser zoom remains Cmd/Ctrl +/−'],
+            ['Tabs', 'Left/Right Previous or next · Home/End First or last'],
+          ] as const).map(([group, bindings]) => <section key={group}><h3>{group}</h3><p>{bindings}</p></section>)}
+        </div>
+      ) : null}
       <div
         aria-hidden="true"
         className="canvas-dot-grid"
@@ -3546,8 +3607,8 @@ export function DiagramCanvas({
               minZoom={MIN_ZOOM}
               multiSelectionKeyCode="Shift"
               nodes={controlledFlowNodes}
-              nodesConnectable={canEditStructure}
-              nodesDraggable={canEditStructure}
+              nodesConnectable={canEditStructure && overlay?.tool !== 'hand'}
+              nodesDraggable={canEditStructure && overlay?.tool !== 'hand'}
               nodesFocusable={canEditStructure}
               nodeTypes={FLOW_NODE_TYPES}
               onConnect={handleFlowConnect}
@@ -3603,7 +3664,7 @@ export function DiagramCanvas({
               proOptions={FLOW_PRO_OPTIONS}
               selectionKeyCode="Shift"
               selectionMode={SelectionMode.Full}
-              selectionOnDrag={shouldEnableCanvasMarquee(canEditStructure, mode, isCoarsePointer)}
+              selectionOnDrag={overlay?.tool !== 'hand' && shouldEnableCanvasMarquee(canEditStructure, mode, isCoarsePointer)}
               viewport={flowViewport}
               zoomOnDoubleClick={false}
               zoomOnPinch={false}
@@ -3733,6 +3794,7 @@ export function DiagramCanvas({
           {...overlay}
           canConnectMermaidNodes={isFlowchart}
           controlsSafeBottom={semanticControlsSafeBottom}
+          onFitSelection={(bounds) => { if (bounds) fitBoundsToViewport(bounds, true); else fitToDiagram(true); }}
           semanticAnchors={overlaySemanticAnchors}
           transform={{ x: viewport.panX, y: viewport.panY, zoom: viewport.zoom }}
           viewport={canvasViewport}
@@ -4239,6 +4301,8 @@ export function DiagramCanvas({
                 <ClipboardPaste size={16} />
               </ToolbarButton>
             ) : null}
+            {onUndo ? <ToolbarButton label="Undo Mermaid change" onClick={onUndo} shortcut="Mod+Z"><RotateCcw size={16} /></ToolbarButton> : null}
+            {onRedo ? <ToolbarButton label="Redo Mermaid change" onClick={onRedo} shortcut="Mod+Shift+Z"><RotateCcw size={16} style={{ transform: 'scaleX(-1)' }} /></ToolbarButton> : null}
             <ToolbarButton label="Zoom out" onClick={() => { zoomCanvas(0.9); }} shortcut="−">
               <ZoomOut size={16} />
             </ToolbarButton>
@@ -4250,6 +4314,9 @@ export function DiagramCanvas({
             </ToolbarButton>
             <ToolbarButton label="Fit diagram" onClick={() => { fitToDiagram(true); }} shortcut="F">
               <ScanSearch size={16} />
+            </ToolbarButton>
+            <ToolbarButton label="Keyboard shortcuts" onClick={() => { shortcutsOriginRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : containerRef.current; setShortcutsOpen(true); }} shortcut="?">
+              <HelpCircle size={16} />
             </ToolbarButton>
           </div>
         ) : null}
@@ -4440,7 +4507,12 @@ export function DiagramCanvas({
                   commitPendingEdge(pendingEdgeLabel.trim() || undefined);
                 }
                 if (event.key === 'Escape') {
-                  commitPendingEdge(undefined);
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setPendingEdge(null);
+                  setPendingEdgeLabel('');
+                  setMode('select');
+                  onCanvasToolChange?.('select');
                 }
               }}
               placeholder="label (optional)"
@@ -7601,7 +7673,9 @@ function ToolbarButton({
   hint?: string;
   shortcut?: string;
 }) {
-  const title = shortcut ? `${label} (${shortcut})` : label;
+  const title = shortcut?.startsWith('Mod')
+    ? getPlatformShortcutTitle(label, shortcut)
+    : shortcut ? `${label} (${shortcut})` : label;
   return (
     <button aria-label={label} className="canvas-toolbar-button" data-testid={`canvas-action-${toTestId(label)}`} disabled={disabled} onClick={onClick} style={{ ...TOOLBAR_BUTTON_STYLE, opacity: disabled ? 0.45 : 1, position: 'relative' }} title={title} type="button">
       {children}

@@ -52,7 +52,7 @@ export interface OverlaySceneController {
   /** Final pointer-up geometry commit. Remote changes make this a no-write stale result. */
   transform: (id: string, expectedGeometry: OverlayGeometry, geometry: OverlayGeometry) => OverlayTransformCommitResult;
   editText: (id: string, index: number, deleteCount: number, insert: string) => void;
-  duplicate: (id: string) => void;
+  duplicate: (id: string) => string | null;
   beginComposition: (id: string) => OverlayTextComposition | null;
   commitComposition: (id: string, composition: OverlayTextComposition, draft: string) => void;
   addStroke: (points: readonly InkPoint[], mode: InkMode, style: { color: string; width: number; opacity: number; compositeExport: boolean }) => void;
@@ -208,9 +208,12 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, his
     editOverlayText(doc, diagramId, id, index, deleteCount, insert);
   }, [diagramId, doc]);
   const duplicate = useCallback((id: string) => {
-    if (!doc || !diagramId) return;
+    if (!doc || !diagramId) return null;
     const sceneNow = readOverlayScene(doc, diagramId); const item = sceneNow.objects.find((candidate) => candidate.id === id);
-    if (item && !isOverlayObjectLocked(sceneNow, item)) pasteOverlayObjects(doc, diagramId, [item], () => `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`);
+    if (!item || isOverlayObjectLocked(sceneNow, item)) return null;
+    const newId = `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`;
+    pasteOverlayObjects(doc, diagramId, [item], () => newId);
+    return newId;
   }, [diagramId, doc]);
   const addStroke = useCallback((points: readonly InkPoint[], mode: InkMode, style: { color: string; width: number; opacity: number; compositeExport: boolean }) => {
     if (!doc || !diagramId) return;

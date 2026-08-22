@@ -87,7 +87,7 @@ const ANCHORS = {
   topbar: '.workspace-topbar',
 };
 
-const OVERLAY_PRIMARY_ACTIONS = ['Select tool', 'Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow'] as const;
+const OVERLAY_PRIMARY_ACTIONS = ['Select tool', 'Hand tool', 'Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow'] as const;
 async function ensureOverlaySecondaryRail(page: Page): Promise<void> {
   const rail = page.getByTestId('overlay-toolbar-secondary');
   const more = page.getByTestId('overlay-toolbar-more-toggle');
@@ -3668,7 +3668,7 @@ async function assertAndClickBoardControl(
 async function assertCompactErrorToolbarAndRecovery(page: Page, banner: Locator, recovery: Locator, label: string): Promise<void> {
   const primary = page.getByTestId('overlay-toolbar-primary');
   const select = page.getByRole('button', { name: 'Select tool', exact: true });
-  await expect(primary.getByRole('button')).toHaveCount(9);
+  await expect(primary.getByRole('button')).toHaveCount(10);
   await expect(select).toBeVisible();
   await assertClosedOverlayToggleBesideError(page, banner, `${label} inline toolbar`);
   await assertBoardControl(page, recovery, `${label} recovery remains hit-testable`);
@@ -3677,7 +3677,7 @@ async function assertCompactErrorToolbarAndRecovery(page: Page, banner: Locator,
 async function assertNormalMobileOverlayToolbar(page: Page, label: string): Promise<void> {
   const primary = page.getByTestId('overlay-toolbar-primary');
   const directTools = page.getByTestId('overlay-toolbar-primary-tools');
-  await expect(primary.getByRole('button')).toHaveCount(9);
+  await expect(primary.getByRole('button')).toHaveCount(10);
   for (const action of OVERLAY_PRIMARY_ACTIONS) {
     await expect(primary.getByRole('button', { name: action, exact: true })).toBeVisible();
   }
@@ -3742,7 +3742,7 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
       && bounds.top >= railBounds.top && bounds.bottom <= railBounds.bottom
       && hit instanceof Node && button.contains(hit);
   });
-  if (!await lastDirectToolVisible()) {
+  for (let attempt = 0; attempt < 2 && !await lastDirectToolVisible(); attempt += 1) {
     const railBounds = await directTools.boundingBox();
     assert(railBounds && railBounds.width >= 88 && railBounds.height >= 44,
       `${label} direct toolbar rail is not large enough for a trusted touch swipe: ${JSON.stringify(railBounds)}.`);
@@ -3786,12 +3786,12 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
     } finally {
       await session.detach();
     }
-    await expect.poll(lastDirectToolVisible, {
-      message: `${label} direct toolbar last tool remained clipped after a trusted touch swipe: ${JSON.stringify(beforeScroll)}.`,
-      timeout: 5_000,
-    }).toBe(true);
     await expect(swipeTool).toHaveAttribute('aria-pressed', 'false');
   }
+  await expect.poll(lastDirectToolVisible, {
+    message: `${label} direct toolbar last tool remained clipped after trusted touch swipes: ${JSON.stringify(beforeScroll)}.`,
+    timeout: 5_000,
+  }).toBe(true);
   await settleCenterHitPoint(page, lastDirectTool, `${label} last direct toolbar tool`);
   await verifiedClick(page, lastDirectTool, `${label} normal Arrow tool tap after direct rail swipe`);
   await expect(lastDirectTool).toHaveAttribute('aria-pressed', 'true');
@@ -4254,7 +4254,7 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   const canvas = page.getByTestId('diagram-canvas');
   const overlayInspector = page.getByRole('button', { name: 'Objects and layers', exact: true });
   const primaryToolbar = page.getByTestId('overlay-toolbar-primary');
-  await expect(primaryToolbar.getByRole('button')).toHaveCount(9);
+  await expect(primaryToolbar.getByRole('button')).toHaveCount(10);
   await expect(page.getByRole('button', { name: 'Overlay tools', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'More overlay tools', exact: true })).toHaveCount(0);
   await saveScreenshot(page, 'inline-overlay-toolbar-light');
@@ -4263,6 +4263,22 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   await selectThemePreference(page, 'light');
   await ensureOverlaySecondaryRail(page);
   const laser = page.getByRole('button', { name: 'Laser pointer', exact: true });
+  const hand = page.getByRole('button', { name: 'Hand tool', exact: true });
+  const lineTool = page.getByRole('button', { name: 'Line', exact: true });
+  await canvas.focus();
+  await page.keyboard.press('H');
+  await expect(hand).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('L');
+  await expect(lineTool).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('K');
+  await expect(laser).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('V');
+  await expect(page.getByRole('button', { name: 'Select tool', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('?');
+  const shortcutsDialog = page.getByRole('dialog', { name: 'Canvas keyboard shortcuts', exact: true });
+  await expect(shortcutsDialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(shortcutsDialog).toHaveCount(0);
   await verifiedClick(page, laser, 'activate laser pointer before toolbar interaction');
   assert(await canvas.evaluate((element) => getComputedStyle(element).cursor) === 'crosshair', 'Laser mode did not expose its crosshair cursor.');
   await verifiedClick(page, page.getByRole('button', { name: 'Pen', exact: true }), 'activate pen while laser is active');

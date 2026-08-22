@@ -20,6 +20,7 @@ import {
   EyeOff,
   Frame,
   Highlighter,
+  Hand,
   Layers3,
   Lock,
   LineChart,
@@ -32,6 +33,8 @@ import {
   RotateCw,
   SquareDashedMousePointer,
   StickyNote,
+  Type,
+  Crosshair,
   ChevronDown,
   SendToBack,
   Trash2,
@@ -43,7 +46,7 @@ import { createPortal } from 'react-dom';
 import { listOverlayHistory, readCurrentOverlayScene, restoreOverlayRevision } from '../lib/overlay-history-api';
 import { adaptOverlaySceneToViewport, effectiveOverlayGeometry, isOverlayObjectLocked, type OverlayRenderObject, type OverlayTextComposition, type OverlayTransformCommitResult, type OverlayViewportTransform } from '../lib/overlay-scene';
 import { INK_MAX_PREVIEW_POINTS, INK_PREVIEW_INTERVAL_MS, simplifyInkPoints, type InkMode, type InkPoint } from '../lib/freehand-ink';
-import { getCanvasToolCursor, getCanvasToolShortcut, isOverlayPointerTool, type CanvasTool } from '../lib/canvas-interaction-state';
+import { getCanvasToolCursor, getCanvasToolShortcut, getCanvasToolShortcutLabel, isOverlayPointerTool, type CanvasTool } from '../lib/canvas-interaction-state';
 import {
   beginOverlayTransformDraft,
   overlayGeometryEqual,
@@ -87,7 +90,8 @@ export interface OverlayCanvasLayerProps {
   onUpdate: (id: string, patch: Partial<Omit<OverlayObjectRecord, 'id'>>) => void;
   onTransform?: (id: string, expected: OverlayGeometry, geometry: OverlayGeometry) => OverlayTransformCommitResult;
   onEditText: (id: string, index: number, deleteCount: number, insert: string) => void;
-  onDuplicate: (id: string) => void;
+  onDuplicate: (id: string) => string | null;
+  onFitSelection?: (bounds: OverlayGeometry | null) => void;
   onBeginComposition: (id: string) => OverlayTextComposition | null;
   onCommitComposition: (id: string, composition: OverlayTextComposition, draft: string) => void;
   onAddStroke?: (points: readonly InkPoint[], mode: InkMode, style: { color: string; width: number; opacity: number; compositeExport: boolean }) => void;
@@ -151,13 +155,24 @@ type ToolbarIconButtonProps = {
   disabled?: boolean;
   expanded?: boolean;
   label: string;
+  shortcut?: string;
   onClick: () => void;
   pressed?: boolean;
   testId?: string;
 };
 
-function ToolbarIconButton({ children, className, controls, disabled, expanded, label, onClick, pressed, testId }: ToolbarIconButtonProps) {
-  return <button aria-controls={controls} aria-expanded={expanded} aria-label={label} aria-pressed={pressed} className={`overlay-toolbar-button${className ? ` ${className}` : ''}`} data-testid={testId} disabled={disabled} onClick={onClick} title={label} type="button">
+export function getPlatformShortcutTitle(label: string, shortcut?: string): string {
+  if (!shortcut) return label;
+  const mod = getPlatformModifierLabel();
+  return `${label} — ${shortcut.replace('Mod', mod)}`;
+}
+
+export function getPlatformModifierLabel(): '⌘' | 'Ctrl' {
+  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/u.test(navigator.platform) ? '⌘' : 'Ctrl';
+}
+
+function ToolbarIconButton({ children, className, controls, disabled, expanded, label, onClick, pressed, shortcut, testId }: ToolbarIconButtonProps) {
+  return <button aria-controls={controls} aria-expanded={expanded} aria-label={label} aria-pressed={pressed} className={`overlay-toolbar-button${className ? ` ${className}` : ''}`} data-testid={testId} disabled={disabled} onClick={onClick} title={getPlatformShortcutTitle(label, shortcut)} type="button">
     {children}
   </button>;
 }
@@ -313,6 +328,15 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
   );
   const selected = objects.find(({ id }) => id === selectedId) ?? null;
   const selectedObjectIds = selectedIds.size ? [...selectedIds] : selectedId ? [selectedId] : [];
+  const selectableObjectIds = useMemo(() => {
+    const hiddenMembers = new Set(props.scene.objects.filter((item) => item.kind === 'frame.section' && item.metadata.hidden === true)
+      .flatMap((frame) => Array.isArray(frame.payload.members) ? frame.payload.members.filter((member): member is string => typeof member === 'string') : []));
+    return props.scene.objects
+      .filter((object) => !hiddenMembers.has(object.id) || object.kind === 'frame.section')
+      .filter((object) => (props.scene.layers ?? []).find((layer) => layer.id === (object.layer ?? 'default'))?.visible ?? true)
+      .filter((object) => !isOverlayObjectLocked(props.scene, object))
+      .map(({ id }) => id);
+  }, [props.scene]);
   const selectedLocked = selected ? selected.metadata.locked === true || (props.scene.layers ?? []).find(({ id }) => id === (selected.layer ?? 'default'))?.locked === true
     || props.scene.objects.some((frame) => frame.kind === 'frame.section' && frame.metadata.locked === true && Array.isArray(frame.payload.members) && frame.payload.members.includes(selected.id)) : false;
   const writable = !props.readOnly && props.scene.version === 1;
@@ -751,18 +775,48 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     });
   };
   const handleOverlayShortcut = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.nativeEvent.isComposing || event.key === 'Process') return;
     const target = event.target as HTMLElement;
     if (target.closest('textarea, input, select, [contenteditable="true"]')) return;
-    const shortcutTool = !event.metaKey && !event.ctrlKey ? getCanvasToolShortcut(event.key, false) : null;
+    if (event.shiftKey && (event.code === 'Digit1' || event.code === 'Digit2')) {
+      if (!props.onFitSelection) return;
+      event.preventDefault(); event.stopPropagation();
+      const selectedObjects = objects.filter(({ id }) => selectedObjectIds.includes(id));
+      const bounds = selectedObjects.length > 0 ? selectedObjects.reduce<OverlayGeometry>((result, object) => {
+        const geometry = effectiveOverlayGeometry(object);
+        const left = Math.min(geometry.x, geometry.x + geometry.width); const top = Math.min(geometry.y, geometry.y + geometry.height);
+        const right = Math.max(geometry.x, geometry.x + geometry.width); const bottom = Math.max(geometry.y, geometry.y + geometry.height);
+        return { x: Math.min(result.x, left), y: Math.min(result.y, top), width: Math.max(result.x + result.width, right) - Math.min(result.x, left), height: Math.max(result.y + result.height, bottom) - Math.min(result.y, top), rotation: 0 };
+      }, (() => { const first = effectiveOverlayGeometry(selectedObjects[0]!); return { x: Math.min(first.x, first.x + first.width), y: Math.min(first.y, first.y + first.height), width: Math.abs(first.width), height: Math.abs(first.height), rotation: 0 }; })()) : null;
+      props.onFitSelection(event.code === 'Digit2' ? bounds : null);
+      return;
+    }
+    const hasModifier = event.metaKey || event.ctrlKey || event.altKey;
+    const shortcutTool = getCanvasToolShortcut(event.key, false, hasModifier);
     if (shortcutTool) {
-      stopInk(false); activateInkTool('select'); setSelectedId(null); setSelectedIds(new Set()); return;
+      event.preventDefault(); event.stopPropagation();
+      stopInk(false); activateInkTool(shortcutTool === 'pen' || shortcutTool === 'eraser' ? shortcutTool : 'select');
+      onToolChange(shortcutTool);
+      return;
     }
     if ((!event.metaKey && !event.ctrlKey) || event.altKey) return;
     const key = event.key.toLowerCase();
+    if (key === 'a' && tool === 'select') {
+      event.preventDefault(); event.stopPropagation();
+      setSelectedIds(new Set(selectableObjectIds));
+      setSelectedId(selectableObjectIds.at(-1) ?? null);
+      return;
+    }
+    if (key === 'd' && selectedObjectIds.length > 0) {
+      event.preventDefault(); event.stopPropagation();
+      const copies = selectedObjectIds.map(props.onDuplicate).filter((id): id is string => id !== null);
+      setSelectedIds(new Set(copies)); setSelectedId(copies.at(-1) ?? null);
+      return;
+    }
     if (key !== 'z' && key !== 'y') return;
-    event.preventDefault();
+    event.preventDefault(); event.stopPropagation();
     if (key === 'y' || event.shiftKey) props.onRedo?.(); else props.onUndo();
-  }, [activateInkTool, props, stopInk]);
+  }, [activateInkTool, objects, onToolChange, props, selectableObjectIds, selectedObjectIds, stopInk, tool]);
 
   return (<>
     <div data-testid="overlay-canvas-owner" onKeyDownCapture={handleOverlayShortcut} ref={canvasOwnerRef} style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 8 }}>
@@ -809,7 +863,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
           key={object.id}
           onClick={(event) => {
             if (tool !== 'select') return;
-            event.stopPropagation(); choose(object.id, event.metaKey || event.ctrlKey);
+            event.stopPropagation(); choose(object.id, event.shiftKey || event.metaKey || event.ctrlKey);
           }}
           onPointerCancel={endMove}
           onPointerDown={(event) => beginMove(event, object)}
@@ -837,7 +891,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
             height: Math.abs(screenGeometry.height),
             left: Math.min(screenX, screenX + screenGeometry.width),
             overflow: 'hidden',
-            pointerEvents: writable && tool === 'select' ? 'auto' : 'none',
+            pointerEvents: writable && (tool === 'select' || editingId === object.id) ? 'auto' : 'none',
             position: 'absolute',
             top: Math.min(screenY, screenY + screenGeometry.height),
             transform: `rotate(${geometry.rotation}deg)`,
@@ -865,6 +919,13 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
               setCompositionDrafts((drafts) => ({ ...drafts, [object.id]: draft }));
             }}
             onBlur={() => setEditingId(null)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault(); event.stopPropagation();
+                setEditingId(null);
+                event.currentTarget.parentElement?.focus();
+              }
+            }}
             placeholder={object.kind === 'annotation.sticky' ? 'Write a sticky note' : object.kind.startsWith('shape.') ? 'Shape label' : 'Add text'}
             readOnly={!writable || object.metadata.locked === true || (props.scene.layers ?? []).find(({ id }) => id === (object.layer ?? 'default'))?.locked === true || props.scene.objects.some((frame) => frame.kind === 'frame.section' && frame.metadata.locked === true && Array.isArray(frame.payload.members) && frame.payload.members.includes(object.id))}
             style={{ background: 'transparent', border: 0, color: 'inherit', font: 'inherit', height: '100%', padding: 8, resize: 'none', width: '100%' }}
@@ -948,29 +1009,30 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       >
         <div aria-label="Overlay canvas toolbar" className="overlay-toolbar-primary" data-testid="overlay-toolbar-primary" onFocusCapture={handleToolbarFocus} onKeyDown={handleToolbarKeyDown} ref={primaryToolbarRef} role="toolbar">
           <div className="overlay-toolbar-primary-tools" data-testid="overlay-toolbar-primary-tools" onClickCapture={handleDirectToolbarClickCapture} onLostPointerCapture={(event) => finishDirectToolbarPointer(event, true)} onPointerCancel={(event) => finishDirectToolbarPointer(event, true)} onPointerDown={handleDirectToolbarPointerDown} onPointerMove={handleDirectToolbarPointerMove} onPointerUp={(event) => finishDirectToolbarPointer(event, false)}>
-            <ToolbarIconButton disabled={!writable} label="Select tool" onClick={() => onToolChange('select')} pressed={tool === 'select'}><MousePointer2 size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Select tool" onClick={() => onToolChange('select')} pressed={tool === 'select'} shortcut={getCanvasToolShortcutLabel('select')}><MousePointer2 size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Hand tool" onClick={() => onToolChange('hand')} pressed={tool === 'hand'} shortcut={getCanvasToolShortcutLabel('hand')}><Hand size={18} /></ToolbarIconButton>
             <ToolbarDivider />
-            <ToolbarIconButton disabled={!writable} label="Text" onClick={() => onToolChange('text')} pressed={tool === 'text'}><Plus size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Text" onClick={() => onToolChange('text')} pressed={tool === 'text'} shortcut={getCanvasToolShortcutLabel('text')}><Type size={18} /></ToolbarIconButton>
             <ToolbarIconButton disabled={!writable} label="Sticky note" onClick={() => onToolChange('sticky')} pressed={tool === 'sticky'}><StickyNote size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Rectangle" onClick={() => onToolChange('rectangle')} pressed={tool === 'rectangle'}><RectangleHorizontal size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Ellipse" onClick={() => onToolChange('ellipse')} pressed={tool === 'ellipse'}><Circle size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Diamond" onClick={() => onToolChange('diamond')} pressed={tool === 'diamond'}><Diamond size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Line" onClick={() => onToolChange('line')} pressed={tool === 'line'}><LineChart size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Arrow" onClick={() => onToolChange('arrow')} pressed={tool === 'arrow'}><ArrowRight size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Rectangle" onClick={() => onToolChange('rectangle')} pressed={tool === 'rectangle'} shortcut={getCanvasToolShortcutLabel('rectangle')}><RectangleHorizontal size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Ellipse" onClick={() => onToolChange('ellipse')} pressed={tool === 'ellipse'} shortcut={getCanvasToolShortcutLabel('ellipse')}><Circle size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Diamond" onClick={() => onToolChange('diamond')} pressed={tool === 'diamond'} shortcut={getCanvasToolShortcutLabel('diamond')}><Diamond size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Line" onClick={() => onToolChange('line')} pressed={tool === 'line'} shortcut={getCanvasToolShortcutLabel('line')}><LineChart size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Arrow" onClick={() => onToolChange('arrow')} pressed={tool === 'arrow'} shortcut={getCanvasToolShortcutLabel('arrow')}><ArrowRight size={18} /></ToolbarIconButton>
           </div>
           <ToolbarDivider />
           <ToolbarIconButton controls={secondaryToolsId} expanded={toolsExpanded} label={toolsExpanded ? 'Collapse more canvas tools' : 'More canvas tools'} onClick={() => setToolsExpanded((open) => !open)} pressed={toolsExpanded} testId="overlay-toolbar-more-toggle"><ChevronDown size={18} /></ToolbarIconButton>
         </div>
         <div aria-hidden={!toolsExpanded} className={`overlay-toolbar-secondary${toolsExpanded ? ' is-expanded' : ''}`} data-testid="overlay-toolbar-secondary" id={secondaryToolsId}>
           <div aria-label="More canvas tools" className="overlay-toolbar-secondary-actions" onFocusCapture={handleToolbarFocus} onKeyDown={handleToolbarKeyDown} ref={secondaryToolbarRef} role="toolbar">
-            <ToolbarIconButton disabled={!writable || !canConnectMermaidNodes} label="Connect Mermaid nodes" onClick={() => onToolChange('connect')} pressed={canConnectMermaidNodes && tool === 'connect'}><SquareDashedMousePointer size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Laser pointer" onClick={() => onToolChange(tool === 'laser' ? 'select' : 'laser')} pressed={tool === 'laser'}><MousePointer2 size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Pen" onClick={() => onToolChange(tool === 'pen' ? 'select' : 'pen')} pressed={tool === 'pen'}><PenLine size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable || !canConnectMermaidNodes} label="Connect Mermaid nodes" onClick={() => onToolChange('connect')} pressed={canConnectMermaidNodes && tool === 'connect'} shortcut={getCanvasToolShortcutLabel('connect')}><SquareDashedMousePointer size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Laser pointer" onClick={() => onToolChange(tool === 'laser' ? 'select' : 'laser')} pressed={tool === 'laser'} shortcut={getCanvasToolShortcutLabel('laser')}><Crosshair size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Pen" onClick={() => onToolChange(tool === 'pen' ? 'select' : 'pen')} pressed={tool === 'pen'} shortcut={getCanvasToolShortcutLabel('pen')}><PenLine size={18} /></ToolbarIconButton>
             <ToolbarIconButton disabled={!writable} label="Highlighter" onClick={() => onToolChange(tool === 'highlighter' ? 'select' : 'highlighter')} pressed={tool === 'highlighter'}><Highlighter size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Erase stroke" onClick={() => onToolChange(tool === 'eraser' ? 'select' : 'eraser')} pressed={tool === 'eraser'}><Eraser size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Erase stroke" onClick={() => onToolChange(tool === 'eraser' ? 'select' : 'eraser')} pressed={tool === 'eraser'} shortcut={getCanvasToolShortcutLabel('eraser')}><Eraser size={18} /></ToolbarIconButton>
             <ToolbarDivider />
-            <ToolbarIconButton disabled={!writable} label="Undo canvas change" onClick={props.onUndo}><Undo2 size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable} label="Redo canvas change" onClick={() => props.onRedo?.()}><Redo2 size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Undo canvas change" onClick={props.onUndo} shortcut="Mod+Z"><Undo2 size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable} label="Redo canvas change" onClick={() => props.onRedo?.()} shortcut="Mod+Shift+Z"><Redo2 size={18} /></ToolbarIconButton>
             <ToolbarIconButton controls={inspectorId} expanded={inspectorOpen} label="Objects and layers" onClick={() => setInspectorOpen((open) => !open)} pressed={inspectorOpen}><Layers3 size={18} /></ToolbarIconButton>
           </div>
         {selectedObjectIds.length > 0 && !inspectorOpen ? <div aria-label="Selected overlay actions" className="overlay-toolbar-context" data-testid="overlay-toolbar-context" onFocusCapture={handleToolbarFocus} onKeyDown={handleToolbarKeyDown} ref={contextToolbarRef} role="toolbar">
@@ -984,7 +1046,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
                 <ToolbarIconButton disabled={!writable} label="Send back" onClick={() => props.onReorder(selected.id, 'back')}><SendToBack size={18} /></ToolbarIconButton>
                 <ToolbarIconButton disabled={!writable} label="Send backward" onClick={() => props.onReorder(selected.id, 'backward')}><ArrowDownToLine size={18} /></ToolbarIconButton>
                 <ToolbarIconButton disabled={!writable} label="Copy overlay" onClick={() => props.onCopy([selected.id])}><Copy size={18} /></ToolbarIconButton>
-                <ToolbarIconButton disabled={!writable} label="Duplicate" onClick={() => props.onDuplicate(selected.id)}><CopyPlus size={18} /></ToolbarIconButton>
+                <ToolbarIconButton disabled={!writable} label="Duplicate" onClick={() => { const copy = props.onDuplicate(selected.id); if (copy) { setSelectedId(copy); setSelectedIds(new Set([copy])); } }}><CopyPlus size={18} /></ToolbarIconButton>
                 <ToolbarIconButton disabled={!writable} label="Delete overlay" onClick={() => { props.onDelete([selected.id]); setSelectedId(null); }}><Trash2 size={18} /></ToolbarIconButton>
                 {props.semanticAnchors.size > 0 ? <ToolbarIconButton disabled={!writable} label="Anchor first node" onClick={() => { const mermaidId = props.semanticAnchors.keys().next().value as string | undefined; if (mermaidId) props.onAnchor(selected.id, mermaidId); }}><Anchor size={18} /></ToolbarIconButton> : null}
                 {selectedObjectIds.length >= 2 ? <><ToolbarIconButton disabled={!writable} label="Align left" onClick={() => props.onAlign?.(selectedObjectIds, 'left')}><AlignLeft size={18} /></ToolbarIconButton><ToolbarIconButton disabled={!writable} label="Align top" onClick={() => props.onAlign?.(selectedObjectIds, 'top')}><AlignStartVertical size={18} /></ToolbarIconButton></> : null}

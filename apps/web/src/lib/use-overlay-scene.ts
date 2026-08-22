@@ -53,6 +53,7 @@ export interface OverlaySceneController {
   transform: (id: string, expectedGeometry: OverlayGeometry, geometry: OverlayGeometry) => OverlayTransformCommitResult;
   editText: (id: string, index: number, deleteCount: number, insert: string) => void;
   duplicate: (id: string) => string | null;
+  duplicateMany: (ids: readonly string[]) => string[];
   beginComposition: (id: string) => OverlayTextComposition | null;
   commitComposition: (id: string, composition: OverlayTextComposition, draft: string) => void;
   addStroke: (points: readonly InkPoint[], mode: InkMode, style: { color: string; width: number; opacity: number; compositeExport: boolean }) => void;
@@ -85,7 +86,7 @@ export function updateOverlayControllerObject(
   return true;
 }
 
-export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, history: CanvasHistoryCoordinator | null = null): OverlaySceneController | null {
+export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, history: CanvasHistoryCoordinator | null = null, writable = true): OverlaySceneController | null {
   const [scene, setScene] = useState<OverlaySceneSnapshot | null>(null);
   const [clipboard, setClipboard] = useState<OverlayObjectRecord[]>([]);
   useEffect(() => {
@@ -207,14 +208,20 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, his
     const sceneNow = readOverlayScene(doc, diagramId); const object = sceneNow.objects.find((item) => item.id === id); if (!object || isOverlayObjectLocked(sceneNow, object)) return;
     editOverlayText(doc, diagramId, id, index, deleteCount, insert);
   }, [diagramId, doc]);
-  const duplicate = useCallback((id: string) => {
-    if (!doc || !diagramId) return null;
-    const sceneNow = readOverlayScene(doc, diagramId); const item = sceneNow.objects.find((candidate) => candidate.id === id);
-    if (!item || isOverlayObjectLocked(sceneNow, item)) return null;
-    const newId = `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`;
-    pasteOverlayObjects(doc, diagramId, [item], () => newId);
-    return newId;
-  }, [diagramId, doc]);
+  const duplicateMany = useCallback((ids: readonly string[]) => {
+    if (!writable || !doc || !diagramId) return [];
+    const sceneNow = readOverlayScene(doc, diagramId);
+    const items = sceneNow.objects.filter((candidate) => ids.includes(candidate.id) && !isOverlayObjectLocked(sceneNow, candidate));
+    if (items.length === 0) return [];
+    const newIds = items.map(() => `overlay_${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}`);
+    const duplicate = () => {
+      let index = 0;
+      pasteOverlayObjects(doc, diagramId, items, () => newIds[index++]!);
+    };
+    if (history) history.withAction(duplicate); else duplicate();
+    return newIds;
+  }, [diagramId, doc, history, writable]);
+  const duplicate = useCallback((id: string) => duplicateMany([id]).at(0) ?? null, [duplicateMany]);
   const addStroke = useCallback((points: readonly InkPoint[], mode: InkMode, style: { color: string; width: number; opacity: number; compositeExport: boolean }) => {
     if (!doc || !diagramId) return;
     const simplified = simplifyInkPoints(points);
@@ -267,5 +274,5 @@ export function useOverlayScene(doc: Y.Doc | null, diagramId: string | null, his
   }, [diagramId, doc, history]);
 
   if (!scene) return null;
-  return { scene, add, addShape, addConnector, addFrame, addLayer, updateLayer, assignLayer, reorderLayer, move, moveMany, align, distribute, anchor, remove, reorder, copy, paste, update, transform, editText, duplicate, beginComposition, commitComposition, addStroke };
+  return { scene, add, addShape, addConnector, addFrame, addLayer, updateLayer, assignLayer, reorderLayer, move, moveMany, align, distribute, anchor, remove, reorder, copy, paste, update, transform, editText, duplicate, duplicateMany, beginComposition, commitComposition, addStroke };
 }

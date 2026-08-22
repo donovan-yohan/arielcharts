@@ -760,7 +760,7 @@ export function SessionWorkspace({
   // switch it can briefly describe the previous diagram, so onboarding
   // eligibility must read the exact current Y.Text instead.
   const activeDiagramSource = activeDiagram?.yText.toString() ?? '';
-  const overlayController = useOverlayScene(collaboration?.doc ?? null, activeDiagramId, canvasHistory);
+  const overlayController = useOverlayScene(collaboration?.doc ?? null, activeDiagramId, canvasHistory, historyPreview === null);
   // Like source, derive onboarding eligibility from the active durable scene
   // rather than the controller's last rendered scene during a tab transition.
   const activeOverlayCount = collaboration && activeDiagramId
@@ -2801,6 +2801,7 @@ export function SessionWorkspace({
               onTransform: overlayController.transform,
               onEditText: overlayController.editText,
               onDuplicate: overlayController.duplicate,
+              onDuplicateMany: overlayController.duplicateMany,
               onBeginComposition: overlayController.beginComposition,
               onCommitComposition: overlayController.commitComposition,
               onAddStroke: overlayController.addStroke,

@@ -1310,6 +1310,11 @@ export function DiagramCanvas({
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const shortcutsOriginRef = useRef<HTMLElement | null>(null);
   const shortcutsDialogRef = useRef<HTMLDivElement | null>(null);
+  const restoreShortcutsFocusRef = useRef(false);
+  const closeShortcuts = useCallback(() => {
+    restoreShortcutsFocusRef.current = true;
+    setShortcutsOpen(false);
+  }, []);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const [editingSequenceTarget, setEditingSequenceTarget] = useState<SequenceSvgTextTarget | null>(null);
@@ -1656,11 +1661,11 @@ export function DiagramCanvas({
           remoteSelections: remoteSelectionsByNodeId.get(node.id) ?? [],
           shape: node.shape,
         },
-        draggable: isFlowchart && !readOnly,
+        draggable: isFlowchart && !readOnly && overlay?.tool !== 'hand',
         focusable: false,
         id: node.id,
         position: { x: bounds.x, y: bounds.y },
-        selectable: isFlowchart && !readOnly,
+        selectable: isFlowchart && !readOnly && overlay?.tool !== 'hand',
         selected: selection.includes(node.id),
         style: {
           height: bounds.height,
@@ -1671,7 +1676,7 @@ export function DiagramCanvas({
     });
 
     return nextNodes;
-  }, [graph, interactiveNodeBounds, isFlowchart, mermaidPresentation.nodes, readOnly, remoteEditorsByNodeId, remoteSelectionsByNodeId, selection]);
+  }, [graph, interactiveNodeBounds, isFlowchart, mermaidPresentation.nodes, overlay?.tool, readOnly, remoteEditorsByNodeId, remoteSelectionsByNodeId, selection]);
   const flowNodeIdsRef = useRef<string[]>([]);
   flowNodeIdsRef.current = flowNodes.map((node) => node.id);
 
@@ -1688,7 +1693,7 @@ export function DiagramCanvas({
         data: { index: graphIndex },
         id: getFlowEdgeId(graphIndex),
         label: getLinkText(link),
-        selectable: canEditStructure,
+        selectable: canEditStructure && overlay?.tool !== 'hand',
         selected: selectedEdgeIndex === graphIndex,
         ...getFlowEdgeHandles(link, interactiveNodeBounds, graph.direction),
         ...getFlowEdgePresentation(link, mermaidPresentation.edges[graphIndex]),
@@ -1696,7 +1701,7 @@ export function DiagramCanvas({
         target: link.target,
         type: 'smoothstep',
       }));
-  }, [graph, interactiveNodeBounds, mermaidPresentation.edges, selectedEdgeIndex]);
+  }, [graph, interactiveNodeBounds, mermaidPresentation.edges, overlay?.tool, selectedEdgeIndex]);
 
   const flowEdgeMarkerColors = useMemo(() => [...new Set([
     FLOW_EDGE_COLOR,
@@ -2355,7 +2360,7 @@ export function DiagramCanvas({
     setEditingSubgraphLabel('');
   }, [isFlowchart, mode, setMode]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || shouldRejectCanvasShortcut(event)) {
         return;
@@ -2385,12 +2390,9 @@ export function DiagramCanvas({
         : false;
 
       if (shortcutsOpen) {
-        if (event.key === 'Escape' && ownsEscape) {
+        if (event.key === 'Escape') {
           event.preventDefault();
-          setShortcutsOpen(false);
-          queueMicrotask(() => shortcutsOriginRef.current?.focus());
-        } else if (ownsCanvas) {
-          event.preventDefault();
+          closeShortcuts();
         }
         return;
       }
@@ -2434,7 +2436,7 @@ export function DiagramCanvas({
         setShortcutsOpen(true);
         return;
       }
-      if (canvasOwnsSingleKeyFocus && event.shiftKey && (event.code === 'Digit1' || event.code === 'Digit2')) {
+      if (canvasOwnsSingleKeyFocus && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey && (event.code === 'Digit1' || event.code === 'Digit2')) {
         event.preventDefault();
         if (event.code === 'Digit2' && selectedBounds) fitBoundsToViewport(selectedBounds, true);
         else fitToDiagram(true);
@@ -2494,11 +2496,12 @@ export function DiagramCanvas({
         ? getCanvasToolShortcut(event.key, false, isModifierShortcut || event.altKey)
         : null;
       if (shortcutTool) {
+        if (readOnly || (shortcutTool === 'connect' && !canEditStructure)) return;
         event.preventDefault();
-        if (shortcutTool === 'connect' && canEditStructure) setMode('connect');
+        if (shortcutTool === 'connect') setMode('connect');
         else if (shortcutTool === 'laser') setMode('laser');
         else setMode('select');
-        onCanvasToolChange?.(shortcutTool === 'connect' && !canEditStructure ? 'select' : shortcutTool);
+        onCanvasToolChange?.(shortcutTool);
         return;
       }
 
@@ -2581,10 +2584,21 @@ export function DiagramCanvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [canEditStructure, copySelectedNodes, fitBoundsToViewport, fitToDiagram, graph, hasPersistedLayout, nodeById, onAddNode, onCanvasToolChange, onDeleteEdge, onDeleteNodes, onRedo, onUndo, onUngroupNodes, pasteClipboard, readOnly, selectedBounds, selectedCurrentEdgeIdentity, selection, setMode, setSelection, shortcutsOpen, simplifyLayout, zoomCanvas]);
+  }, [canEditStructure, closeShortcuts, copySelectedNodes, fitBoundsToViewport, fitToDiagram, graph, hasPersistedLayout, nodeById, onAddNode, onCanvasToolChange, onDeleteEdge, onDeleteNodes, onRedo, onUndo, onUngroupNodes, pasteClipboard, readOnly, selectedBounds, selectedCurrentEdgeIdentity, selection, setMode, setSelection, shortcutsOpen, simplifyLayout, zoomCanvas]);
 
   useEffect(() => {
-    if (shortcutsOpen) shortcutsDialogRef.current?.querySelector<HTMLElement>('button')?.focus();
+    if (shortcutsOpen) {
+      shortcutsDialogRef.current?.querySelector<HTMLElement>('button')?.focus();
+      return;
+    }
+    if (!restoreShortcutsFocusRef.current) return;
+    restoreShortcutsFocusRef.current = false;
+    const origin = shortcutsOriginRef.current;
+    const frame = window.requestAnimationFrame(() => {
+      if (origin?.isConnected) origin.focus({ preventScroll: true });
+      if (document.activeElement !== origin) containerRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [shortcutsOpen]);
 
   useEffect(() => {
@@ -2937,10 +2951,11 @@ export function DiagramCanvas({
   }, [connectSourceId, interactiveNodeBounds, isFlowchart, mode]);
 
   const handleNodeClick = useCallback((nodeId: string, shiftKey: boolean) => {
+    if (overlay?.tool === 'hand') return;
     const currentSelection = selectionRef.current;
     setSelection(getNodeClickSelection(currentSelection, nodeId, shiftKey));
     handleNodeActivation(nodeId);
-  }, [handleNodeActivation, setSelection]);
+  }, [handleNodeActivation, overlay?.tool, setSelection]);
 
   const commitNodeEdit = useCallback(() => {
     if (!canEditStructure || !editingNodeId) {
@@ -3151,7 +3166,7 @@ export function DiagramCanvas({
   }, [flowNodes]);
 
   const handleFlowSelectionChange = useCallback(({ nodes }: { nodes: MermaidFlowNode[] }) => {
-    if (!canEditStructure) {
+    if (!canEditStructure || overlay?.tool === 'hand') {
       return;
     }
 
@@ -3165,7 +3180,7 @@ export function DiagramCanvas({
       setEditingSubgraphId(null);
     }
     setSelection(nextSelection);
-  }, [canEditStructure, setSelection]);
+  }, [canEditStructure, overlay?.tool, setSelection]);
 
   const handleFlowNodeDragStart = useCallback<OnNodeDrag<MermaidFlowNode>>((_event, node, nodes) => {
     if (!canEditStructure) {
@@ -3469,26 +3484,37 @@ export function DiagramCanvas({
     >
       {shortcutsOpen ? (
         <div
-          aria-label="Canvas keyboard shortcuts"
-          aria-modal="true"
-          onKeyDown={(event) => {
-            if (event.key !== 'Tab') return;
-            const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((element) => !element.hasAttribute('disabled'));
-            const edge = event.shiftKey ? focusable[0] : focusable.at(-1);
-            if (edge && document.activeElement === edge) { event.preventDefault(); (event.shiftKey ? focusable.at(-1) : focusable[0])?.focus(); }
-          }}
-          ref={shortcutsDialogRef}
-          role="dialog"
-          style={{ background: 'var(--surface-raised)', border: '1px solid var(--control-border)', borderRadius: 10, boxShadow: '0 12px 36px rgb(0 0 0 / 20%)', left: '50%', maxHeight: 'calc(100% - 32px)', overflow: 'auto', padding: 18, pointerEvents: 'auto', position: 'absolute', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(460px, calc(100% - 32px))', zIndex: 100 }}
+          data-testid="shortcuts-dialog-backdrop"
+          onClick={(event) => { if (event.target === event.currentTarget) closeShortcuts(); }}
+          style={{ background: 'rgb(15 23 42 / 16%)', inset: 0, pointerEvents: 'auto', position: 'absolute', zIndex: 99 }}
         >
-          <button aria-label="Close keyboard shortcuts" onClick={() => { setShortcutsOpen(false); queueMicrotask(() => shortcutsOriginRef.current?.focus()); }} style={{ float: 'right' }} type="button">Close</button>
-          <h2>Keyboard shortcuts</h2>
-          {([
-            ['Overlay', getCanvasToolShortcutSummary(['connect'])],
-            ['Mermaid', `C Connect · Enter Edit selected node · F2 Edit · ${getPlatformModifierLabel()}+Z Undo · ${getPlatformModifierLabel()}+Shift+Z Redo`],
-            ['Navigation', 'Space+drag Pan · Shift+1 Fit all · Shift+2 Fit selection · +/− Canvas zoom · Browser zoom remains Cmd/Ctrl +/−'],
-            ['Tabs', 'Left/Right Previous or next · Home/End First or last'],
-          ] as const).map(([group, bindings]) => <section key={group}><h3>{group}</h3><p>{bindings}</p></section>)}
+          <div
+            aria-label="Canvas keyboard shortcuts"
+            aria-modal="true"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeShortcuts();
+                return;
+              }
+              if (event.key !== 'Tab') return;
+              const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((element) => !element.hasAttribute('disabled'));
+              const edge = event.shiftKey ? focusable[0] : focusable.at(-1);
+              if (edge && document.activeElement === edge) { event.preventDefault(); (event.shiftKey ? focusable.at(-1) : focusable[0])?.focus(); }
+            }}
+            ref={shortcutsDialogRef}
+            role="dialog"
+            style={{ background: 'var(--surface-raised)', border: '1px solid var(--control-border)', borderRadius: 10, boxShadow: '0 12px 36px rgb(0 0 0 / 20%)', left: '50%', maxHeight: 'calc(100% - 32px)', overflow: 'auto', padding: 18, pointerEvents: 'auto', position: 'absolute', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(460px, calc(100% - 32px))' }}
+          >
+            <button aria-label="Close keyboard shortcuts" onClick={closeShortcuts} style={{ float: 'right' }} type="button">Close</button>
+            <h2>Keyboard shortcuts</h2>
+            {([
+              ['Overlay', getCanvasToolShortcutSummary(['connect'])],
+              ['Mermaid', `C Connect · Enter Edit selected node · F2 Edit · ${getPlatformModifierLabel()}+Z Undo · ${getPlatformModifierLabel()}+Shift+Z Redo`],
+              ['Navigation', 'Space+drag Pan · Shift+1 Fit all · Shift+2 Fit selection · +/− Canvas zoom · Browser zoom remains Cmd/Ctrl +/−'],
+              ['Tabs', 'Left/Right Previous or next · Home/End First or last'],
+            ] as const).map(([group, bindings]) => <section key={group}><h3>{group}</h3><p>{bindings}</p></section>)}
+          </div>
         </div>
       ) : null}
       <div
@@ -3531,7 +3557,7 @@ export function DiagramCanvas({
                   }}
                   onDoubleClick={(event) => {
                     event.stopPropagation();
-                    if (!node || readOnly) {
+                    if (overlay?.tool === 'hand' || !node || readOnly) {
                       return;
                     }
                     openNodeEditor(node);
@@ -3616,6 +3642,7 @@ export function DiagramCanvas({
               onConnectStart={handleFlowConnectStart}
               onEdgeClick={(event, edge) => {
                 event.stopPropagation();
+                if (overlay?.tool === 'hand') return;
                 const edgeIdentity = graph ? getDiagramEdgeIdentityForFlowEdge(graph.links, edge.id) : null;
                 if (!edgeIdentity) {
                   return;
@@ -3630,6 +3657,7 @@ export function DiagramCanvas({
               }}
               onEdgeDoubleClick={(event, edge) => {
                 event.stopPropagation();
+                if (overlay?.tool === 'hand') return;
                 const edgeIdentity = graph ? getDiagramEdgeIdentityForFlowEdge(graph.links, edge.id) : null;
                 if (edgeIdentity) {
                   setSelectedSubgraphId(null);
@@ -3644,6 +3672,7 @@ export function DiagramCanvas({
               }}
               onNodeDoubleClick={(event, node) => {
                 event.stopPropagation();
+                if (overlay?.tool === 'hand') return;
                 const diagramNode = nodeById.get(node.id);
                 if (diagramNode && canEditStructure) {
                   openNodeEditor(diagramNode);
@@ -4301,8 +4330,8 @@ export function DiagramCanvas({
                 <ClipboardPaste size={16} />
               </ToolbarButton>
             ) : null}
-            {onUndo ? <ToolbarButton label="Undo Mermaid change" onClick={onUndo} shortcut="Mod+Z"><RotateCcw size={16} /></ToolbarButton> : null}
-            {onRedo ? <ToolbarButton label="Redo Mermaid change" onClick={onRedo} shortcut="Mod+Shift+Z"><RotateCcw size={16} style={{ transform: 'scaleX(-1)' }} /></ToolbarButton> : null}
+            {onUndo ? <ToolbarButton label="Undo canvas change" onClick={onUndo} shortcut="Mod+Z"><RotateCcw size={16} /></ToolbarButton> : null}
+            {onRedo ? <ToolbarButton label="Redo canvas change" onClick={onRedo} shortcut="Mod+Shift+Z"><RotateCcw size={16} style={{ transform: 'scaleX(-1)' }} /></ToolbarButton> : null}
             <ToolbarButton label="Zoom out" onClick={() => { zoomCanvas(0.9); }} shortcut="−">
               <ZoomOut size={16} />
             </ToolbarButton>

@@ -3743,6 +3743,7 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
       && hit instanceof Node && button.contains(hit);
   });
   for (let attempt = 0; attempt < 2 && !await lastDirectToolVisible(); attempt += 1) {
+    const beforeAttemptScroll = await directTools.evaluate((element) => element.scrollLeft);
     const railBounds = await directTools.boundingBox();
     assert(railBounds && railBounds.width >= 88 && railBounds.height >= 44,
       `${label} direct toolbar rail is not large enough for a trusted touch swipe: ${JSON.stringify(railBounds)}.`);
@@ -3786,7 +3787,12 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
     } finally {
       await session.detach();
     }
+    await directTools.evaluate(() => new Promise<void>((resolve) => window.setTimeout(resolve, 100)));
     await expect(swipeTool).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(() => directTools.evaluate((element) => element.scrollLeft), {
+      message: `${label} direct toolbar swipe did not settle to a new scroll position.`,
+      timeout: 5_000,
+    }).toBeGreaterThan(beforeAttemptScroll);
   }
   await expect.poll(lastDirectToolVisible, {
     message: `${label} direct toolbar last tool remained clipped after trusted touch swipes: ${JSON.stringify(beforeScroll)}.`,
@@ -4225,6 +4231,60 @@ async function expectToolbarConnectSelectionBoundary(page: Page): Promise<void> 
   await page.getByTestId('diagram-canvas').press('Escape');
 }
 
+async function expectHandToolDoesNotActivateFlowTargets(page: Page): Promise<void> {
+  const node = page.locator('.react-flow__node').first();
+  const nodeSurface = node.locator('.mermaid-flow-node').first();
+  const [blankPoint] = await allowedCanvasGesturePoints(page, 'clear flow selection before Hand target test', 1, 0);
+  assert(blankPoint, 'Hand target test did not find a blank canvas point.');
+  await page.mouse.click(blankPoint.x, blankPoint.y);
+  await expect(node).not.toHaveClass(/(?:^|\s)selected(?:\s|$)/u);
+  const hand = page.getByRole('button', { name: 'Hand tool', exact: true });
+  await verifiedClick(page, hand, 'activate Hand before flow-node click');
+  await expect(hand).toHaveAttribute('aria-pressed', 'true');
+  await verifiedClick(page, nodeSurface, 'click flow node while Hand is active');
+  await expect(node).not.toHaveClass(/(?:^|\s)selected(?:\s|$)/u);
+  await expect(page.getByTestId('canvas-node-toolbar')).toHaveCount(0);
+  await verifiedClick(page, page.getByRole('button', { name: 'Select tool', exact: true }), 'leave Hand after flow-node click');
+}
+
+async function expectShortcutsDialogKeyboardBehavior(page: Page): Promise<void> {
+  const canvas = page.getByTestId('diagram-canvas');
+  const openDialog = async () => {
+    await canvas.focus();
+    await page.keyboard.press('?');
+    const dialog = page.getByRole('dialog', { name: 'Canvas keyboard shortcuts', exact: true });
+    await expect(dialog).toBeVisible();
+    return dialog;
+  };
+  const dialog = await openDialog();
+  const close = dialog.getByRole('button', { name: 'Close keyboard shortcuts', exact: true });
+  await expect(close).toBeFocused();
+  const cancellable = await dialog.evaluate((element) => ['a', 'c', 'v'].every((key) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key });
+    return element.dispatchEvent(event) && !event.defaultPrevented;
+  }));
+  assert(cancellable, 'The shortcuts dialog prevented cancellable browser shortcuts.');
+  await page.keyboard.press('Enter');
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => canvas.evaluate((element) => document.activeElement === element), { timeout: 5_000 }).toBe(true);
+
+  const escapeFocusDialog = await openDialog();
+  await page.keyboard.press('Escape');
+  await expect(escapeFocusDialog).toHaveCount(0);
+  await expect.poll(() => canvas.evaluate((element) => document.activeElement === element), { timeout: 5_000 }).toBe(true);
+
+  const nonCanvasOrigin = page.getByTestId(SETTINGS_TRIGGER_TEST_ID);
+  const escapeDialog = await openDialog();
+  await nonCanvasOrigin.evaluate((element) => (element as HTMLElement).focus());
+  await page.keyboard.press('Escape');
+  await expect(escapeDialog).toHaveCount(0);
+
+  const backdropDialog = await openDialog();
+  const backdrop = page.getByTestId('shortcuts-dialog-backdrop');
+  await backdrop.click({ position: { x: 2, y: 2 } });
+  await expect(backdropDialog).toHaveCount(0);
+}
+
 async function expectDesktopToolbarSafeLane(page: Page): Promise<void> {
   const canvas = page.getByTestId('diagram-canvas');
   const chrome = page.getByLabel('Overlay scene controls', { exact: true });
@@ -4332,7 +4392,7 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   await verifiedClick(page, page.getByRole('button', { name: 'Delete overlay', exact: true }), 'delete overlay object');
   await expect(objects).toHaveCount(1);
   await ensureOverlaySecondaryRail(page);
-  await verifiedClick(page, page.getByRole('button', { name: 'Undo canvas change', exact: true }), 'undo overlay delete');
+  await verifiedClick(page, await revealOverlaySecondaryAction(page, 'Undo canvas change'), 'undo overlay delete');
   await expect(objects).toHaveCount(2);
   await overlayInspector.scrollIntoViewIfNeeded();
   await verifiedClick(page, overlayInspector, 'reopen overlay inspector before palette selection');
@@ -8136,6 +8196,8 @@ async function validateWorkspaceUx(): Promise<void> {
         await waitForCanvas(toolbarPage, 'flowchart');
         await closeFlyout(toolbarPage, 'source');
         await expectToolbarConnectSelectionBoundary(toolbarPage);
+        await expectHandToolDoesNotActivateFlowTargets(toolbarPage);
+        await expectShortcutsDialogKeyboardBehavior(toolbarPage);
         await expectOverlayDirectManipulation(toolbarPage);
         await replaceSource(toolbarPage, API_SEQUENCE_FIXTURE);
         await waitForCanvas(toolbarPage, 'sequence');

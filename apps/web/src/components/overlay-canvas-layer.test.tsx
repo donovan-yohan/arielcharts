@@ -41,6 +41,69 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => root.unmount());
   });
 
+  it('clears overlay selection for Escape and V while preserving the outer Escape path', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const parentKeyDown = vi.fn(); const onToolChange = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange };
+    const shape: OverlayObjectRecord = { id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 100, height: 60, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Text' };
+    await act(async () => root.render(<div onKeyDown={parentKeyDown}><OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [shape] }} /></div>));
+    const object = host.querySelector<HTMLElement>('[data-testid="overlay-object-shape"]')!;
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => object.click());
+    expect(object.getAttribute('data-selected')).toBe('true');
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })));
+    expect(parentKeyDown).toHaveBeenCalled();
+    expect(object.getAttribute('data-selected')).toBeNull();
+    expect(onToolChange).toHaveBeenCalledTimes(1);
+    await act(async () => object.click());
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'v' })));
+    expect(object.getAttribute('data-selected')).toBeNull();
+    expect(onToolChange).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount());
+  });
+
+  it('fits an anchored overlay from its rendered world bounds', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onFitSelection = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onFitSelection };
+    const anchored: OverlayObjectRecord = { id: 'anchored', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 5, y: 7, width: 30, height: 40, rotation: 0 }, anchor: { mermaid_id: 'node-1', offset: { x: 4, y: 6 }, fallback: { x: 5, y: 7 } }, style: {}, metadata: {}, payload: {}, body: '' };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map([['node-1', { x: 50, y: 60 }]])} sessionId="abc123de" tool="select" transform={{ x: 100, y: 200, zoom: 2 }} scene={{ version: 1, diagram_id: 'main', objects: [anchored] }} />));
+    const object = host.querySelector<HTMLElement>('[data-testid="overlay-object-anchored"]')!;
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => object.click());
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'Digit2', key: '@', shiftKey: true })));
+    expect(onFitSelection).toHaveBeenCalledWith(expect.objectContaining({ x: 54, y: 66, width: 30, height: 40 }));
+    await act(async () => root.unmount());
+  });
+
+  it('does not select, duplicate, or switch tools while the overlay is read-only', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onDuplicate = vi.fn(() => 'copy'); const onToolChange = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate, onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange };
+    const shape: OverlayObjectRecord = { id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 100, height: 60, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Text' };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [shape] }} />));
+    const object = host.querySelector<HTMLElement>('[data-testid="overlay-object-shape"]')!;
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'a' })));
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'd' })));
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'r' })));
+    expect(object.getAttribute('data-selected')).toBeNull();
+    expect(onDuplicate).not.toHaveBeenCalled();
+    expect(onToolChange).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it('does not enter Connect from a keyboard shortcut when Mermaid connections are unavailable', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onToolChange = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} canConnectMermaidNodes={false} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} />));
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'c' })));
+    expect(onToolChange).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
   it('keeps textarea Escape and composing keys out of parent canvas history', async () => {
     const host = document.createElement('div'); document.body.append(host); const root = createRoot(host); const parentKeyDown = vi.fn();
     const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(), onCommitComposition: vi.fn() };
@@ -56,6 +119,23 @@ describe('OverlayCanvasLayer', () => {
     const composing = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, isComposing: true, key: 'h' });
     await act(async () => object.dispatchEvent(composing));
     expect(callbacks.onUndo).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it('keeps an overlay textarea mounted when Escape arrives during IME composition', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(() => null), onCommitComposition: vi.fn() };
+    const shape: OverlayObjectRecord = { id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 100, height: 60, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Text' };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [shape] }} />));
+    const object = host.querySelector<HTMLElement>('[data-testid="overlay-object-shape"]')!;
+    await act(async () => object.click());
+    await act(async () => object.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter' })));
+    const textarea = object.querySelector<HTMLTextAreaElement>('textarea')!;
+    await act(async () => textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: 'に' })));
+    await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, isComposing: true, key: 'Escape' })));
+    expect(object.querySelector('textarea')).toBe(textarea);
+    await act(async () => textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'に' })));
+    expect(object.querySelector('textarea')).toBe(textarea);
     await act(async () => root.unmount());
   });
 
@@ -165,7 +245,7 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => root.unmount());
   });
 
-  it('scopes touch-drag click suppression to its originating direct action and expires it for other tools', async () => {
+  it('suppresses the originating touch-drag click beyond the next animation frame without blocking other tools', async () => {
     const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
     const onToolChange = vi.fn();
     const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange };
@@ -175,14 +255,14 @@ describe('OverlayCanvasLayer', () => {
     const rectangle = rail.querySelector<HTMLButtonElement>('[aria-label="Rectangle"]')!;
     rail.setPointerCapture = vi.fn(); rail.releasePointerCapture = vi.fn(); rail.hasPointerCapture = vi.fn(() => true);
     const pointer = (type: string, x: number) => Object.assign(new Event(type, { bubbles: true, cancelable: true }), { button: 0, clientX: x, pointerId: 12, pointerType: 'touch' });
+    const click = (pointerId: number) => Object.assign(new MouseEvent('click', { bubbles: true, cancelable: true }), { pointerId });
     await act(async () => { diamond.dispatchEvent(pointer('pointerdown', 220)); diamond.dispatchEvent(pointer('pointermove', 160)); diamond.dispatchEvent(pointer('pointerup', 160)); });
     expect(rail.scrollLeft).toBe(60);
-    expect(onToolChange).not.toHaveBeenCalled();
-    await act(async () => rectangle.click());
-    expect(onToolChange).toHaveBeenLastCalledWith('rectangle');
     await act(async () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())));
-    await act(async () => diamond.click());
-    expect(onToolChange).toHaveBeenLastCalledWith('diamond');
+    await act(async () => diamond.dispatchEvent(click(12)));
+    expect(onToolChange).not.toHaveBeenCalled();
+    await act(async () => rectangle.dispatchEvent(click(13)));
+    expect(onToolChange).toHaveBeenLastCalledWith('rectangle');
     await act(async () => root.unmount());
   });
 

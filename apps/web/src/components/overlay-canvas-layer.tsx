@@ -91,6 +91,7 @@ export interface OverlayCanvasLayerProps {
   onTransform?: (id: string, expected: OverlayGeometry, geometry: OverlayGeometry) => OverlayTransformCommitResult;
   onEditText: (id: string, index: number, deleteCount: number, insert: string) => void;
   onDuplicate: (id: string) => string | null;
+  onDuplicateMany?: (ids: readonly string[]) => string[];
   onFitSelection?: (bounds: OverlayGeometry | null) => void;
   onBeginComposition: (id: string) => OverlayTextComposition | null;
   onCommitComposition: (id: string, composition: OverlayTextComposition, draft: string) => void;
@@ -112,7 +113,7 @@ export interface OverlayCanvasLayerProps {
 type InkDraft = { mode: InkMode; pointerId: number; points: InkPoint[] };
 type MoveDraft = { id: string; pointerId: number; origin: { x: number; y: number; width: number; height: number; rotation: number }; start: InkPoint };
 type DirectToolbarDrag = { button: HTMLButtonElement; pointerId: number; startScrollLeft: number; startX: number; moved: boolean };
-type DirectToolbarClickSuppression = { button: HTMLButtonElement; frameId: number; pointerId: number };
+type DirectToolbarClickSuppression = { button: HTMLButtonElement; pointerId: number };
 type TransformDraft = {
   draft: OverlayTransformDraft;
   expectedGeometry: OverlayGeometry;
@@ -495,6 +496,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
   const handleDirectToolbarPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.overlay-toolbar-button') : null;
     if (event.pointerType !== 'touch' || event.button !== 0 || !button) return;
+    suppressDirectToolbarClickRef.current = null;
     directToolbarDragRef.current = {
       button,
       moved: false,
@@ -522,10 +524,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     directToolbarDragRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (!canceled && drag.moved) {
-      const frameId = window.requestAnimationFrame(() => {
-        if (suppressDirectToolbarClickRef.current?.pointerId === drag.pointerId) suppressDirectToolbarClickRef.current = null;
-      });
-      suppressDirectToolbarClickRef.current = { button: drag.button, frameId, pointerId: drag.pointerId };
+      suppressDirectToolbarClickRef.current = { button: drag.button, pointerId: drag.pointerId };
       event.preventDefault();
       event.stopPropagation();
     }
@@ -534,8 +533,8 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
   const handleDirectToolbarClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const suppression = suppressDirectToolbarClickRef.current;
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.overlay-toolbar-button') : null;
-    if (!suppression || button !== suppression.button) return;
-    window.cancelAnimationFrame(suppression.frameId);
+    const pointerId = (event.nativeEvent as MouseEvent & { pointerId?: number }).pointerId;
+    if (!suppression || button !== suppression.button || pointerId !== suppression.pointerId) return;
     suppressDirectToolbarClickRef.current = null;
     event.preventDefault();
     event.stopPropagation();
@@ -778,38 +777,50 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     if (event.nativeEvent.isComposing || event.key === 'Process') return;
     const target = event.target as HTMLElement;
     if (target.closest('textarea, input, select, [contenteditable="true"]')) return;
-    if (event.shiftKey && (event.code === 'Digit1' || event.code === 'Digit2')) {
+    const hasModifier = event.metaKey || event.ctrlKey || event.altKey;
+    if (event.shiftKey && !hasModifier && (event.code === 'Digit1' || event.code === 'Digit2')) {
       if (!props.onFitSelection) return;
       event.preventDefault(); event.stopPropagation();
       const selectedObjects = objects.filter(({ id }) => selectedObjectIds.includes(id));
+      const renderedWorldGeometry = (object: OverlayRenderObject): OverlayGeometry => ({
+        ...object.screen_geometry,
+        x: (object.screen_geometry.x - props.transform.x) / props.transform.zoom,
+        y: (object.screen_geometry.y - props.transform.y) / props.transform.zoom,
+        width: object.screen_geometry.width / props.transform.zoom,
+        height: object.screen_geometry.height / props.transform.zoom,
+      });
       const bounds = selectedObjects.length > 0 ? selectedObjects.reduce<OverlayGeometry>((result, object) => {
-        const geometry = effectiveOverlayGeometry(object);
+        const geometry = renderedWorldGeometry(object);
         const left = Math.min(geometry.x, geometry.x + geometry.width); const top = Math.min(geometry.y, geometry.y + geometry.height);
         const right = Math.max(geometry.x, geometry.x + geometry.width); const bottom = Math.max(geometry.y, geometry.y + geometry.height);
         return { x: Math.min(result.x, left), y: Math.min(result.y, top), width: Math.max(result.x + result.width, right) - Math.min(result.x, left), height: Math.max(result.y + result.height, bottom) - Math.min(result.y, top), rotation: 0 };
-      }, (() => { const first = effectiveOverlayGeometry(selectedObjects[0]!); return { x: Math.min(first.x, first.x + first.width), y: Math.min(first.y, first.y + first.height), width: Math.abs(first.width), height: Math.abs(first.height), rotation: 0 }; })()) : null;
+      }, (() => { const first = renderedWorldGeometry(selectedObjects[0]!); return { x: Math.min(first.x, first.x + first.width), y: Math.min(first.y, first.y + first.height), width: Math.abs(first.width), height: Math.abs(first.height), rotation: 0 }; })()) : null;
       props.onFitSelection(event.code === 'Digit2' ? bounds : null);
       return;
     }
-    const hasModifier = event.metaKey || event.ctrlKey || event.altKey;
     const shortcutTool = getCanvasToolShortcut(event.key, false, hasModifier);
     if (shortcutTool) {
-      event.preventDefault(); event.stopPropagation();
-      stopInk(false); activateInkTool(shortcutTool === 'pen' || shortcutTool === 'eraser' ? shortcutTool : 'select');
+      if (!writable || (shortcutTool === 'connect' && !canConnectMermaidNodes)) return;
+      const clearsSelection = shortcutTool === 'select' && (event.key === 'Escape' || event.key.toLowerCase() === 'v');
+      if (clearsSelection) { setSelectedId(null); setSelectedIds(new Set()); }
+      // Escape must continue to DiagramCanvas and SessionWorkspace, which own
+      // the broader reset and presenter-follow exit paths.
+      if (event.key !== 'Escape') { event.preventDefault(); event.stopPropagation(); }
+      stopInk(false);
       onToolChange(shortcutTool);
       return;
     }
     if ((!event.metaKey && !event.ctrlKey) || event.altKey) return;
     const key = event.key.toLowerCase();
-    if (key === 'a' && tool === 'select') {
+    if (key === 'a' && writable && tool === 'select') {
       event.preventDefault(); event.stopPropagation();
       setSelectedIds(new Set(selectableObjectIds));
       setSelectedId(selectableObjectIds.at(-1) ?? null);
       return;
     }
-    if (key === 'd' && selectedObjectIds.length > 0) {
+    if (key === 'd' && writable && selectedObjectIds.length > 0) {
       event.preventDefault(); event.stopPropagation();
-      const copies = selectedObjectIds.map(props.onDuplicate).filter((id): id is string => id !== null);
+      const copies = props.onDuplicateMany?.(selectedObjectIds) ?? selectedObjectIds.map(props.onDuplicate).filter((id): id is string => id !== null);
       setSelectedIds(new Set(copies)); setSelectedId(copies.at(-1) ?? null);
       return;
     }
@@ -920,6 +931,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
             }}
             onBlur={() => setEditingId(null)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.key === 'Process') return;
               if (event.key === 'Escape') {
                 event.preventDefault(); event.stopPropagation();
                 setEditingId(null);

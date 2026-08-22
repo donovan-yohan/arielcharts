@@ -4259,12 +4259,16 @@ async function expectShortcutsDialogKeyboardBehavior(page: Page): Promise<void> 
   const dialog = await openDialog();
   const close = dialog.getByRole('button', { name: 'Close keyboard shortcuts', exact: true });
   await expect(close).toBeFocused();
+  await expect(dialog).toContainText(/(?:Ctrl|⌘)\+A Select all visible unlocked overlays/u);
+  await expect(dialog).toContainText(/(?:Ctrl|⌘)\+D Duplicate/u);
+  await expect(dialog).toContainText(/Delete\/Backspace Delete · Arrow Nudge 1 · Shift\+Arrow Nudge 10/u);
+  await expect(dialog).toContainText(/Enter Edit text · Escape Commit text edit/u);
   const cancellable = await dialog.evaluate((element) => ['a', 'c', 'v'].every((key) => {
     const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key });
     return element.dispatchEvent(event) && !event.defaultPrevented;
   }));
   assert(cancellable, 'The shortcuts dialog prevented cancellable browser shortcuts.');
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('Space');
   await expect(dialog).toHaveCount(0);
   await expect.poll(() => canvas.evaluate((element) => document.activeElement === element), { timeout: 5_000 }).toBe(true);
 
@@ -4353,6 +4357,27 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   await verifiedClick(page, laser, 'activate laser pointer for Escape exit');
   await canvas.focus(); await page.keyboard.press('Escape');
   assert(await page.getByRole('button', { name: 'Laser pointer', exact: true }).count() === 1, 'Escape did not exit laser mode.');
+  const rectangle = page.getByRole('button', { name: 'Rectangle', exact: true });
+  await verifiedClick(page, rectangle, 'activate Rectangle before temporary Space pan');
+  await expect(rectangle).toHaveAttribute('aria-pressed', 'true');
+  const objectsBeforeSpacePan = await page.locator('[data-testid^="overlay-object-"]').count();
+  const cameraBeforeSpacePan = await renderedCanvasCameraTransform(page, 'temporary Space pan baseline');
+  const canvasBounds = await canvas.boundingBox();
+  assert(canvasBounds, 'Temporary Space pan has no canvas bounds.');
+  await canvas.focus();
+  await page.keyboard.down('Space');
+  await expect(canvas, 'Space did not enter temporary canvas-pan mode.').toHaveAttribute('data-panning', 'true');
+  await page.mouse.move(canvasBounds.x + (canvasBounds.width * 0.58), canvasBounds.y + (canvasBounds.height * 0.55));
+  await page.mouse.down();
+  await page.mouse.move(canvasBounds.x + (canvasBounds.width * 0.72), canvasBounds.y + (canvasBounds.height * 0.64));
+  await page.mouse.up();
+  await page.keyboard.up('Space');
+  await expect.poll(() => renderedCanvasCameraTransform(page, 'temporary Space pan result'), {
+    message: 'Space-held drag did not move the canvas camera.',
+    timeout: 5_000,
+  }).not.toBe(cameraBeforeSpacePan);
+  await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(objectsBeforeSpacePan);
+  await expect(rectangle).toHaveAttribute('aria-pressed', 'true');
   await createOverlayAt(page, 'Text');
   const objects = page.locator('[data-testid^="overlay-object-"]');
   await expect(objects).toHaveCount(1);
@@ -5402,6 +5427,30 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
   await selectTabByName(page, diagramName);
   await waitForCanvas(page, 'flowchart');
+  if (label === 'mobile-390') {
+    const chrome = await page.evaluate(() => {
+      const canvasBounds = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]')?.getBoundingClientRect();
+      const logoBounds = document.querySelector<HTMLElement>('.workspace-logo')?.getBoundingClientRect();
+      const rightBounds = document.querySelector<HTMLElement>('.workspace-topbar-right')?.getBoundingClientRect();
+      const tabbarBounds = document.querySelector<HTMLElement>('[data-testid="diagram-tab-bar"]')?.getBoundingClientRect();
+      const topbarBounds = document.querySelector<HTMLElement>('.workspace-topbar')?.getBoundingClientRect();
+      return {
+        canvas: canvasBounds && { bottom: canvasBounds.bottom, left: canvasBounds.left, right: canvasBounds.right, top: canvasBounds.top },
+        logo: logoBounds && { bottom: logoBounds.bottom, left: logoBounds.left, right: logoBounds.right, top: logoBounds.top },
+        right: rightBounds && { bottom: rightBounds.bottom, left: rightBounds.left, right: rightBounds.right, top: rightBounds.top },
+        tabbar: tabbarBounds && { bottom: tabbarBounds.bottom, left: tabbarBounds.left, right: tabbarBounds.right, top: tabbarBounds.top },
+        topbar: topbarBounds && { bottom: topbarBounds.bottom, left: topbarBounds.left, right: topbarBounds.right, top: topbarBounds.top },
+        viewport: { height: window.innerHeight, width: window.innerWidth },
+      };
+    });
+    assert(chrome.logo && chrome.right && chrome.topbar && chrome.tabbar && chrome.canvas
+      && chrome.logo.left >= chrome.topbar.left - 0.5 && chrome.logo.right <= chrome.right.left + 0.5
+      && chrome.right.right <= chrome.topbar.right + 0.5
+      && chrome.tabbar.top >= chrome.topbar.bottom - 0.5
+      && chrome.canvas.top >= chrome.tabbar.bottom - 0.5
+      && chrome.canvas.left >= -0.5 && chrome.canvas.right <= chrome.viewport.width + 0.5,
+    `mobile-390 workspace chrome overlaps or clips the canvas lane: ${JSON.stringify(chrome)}.`);
+  }
   if (label.startsWith('mobile')) {
     const toggle = page.getByRole('button', { name: 'Select tool', exact: true });
     const canvas = page.getByTestId('diagram-canvas');

@@ -41,6 +41,19 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => root.unmount());
   });
 
+  it('selects visible unlocked overlays with Mod+A regardless of the active drawing tool', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onDuplicate = vi.fn(() => null);
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate, onBeginComposition: vi.fn(), onCommitComposition: vi.fn() };
+    const object = (id: string): OverlayObjectRecord => ({ id, kind: 'shape.rectangle', version: 1, order_key: id, geometry: { x: 10, y: 20, width: 30, height: 40, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: '' });
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="rectangle" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [object('a'), object('b')] }} />));
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'a' })));
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'd' })));
+    expect(onDuplicate).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount());
+  });
+
   it('clears overlay selection for Escape and V while preserving the outer Escape path', async () => {
     const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
     const parentKeyDown = vi.fn(); const onToolChange = vi.fn();
@@ -851,7 +864,7 @@ describe('OverlayCanvasLayer', () => {
     const listButton = (prefix: string) => [...document.body.querySelectorAll('aside[aria-label="ArielCharts overlay list"] button')].find((item) => item.textContent?.startsWith(prefix)) as HTMLButtonElement;
     await act(async () => {
       listButton('shape.rectangle: Left').click();
-      listButton('shape.ellipse: Right').dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+      listButton('shape.ellipse: Right').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
     });
     await act(async () => button('Objects and layers').click());
     await act(async () => button('Connect selection').click());

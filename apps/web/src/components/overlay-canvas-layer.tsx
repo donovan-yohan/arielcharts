@@ -98,6 +98,8 @@ export interface OverlayCanvasLayerProps {
   onAddStroke?: (points: readonly InkPoint[], mode: InkMode, style: { color: string; width: number; opacity: number; compositeExport: boolean }) => void;
   /** Controlled by SessionWorkspace with Mermaid tools; never bridge modes through window events. */
   tool?: CanvasTool;
+  /** Temporary Space-held camera ownership from DiagramCanvas. */
+  spacePanning?: boolean;
   /** DiagramCanvas capability projection; Connect only exists for editable flowcharts. */
   canConnectMermaidNodes?: boolean;
   onToolChange?: (tool: CanvasTool) => void;
@@ -273,6 +275,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
   // The workspace always controls this value. The default keeps isolated
   // renderer tests and historical embeds safely in selection mode.
   const tool = props.tool ?? 'select';
+  const spacePanning = props.spacePanning === true;
   const canConnectMermaidNodes = props.canConnectMermaidNodes ?? true;
   const onToolChange = props.onToolChange ?? (() => undefined);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -617,13 +620,13 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
   }, [objects, props]);
   const handleInkDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const stylusEraser = event.pointerType === 'pen' && event.nativeEvent.button === 5;
-    if (!writable || inkTool === 'select' || (!stylusEraser && event.button !== 0)) return;
+    if (spacePanning || !writable || inkTool === 'select' || (!stylusEraser && event.button !== 0)) return;
     const point = pointForEvent(event); if (!point) return;
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
     if (inkTool === 'eraser' || stylusEraser) { eraseAt(point); return; }
     const draft: InkDraft = { mode: inkTool, pointerId: event.pointerId, points: [point] };
     inkDraftRef.current = draft; setInkDraft(draft); publishInkPreview(draft, true);
-  }, [eraseAt, inkTool, pointForEvent, publishInkPreview, writable]);
+  }, [eraseAt, inkTool, pointForEvent, publishInkPreview, spacePanning, writable]);
   const handleInkMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const draft = inkDraftRef.current; if (!draft || draft.pointerId !== event.pointerId) return;
     const point = pointForEvent(event); if (!point) return;
@@ -636,7 +639,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     event.preventDefault(); stopInk(event.type === 'pointerup');
   }, [stopInk]);
   const beginTransform = useCallback((event: React.PointerEvent<HTMLButtonElement>, object: OverlayRenderObject, target: TransformDraft['target']) => {
-    if (!writable || tool !== 'select' || selectedLocked || !props.onTransform) return;
+    if (spacePanning || !writable || tool !== 'select' || selectedLocked || !props.onTransform) return;
     const startScreen = { x: event.clientX, y: event.clientY };
     if (!Number.isFinite(startScreen.x) || !Number.isFinite(startScreen.y)) return;
     const bounds = canvasOwnerRef.current?.getBoundingClientRect();
@@ -650,7 +653,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     transformDraftRef.current = { draft, expectedGeometry: object.geometry, pointerId: event.pointerId, target, geometry, centerScreen };
     setTransformPreview({ id: object.id, geometry });
     setTransformStatus('');
-  }, [props.onTransform, selectedLocked, tool, writable]);
+  }, [props.onTransform, selectedLocked, spacePanning, tool, writable]);
   const moveTransform = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     const active = transformDraftRef.current;
     if (!active || active.pointerId !== event.pointerId) return;
@@ -692,12 +695,12 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     if (result !== 'applied') setTransformStatus('Could not transform');
   }, [props.onTransform, props.transform.zoom, selectedLocked, tool, writable]);
   const beginMove = useCallback((event: React.PointerEvent<HTMLDivElement>, object: OverlayObjectRecord) => {
-    if (!writable || tool !== 'select' || isOverlayObjectLocked(props.scene, object) || event.button !== 0 || event.target instanceof Element && event.target.closest('button, textarea, input, select, [contenteditable="true"]')) return;
+    if (spacePanning || !writable || tool !== 'select' || isOverlayObjectLocked(props.scene, object) || event.button !== 0 || event.target instanceof Element && event.target.closest('button, textarea, input, select, [contenteditable="true"]')) return;
     const point = pointForEvent(event); if (!point) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     moveDraftRef.current = { id: object.id, pointerId: event.pointerId, origin: object.geometry, start: point };
     setSelectedId(object.id); setSelectedIds(new Set([object.id]));
-  }, [pointForEvent, props.scene, tool, writable]);
+  }, [pointForEvent, props.scene, spacePanning, tool, writable]);
   const moveObject = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const draft = moveDraftRef.current; if (!draft || draft.pointerId !== event.pointerId) return;
     const point = pointForEvent(event); if (!point) return;
@@ -759,13 +762,13 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     if (shape) props.onAddShape?.(point, shape);
   }, [props, tool]);
   const handleOverlayPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!writable || !isOverlayPointerTool(tool) || ['pen', 'highlighter', 'eraser'].includes(tool) || event.button !== 0) return;
+    if (spacePanning || !writable || !isOverlayPointerTool(tool) || ['pen', 'highlighter', 'eraser'].includes(tool) || event.button !== 0) return;
     const point = pointForEvent(event);
     if (!point) return;
     event.preventDefault();
     event.stopPropagation();
     addAtPoint(point);
-  }, [addAtPoint, pointForEvent, tool, writable]);
+  }, [addAtPoint, pointForEvent, spacePanning, tool, writable]);
   const choose = (id: string, extend: boolean) => {
     setSelectedId(id);
     setSelectedIds((current) => {
@@ -812,7 +815,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     }
     if ((!event.metaKey && !event.ctrlKey) || event.altKey) return;
     const key = event.key.toLowerCase();
-    if (key === 'a' && writable && tool === 'select') {
+    if (key === 'a' && writable) {
       event.preventDefault(); event.stopPropagation();
       setSelectedIds(new Set(selectableObjectIds));
       setSelectedId(selectableObjectIds.at(-1) ?? null);
@@ -873,7 +876,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
           data-world-y={object.geometry.y}
           key={object.id}
           onClick={(event) => {
-            if (tool !== 'select') return;
+            if (spacePanning || tool !== 'select') return;
             event.stopPropagation(); choose(object.id, event.shiftKey || event.metaKey || event.ctrlKey);
           }}
           onPointerCancel={endMove}
@@ -1076,7 +1079,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
           </div>
           <aside aria-label="ArielCharts overlay list" className="overlay-scene-list">
             <span className="overlay-toolbar-section-label">Layers</span>
-            {objects.length === 0 ? <p>No overlays</p> : <ul>{objects.map((object) => <li key={object.id}><button aria-current={selectedId === object.id || undefined} onClick={(event) => choose(object.id, event.metaKey || event.ctrlKey)} type="button">{object.kind === 'annotation.sticky' ? 'Sticky note' : object.kind === 'annotation.text' ? 'Text' : object.kind}: {(object.body ?? String(object.payload.label ?? '')).slice(0, 40) || 'Empty'}{object.orphaned ? ' (orphaned)' : ''}</button></li>)}</ul>}
+            {objects.length === 0 ? <p>No overlays</p> : <ul>{objects.map((object) => <li key={object.id}><button aria-current={selectedId === object.id || undefined} onClick={(event) => choose(object.id, event.shiftKey || event.metaKey || event.ctrlKey)} type="button">{object.kind === 'annotation.sticky' ? 'Sticky note' : object.kind === 'annotation.text' ? 'Text' : object.kind}: {(object.body ?? String(object.payload.label ?? '')).slice(0, 40) || 'Empty'}{object.orphaned ? ' (orphaned)' : ''}</button></li>)}</ul>}
             <label className="overlay-layer-add">New layer <input aria-label="New overlay layer name" disabled={!writable} onChange={(event) => setNewLayerName(event.target.value)} value={newLayerName} /><ToolbarIconButton disabled={!writable || !newLayerName.trim()} label="Add layer" onClick={() => props.onAddLayer?.(newLayerName)}><Plus size={18} /></ToolbarIconButton></label>
             {selectedObjectIds.length > 0 ? <label>Assign selection to <select aria-label="Assign selected overlays to layer" disabled={!writable || selectedLocked} onChange={(event) => { if (event.target.value) props.onAssignLayer?.(selectedObjectIds, event.target.value); }} value=""><option value="">Choose layer</option>{(props.scene.layers ?? []).map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}</select></label> : null}
             <ul>{(props.scene.layers ?? []).map((layer) => <li key={layer.id}><span>{layer.name}</span><ToolbarIconButton disabled={!writable} label={`${layer.visible ? 'Hide' : 'Show'} ${layer.name} layer`} onClick={() => props.onUpdateLayer?.(layer.id, { visible: !layer.visible })} pressed={layer.visible}>{layer.visible ? <Eye size={18} /> : <EyeOff size={18} />}</ToolbarIconButton><ToolbarIconButton disabled={!writable} label={`${layer.locked ? 'Unlock' : 'Lock'} ${layer.name} layer`} onClick={() => props.onUpdateLayer?.(layer.id, { locked: !layer.locked })} pressed={layer.locked}>{layer.locked ? <Lock size={18} /> : <Unlock size={18} />}</ToolbarIconButton><ToolbarIconButton disabled={!writable} label={`${layer.export ? 'Exclude' : 'Include'} ${layer.name} layer from composite export`} onClick={() => props.onUpdateLayer?.(layer.id, { export: !layer.export })} pressed={layer.export}><Layers3 size={18} /></ToolbarIconButton><ToolbarIconButton disabled={!writable} label={`Bring ${layer.name} layer front`} onClick={() => props.onReorderLayer?.(layer.id, 'front')}><ArrowUpToLine size={18} /></ToolbarIconButton><ToolbarIconButton disabled={!writable} label={`Send ${layer.name} layer back`} onClick={() => props.onReorderLayer?.(layer.id, 'back')}><ArrowDownToLine size={18} /></ToolbarIconButton></li>)}</ul>

@@ -65,6 +65,15 @@ describe('mobile workspace CSS contracts', () => {
   it('keeps chooser documentation links as centered 44px touch targets', () => {
     expect(css).toMatch(/\.workspace-template-menu-help\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*min-width:\s*44px;[^}]*min-height:\s*44px;/u);
   });
+
+  it('collapses Export chrome before it can overlap the mobile workspace header', () => {
+    expect(mobileCss).toMatch(/\.workspace-topbar\s*\{[^}]*justify-content:\s*flex-start;[^}]*gap:\s*6px;/u);
+    expect(mobileCss).toMatch(/\.workspace-topbar-left\s*\{[^}]*flex:\s*0 1 auto;[^}]*overflow:\s*hidden;/u);
+    expect(mobileCss).toMatch(/\.workspace-topbar-right\s*\{[^}]*flex:\s*1 1 auto;[^}]*margin-left:\s*auto;/u);
+    expect(mobileCss).toMatch(/\.workspace-presence-avatars\s*\{[^}]*padding-left:\s*0;/u);
+    expect(mobileCss).toMatch(/\.workspace-export-menu > \.workspace-icon-button\s*\{[^}]*width:\s*44px;[^}]*min-width:\s*44px;[^}]*justify-content:\s*center;/u);
+    expect(mobileCss).toMatch(/\.presenter-mobile-menu summary\s*\{[^}]*width:\s*44px;[^}]*min-width:\s*44px;[^}]*font-size:\s*0;/u);
+  });
 });
 
 describe('Mermaid source highlighting accessibility', () => {

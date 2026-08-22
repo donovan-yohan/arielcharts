@@ -845,13 +845,21 @@ function canStartTouchCanvasGesture(target: EventTarget | null, root: HTMLDivEle
   return root.contains(target);
 }
 
-function canStartMouseCanvasPan(target: EventTarget | null, root: HTMLDivElement, handActive = false): boolean {
+function isCanvasSpacePanControl(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('input, select, textarea, form, [contenteditable="true"], [role="dialog"], [data-canvas-pan-exclusion="true"], [data-testid*="toolbar"]') !== null;
+}
+
+function canStartMouseCanvasPan(target: EventTarget | null, root: HTMLDivElement, handActive = false, spaceActive = false): boolean {
   if (!(target instanceof Element) || !root.contains(target)) {
     return false;
   }
 
   if (target.closest('[data-subgraph-drag-target="true"]')) {
     return true;
+  }
+
+  if (spaceActive) {
+    return !target.closest('a, input, select, textarea, form, [contenteditable="true"], [role="dialog"], [data-testid*="toolbar"]');
   }
 
   const exclusion = handActive
@@ -1307,6 +1315,7 @@ export function DiagramCanvas({
   const [animateTransform, setAnimateTransform] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [spacePressed, setSpacePressed] = useState(false);
+  const spacePressedRef = useRef(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const shortcutsOriginRef = useRef<HTMLElement | null>(null);
   const shortcutsDialogRef = useRef<HTMLDivElement | null>(null);
@@ -2361,6 +2370,26 @@ export function DiagramCanvas({
   }, [isFlowchart, mode, setMode]);
 
   useLayoutEffect(() => {
+    const handleSpaceKeyDownCapture = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || shouldRejectCanvasShortcut(event) || isTypingElement(event.target)) return;
+      const canvas = containerRef.current;
+      const ownsCanvas = canvas
+        ? shouldHandleCanvasShortcut(
+          event.target instanceof Node && canvas.contains(event.target),
+          document.activeElement instanceof Node && canvas.contains(document.activeElement),
+          false,
+        )
+        : false;
+      if (!ownsCanvas || isCanvasSpacePanControl(event.target) || isCanvasSpacePanControl(document.activeElement)) return;
+      event.preventDefault();
+      spacePressedRef.current = true;
+      setSpacePressed(true);
+    };
+    const handleSpaceKeyUpCapture = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || !spacePressedRef.current) return;
+      spacePressedRef.current = false;
+      setSpacePressed(false);
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || shouldRejectCanvasShortcut(event)) {
         return;
@@ -2377,10 +2406,6 @@ export function DiagramCanvas({
           false,
         )
         : false;
-
-      if (event.code === 'Space' && ownsCanvas) {
-        setSpacePressed(true);
-      }
 
       const ownsEscape = canvas
         ? shouldCanvasHandleEscape(
@@ -2563,26 +2588,14 @@ export function DiagramCanvas({
       }
     };
 
-    const handleKeyUp = (event: KeyboardEvent) => {
-      const canvas = containerRef.current;
-      const ownsCanvas = canvas
-        ? shouldHandleCanvasShortcut(
-          event.target instanceof Node && canvas.contains(event.target),
-          document.activeElement instanceof Node && canvas.contains(document.activeElement),
-          isTypingElement(event.target),
-        )
-        : false;
-      if (event.code === 'Space' && ownsCanvas) {
-        setSpacePressed(false);
-      }
-    };
-
+    window.addEventListener('keydown', handleSpaceKeyDownCapture, true);
+    window.addEventListener('keyup', handleSpaceKeyUpCapture, true);
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
 
     return () => {
+      window.removeEventListener('keydown', handleSpaceKeyDownCapture, true);
+      window.removeEventListener('keyup', handleSpaceKeyUpCapture, true);
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
     };
   }, [canEditStructure, closeShortcuts, copySelectedNodes, fitBoundsToViewport, fitToDiagram, graph, hasPersistedLayout, nodeById, onAddNode, onCanvasToolChange, onDeleteEdge, onDeleteNodes, onRedo, onUndo, onUngroupNodes, pasteClipboard, readOnly, selectedBounds, selectedCurrentEdgeIdentity, selection, setMode, setSelection, shortcutsOpen, simplifyLayout, zoomCanvas]);
 
@@ -2736,13 +2749,14 @@ export function DiagramCanvas({
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const isMiddleMouse = event.button === 1;
-    const isSpacePrimaryPointer = (spacePressed || overlay?.tool === 'hand') && event.button === 0;
+    const spacePanning = spacePressedRef.current;
+    const isSpacePrimaryPointer = (spacePanning || overlay?.tool === 'hand') && event.button === 0;
     const canvas = containerRef.current;
     if (
       event.pointerType === 'touch'
       || (!isMiddleMouse && !isSpacePrimaryPointer)
       || !canvas
-      || !canStartMouseCanvasPan(event.target, canvas, overlay?.tool === 'hand')
+      || !canStartMouseCanvasPan(event.target, canvas, overlay?.tool === 'hand', spacePanning)
     ) {
       return false;
     }
@@ -2764,7 +2778,7 @@ export function DiagramCanvas({
   }, [overlay?.tool, spacePressed, viewport]);
 
   const handlePointerDownCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (mode === 'laser' && event.button === 0) {
+    if (mode === 'laser' && !spacePressedRef.current && event.button === 0) {
       if (event.target instanceof Element && event.target.closest('button, input, select, textarea, [contenteditable="true"], [role="dialog"], [data-canvas-pan-exclusion="true"]')) return;
       const canvas = containerRef.current;
       if (!canvas) return;
@@ -2808,24 +2822,22 @@ export function DiagramCanvas({
       onCanvasCursorChange?.(point);
     }
 
+    const nextPan = mousePanRef.current.move(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (nextPan) {
+      onLocalCanvasInteraction?.();
+      setAnimateTransform(false);
+      setViewport((current) => ({
+        ...current,
+        ...nextPan,
+      }));
+      return;
+    }
+
     if (!hitMap) {
       return;
     }
 
     setCursorPoint(point);
-
-    const nextPan = mousePanRef.current.move(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (!nextPan) {
-      return;
-    }
-
-    onLocalCanvasInteraction?.();
-
-    setAnimateTransform(false);
-    setViewport((current) => ({
-      ...current,
-      ...nextPan,
-    }));
   }, [hitMap, mode, onCanvasCursorChange, onLaserChange, onLocalCanvasInteraction, viewport.panX, viewport.panY, viewport.zoom]);
 
   const suppressCanvasClick = useCallback(() => {
@@ -2878,6 +2890,7 @@ export function DiagramCanvas({
       touchGestureRef.current.reset();
       stopPanning();
       setIsPanning(false);
+      spacePressedRef.current = false;
       setSpacePressed(false);
     };
     const handleVisibilityChange = () => {
@@ -3449,6 +3462,11 @@ export function DiagramCanvas({
         if (event.target.closest('button, input, select, [role="button"]')) return;
         handleCanvasClick();
       }}
+      onClickCapture={(event) => {
+        if (!spacePressedRef.current && !suppressCanvasClickRef.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
       onDoubleClick={(event) => {
         if (event.target === containerRef.current) {
           fitToDiagram(true);
@@ -3509,7 +3527,7 @@ export function DiagramCanvas({
             <button aria-label="Close keyboard shortcuts" onClick={closeShortcuts} style={{ float: 'right' }} type="button">Close</button>
             <h2>Keyboard shortcuts</h2>
             {([
-              ['Overlay', getCanvasToolShortcutSummary(['connect'])],
+              ['Overlay', `${getCanvasToolShortcutSummary(['connect'])} · ${getPlatformModifierLabel()}+A Select all visible unlocked overlays · ${getPlatformModifierLabel()}+D Duplicate · Delete/Backspace Delete · Arrow Nudge 1 · Shift+Arrow Nudge 10 · Enter Edit text · Escape Commit text edit`],
               ['Mermaid', `C Connect · Enter Edit selected node · F2 Edit · ${getPlatformModifierLabel()}+Z Undo · ${getPlatformModifierLabel()}+Shift+Z Redo`],
               ['Navigation', 'Space+drag Pan · Shift+1 Fit all · Shift+2 Fit selection · +/− Canvas zoom · Browser zoom remains Cmd/Ctrl +/−'],
               ['Tabs', 'Left/Right Previous or next · Home/End First or last'],
@@ -3825,6 +3843,7 @@ export function DiagramCanvas({
           controlsSafeBottom={semanticControlsSafeBottom}
           onFitSelection={(bounds) => { if (bounds) fitBoundsToViewport(bounds, true); else fitToDiagram(true); }}
           semanticAnchors={overlaySemanticAnchors}
+          spacePanning={spacePressed}
           transform={{ x: viewport.panX, y: viewport.panY, zoom: viewport.zoom }}
           viewport={canvasViewport}
         />

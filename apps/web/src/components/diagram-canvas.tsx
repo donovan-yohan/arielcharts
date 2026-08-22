@@ -1320,6 +1320,7 @@ export function DiagramCanvas({
   const shortcutsOriginRef = useRef<HTMLElement | null>(null);
   const shortcutsDialogRef = useRef<HTMLDivElement | null>(null);
   const restoreShortcutsFocusRef = useRef(false);
+  const suppressCanvasRovingFocusRef = useRef(false);
   const closeShortcuts = useCallback(() => {
     restoreShortcutsFocusRef.current = true;
     setShortcutsOpen(false);
@@ -2457,7 +2458,7 @@ export function DiagramCanvas({
       );
       if (!isModifierShortcut && canvasOwnsSingleKeyFocus && event.key === '?') {
         event.preventDefault();
-        shortcutsOriginRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : canvas;
+        shortcutsOriginRef.current = canvas;
         setShortcutsOpen(true);
         return;
       }
@@ -2601,15 +2602,21 @@ export function DiagramCanvas({
 
   useEffect(() => {
     if (shortcutsOpen) {
-      shortcutsDialogRef.current?.querySelector<HTMLElement>('button')?.focus();
-      return;
+      const frame = window.requestAnimationFrame(() => {
+        shortcutsDialogRef.current?.querySelector<HTMLElement>('button')?.focus();
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
     if (!restoreShortcutsFocusRef.current) return;
     restoreShortcutsFocusRef.current = false;
     const origin = shortcutsOriginRef.current;
     const frame = window.requestAnimationFrame(() => {
+      suppressCanvasRovingFocusRef.current = origin === containerRef.current;
       if (origin?.isConnected) origin.focus({ preventScroll: true });
-      if (document.activeElement !== origin) containerRef.current?.focus({ preventScroll: true });
+      if (document.activeElement !== origin) {
+        suppressCanvasRovingFocusRef.current = true;
+        containerRef.current?.focus({ preventScroll: true });
+      }
     });
     return () => window.cancelAnimationFrame(frame);
   }, [shortcutsOpen]);
@@ -3077,7 +3084,7 @@ export function DiagramCanvas({
   }, [canEditStructure, editingSubgraphId, editingSubgraphLabel, onEditSubgraphLabel, subgraphById]);
 
   const handleSubgraphPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>, subgraphId: string) => {
-    if (!canEditStructure || spacePressed || event.button !== 0 || !interactiveNodeBounds) return;
+    if (!canEditStructure || overlay?.tool === 'hand' || spacePressed || event.button !== 0 || !interactiveNodeBounds) return;
     const initialPositions: DiagramNodePositions = {};
     for (const nodeId of subgraphMemberNodeIds.get(subgraphId) ?? []) {
       const bounds = interactiveNodeBounds.get(nodeId);
@@ -3095,7 +3102,7 @@ export function DiagramCanvas({
       origin: { x: event.clientX, y: event.clientY },
       pointerId: event.pointerId,
     };
-  }, [canEditStructure, interactiveNodeBounds, selectSubgraph, spacePressed, subgraphMemberNodeIds]);
+  }, [canEditStructure, interactiveNodeBounds, overlay?.tool, selectSubgraph, spacePressed, subgraphMemberNodeIds]);
 
   const handleSubgraphPointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const drag = subgraphDragRef.current;
@@ -3483,7 +3490,9 @@ export function DiagramCanvas({
       onLostPointerCapture={handleLostPointerCapture}
       onPointerUp={handlePointerUp}
       onFocus={(event) => {
-        if (event.target === event.currentTarget && event.currentTarget.matches(':focus-visible') && orderedNodeIds[0]) {
+        const suppressRovingFocus = suppressCanvasRovingFocusRef.current;
+        suppressCanvasRovingFocusRef.current = false;
+        if (!suppressRovingFocus && event.target === event.currentTarget && event.currentTarget.matches(':focus-visible') && orderedNodeIds[0]) {
           focusNode(orderedNodeIds[0]);
         }
       }}

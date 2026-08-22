@@ -736,6 +736,18 @@ describe('keyboard completion behavior', () => {
   });
 });
 
+describe('bounded focus and Hand seams', () => {
+  it('restores keyboard shortcut focus to the canvas without advancing roving node focus', () => {
+    expect(canvasSource).toContain('shortcutsOriginRef.current = canvas;');
+    expect(canvasSource).toMatch(/restoreShortcutsFocusRef\.current = true;[^]*?origin\.focus\(\{ preventScroll: true \}\);/u);
+    expect(canvasSource).toMatch(/suppressCanvasRovingFocusRef\.current = origin === containerRef\.current;[^]*?const suppressRovingFocus = suppressCanvasRovingFocusRef\.current;[^]*?if \(!suppressRovingFocus[^]*?orderedNodeIds\[0\]/u);
+  });
+
+  it('keeps Hand from beginning a subgraph drag that can write node positions', () => {
+    expect(canvasSource).toMatch(/const handleSubgraphPointerDown[^]*?if \(!canEditStructure \|\| overlay\?\.tool === 'hand' \|\| spacePressed \|\| event\.button !== 0/u);
+  });
+});
+
 describe('getFlowEdgePresentation', () => {
   it.each(['arrow_circle', 'arrow_cross'] as const)('uses authored stroke color for %s markers', (type) => {
     const link: DiagramLink = {

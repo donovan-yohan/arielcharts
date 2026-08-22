@@ -20,24 +20,40 @@ describe('OverlayCanvasLayer', () => {
     expect(getPlatformShortcutTitle('Undo Mermaid change', 'Mod+Z')).toBe('Undo Mermaid change — Ctrl+Z');
   });
 
-  it('keeps overlay selection local for Mod+A, Shift-click, duplicate, locked and hidden objects', async () => {
+  it('hands real pointer selection and keyboard ownership to overlay objects while preserving Shift toggle and Escape bubbling', async () => {
     const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
-    let copy = 0; const onDuplicate = vi.fn(() => `copy-${++copy}`); const onFitSelection = vi.fn();
-    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate, onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onFitSelection };
-    const object = (id: string, metadata = {}, layer?: string): OverlayObjectRecord => ({ id, kind: 'shape.rectangle', version: 1, order_key: id, geometry: { x: 10, y: 20, width: 30, height: 40, rotation: 0 }, style: {}, metadata, payload: {}, body: '', layer });
-    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', layers: [{ id: 'hidden', name: 'Hidden', order_key: 'z', visible: false, locked: false, export: true }], objects: [object('a'), object('b'), object('locked', { locked: true }), object('hidden', {}, 'hidden')] }} />));
-    const a = host.querySelector<HTMLElement>('[data-testid="overlay-object-a"]')!; const b = host.querySelector<HTMLElement>('[data-testid="overlay-object-b"]')!;
-    await act(async () => a.click());
-    await act(async () => b.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })));
+    const onDuplicateMany = vi.fn(() => ['copy-a', 'copy-b']); const onFitSelection = vi.fn(); const onMoveMany = vi.fn();
+    const parentKeyDown = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onMoveMany, onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onDuplicateMany, onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onFitSelection };
+    const object = (id: string, metadata = {}, layer?: string): OverlayObjectRecord => ({ id, kind: 'shape.rectangle', version: 1, order_key: id, geometry: { x: id === 'a' ? 10 : 60, y: 20, width: 30, height: 40, rotation: 0 }, style: {}, metadata, payload: {}, body: '', layer });
+    await act(async () => root.render(<div onKeyDown={parentKeyDown}><OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', layers: [{ id: 'hidden', name: 'Hidden', order_key: 'z', visible: false, locked: false, export: true }], objects: [object('a'), object('b'), object('locked', { locked: true }), object('hidden', {}, 'hidden')] }} /></div>));
     const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
-    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'd' })));
-    expect(onDuplicate).toHaveBeenCalledTimes(2);
-    expect(host.querySelector('[data-selected="true"]')).toBeNull();
-    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'a' })));
-    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'Digit2', key: '@', shiftKey: true })));
-    expect(onFitSelection).toHaveBeenCalledWith(expect.objectContaining({ x: 10, y: 20, width: 30, height: 40 }));
-    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'd' })));
-    expect(onDuplicate).toHaveBeenCalledTimes(4);
+    owner.getBoundingClientRect = () => ({ bottom: 400, height: 400, left: 0, right: 400, top: 0, width: 400, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const a = host.querySelector<HTMLElement>('[data-testid="overlay-object-a"]')!; const b = host.querySelector<HTMLElement>('[data-testid="overlay-object-b"]')!;
+    a.setPointerCapture = vi.fn(); b.setPointerCapture = vi.fn();
+    const pointer = (shiftKey = false) => Object.assign(new MouseEvent('pointerdown', { bubbles: true, button: 0, cancelable: true, clientX: 30, clientY: 40, shiftKey }), { pointerId: shiftKey ? 2 : 1 });
+
+    await act(async () => a.dispatchEvent(pointer()));
+    expect(document.activeElement).toBe(a); expect(owner.contains(document.activeElement)).toBe(true);
+    await act(async () => b.dispatchEvent(pointer(true)));
+    expect(document.activeElement).toBe(b); expect(owner.contains(document.activeElement)).toBe(true);
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })));
+    expect(onMoveMany).toHaveBeenCalledWith(['a', 'b'], 1, 0);
+
+    await act(async () => b.dispatchEvent(pointer(true)));
+    expect(a.getAttribute('data-selected')).toBe('true'); expect(b.getAttribute('data-selected')).toBeNull();
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Backspace' })));
+    expect(callbacks.onDelete).toHaveBeenLastCalledWith(['a']);
+    await act(async () => b.dispatchEvent(pointer(true)));
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'Digit2', key: '@', shiftKey: true })));
+    expect(onFitSelection).toHaveBeenCalledWith(expect.objectContaining({ x: 10, y: 20, width: 80, height: 40 }));
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'd' })));
+    expect(onDuplicateMany).toHaveBeenCalledWith(['a', 'b']);
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'a' })));
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Backspace' })));
+    expect(callbacks.onDelete).toHaveBeenLastCalledWith(['a', 'b']);
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })));
+    expect(parentKeyDown).toHaveBeenCalled(); expect(host.querySelector('[data-selected="true"]')).toBeNull();
     await act(async () => root.unmount());
   });
 

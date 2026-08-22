@@ -428,6 +428,10 @@ const SWIMLANE_DIAGRAM_FIXTURE = `swimlane-beta LR
     answer[Answer]
   end
   request --> answer`;
+const HAND_SUBGRAPH_FIXTURE = `flowchart LR
+  subgraph guarded [Guarded section]
+    start[Start] --> finish[Finish]
+  end`;
 const JOURNEY_DIAGRAM_FIXTURE = `journey
   section Product
   Browse: 5: Customer`;
@@ -4245,17 +4249,113 @@ async function expectHandToolDoesNotActivateFlowTargets(page: Page): Promise<voi
   await verifiedClick(page, nodeSurface, 'click flow node while Hand is active');
   await expect(node).not.toHaveClass(/(?:^|\s)selected(?:\s|$)/u);
   await expect(page.getByTestId('canvas-node-toolbar')).toHaveCount(0);
+
+  await replaceSource(page, HAND_SUBGRAPH_FIXTURE);
+  await waitForCanvas(page, 'flowchart');
+  await verifiedClick(page, hand, 'reactivate Hand before subgraph-header gestures');
+  await expect(hand).toHaveAttribute('aria-pressed', 'true');
+  const header = page.getByTestId('canvas-subgraph-header-guarded');
+  const section = page.getByTestId('canvas-subgraph-guarded');
+  await expect(header).toBeVisible();
+  const sourceBeforeHeaderGestures = await canonicalSource(page);
+  await header.dblclick();
+  await expect(section).toHaveAttribute('data-selected', 'false');
+  await expect(page.getByTestId('canvas-subgraph-toolbar')).toHaveCount(0);
+  await expect.poll(() => canonicalSource(page), {
+    message: 'Hand double-click on a subgraph header changed Mermaid source.',
+    timeout: 5_000,
+  }).toBe(sourceBeforeHeaderGestures);
+  const headerBox = await header.boundingBox();
+  assert(headerBox, 'Hand subgraph-header touch test has no header bounds.');
+  const touchSession = await page.context().newCDPSession(page);
+  try {
+    await touchSession.send('Input.dispatchTouchEvent', { touchPoints: [{ id: 91, x: headerBox.x + (headerBox.width / 2), y: headerBox.y + (headerBox.height / 2) }], type: 'touchStart' });
+    await touchSession.send('Input.dispatchTouchEvent', { touchPoints: [], type: 'touchEnd' });
+  } finally {
+    await touchSession.detach();
+  }
+  await expect(section).toHaveAttribute('data-selected', 'false');
+  await expect(page.getByTestId('canvas-subgraph-toolbar')).toHaveCount(0);
+  await expect.poll(() => canonicalSource(page), {
+    message: 'Hand touch tap on a subgraph header changed Mermaid source.',
+    timeout: 5_000,
+  }).toBe(sourceBeforeHeaderGestures);
+  await saveScreenshot(page, 'arbitration2-hand-subgraph-header');
   await verifiedClick(page, page.getByRole('button', { name: 'Select tool', exact: true }), 'leave Hand after flow-node click');
+  await replaceSource(page, FLOWCHART_FIXTURE);
+  await waitForCanvas(page, 'flowchart');
+}
+
+async function expectOverlayTextEditorPointerRetention(page: Page): Promise<void> {
+  await createOverlayAt(page, 'Text');
+  const createdObject = page.locator('[data-testid^="overlay-object-"]').last();
+  const createdObjectTestId = await createdObject.getAttribute('data-testid');
+  assert(createdObjectTestId, 'Newly created text overlay has no stable test id.');
+  const object = page.getByTestId(createdObjectTestId);
+  const newlyCreatedEditor = object.locator('textarea');
+  await expect(newlyCreatedEditor).toBeVisible();
+  await newlyCreatedEditor.press('Escape');
+  await expect(newlyCreatedEditor).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(object).not.toHaveAttribute('data-selected', 'true');
+  const selectTool = page.getByRole('button', { name: 'Select tool', exact: true });
+  await verifiedClick(page, selectTool, 'enter Select mode before the new-text editor pointer check');
+  await object.focus();
+  await expect(object).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(newlyCreatedEditor).toBeVisible();
+  const newEditorBox = await newlyCreatedEditor.boundingBox();
+  assert(newEditorBox, 'Newly created overlay text editor has no bounds.');
+  const firstClickPoint = { x: newEditorBox.x + 8, y: newEditorBox.y + Math.min(16, Math.max(8, newEditorBox.height - 8)) };
+  const firstClickHit = await page.evaluate((point) => {
+    const target = document.elementFromPoint(point.x, point.y);
+    return target ? { tag: target.tagName, testId: target.getAttribute('data-testid'), textarea: target.closest('textarea') !== null } : null;
+  }, firstClickPoint);
+  assert(firstClickHit?.textarea, `First click into the newly created editor did not hit its textarea: ${JSON.stringify(firstClickHit)}.`);
+  await page.mouse.click(firstClickPoint.x, firstClickPoint.y);
+  await expect(newlyCreatedEditor).toBeVisible();
+  await expect(newlyCreatedEditor).toBeFocused();
+  await newlyCreatedEditor.type('edited text', { delay: 80 });
+  await expect.poll(() => newlyCreatedEditor.inputValue(), {
+    message: 'Edited overlay text did not settle before the real mouse drag-selection.',
+    timeout: 5_000,
+  }).toBe('edited text');
+  await expect(newlyCreatedEditor, 'Edited text must remain mounted before its pointer drag-selection.').toBeVisible();
+  const dragSelect = async (editor: Locator, label: string): Promise<void> => {
+    const box = await editor.boundingBox();
+    assert(box, `${label} textarea has no bounds.`);
+    const y = box.y + Math.min(16, Math.max(8, box.height - 8));
+    await page.mouse.click(box.x + 8, y);
+    await page.mouse.move(box.x + 8, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + Math.max(16, box.width - 8), y, { steps: 4 });
+    await page.mouse.up();
+    await expect(editor, `${label} must remain mounted after its real mouse click and drag`).toBeVisible();
+    await expect(editor, `${label} must retain DOM focus after its real mouse click and drag`).toBeFocused();
+    const selection = await editor.evaluate((element) => ({ end: element.selectionEnd, start: element.selectionStart, value: element.value }));
+    assert(selection.start !== selection.end, `${label} textarea did not retain a mouse text selection: ${JSON.stringify(selection)}.`);
+  };
+  await dragSelect(newlyCreatedEditor, 'Mouse drag-selection of pre-existing edited text after the first click into a newly created editor');
+  await saveScreenshot(page, 'arbitration2-text-editor-pointer-retention');
+  await newlyCreatedEditor.press('Escape');
+  await expect(newlyCreatedEditor).toHaveCount(0);
+  await verifiedClick(page, selectTool, 'return to Select before cleaning up edited overlay text');
+  await verifiedClick(page, object, 'select edited overlay text for cleanup');
+  await object.press('Backspace');
+  await expect(object).toHaveCount(0);
 }
 
 async function expectOverlayPointerKeyboardOwnership(page: Page): Promise<void> {
+  await expectOverlayTextEditorPointerRetention(page);
   await createOverlayAt(page, 'Rectangle');
   await createOverlayAt(page, 'Rectangle', 1);
+  await createOverlayAt(page, 'Rectangle', 2);
   await verifiedClick(page, page.getByRole('button', { name: 'Select tool', exact: true }), 'select pointer-keyboard overlays');
   const objects = page.locator('[data-testid^="overlay-object-"]');
-  await expect(objects).toHaveCount(2);
+  await expect(objects).toHaveCount(3);
   const first = objects.first();
-  const second = objects.last();
+  const second = objects.nth(1);
+  const unselected = objects.last();
   await verifiedClick(page, first, 'pointer-select first overlay for keyboard ownership');
   assert(await first.evaluate((element) => {
     const owner = document.querySelector('[data-testid="overlay-canvas-owner"]');
@@ -4271,6 +4371,14 @@ async function expectOverlayPointerKeyboardOwnership(page: Page): Promise<void> 
   await expect(first).not.toHaveAttribute('data-selected', 'true');
   await first.click({ modifiers: ['Shift'] });
   await expect(first).toHaveAttribute('data-selected', 'true');
+
+  const [firstBorder, secondBorder, unselectedBorder] = await Promise.all([first, second, unselected].map((object) => object.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return `${style.borderTopWidth} ${style.borderTopStyle} ${style.borderTopColor}`;
+  })));
+  assert(firstBorder !== unselectedBorder && secondBorder !== unselectedBorder
+    && !firstBorder.startsWith('0px') && !secondBorder.startsWith('0px'),
+  `Shift multi-selection did not render a visible border on every selected overlay: ${JSON.stringify({ firstBorder, secondBorder, unselectedBorder })}.`);
 
   const beforeNudge = await Promise.all([first.getAttribute('data-world-x'), second.getAttribute('data-world-x')]);
   await first.press('ArrowRight');
@@ -4294,15 +4402,84 @@ async function expectOverlayPointerKeyboardOwnership(page: Page): Promise<void> 
   await expect(second).toHaveAttribute('data-selected', 'true');
   const beforeDuplicateCount = await page.locator('[data-testid^="overlay-object-"]').count();
   await first.press('ControlOrMeta+D');
-  await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(beforeDuplicateCount + 2);
+  await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(beforeDuplicateCount + 3);
   await first.press('Backspace');
   await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(beforeDuplicateCount);
+
+  await verifiedClick(page, first, 'pointer-select singleton overlay before focused duplicate');
+  const originalPosition = await first.evaluate((element) => ({ x: element.getAttribute('data-world-x'), y: element.getAttribute('data-world-y') }));
+  await first.press('ControlOrMeta+D');
+  const selectedCopy = page.locator('[data-testid^="overlay-object-"][data-selected="true"]');
+  await expect(selectedCopy).toHaveCount(1);
+  const selectedCopyTestId = await selectedCopy.getAttribute('data-testid');
+  assert(selectedCopyTestId && selectedCopyTestId !== await first.getAttribute('data-testid'), 'Mod+D did not select a distinct duplicate overlay.');
+  const copy = page.getByTestId(selectedCopyTestId!);
+  await expect.poll(() => copy.evaluate((element) => document.activeElement === element), {
+    message: 'Mod+D did not transfer DOM focus to the selected duplicate overlay.',
+    timeout: 5_000,
+  }).toBe(true);
+
+  const copyPosition = await copy.evaluate((element) => ({ x: element.getAttribute('data-world-x'), y: element.getAttribute('data-world-y') }));
+  await copy.press('ArrowRight');
+  await expect.poll(async () => ({
+    copy: await copy.getAttribute('data-world-x'),
+    original: await first.getAttribute('data-world-x'),
+  }), {
+    message: 'Arrow nudge after Mod+D did not move only the focused duplicate.',
+    timeout: 5_000,
+  }).toMatchObject({ copy: expect.not.stringContaining(copyPosition.x ?? ''), original: originalPosition.x });
+
+  await copy.press('Escape');
+  await expect(copy).not.toHaveAttribute('data-selected', 'true');
+  const canvas = page.getByTestId('diagram-canvas');
+  await expect.poll(() => canvas.evaluate((element) => ({
+    focusIsCanvas: document.activeElement === element,
+    focusedMermaidNode: document.activeElement?.closest('.mermaid-flow-node, .react-flow__node') !== null,
+  })), {
+    message: 'Escape from a focused overlay did not land on the canvas without roving to a Mermaid node.',
+    timeout: 5_000,
+  }).toEqual({ focusIsCanvas: true, focusedMermaidNode: false });
+
+
+  const [blankPoint] = await allowedCanvasGesturePoints(page, 'overlay empty-canvas keyboard ownership', 1, 0);
+  assert(blankPoint, 'Overlay empty-canvas keyboard ownership test found no empty canvas point.');
+  const exposedOverlayTestId = await page.locator('[data-testid^="overlay-object-"]').evaluateAll((elements) => elements.flatMap((element) => {
+    const bounds = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(bounds.left + (bounds.width / 2), bounds.top + (bounds.height / 2));
+    return hit instanceof Node && element.contains(hit) ? [element.getAttribute('data-testid')] : [];
+  }).find((testId): testId is string => typeof testId === 'string') ?? null);
+  assert(exposedOverlayTestId, 'Overlay empty-canvas keyboard ownership test found no exposed overlay object.');
+  const exposedOverlay = page.getByTestId(exposedOverlayTestId);
+  await exposedOverlay.click();
+  await expect(exposedOverlay).toHaveAttribute('data-selected', 'true');
+  await page.mouse.click(blankPoint.x, blankPoint.y);
+  await page.keyboard.press('Escape');
+  await expect(exposedOverlay).not.toHaveAttribute('data-selected', 'true');
+  await exposedOverlay.click();
+  await expect(exposedOverlay).toHaveAttribute('data-selected', 'true');
+  await page.mouse.click(blankPoint.x, blankPoint.y);
+  await page.keyboard.press('ControlOrMeta+A');
+  await Promise.all([first, second, unselected].map((object) => expect(object).toHaveAttribute('data-selected', 'true')));
+  await exposedOverlay.focus();
+  await exposedOverlay.press('Backspace');
+  await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(0);
 }
 
 async function expectShortcutsDialogKeyboardBehavior(page: Page): Promise<void> {
   const canvas = page.getByTestId('diagram-canvas');
+  await createOverlayAt(page, 'Rectangle', 3);
+  await verifiedClick(page, page.getByRole('button', { name: 'Select tool', exact: true }), 'select shortcut-origin overlay fixture');
+  const overlayObject = page.locator('[data-testid^="overlay-object-"]').last();
+  await overlayObject.click();
+  await expect(overlayObject).toHaveAttribute('data-selected', 'true');
   const openFromCanvas = async () => {
-    await canvas.focus();
+    const [blankPoint] = await allowedCanvasGesturePoints(page, 'shortcut-help canvas origin', 1, 0);
+    assert(blankPoint, 'Shortcut-help canvas-origin test found no empty canvas point.');
+    await page.mouse.click(blankPoint.x, blankPoint.y);
+    await expect.poll(() => canvas.evaluate((element) => document.activeElement === element), {
+      message: 'An empty-canvas click did not establish the canvas shortcut-help origin.', timeout: 5_000,
+    }).toBe(true);
+
     await page.keyboard.press('?');
     const dialog = page.getByRole('dialog', { name: 'Canvas keyboard shortcuts', exact: true });
     await expect(dialog).toBeVisible();
@@ -4320,11 +4497,40 @@ async function expectShortcutsDialogKeyboardBehavior(page: Page): Promise<void> 
     return element.dispatchEvent(event) && !event.defaultPrevented;
   }));
   assert(cancellable, 'The shortcuts dialog prevented cancellable browser shortcuts.');
-  await page.keyboard.press('Escape');
+  await close.press('Space');
   await expect(keyboardDialog).toHaveCount(0);
+  await expect.poll(() => canvas.evaluate((element) => document.activeElement === element), {
+    message: 'Space on focused Close did not close the keyboard dialog and restore canvas focus.', timeout: 5_000,
+  }).toBe(true);
+
+
+  const escapeDialog = await openFromCanvas();
+  await page.keyboard.press('Escape');
+  await expect(escapeDialog).toHaveCount(0);
   await expect.poll(() => canvas.evaluate((element) => document.activeElement === element), {
     message: 'Escape did not restore keyboard shortcut focus to its canvas trigger.', timeout: 5_000,
   }).toBe(true);
+
+
+  const assertShortcutOrigin = async (origin: Locator, closeWith: 'Escape' | 'Space', label: string): Promise<void> => {
+    await origin.focus();
+    await expect(origin).toBeFocused();
+
+    await page.keyboard.press('?');
+    const dialog = page.getByRole('dialog', { name: 'Canvas keyboard shortcuts', exact: true });
+    await expect(dialog).toBeVisible();
+    const close = dialog.getByRole('button', { name: 'Close keyboard shortcuts', exact: true });
+    await expect(close).toBeFocused();
+    if (closeWith === 'Escape') await page.keyboard.press('Escape');
+    else await close.press('Space');
+    await expect(dialog).toHaveCount(0);
+    await waitForFocusedLocator(page, origin, `${label} shortcut-help focus restoration`);
+  };
+  const mermaidNode = page.locator('.mermaid-flow-node').first();
+  await assertShortcutOrigin(mermaidNode, 'Escape', 'Mermaid-node Escape');
+  await assertShortcutOrigin(mermaidNode, 'Space', 'Mermaid-node Close');
+  await assertShortcutOrigin(overlayObject, 'Escape', 'Overlay-object Escape');
+  await assertShortcutOrigin(overlayObject, 'Space', 'Overlay-object Close');
 
   const trigger = page.getByRole('button', { name: 'Keyboard shortcuts', exact: true });
   await verifiedClick(page, trigger, 'open visible keyboard shortcuts trigger');
@@ -4341,6 +4547,9 @@ async function expectShortcutsDialogKeyboardBehavior(page: Page): Promise<void> 
   const backdrop = page.getByTestId('shortcuts-dialog-backdrop');
   await backdrop.click({ position: { x: 2, y: 2 } });
   await expect(backdropDialog).toHaveCount(0);
+  await overlayObject.focus();
+  await overlayObject.press('Backspace');
+  await expect(overlayObject).toHaveCount(0);
 }
 
 async function expectDesktopToolbarSafeLane(page: Page): Promise<void> {

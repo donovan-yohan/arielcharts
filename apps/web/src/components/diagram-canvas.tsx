@@ -1318,6 +1318,7 @@ export function DiagramCanvas({
   const spacePressedRef = useRef(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const shortcutsOriginRef = useRef<HTMLElement | null>(null);
+  const shortcutsOriginNodeIdRef = useRef<string | null>(null);
   const shortcutsDialogRef = useRef<HTMLDivElement | null>(null);
   const restoreShortcutsFocusRef = useRef(false);
   const suppressCanvasRovingFocusRef = useRef(false);
@@ -2372,7 +2373,7 @@ export function DiagramCanvas({
 
   useLayoutEffect(() => {
     const handleSpaceKeyDownCapture = (event: KeyboardEvent) => {
-      if (event.code !== 'Space' || shouldRejectCanvasShortcut(event) || isTypingElement(event.target)) return;
+      if (shortcutsOpen || event.code !== 'Space' || shouldRejectCanvasShortcut(event) || isTypingElement(event.target)) return;
       const canvas = containerRef.current;
       const ownsCanvas = canvas
         ? shouldHandleCanvasShortcut(
@@ -2441,7 +2442,8 @@ export function DiagramCanvas({
         setEditingSubgraphLabel('');
         setMode('select');
         onCanvasToolChange?.('select');
-        canvas?.focus();
+        suppressCanvasRovingFocusRef.current = true;
+        canvas?.focus({ preventScroll: true });
       }
 
       if (!ownsCanvas) {
@@ -2458,7 +2460,10 @@ export function DiagramCanvas({
       );
       if (!isModifierShortcut && canvasOwnsSingleKeyFocus && event.key === '?') {
         event.preventDefault();
-        shortcutsOriginRef.current = canvas;
+        const origin = event.target instanceof HTMLElement ? event.target : canvas;
+        shortcutsOriginRef.current = origin;
+        const originNode = origin?.closest<HTMLElement>('.mermaid-flow-node, .diagram-node-target');
+        shortcutsOriginNodeIdRef.current = [...nodeButtonRefs.current.entries()].find(([, element]) => element === originNode)?.[0] ?? null;
         setShortcutsOpen(true);
         return;
       }
@@ -2610,15 +2615,26 @@ export function DiagramCanvas({
     if (!restoreShortcutsFocusRef.current) return;
     restoreShortcutsFocusRef.current = false;
     const origin = shortcutsOriginRef.current;
-    const frame = window.requestAnimationFrame(() => {
-      suppressCanvasRovingFocusRef.current = origin === containerRef.current;
-      if (origin?.isConnected) origin.focus({ preventScroll: true });
-      if (document.activeElement !== origin) {
+    const originNodeId = shortcutsOriginNodeIdRef.current;
+    let settleNodeFrame: number | null = null;
+    const restoreFocus = () => {
+      const currentNodeOrigin = originNodeId ? nodeButtonRefs.current.get(originNodeId) ?? null : null;
+      const restoreTarget = currentNodeOrigin?.isConnected ? currentNodeOrigin : origin;
+      suppressCanvasRovingFocusRef.current = restoreTarget === containerRef.current;
+      if (restoreTarget?.isConnected) restoreTarget.focus({ preventScroll: true });
+      if (document.activeElement !== restoreTarget) {
         suppressCanvasRovingFocusRef.current = true;
         containerRef.current?.focus({ preventScroll: true });
       }
+    };
+    const frame = window.requestAnimationFrame(() => {
+      restoreFocus();
+      if (originNodeId) settleNodeFrame = window.requestAnimationFrame(restoreFocus);
     });
-    return () => window.cancelAnimationFrame(frame);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (settleNodeFrame !== null) window.cancelAnimationFrame(settleNodeFrame);
+    };
   }, [shortcutsOpen]);
 
   useEffect(() => {
@@ -3479,7 +3495,10 @@ export function DiagramCanvas({
           fitToDiagram(true);
         }
       }}
-      onPointerDownCapture={handlePointerDownCapture}
+      onPointerDownCapture={(event) => {
+        if (event.target === event.currentTarget) suppressCanvasRovingFocusRef.current = true;
+        handlePointerDownCapture(event);
+      }}
       onPointerLeave={() => {
         setCursorPoint(null);
         if (mode !== 'laser') onCanvasCursorChange?.(null);
@@ -3765,13 +3784,16 @@ export function DiagramCanvas({
                   data-testid={`canvas-subgraph-header-${subgraph.id}`}
                   onClick={(event) => {
                     event.stopPropagation();
+                    if (overlay?.tool === 'hand') return;
                     selectSubgraph(subgraph.id);
                   }}
                   onDoubleClick={(event) => {
                     event.stopPropagation();
+                    if (overlay?.tool === 'hand') return;
                     openSubgraphEditor(subgraph.id);
                   }}
                   onKeyDown={(event) => {
+                    if (overlay?.tool === 'hand') return;
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault();
                       event.stopPropagation();
@@ -4372,7 +4394,7 @@ export function DiagramCanvas({
             <ToolbarButton label="Fit diagram" onClick={() => { fitToDiagram(true); }} shortcut="F">
               <ScanSearch size={16} />
             </ToolbarButton>
-            <ToolbarButton label="Keyboard shortcuts" onClick={() => { shortcutsOriginRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : containerRef.current; setShortcutsOpen(true); }} shortcut="?">
+            <ToolbarButton label="Keyboard shortcuts" onClick={() => { shortcutsOriginRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : containerRef.current; shortcutsOriginNodeIdRef.current = null; setShortcutsOpen(true); }} shortcut="?">
               <HelpCircle size={16} />
             </ToolbarButton>
           </div>

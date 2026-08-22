@@ -834,12 +834,34 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       event.preventDefault(); event.stopPropagation();
       const copies = props.onDuplicateMany?.(selectedObjectIds) ?? selectedObjectIds.map(props.onDuplicate).filter((id): id is string => id !== null);
       replaceSelection(copies);
+      const copyId = copies.at(-1);
+      if (copyId) window.requestAnimationFrame(() => {
+        canvasOwnerRef.current?.querySelector<HTMLElement>(`[data-testid="overlay-object-${copyId}"]`)?.focus({ preventScroll: true });
+      });
       return;
     }
     if (key !== 'z' && key !== 'y') return;
     event.preventDefault(); event.stopPropagation();
     if (key === 'y' || event.shiftKey) props.onRedo?.(); else props.onUndo();
   }, [activateInkTool, objects, onToolChange, props, replaceSelection, selectableObjectIds, selectedObjectIds, stopInk, tool]);
+  useEffect(() => {
+    if (!writable || tool !== 'select' || selectedObjectIds.length === 0) return;
+    const handleCanvasOwnedShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.key === 'Process') return;
+      const canvas = canvasOwnerRef.current?.closest<HTMLElement>('[data-testid="diagram-canvas"]');
+      if (!canvas || document.activeElement !== canvas) return;
+      if (event.key === 'Escape') {
+        replaceSelection([]);
+        return;
+      }
+      if ((!event.metaKey && !event.ctrlKey) || event.altKey || event.key.toLowerCase() !== 'a') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      replaceSelection(selectableObjectIds);
+    };
+    window.addEventListener('keydown', handleCanvasOwnedShortcut, true);
+    return () => window.removeEventListener('keydown', handleCanvasOwnedShortcut, true);
+  }, [replaceSelection, selectableObjectIds, selectedObjectIds.length, tool, writable]);
 
   return (<>
     <div data-testid="overlay-canvas-owner" onKeyDownCapture={handleOverlayShortcut} ref={canvasOwnerRef} style={{ inset: 0, pointerEvents: 'none', position: 'absolute', zIndex: 8 }}>
@@ -887,6 +909,10 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
           onClick={(event) => {
             if (spacePanning || tool !== 'select') return;
             event.stopPropagation();
+            const target = event.target instanceof Element ? event.target : null;
+            const active = document.activeElement instanceof Element ? document.activeElement : null;
+            if (target?.closest('button, textarea, input, select, [contenteditable="true"]')
+              || active?.closest('button, textarea, input, select, [contenteditable="true"]')) return;
             if (pointerSelectedObjectRef.current === object.id) {
               pointerSelectedObjectRef.current = null;
               return;
@@ -914,7 +940,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
           tabIndex={writable && tool === 'select' ? 0 : -1}
           style={{
             background: object.kind === 'annotation.sticky' ? String(object.style.color ?? '#fef3a6') : object.kind === 'shape.ellipse' ? 'color-mix(in srgb, #dbeafe 45%, transparent)' : object.kind === 'shape.diamond' ? 'color-mix(in srgb, #ede9fe 45%, transparent)' : object.kind === 'shape.rectangle' ? 'color-mix(in srgb, #dcfce7 45%, transparent)' : object.kind === 'frame.section' ? 'color-mix(in srgb, #e2e8f0 25%, transparent)' : object.orphaned ? 'color-mix(in srgb, var(--warning) 18%, var(--surface-raised))' : 'transparent',
-            border: selectedId === object.id ? '2px solid var(--selection)' : '0',
+            border: selectedIds.has(object.id) ? '2px solid var(--selection)' : '0',
             borderRadius: object.kind === 'shape.ellipse' ? '50%' : 8,
             cursor: writable && !isOverlayObjectLocked(props.scene, object) ? dragging ? 'grabbing' : 'grab' : 'default',
             height: Math.abs(screenGeometry.height),
@@ -970,7 +996,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
           aria-label="Selected overlay transform controls"
           className="overlay-selection-overlay"
           data-testid="overlay-box-transform-controls"
-          style={{ height: Math.abs(geometry.height), left: Math.min(geometry.x, geometry.x + geometry.width), top: Math.min(geometry.y, geometry.y + geometry.height), transform: `rotate(${geometry.rotation}deg)`, width: Math.abs(geometry.width) }}
+          style={{ height: Math.abs(geometry.height), left: Math.min(geometry.x, geometry.x + geometry.width), pointerEvents: editingId === selected.id ? 'none' : undefined, top: Math.min(geometry.y, geometry.y + geometry.height), transform: `rotate(${geometry.rotation}deg)`, width: Math.abs(geometry.width) }}
         >
           {BOX_TRANSFORM_HANDLES.map((handle) => <button
             aria-label={`Resize overlay ${handle}`}

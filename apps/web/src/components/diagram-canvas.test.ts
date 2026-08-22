@@ -737,10 +737,12 @@ describe('keyboard completion behavior', () => {
 });
 
 describe('bounded focus and Hand seams', () => {
-  it('restores keyboard shortcut focus to the canvas without advancing roving node focus', () => {
-    expect(canvasSource).toContain('shortcutsOriginRef.current = canvas;');
-    expect(canvasSource).toMatch(/restoreShortcutsFocusRef\.current = true;[^]*?origin\.focus\(\{ preventScroll: true \}\);/u);
-    expect(canvasSource).toMatch(/suppressCanvasRovingFocusRef\.current = origin === containerRef\.current;[^]*?const suppressRovingFocus = suppressCanvasRovingFocusRef\.current;[^]*?if \(!suppressRovingFocus[^]*?orderedNodeIds\[0\]/u);
+  it('preserves the keyboard shortcut initiating target without advancing roving node focus', () => {
+    expect(canvasSource).toContain('const origin = event.target instanceof HTMLElement ? event.target : canvas;');
+    expect(canvasSource).toContain('shortcutsOriginRef.current = origin;');
+    expect(canvasSource).toContain('shortcutsOriginNodeIdRef.current = [...nodeButtonRefs.current.entries()]');
+    expect(canvasSource).toMatch(/restoreShortcutsFocusRef\.current = true;[^]*?const originNodeId = shortcutsOriginNodeIdRef\.current;[^]*?currentNodeOrigin[^]*?const restoreTarget[^]*?restoreTarget\.focus\(\{ preventScroll: true \}\);/u);
+    expect(canvasSource).toMatch(/suppressCanvasRovingFocusRef\.current = restoreTarget === containerRef\.current;[^]*?const suppressRovingFocus = suppressCanvasRovingFocusRef\.current;[^]*?if \(!suppressRovingFocus[^]*?orderedNodeIds\[0\]/u);
   });
 
   it('keeps Hand from beginning a subgraph drag that can write node positions', () => {

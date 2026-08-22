@@ -521,7 +521,8 @@ async function expectCollaborativeDirectTransform(pageA: Page, pageB: Page): Pro
 
 async function clickOverlayTool(page: Page, name: string): Promise<void> {
   if (!OVERLAY_PRIMARY_ACTIONS.has(name)) await ensureOverlaySecondaryRail(page);
-  const button = page.getByRole('button', { name, exact: true });
+  const rail = page.getByTestId(OVERLAY_PRIMARY_ACTIONS.has(name) ? 'overlay-toolbar-primary' : 'overlay-toolbar-secondary');
+  const button = rail.getByRole('button', { name, exact: true });
   await button.scrollIntoViewIfNeeded(); await button.click();
   if (OVERLAY_POINT_CREATION_ACTIONS.has(name)) {
     const canvas = page.getByTestId('diagram-canvas');

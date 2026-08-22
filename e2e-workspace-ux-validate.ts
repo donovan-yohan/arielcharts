@@ -4202,14 +4202,14 @@ async function expectOverlayDirectManipulation(page: Page): Promise<void> {
   assert(before && handleBox, 'Rectangle resize controls were missing.');
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2); await page.mouse.down();
   await page.mouse.move(handleBox.x + handleBox.width / 2 + 46, handleBox.y + handleBox.height / 2 + 30, { steps: 4 }); await page.mouse.up();
-  await expect.poll(() => rectangle.boundingBox()).not.toEqual(before);
+  await expect.poll(() => rectangle.boundingBox(), { message: 'Direct manipulation: overlay rectangle did not move after a mouse-resize drag.', timeout: 15_000 }).not.toEqual(before);
   const rotation = page.getByRole('button', { name: 'Rotate overlay', exact: true }); const rotationBox = await rotation.boundingBox();
   assert(rotationBox, 'Rotation handle was missing.'); const beforeRotation = await rectangle.getAttribute('style');
   await page.mouse.move(rotationBox.x + rotationBox.width / 2, rotationBox.y + rotationBox.height / 2); await page.mouse.down();
   await page.mouse.move(rotationBox.x + rotationBox.width / 2 + 70, rotationBox.y + rotationBox.height / 2 + 35, { steps: 4 }); await page.mouse.up();
-  await expect.poll(() => rectangle.getAttribute('style')).not.toBe(beforeRotation);
-  await canvas.focus(); await page.keyboard.press('ControlOrMeta+z'); await expect.poll(() => rectangle.getAttribute('style')).toBe(beforeRotation);
-  await page.keyboard.press('ControlOrMeta+Shift+z'); await expect.poll(() => rectangle.getAttribute('style')).not.toBe(beforeRotation);
+  await expect.poll(() => rectangle.getAttribute('style'), { message: 'Direct manipulation: overlay rectangle did not rotate after a mouse drag on its rotation handle.', timeout: 15_000 }).not.toBe(beforeRotation);
+  await canvas.focus(); await page.keyboard.press('ControlOrMeta+z'); await expect.poll(() => rectangle.getAttribute('style'), { message: 'Direct manipulation: undo did not revert the overlay rotation.', timeout: 15_000 }).toBe(beforeRotation);
+  await page.keyboard.press('ControlOrMeta+Shift+z'); await expect.poll(() => rectangle.getAttribute('style'), { message: 'Direct manipulation: redo did not reapply the overlay rotation.', timeout: 15_000 }).not.toBe(beforeRotation);
   await createOverlayAt(page, 'Line'); const line = page.locator('[data-testid^="overlay-object-"]').last();
   await verifiedClick(page, page.getByRole('button', { name: 'Select tool', exact: true }), 'return to select after line'); await verifiedClick(page, line, 'select line for endpoints');
   await expect(page.getByRole('button', { name: 'Resize line start', exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'Resize line end', exact: true })).toBeVisible();
@@ -4560,14 +4560,14 @@ async function expectDesktopToolbarSafeLane(page: Page): Promise<void> {
   await expect(editor).toBeVisible();
   const primaryBefore = await primary.boundingBox();
   await ensureOverlaySecondaryRail(page);
-  await expect.poll(() => canvas.evaluate((element) => Number.parseFloat(getComputedStyle(element).getPropertyValue('--overlay-toolbar-safe-top')))).toBeGreaterThan((primaryBefore?.height ?? 0) + 8);
+  await expect.poll(() => canvas.evaluate((element) => Number.parseFloat(getComputedStyle(element).getPropertyValue('--overlay-toolbar-safe-top'))), { message: 'Desktop toolbar safe lane: safe-top did not grow while the secondary rail was expanded.', timeout: 15_000 }).toBeGreaterThan((primaryBefore?.height ?? 0) + 8);
   const [expandedBounds, editorBounds, expandedSafeTop] = await Promise.all([
     chrome.boundingBox(), editor.boundingBox(), canvas.evaluate((element) => Number.parseFloat(getComputedStyle(element).getPropertyValue('--overlay-toolbar-safe-top'))),
   ]);
   assert(expandedBounds && editorBounds && editorBounds.y >= expandedBounds.y + expandedBounds.height - 1,
     `Desktop semantic editor overlaps the expanded overlay toolbar lane: ${JSON.stringify({ editorBounds, expandedBounds })}.`);
   await collapseOverlaySecondaryRail(page);
-  await expect.poll(() => canvas.evaluate((element) => Number.parseFloat(getComputedStyle(element).getPropertyValue('--overlay-toolbar-safe-top')))).toBeLessThan(expandedSafeTop);
+  await expect.poll(() => canvas.evaluate((element) => Number.parseFloat(getComputedStyle(element).getPropertyValue('--overlay-toolbar-safe-top'))), { message: 'Desktop toolbar safe lane: safe-top did not shrink after collapsing the secondary rail.', timeout: 15_000 }).toBeLessThan(expandedSafeTop);
   const [collapsedBounds, primaryAfter] = await Promise.all([chrome.boundingBox(), primary.boundingBox()]);
   assert(collapsedBounds && primaryBefore && primaryAfter && collapsedBounds.height < expandedBounds.height
     && Math.abs(primaryBefore.x - primaryAfter.x) <= 1 && Math.abs(primaryBefore.y - primaryAfter.y) <= 1
@@ -4823,15 +4823,15 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   const sourceNode = page.locator('.mermaid-flow-node').filter({ hasText: 'Session A (Worker 1)' }).first();
   const targetNode = page.locator('.mermaid-flow-node').filter({ hasText: 'Session B (Worker 2)' }).first();
   await verifiedClick(page, sourceNode, 'parenthetical source node');
-  await expect.poll(() => canonicalSelectedNodeIds(page), { timeout: 5_000 }).toHaveLength(1);
+  await expect.poll(() => canonicalSelectedNodeIds(page), { message: 'Connect boundary: parenthetical source node click did not select it.', timeout: 5_000 }).toHaveLength(1);
   const [sourceNodeId] = await canonicalSelectedNodeIds(page);
   assert(sourceNodeId, 'Parenthetical source node selection did not expose a canonical id.');
-  await expect.poll(() => canonicalSelectedNodeIds(page), { timeout: 5_000 }).toEqual([sourceNodeId]);
+  await expect.poll(() => canonicalSelectedNodeIds(page), { message: 'Connect boundary: canonical selection did not match the parenthetical source node id.', timeout: 5_000 }).toEqual([sourceNodeId]);
   await nodeToolbar.waitFor({ state: 'visible', timeout: 15_000 });
   await ensureOverlaySecondaryRail(page);
-  await expect.poll(() => canonicalSelectedNodeIds(page), { timeout: 5_000 }).toEqual([sourceNodeId]);
+  await expect.poll(() => canonicalSelectedNodeIds(page), { message: 'Connect boundary: expanding the overlay rail cleared the parenthetical node selection.', timeout: 5_000 }).toEqual([sourceNodeId]);
   await verifiedClick(page, page.getByRole('button', { name: 'Connect Mermaid nodes', exact: true }), 'unified seeded Connect Mermaid nodes action');
-  await expect.poll(() => canonicalSelectedNodeIds(page), { timeout: 5_000 }).toEqual([sourceNodeId]);
+  await expect.poll(() => canonicalSelectedNodeIds(page), { message: 'Connect boundary: activating unified Connect cleared the parenthetical source node selection.', timeout: 5_000 }).toEqual([sourceNodeId]);
   await page.getByText('click target node [esc cancel]', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
   await verifiedClick(page, targetNode, 'parenthetical target node');
   const edgeLabel = page.getByPlaceholder('label (optional)', { exact: true });
@@ -6899,7 +6899,7 @@ async function assertActiveTabVisible(page: Page, label: string): Promise<void> 
         };
       });
       return geometry.tabLeft >= geometry.scrollerLeft - 1 && geometry.tabRight <= geometry.scrollerRight + 1;
-    }, { timeout: 5_000 }).toBe(true);
+    }, { message: `${label} active diagram tab is clipped inside its overflow scroller.`, timeout: 5_000 }).toBe(true);
   } catch (error) {
     throw new Error(`${label} active tab or its actions remained clipped in the overflow scroller: ${JSON.stringify(geometry)}.`, { cause: error });
   }
@@ -8550,13 +8550,19 @@ async function validateWorkspaceUx(): Promise<void> {
         await replaceSource(productionToolbarPage, FLOWCHART_FIXTURE);
         await waitForCanvas(productionToolbarPage, 'flowchart');
         await closeFlyout(productionToolbarPage, 'source');
+        console.log('E2E toolbar suite: connect selection boundary');
         await expectToolbarConnectSelectionBoundary(productionToolbarPage);
+        console.log('E2E toolbar suite: hand flow targets');
         await expectHandToolDoesNotActivateFlowTargets(productionToolbarPage);
+        console.log('E2E toolbar suite: overlay pointer/keyboard ownership');
         await expectOverlayPointerKeyboardOwnership(productionToolbarPage);
+        console.log('E2E toolbar suite: shortcuts dialog keyboard behavior');
         await expectShortcutsDialogKeyboardBehavior(productionToolbarPage);
+        console.log('E2E toolbar suite: overlay direct manipulation');
         await expectOverlayDirectManipulation(productionToolbarPage);
         await replaceSource(productionToolbarPage, API_SEQUENCE_FIXTURE);
         await waitForCanvas(productionToolbarPage, 'sequence');
+        console.log('E2E toolbar suite: desktop safe lane');
         await expectDesktopToolbarSafeLane(productionToolbarPage);
         record(results, 'production workspace UX runs the toolbar pointer-focus, shortcut-dialog, Hand, and direct-manipulation assertions');
       } finally {

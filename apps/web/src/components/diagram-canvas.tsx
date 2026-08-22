@@ -593,6 +593,11 @@ const FlowNodeInteractionContext = createContext<FlowNodeInteractionContextValue
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
 const EDITOR_MIN_ZOOM = 0.4;
+// Roving-focus suppression is time-windowed, not one-shot: React onFocus
+// bubbles, so the deliberate restore's own focus event consumes a one-shot
+// flag, and a late container refocus (dialog unmount churn, overlay remount)
+// would then rove to node 0. The window only needs to cover that churn.
+const ROVING_SUPPRESS_WINDOW_MS = 250;
 const FIT_PADDING = 64;
 const BOTTOM_TOOLBAR_INSET = 12;
 const BOTTOM_TOOLBAR_GAP = 8;
@@ -1321,7 +1326,7 @@ export function DiagramCanvas({
   const shortcutsOriginNodeIdRef = useRef<string | null>(null);
   const shortcutsDialogRef = useRef<HTMLDivElement | null>(null);
   const restoreShortcutsFocusRef = useRef(false);
-  const suppressCanvasRovingFocusRef = useRef(false);
+  const suppressCanvasRovingFocusRef = useRef(0);
   const closeShortcuts = useCallback(() => {
     restoreShortcutsFocusRef.current = true;
     setShortcutsOpen(false);
@@ -2442,7 +2447,7 @@ export function DiagramCanvas({
         setEditingSubgraphLabel('');
         setMode('select');
         onCanvasToolChange?.('select');
-        suppressCanvasRovingFocusRef.current = true;
+        suppressCanvasRovingFocusRef.current = Date.now();
         canvas?.focus({ preventScroll: true });
       }
 
@@ -2620,10 +2625,13 @@ export function DiagramCanvas({
     const restoreFocus = () => {
       const currentNodeOrigin = originNodeId ? nodeButtonRefs.current.get(originNodeId) ?? null : null;
       const restoreTarget = currentNodeOrigin?.isConnected ? currentNodeOrigin : origin;
-      suppressCanvasRovingFocusRef.current = restoreTarget === containerRef.current;
+      // Any deliberate keyboard-driven restore must not trigger container roving
+      // (e.g. an overlay-object origin would otherwise fall through to node 0).
+      // Time-windowed so the restore's own (bubbled) focus event does not
+      // consume the suppression before late unmount-churn refocus lands.
+      suppressCanvasRovingFocusRef.current = Date.now();
       if (restoreTarget?.isConnected) restoreTarget.focus({ preventScroll: true });
       if (document.activeElement !== restoreTarget) {
-        suppressCanvasRovingFocusRef.current = true;
         containerRef.current?.focus({ preventScroll: true });
       }
     };
@@ -3496,7 +3504,7 @@ export function DiagramCanvas({
         }
       }}
       onPointerDownCapture={(event) => {
-        if (event.target === event.currentTarget) suppressCanvasRovingFocusRef.current = true;
+        if (event.target === event.currentTarget) suppressCanvasRovingFocusRef.current = Date.now();
         handlePointerDownCapture(event);
       }}
       onPointerLeave={() => {
@@ -3509,8 +3517,7 @@ export function DiagramCanvas({
       onLostPointerCapture={handleLostPointerCapture}
       onPointerUp={handlePointerUp}
       onFocus={(event) => {
-        const suppressRovingFocus = suppressCanvasRovingFocusRef.current;
-        suppressCanvasRovingFocusRef.current = false;
+        const suppressRovingFocus = Date.now() - suppressCanvasRovingFocusRef.current < ROVING_SUPPRESS_WINDOW_MS;
         if (!suppressRovingFocus && event.target === event.currentTarget && event.currentTarget.matches(':focus-visible') && orderedNodeIds[0]) {
           focusNode(orderedNodeIds[0]);
         }

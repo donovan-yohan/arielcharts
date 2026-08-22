@@ -742,7 +742,7 @@ describe('bounded focus and Hand seams', () => {
     expect(canvasSource).toContain('shortcutsOriginRef.current = origin;');
     expect(canvasSource).toContain('shortcutsOriginNodeIdRef.current = [...nodeButtonRefs.current.entries()]');
     expect(canvasSource).toMatch(/restoreShortcutsFocusRef\.current = true;[^]*?const originNodeId = shortcutsOriginNodeIdRef\.current;[^]*?currentNodeOrigin[^]*?const restoreTarget[^]*?restoreTarget\.focus\(\{ preventScroll: true \}\);/u);
-    expect(canvasSource).toMatch(/suppressCanvasRovingFocusRef\.current = restoreTarget === containerRef\.current;[^]*?const suppressRovingFocus = suppressCanvasRovingFocusRef\.current;[^]*?if \(!suppressRovingFocus[^]*?orderedNodeIds\[0\]/u);
+    expect(canvasSource).toMatch(/suppressCanvasRovingFocusRef\.current = Date\.now\(\);[^]*?const suppressRovingFocus = Date\.now\(\) - suppressCanvasRovingFocusRef\.current < ROVING_SUPPRESS_WINDOW_MS;[^]*?if \(!suppressRovingFocus[^]*?orderedNodeIds\[0\]/u);
   });
 
   it('keeps Hand from beginning a subgraph drag that can write node positions', () => {

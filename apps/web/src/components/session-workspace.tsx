@@ -2000,6 +2000,7 @@ export function SessionWorkspace({
     if (!openFlyout) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        if (event.defaultPrevented) return;
         const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
         const canvasOwnsEscape = canvas !== null && (
           (event.target instanceof Node && canvas.contains(event.target))

@@ -5,7 +5,7 @@ import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
 import { getConnectModeSourceId } from '../lib/diagram-connect-state';
-import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getControlledConnectSessionTransition, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getMeasuredSemanticPanelPlacement, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRendererInteractionMode, getSankeyLinkControlLabel, getSemanticControlsSafeBottom, isSameNodeSelection, pruneInactivePersistentDrafts, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRestoreCanvasFocusAfterPaste, syncCanvasToolbarSafeLane } from './diagram-canvas';
+import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getControlledConnectSessionTransition, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getMeasuredSemanticPanelPlacement, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRendererInteractionMode, getSankeyLinkControlLabel, getSemanticControlsSafeBottom, isSameNodeSelection, pruneInactivePersistentDrafts, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRejectCanvasShortcut, shouldRestoreCanvasFocusAfterPaste, syncCanvasToolbarSafeLane } from './diagram-canvas';
 import { getDirtyDraftFields, reconcileCanonicalDraft } from '../lib/canonical-draft';
 
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
@@ -39,7 +39,7 @@ describe('canvas pan exclusions', () => {
     expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('form');
     expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('[data-canvas-pan-exclusion="true"]');
     expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('[data-subgraph-drag-target="true"]');
-    expect(canvasSource).toMatch(/return !target\.closest\(CANVAS_PAN_EXCLUSION_SELECTOR\);/u);
+    expect(canvasSource).toMatch(/handActive[^]*?CANVAS_PAN_EXCLUSION_SELECTOR[^]*?return !target\.closest\(exclusion\);/u);
     expect(canvasSource).toMatch(/className="diagram-canvas-shell"[^]*?<div[^]*?data-testid="diagram-canvas"[^]*?touchAction: 'none'/u);
     expect(canvasSource).toMatch(/<form className="canvas-sequence-participant-form" data-canvas-pan-exclusion="true"/u);
   });
@@ -553,7 +553,7 @@ describe('canvas wheel ownership', () => {
 
   it('keeps the focus ring available for keyboard navigation but hides it while a Space drag pans', () => {
     const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
-    expect(canvasSource).toMatch(/data-panning=\{spacePressed \|\| isPanning \|\| undefined\}/u);
+    expect(canvasSource).toMatch(/data-panning=\{spacePressed \|\| overlay\?\.tool === 'hand' \|\| isPanning \|\| undefined\}/u);
     expect(css).toMatch(/\.diagram-canvas:focus-visible\s*\{[^}]*outline:/u);
     expect(css).toMatch(/\.diagram-canvas\[data-panning='true'\]:focus-visible\s*\{\s*outline:\s*none;/u);
   });
@@ -579,7 +579,7 @@ describe('connect mode entry', () => {
     expect(getConnectModeSourceId(['source'])).toBe('source');
     expect(getConnectModeSourceId(['source', 'target'])).toBeNull();
     expect(canvasSource).toMatch(/const toggleConnectMode = useCallback\(\(\) => \{[^]*?getConnectModeSourceId\(selectionRef\.current\)/u);
-    expect(canvasSource).toMatch(/key === 'c'[^]*?toggleConnectMode\(\);/u);
+    expect(canvasSource).toMatch(/getCanvasToolShortcut\(event\.key[^]*?shortcutTool === 'connect'[^]*?setMode\('connect'\)/u);
     expect(canvasSource).not.toMatch(/label="Connect nodes"/u);
     expect(canvasSource).not.toMatch(/label=\{mode === 'laser' \? 'Exit laser pointer' : 'Laser pointer'\}/u);
   });
@@ -720,6 +720,33 @@ describe('shouldEnableCanvasMarquee', () => {
     expect(shouldEnableCanvasMarquee(true, 'select', true)).toBe(false);
     expect(shouldEnableCanvasMarquee(true, 'connect', false)).toBe(false);
     expect(shouldEnableCanvasMarquee(false, 'select', false)).toBe(false);
+  });
+});
+
+describe('keyboard completion behavior', () => {
+  it('rejects IME input and keeps focus, shift-code, pending Escape, and Hand gates wired', () => {
+    expect(shouldRejectCanvasShortcut({ isComposing: true, key: 'h' })).toBe(true);
+    expect(shouldRejectCanvasShortcut({ isComposing: false, key: 'Process' })).toBe(true);
+    expect(shouldRejectCanvasShortcut({ isComposing: false, key: 'h' })).toBe(false);
+    expect(canvasSource).toContain("event.code === 'Digit1'");
+    expect(canvasSource).toContain("event.code === 'Digit2'");
+    expect(canvasSource).toContain('shortcutsDialogRef.current?.querySelector');
+    expect(canvasSource).toContain('onFitSelection={(bounds)');
+    expect(canvasSource).toContain("overlay?.tool !== 'hand'");
+  });
+});
+
+describe('bounded focus and Hand seams', () => {
+  it('preserves the keyboard shortcut initiating target without advancing roving node focus', () => {
+    expect(canvasSource).toContain('const origin = event.target instanceof HTMLElement ? event.target : canvas;');
+    expect(canvasSource).toContain('shortcutsOriginRef.current = origin;');
+    expect(canvasSource).toContain('shortcutsOriginNodeIdRef.current = [...nodeButtonRefs.current.entries()]');
+    expect(canvasSource).toMatch(/restoreShortcutsFocusRef\.current = true;[^]*?const originNodeId = shortcutsOriginNodeIdRef\.current;[^]*?currentNodeOrigin[^]*?const restoreTarget[^]*?restoreTarget\.focus\(\{ preventScroll: true \}\);/u);
+    expect(canvasSource).toMatch(/suppressCanvasRovingFocusRef\.current = Date\.now\(\);[^]*?const suppressRovingFocus = Date\.now\(\) - suppressCanvasRovingFocusRef\.current < ROVING_SUPPRESS_WINDOW_MS;[^]*?if \(!suppressRovingFocus[^]*?orderedNodeIds\[0\]/u);
+  });
+
+  it('keeps Hand from beginning a subgraph drag that can write node positions', () => {
+    expect(canvasSource).toMatch(/const handleSubgraphPointerDown[^]*?if \(!canEditStructure \|\| overlay\?\.tool === 'hand' \|\| spacePressed \|\| event\.button !== 0/u);
   });
 });
 

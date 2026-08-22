@@ -6,13 +6,168 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OverlayGeometry, OverlayObjectRecord } from '@arielcharts/shared';
 import type { CanvasTool } from '../lib/canvas-interaction-state';
-import { getImmediateOverlayInspectorCap, incrementalTextChange, inspectorCapacityPx, moveRovingToolbarFocus, OverlayCanvasLayer, OVERLAY_TOOLBAR_PRIMARY_HEIGHT, OVERLAY_TOOLBAR_SECONDARY_ACTIONS_HEIGHT, OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET, OVERLAY_TOOLBAR_STACKED_INNER_GAP, resolveOverlayInspectorSafeBottomTop, resolveOverlayToolbarViewport, viewportCenterToWorld } from './overlay-canvas-layer';
+import { getImmediateOverlayInspectorCap, getPlatformShortcutTitle, incrementalTextChange, inspectorCapacityPx, moveRovingToolbarFocus, OverlayCanvasLayer, OVERLAY_TOOLBAR_PRIMARY_HEIGHT, OVERLAY_TOOLBAR_SECONDARY_ACTIONS_HEIGHT, OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET, OVERLAY_TOOLBAR_STACKED_INNER_GAP, resolveOverlayInspectorSafeBottomTop, resolveOverlayToolbarViewport, viewportCenterToWorld } from './overlay-canvas-layer';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 describe('OverlayCanvasLayer', () => {
+  it('formats modifier titles with the actual platform glyph while preserving action labels', () => {
+    vi.stubGlobal('navigator', { platform: 'MacIntel' });
+    expect(getPlatformShortcutTitle('Undo Mermaid change', 'Mod+Z')).toBe('Undo Mermaid change — ⌘+Z');
+    vi.stubGlobal('navigator', { platform: 'Linux x86_64' });
+    expect(getPlatformShortcutTitle('Undo Mermaid change', 'Mod+Z')).toBe('Undo Mermaid change — Ctrl+Z');
+  });
+
+  it('hands real pointer selection and keyboard ownership to overlay objects while preserving Shift toggle and Escape bubbling', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onDuplicateMany = vi.fn(() => ['copy-a', 'copy-b']); const onFitSelection = vi.fn(); const onMoveMany = vi.fn();
+    const parentKeyDown = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onMoveMany, onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onDuplicateMany, onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onFitSelection };
+    const object = (id: string, metadata = {}, layer?: string): OverlayObjectRecord => ({ id, kind: 'shape.rectangle', version: 1, order_key: id, geometry: { x: id === 'a' ? 10 : 60, y: 20, width: 30, height: 40, rotation: 0 }, style: {}, metadata, payload: {}, body: '', layer });
+    await act(async () => root.render(<div onKeyDown={parentKeyDown}><OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', layers: [{ id: 'hidden', name: 'Hidden', order_key: 'z', visible: false, locked: false, export: true }], objects: [object('a'), object('b'), object('locked', { locked: true }), object('hidden', {}, 'hidden')] }} /></div>));
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    owner.getBoundingClientRect = () => ({ bottom: 400, height: 400, left: 0, right: 400, top: 0, width: 400, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const a = host.querySelector<HTMLElement>('[data-testid="overlay-object-a"]')!; const b = host.querySelector<HTMLElement>('[data-testid="overlay-object-b"]')!;
+    a.setPointerCapture = vi.fn(); b.setPointerCapture = vi.fn();
+    const pointer = (shiftKey = false) => Object.assign(new MouseEvent('pointerdown', { bubbles: true, button: 0, cancelable: true, clientX: 30, clientY: 40, shiftKey }), { pointerId: shiftKey ? 2 : 1 });
+
+    await act(async () => a.dispatchEvent(pointer()));
+    expect(document.activeElement).toBe(a); expect(owner.contains(document.activeElement)).toBe(true);
+    await act(async () => b.dispatchEvent(pointer(true)));
+    expect(document.activeElement).toBe(b); expect(owner.contains(document.activeElement)).toBe(true);
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })));
+    expect(onMoveMany).toHaveBeenCalledWith(['a', 'b'], 1, 0);
+
+    await act(async () => b.dispatchEvent(pointer(true)));
+    expect(a.getAttribute('data-selected')).toBe('true'); expect(b.getAttribute('data-selected')).toBeNull();
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Backspace' })));
+    expect(callbacks.onDelete).toHaveBeenLastCalledWith(['a']);
+    await act(async () => b.dispatchEvent(pointer(true)));
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'Digit2', key: '@', shiftKey: true })));
+    expect(onFitSelection).toHaveBeenCalledWith(expect.objectContaining({ x: 10, y: 20, width: 80, height: 40 }));
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'd' })));
+    expect(onDuplicateMany).toHaveBeenCalledWith(['a', 'b']);
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'a' })));
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Backspace' })));
+    expect(callbacks.onDelete).toHaveBeenLastCalledWith(['a', 'b']);
+    await act(async () => b.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })));
+    expect(parentKeyDown).toHaveBeenCalled(); expect(host.querySelector('[data-selected="true"]')).toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it('selects visible unlocked overlays with Mod+A regardless of the active drawing tool', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onDuplicate = vi.fn(() => null);
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate, onBeginComposition: vi.fn(), onCommitComposition: vi.fn() };
+    const object = (id: string): OverlayObjectRecord => ({ id, kind: 'shape.rectangle', version: 1, order_key: id, geometry: { x: 10, y: 20, width: 30, height: 40, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: '' });
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="rectangle" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [object('a'), object('b')] }} />));
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'a' })));
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'd' })));
+    expect(onDuplicate).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount());
+  });
+
+  it('clears overlay selection for Escape and V while preserving the outer Escape path', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const parentKeyDown = vi.fn(); const onToolChange = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange };
+    const shape: OverlayObjectRecord = { id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 100, height: 60, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Text' };
+    await act(async () => root.render(<div onKeyDown={parentKeyDown}><OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [shape] }} /></div>));
+    const object = host.querySelector<HTMLElement>('[data-testid="overlay-object-shape"]')!;
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => object.click());
+    expect(object.getAttribute('data-selected')).toBe('true');
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })));
+    expect(parentKeyDown).toHaveBeenCalled();
+    expect(object.getAttribute('data-selected')).toBeNull();
+    expect(onToolChange).toHaveBeenCalledTimes(1);
+    await act(async () => object.click());
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'v' })));
+    expect(object.getAttribute('data-selected')).toBeNull();
+    expect(onToolChange).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount());
+  });
+
+  it('fits an anchored overlay from its rendered world bounds', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onFitSelection = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onFitSelection };
+    const anchored: OverlayObjectRecord = { id: 'anchored', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 5, y: 7, width: 30, height: 40, rotation: 0 }, anchor: { mermaid_id: 'node-1', offset: { x: 4, y: 6 }, fallback: { x: 5, y: 7 } }, style: {}, metadata: {}, payload: {}, body: '' };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map([['node-1', { x: 50, y: 60 }]])} sessionId="abc123de" tool="select" transform={{ x: 100, y: 200, zoom: 2 }} scene={{ version: 1, diagram_id: 'main', objects: [anchored] }} />));
+    const object = host.querySelector<HTMLElement>('[data-testid="overlay-object-anchored"]')!;
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => object.click());
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'Digit2', key: '@', shiftKey: true })));
+    expect(onFitSelection).toHaveBeenCalledWith(expect.objectContaining({ x: 54, y: 66, width: 30, height: 40 }));
+    await act(async () => root.unmount());
+  });
+
+  it('does not select, duplicate, or switch tools while the overlay is read-only', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onDuplicate = vi.fn(() => 'copy'); const onToolChange = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate, onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange };
+    const shape: OverlayObjectRecord = { id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 100, height: 60, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Text' };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [shape] }} />));
+    const object = host.querySelector<HTMLElement>('[data-testid="overlay-object-shape"]')!;
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'a' })));
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ctrlKey: true, key: 'd' })));
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'r' })));
+    expect(object.getAttribute('data-selected')).toBeNull();
+    expect(onDuplicate).not.toHaveBeenCalled();
+    expect(onToolChange).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it('does not enter Connect from a keyboard shortcut when Mermaid connections are unavailable', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onToolChange = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} canConnectMermaidNodes={false} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} />));
+    const owner = host.querySelector<HTMLElement>('[data-testid="overlay-canvas-owner"]')!;
+    await act(async () => owner.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'c' })));
+    expect(onToolChange).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it('keeps textarea Escape and composing keys out of parent canvas history', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host); const parentKeyDown = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(), onCommitComposition: vi.fn() };
+    const shape: OverlayObjectRecord = { id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 100, height: 60, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Text' };
+    await act(async () => root.render(<div onKeyDown={parentKeyDown}><OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [shape] }} /></div>));
+    const object = host.querySelector<HTMLElement>('[data-testid="overlay-object-shape"]')!;
+    await act(async () => object.click());
+    await act(async () => object.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter' })));
+    const textarea = object.querySelector<HTMLTextAreaElement>('textarea')!;
+    parentKeyDown.mockClear();
+    await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })));
+    expect(parentKeyDown).not.toHaveBeenCalled(); expect(callbacks.onUndo).not.toHaveBeenCalled(); expect(object.querySelector('textarea')).toBeNull();
+    const composing = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, isComposing: true, key: 'h' });
+    await act(async () => object.dispatchEvent(composing));
+    expect(callbacks.onUndo).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it('keeps an overlay textarea mounted when Escape arrives during IME composition', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(() => null), onBeginComposition: vi.fn(() => null), onCommitComposition: vi.fn() };
+    const shape: OverlayObjectRecord = { id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 100, height: 60, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'Text' };
+    await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [shape] }} />));
+    const object = host.querySelector<HTMLElement>('[data-testid="overlay-object-shape"]')!;
+    await act(async () => object.click());
+    await act(async () => object.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter' })));
+    const textarea = object.querySelector<HTMLTextAreaElement>('textarea')!;
+    await act(async () => textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: 'に' })));
+    await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, isComposing: true, key: 'Escape' })));
+    expect(object.querySelector('textarea')).toBe(textarea);
+    await act(async () => textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'に' })));
+    expect(object.querySelector('textarea')).toBe(textarea);
+    await act(async () => root.unmount());
+  });
+
   it('derives one incremental character operation for controlled text edits', () => {
     expect(incrementalTextChange('hello world', 'hello brave world')).toEqual({ index: 6, deleteCount: 0, insert: 'brave ' });
     expect(incrementalTextChange('hello brave world', 'hello world')).toEqual({ index: 6, deleteCount: 6, insert: '' });
@@ -119,7 +274,7 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => root.unmount());
   });
 
-  it('scopes touch-drag click suppression to its originating direct action and expires it for other tools', async () => {
+  it('suppresses the originating touch-drag click beyond the next animation frame without blocking other tools', async () => {
     const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
     const onToolChange = vi.fn();
     const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange };
@@ -129,14 +284,14 @@ describe('OverlayCanvasLayer', () => {
     const rectangle = rail.querySelector<HTMLButtonElement>('[aria-label="Rectangle"]')!;
     rail.setPointerCapture = vi.fn(); rail.releasePointerCapture = vi.fn(); rail.hasPointerCapture = vi.fn(() => true);
     const pointer = (type: string, x: number) => Object.assign(new Event(type, { bubbles: true, cancelable: true }), { button: 0, clientX: x, pointerId: 12, pointerType: 'touch' });
+    const click = (pointerId: number) => Object.assign(new MouseEvent('click', { bubbles: true, cancelable: true }), { pointerId });
     await act(async () => { diamond.dispatchEvent(pointer('pointerdown', 220)); diamond.dispatchEvent(pointer('pointermove', 160)); diamond.dispatchEvent(pointer('pointerup', 160)); });
     expect(rail.scrollLeft).toBe(60);
-    expect(onToolChange).not.toHaveBeenCalled();
-    await act(async () => rectangle.click());
-    expect(onToolChange).toHaveBeenLastCalledWith('rectangle');
     await act(async () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())));
-    await act(async () => diamond.click());
-    expect(onToolChange).toHaveBeenLastCalledWith('diamond');
+    await act(async () => diamond.dispatchEvent(click(12)));
+    expect(onToolChange).not.toHaveBeenCalled();
+    await act(async () => rectangle.dispatchEvent(click(13)));
+    expect(onToolChange).toHaveBeenLastCalledWith('rectangle');
     await act(async () => root.unmount());
   });
 
@@ -564,12 +719,15 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="primary" sessionId="abc123de" readOnly={false} semanticAnchors={new Map()} transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'primary', objects: [{ id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 180, height: 120, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'A label' }] }} />));
     const primary = document.body.querySelector<HTMLElement>('[data-testid="overlay-toolbar-primary"]')!;
     const select = primary.querySelector<HTMLButtonElement>('[aria-label="Select tool"]')!;
+    const hand = primary.querySelector<HTMLButtonElement>('[aria-label="Hand tool"]')!;
     const text = primary.querySelector<HTMLButtonElement>('[aria-label="Text"]')!;
     const inspector = primary.querySelector<HTMLButtonElement>('[aria-label="More canvas tools"]')!;
     expect([...primary.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.tabIndex === 0)).toHaveLength(1);
     select.focus();
     await act(async () => primary.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })));
-    expect(document.activeElement).toBe(text); expect(text.tabIndex).toBe(0); expect(select.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(hand); expect(hand.tabIndex).toBe(0); expect(select.tabIndex).toBe(-1);
+    await act(async () => primary.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })));
+    expect(document.activeElement).toBe(text); expect(text.tabIndex).toBe(0);
     text.disabled = true;
     await act(async () => { await Promise.resolve(); });
     expect(select.tabIndex).toBe(0);
@@ -722,7 +880,7 @@ describe('OverlayCanvasLayer', () => {
     const listButton = (prefix: string) => [...document.body.querySelectorAll('aside[aria-label="ArielCharts overlay list"] button')].find((item) => item.textContent?.startsWith(prefix)) as HTMLButtonElement;
     await act(async () => {
       listButton('shape.rectangle: Left').click();
-      listButton('shape.ellipse: Right').dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+      listButton('shape.ellipse: Right').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
     });
     await act(async () => button('Objects and layers').click());
     await act(async () => button('Connect selection').click());

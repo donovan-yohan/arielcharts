@@ -5,6 +5,7 @@
  */
 export type CanvasTool =
   | 'select'
+  | 'hand'
   | 'connect'
   | 'laser'
   | 'text'
@@ -19,7 +20,7 @@ export type CanvasTool =
   | 'eraser';
 
 export type MermaidCanvasTool = Extract<CanvasTool, 'select' | 'connect' | 'laser'>;
-export type OverlayCanvasTool = Exclude<CanvasTool, 'connect' | 'laser'>;
+export type OverlayCanvasTool = Exclude<CanvasTool, 'connect' | 'laser' | 'hand'>;
 
 export const CANVAS_SELECTION_PRESERVING_SELECTOR = '[data-canvas-selection-preserving="true"]';
 
@@ -40,12 +41,13 @@ export function coerceCanvasToolForRenderer(tool: CanvasTool, isFlowchart: boole
 }
 
 export function isOverlayPointerTool(tool: CanvasTool): tool is Exclude<OverlayCanvasTool, 'select'> {
-  return tool !== 'select' && tool !== 'connect' && tool !== 'laser';
+  return tool !== 'select' && tool !== 'connect' && tool !== 'laser' && tool !== 'hand';
 }
 
 export function getCanvasToolCursor(tool: CanvasTool): string {
   switch (tool) {
     case 'select': return 'default';
+    case 'hand': return 'grab';
     case 'connect': return 'crosshair';
     case 'laser': return 'none';
     case 'eraser': return 'cell';
@@ -55,8 +57,41 @@ export function getCanvasToolCursor(tool: CanvasTool): string {
   }
 }
 
+export const CANVAS_TOOL_SHORTCUTS = {
+  a: 'arrow', c: 'connect', d: 'diamond', e: 'eraser', h: 'hand', k: 'laser',
+  l: 'line', o: 'ellipse', p: 'pen', r: 'rectangle', t: 'text', v: 'select',
+} as const satisfies Record<string, CanvasTool>;
+
+const CANVAS_TOOL_SHORTCUT_LABELS: Partial<Record<CanvasTool, string>> = {
+  arrow: 'Arrow',
+  connect: 'Connect',
+  diamond: 'Diamond',
+  ellipse: 'Ellipse',
+  eraser: 'Eraser',
+  hand: 'Hand',
+  laser: 'Laser',
+  line: 'Line',
+  pen: 'Pen',
+  rectangle: 'Rectangle',
+  select: 'Select',
+  text: 'Text',
+};
+
+export function getCanvasToolShortcutLabel(tool: CanvasTool): string {
+  const entry = (Object.entries(CANVAS_TOOL_SHORTCUTS) as Array<[string, CanvasTool]>).find(([, value]) => value === tool);
+  return entry?.[0].toUpperCase() ?? '';
+}
+
+export function getCanvasToolShortcutSummary(exclude: readonly CanvasTool[] = []): string {
+  return (Object.entries(CANVAS_TOOL_SHORTCUTS) as Array<[string, CanvasTool]>)
+    .filter(([, tool]) => !exclude.includes(tool))
+    .map(([key, tool]) => `${key.toUpperCase()} ${CANVAS_TOOL_SHORTCUT_LABELS[tool] ?? tool}`)
+    .join(' · ');
+}
+
 /** V and Escape are intentionally global canvas exits, except while typing. */
-export function getCanvasToolShortcut(key: string, isTyping: boolean): CanvasTool | null {
-  if (isTyping) return null;
-  return key === 'Escape' || key.toLowerCase() === 'v' ? 'select' : null;
+export function getCanvasToolShortcut(key: string, isTyping: boolean, hasModifier = false): CanvasTool | null {
+  if (isTyping || hasModifier) return null;
+  if (key === 'Escape') return 'select';
+  return CANVAS_TOOL_SHORTCUTS[key.toLowerCase() as keyof typeof CANVAS_TOOL_SHORTCUTS] ?? null;
 }

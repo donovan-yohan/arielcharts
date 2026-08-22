@@ -1617,7 +1617,10 @@ code {
 
   .workspace-onboarding {
     left: 8px;
+    max-height: calc(100% - max(76px, var(--overlay-toolbar-safe-top, 0px)) - 124px);
     max-width: calc(100% - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 12px;
   }
 
@@ -3031,7 +3034,9 @@ code {
     min-height: var(--workspace-mobile-topbar-height);
     flex-direction: row;
     align-items: center;
-    padding: max(6px, env(safe-area-inset-top)) 10px 6px;
+    justify-content: flex-start;
+    gap: 6px;
+    padding: max(6px, env(safe-area-inset-top)) 10px 6px 8px;
   }
 
   .workspace-topbar-left,
@@ -3040,10 +3045,38 @@ code {
     min-width: 0;
   }
 
-  .workspace-topbar-right {
+  .workspace-topbar-left {
     flex: 0 1 auto;
+    overflow: hidden;
+  }
+
+  .workspace-topbar-right {
+    flex: 1 1 auto;
+    margin-left: auto;
     justify-content: flex-end;
-    gap: 6px;
+    gap: 5px;
+  }
+
+  .workspace-presence-avatars {
+    padding-left: 0;
+  }
+
+  .presenter-mobile-menu summary {
+    width: 44px;
+    min-width: 44px;
+    justify-content: center;
+    padding: 0;
+    font-size: 0;
+    list-style: none;
+  }
+
+  .presenter-mobile-menu summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .presenter-mobile-menu summary::after {
+    content: '⋯';
+    font: 700 22px/1 var(--font-sans);
   }
 
   .workspace-export-menu > .workspace-icon-button {
@@ -3052,7 +3085,26 @@ code {
   }
 
   .workspace-logo {
-    font-size: 16px;
+    font-size: 15px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-export-menu > .workspace-icon-button {
+    width: 44px;
+    min-width: 44px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .workspace-export-menu > .workspace-icon-button > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .workspace-main,
@@ -3200,10 +3252,16 @@ code {
   }
 
   [data-testid='canvas-controls-toolbar'] {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 4px !important;
     justify-content: flex-end;
+    overflow-x: auto;
     padding: 4px !important;
+    scrollbar-width: thin;
+  }
+
+  [data-testid='canvas-controls-toolbar'] .canvas-toolbar-button {
+    flex: 0 0 44px;
   }
 
   .workspace-touch-label {

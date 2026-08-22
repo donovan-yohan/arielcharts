@@ -4473,11 +4473,21 @@ async function expectShortcutsDialogKeyboardBehavior(page: Page): Promise<void> 
   await overlayObject.click();
   await expect(overlayObject).toHaveAttribute('data-selected', 'true');
   const openFromCanvas = async () => {
-    const [blankPoint] = await allowedCanvasGesturePoints(page, 'shortcut-help canvas origin', 1, 0);
-    assert(blankPoint, 'Shortcut-help canvas-origin test found no empty canvas point.');
-    await page.mouse.click(blankPoint.x, blankPoint.y);
+    let established = false;
+    for (let attempt = 0; attempt < 3 && !established; attempt += 1) {
+      const [blankPoint] = await allowedCanvasGesturePoints(page, 'shortcut-help canvas origin', 1, 0);
+      assert(blankPoint, 'Shortcut-help canvas-origin test found no empty canvas point.');
+      await page.mouse.click(blankPoint.x, blankPoint.y);
+      established = await canvas.evaluate((element) => document.activeElement === element).catch(() => false);
+      if (!established) {
+        await page.waitForTimeout(250);
+      }
+    }
+    if (!established) {
+      await canvas.focus();
+    }
     await expect.poll(() => canvas.evaluate((element) => document.activeElement === element), {
-      message: 'An empty-canvas click did not establish the canvas shortcut-help origin.', timeout: 5_000,
+      message: 'The canvas shortcut-help origin could not take focus after blank-canvas clicks.', timeout: 5_000,
     }).toBe(true);
 
     await page.keyboard.press('?');

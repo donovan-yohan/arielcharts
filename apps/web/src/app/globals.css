@@ -1286,10 +1286,14 @@ code {
   display: grid;
   gap: 12px;
   left: 50%;
-  /* Center within the free band below the measured overlay-toolbar lane so the
-     card can never slide under an expanded More lane; when no toolbar is
-     mounted, keep a small top gutter. */
+  /* Center within the free band below the measured overlay-toolbar lane and
+     cap the card to that band, so an expanded More lane can never cover it
+     even when the band is shorter than the card. When no toolbar is mounted,
+     keep a small top gutter. */
   top: calc(var(--overlay-toolbar-safe-top, 16px) + (100% - var(--overlay-toolbar-safe-top, 16px) - 80px) / 2);
+  max-height: calc(100% - max(16px, var(--overlay-toolbar-safe-top, 0px)) - 80px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   max-width: min(370px, calc(100% - 32px));
   padding: 14px;
   position: absolute;

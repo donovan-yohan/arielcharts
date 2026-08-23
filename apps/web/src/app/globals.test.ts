@@ -20,7 +20,8 @@ describe('mobile workspace CSS contracts', () => {
     expect(css).toMatch(/\.overlay-toolbar-secondary-actions\s*\{[^}]*box-sizing:\s*border-box;[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;[^}]*touch-action:\s*pan-x;[^}]*width:\s*100%;/u);
     expect(css).not.toMatch(/\.overlay-toolbar-divider\s*\{[^}]*pointer-events:\s*auto;/u);
     expect(css).toMatch(/\.overlay-toolbar-secondary\s*\{[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;[^}]*overflow:\s*clip;[^}]*pointer-events:\s*none;[^}]*grid-template-rows:\s*54px minmax\(0, 1fr\);[^}]*visibility:\s*hidden;/u);
-    expect(css).toMatch(/\.overlay-toolbar-secondary\.is-expanded\s*\{[^}]*height:\s*var\(--overlay-toolbar-rail-height\);[^}]*min-height:\s*var\(--overlay-toolbar-rail-height\);[^}]*pointer-events:\s*none;[^}]*visibility:\s*visible;/u);
+    expect(css).toMatch(/\.overlay-toolbar-secondary\.is-expanded\s*\{[^}]*height:\s*auto;[^}]*max-height:\s*calc\(var\(--overlay-toolbar-available-height, 100vh\) - 62px\);[^}]*pointer-events:\s*none;[^}]*visibility:\s*visible;/u);
+    expect(css).not.toMatch(/--overlay-toolbar-rail-height/u);
     expect(css).toMatch(/\.overlay-toolbar-inspector\s*\{[^}]*box-sizing:\s*border-box;[^}]*max-height:\s*118px;[^}]*overflow:\s*auto;/u);
     expect(css).toMatch(/@media \(pointer: coarse\), \(max-width: 420px\)[^]*?\.overlay-toolbar-button\s*\{[^}]*height:\s*44px;[^}]*width:\s*44px;/u);
     expect(css).not.toMatch(/@media \(pointer: coarse\), \(max-width: 420px\)[^]*?\.overlay-toolbar-primary-tools\s*\{[^}]*pointer-events:\s*auto;/u);

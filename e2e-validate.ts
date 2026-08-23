@@ -513,7 +513,7 @@ async function validate() {
   console.log(`   Manual layout edges: RF=${manualEdgeState.reactFlowEdges}, Mermaid opacity=${manualEdgeState.mermaidEdgeOpacity}, bbox=${manualEdgeState.reactFlowEdgeWidth}x${manualEdgeState.reactFlowEdgeHeight} — ${manualEdgesPass ? 'PASS' : 'FAIL'}`);
 
   const hasSimplifyButton = await simplifyButton.count() > 0;
-  const simplifyHint = hasSimplifyButton ? await simplifyButton.locator('.canvas-toolbar-shortcut').textContent() : null;
+  const simplifyHint = hasSimplifyButton ? await simplifyButton.getAttribute('title') : null;
   const sourceBeforeSimplify = await editor.textContent();
   let simplifyPass = false;
   let simplifyPreservedSource = false;
@@ -536,7 +536,7 @@ async function validate() {
     && simplifyPass
     && simplifyPreservedSource
     && simplifyActionDisappeared
-    && simplifyHint === 'S'
+    && typeof simplifyHint === 'string' && simplifyHint.includes('(S)')
     && simplifyKeptCanvasMounted;
   results.push({ test: 'reactflow simplify layout keyboard shortcut', pass: simplifyLayoutPass });
   console.log(`   Simplified with S: ${simplifyLayoutPass} — ${simplifyLayoutPass ? 'PASS' : 'FAIL'}`);

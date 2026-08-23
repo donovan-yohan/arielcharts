@@ -115,4 +115,15 @@ describe('workspace onboarding', () => {
     expect(css).toContain('@media (forced-colors: active)');
     expect(css).toContain('background: Canvas; border-color: CanvasText; color: CanvasText; forced-color-adjust: none;');
   });
+
+  it('centers the card over the diagram pane and constrains it against the full pane height', () => {
+    const css = readFileSync('src/app/globals.css', 'utf8');
+    const onboardingCss = css.slice(css.indexOf('.workspace-onboarding {'));
+    expect(onboardingCss).toMatch(/\.workspace-onboarding\s*\{[^}]*left:\s*50%;[^}]*top:\s*50%;[^}]*transform:\s*translate\(-50%,\s*-50%\);[^}]*z-index:\s*18;/u);
+    expect(onboardingCss).toMatch(/max-width:\s*min\(370px,\s*calc\(100% - 32px\)\);/u);
+    const shortViewportCss = css.slice(css.indexOf('@media (max-height: 500px)'), css.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(shortViewportCss).toMatch(/\.workspace-onboarding\s*\{[^}]*max-height:\s*calc\(100% - var\(--overlay-toolbar-safe-top, 0px\) - 80px\);[^}]*overflow-y:\s*auto;/u);
+    expect(shortViewportCss).toMatch(/top:\s*calc\(var\(--overlay-toolbar-safe-top, 0px\) \+ \(100% - var\(--overlay-toolbar-safe-top, 0px\) - 80px\) \/ 2\);/u);
+    expect(css).not.toContain('canvas-toolbar-shortcut');
+  });
 });

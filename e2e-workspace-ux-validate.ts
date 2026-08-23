@@ -4791,22 +4791,19 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   for (const label of ['Edit label', 'Change shape', 'Delete selected nodes', 'Add node']) {
     await assertHitTarget(page, nodeToolbar.getByRole('button', { name: label, exact: true }), `node toolbar ${label}`);
   }
-  for (const [label, hint, title] of [
-    ['Edit label', 'F2', 'Edit label (F2)'],
-    ['Delete selected nodes', '⌫', 'Delete selected nodes (Delete or Backspace)'],
-    ['Add node', 'N', 'Add node (N)'],
+  for (const [label, title] of [
+    ['Edit label', 'Edit label (F2)'],
+    ['Delete selected nodes', 'Delete selected nodes (Delete or Backspace)'],
+    ['Add node', 'Add node (N)'],
   ] as const) {
     const action = nodeToolbar.getByRole('button', { name: label, exact: true });
-    await expect(action.locator('.canvas-toolbar-shortcut')).toHaveText(hint);
     assert(await action.getAttribute('title') === title, `${label} must retain its full shortcut in the tooltip.`);
   }
   const copyAction = nodeToolbar.getByRole('button', { name: 'Copy selected nodes', exact: true });
-  await expect(copyAction.locator('.canvas-toolbar-shortcut')).toHaveText('C');
   assert(await copyAction.getAttribute('title') === 'Copy selected nodes (Ctrl/Cmd+C)', 'Copy must retain its full shortcut in the tooltip.');
   await verifiedClick(page, copyAction, 'node toolbar Copy selected nodes');
   const pasteAction = page.getByRole('button', { name: 'Paste copied nodes', exact: true });
   await pasteAction.waitFor({ state: 'visible', timeout: 15_000 });
-  await expect(pasteAction.locator('.canvas-toolbar-shortcut')).toHaveText('V');
   assert(await pasteAction.getAttribute('title') === 'Paste copied nodes (Ctrl/Cmd+V)', 'Paste must retain its full shortcut in the tooltip.');
   const nodesBeforePasteAction = await page.locator('.mermaid-flow-node').count();
   await verifiedClick(page, pasteAction, 'canvas controls Paste copied nodes');
@@ -5921,10 +5918,8 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     const sourceBounds = await sourceToggle.boundingBox();
     assert(sourceBounds !== null && sourceBounds.width >= 44 && sourceBounds.height >= 44,
       `${label} source toggle must provide a 44px touch target: ${JSON.stringify(sourceBounds)}.`);
-    const shortcutHints = page.locator('.canvas-toolbar-shortcut');
-    assert(await shortcutHints.count() > 0, `${label} did not render any desktop shortcut hints to suppress.`);
-    const visibleShortcutHints = await shortcutHints.evaluateAll((hints) => hints.filter((hint) => getComputedStyle(hint).display !== 'none').length);
-    assert(visibleShortcutHints === 0, `${label} exposed ${visibleShortcutHints} canvas shortcut hint(s) on a coarse-pointer viewport.`);
+    const shortcutHints = await page.locator('.canvas-toolbar-shortcut').count();
+    assert(shortcutHints === 0, `${label} exposed ${shortcutHints} canvas shortcut hint(s) on a coarse-pointer viewport.`);
     await verifiedClick(page, sourceToggle, `${label} source flyout resize handle`);
     await page.getByTestId('source-flyout').waitFor({ state: 'visible', timeout: 15_000 });
     const sourceResizeHandle = page.getByTestId('source-flyout-resize-handle');

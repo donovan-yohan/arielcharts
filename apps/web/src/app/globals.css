@@ -1285,11 +1285,19 @@ code {
   box-shadow: 0 12px 30px color-mix(in srgb, #000 20%, transparent);
   display: grid;
   gap: 12px;
-  left: 16px;
+  left: 50%;
+  /* Center within the free band below the measured overlay-toolbar lane and
+     cap the card to that band, so an expanded More lane can never cover it
+     even when the band is shorter than the card. When no toolbar is mounted,
+     keep a small top gutter. */
+  top: calc(var(--overlay-toolbar-safe-top, 16px) + (100% - var(--overlay-toolbar-safe-top, 16px) - 80px) / 2);
+  max-height: calc(100% - max(16px, var(--overlay-toolbar-safe-top, 0px)) - 80px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   max-width: min(370px, calc(100% - 32px));
   padding: 14px;
   position: absolute;
-  top: max(76px, var(--overlay-toolbar-safe-top, 0px));
+  transform: translate(-50%, -50%);
   z-index: 18;
 }
 
@@ -1382,10 +1390,13 @@ code {
 
 @media (max-height: 500px) {
   .workspace-onboarding {
-    max-height: calc(100% - max(76px, var(--overlay-toolbar-safe-top, 0px)) - 80px);
+    /* Short viewports: center within the free band between the measured
+       overlay toolbar lane and the bottom camera-control reserve. */
+    max-height: calc(100% - max(16px, var(--overlay-toolbar-safe-top, 0px)) - 80px);
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: thin;
+    top: calc(max(16px, var(--overlay-toolbar-safe-top, 0px)) + (100% - max(16px, var(--overlay-toolbar-safe-top, 0px)) - 80px) / 2);
   }
 }
 
@@ -1622,6 +1633,8 @@ code {
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: 12px;
+    top: max(76px, var(--overlay-toolbar-safe-top, 0px));
+    transform: none;
   }
 
   .workspace-onboarding-actions {
@@ -2612,20 +2625,6 @@ code {
   transform: translate(-50%, 0);
 }
 
-.canvas-toolbar-shortcut {
-  position: absolute;
-  right: -2px;
-  bottom: -2px;
-  z-index: 1;
-  color: var(--ink);
-  font-family: var(--font-mono);
-  font-size: 0.5625rem;
-  font-weight: 600;
-  line-height: 1;
-  opacity: 0.9;
-  white-space: nowrap;
-}
-
 .laser-pointer-layer {
   inset: 0;
   pointer-events: none;
@@ -2683,9 +2682,9 @@ code {
   }
 }
 
-/* The primary strip is stable; More grows a measured lane only while active. */
+/* The primary strip is stable; More grows a lane sized to whichever
+   conditional rows are active, capped by the measured available space. */
 .overlay-icon-toolbar {
-  --overlay-toolbar-rail-height: 188px;
   align-items: stretch;
   display: grid;
   gap: 8px;
@@ -2771,8 +2770,11 @@ code {
 }
 
 .overlay-toolbar-secondary.is-expanded {
-  height: var(--overlay-toolbar-rail-height);
-  min-height: var(--overlay-toolbar-rail-height);
+  /* Content-driven: one 54px actions row plus whatever contextual rows are
+     mounted. The cap reserves the 8px grid gap beneath the 54px primary row
+     so the lane can never push past the measured available height. */
+  height: auto;
+  max-height: calc(var(--overlay-toolbar-available-height, 100vh) - 62px);
   pointer-events: none;
   visibility: visible;
 }
@@ -2907,7 +2909,7 @@ code {
 }
 
 @media (pointer: coarse), (max-width: 420px) {
-  .overlay-icon-toolbar { --overlay-toolbar-rail-height: 188px; max-width: calc(100% - 16px); top: 8px; width: min(100%, var(--overlay-toolbar-available-width, 100vw)); }
+  .overlay-icon-toolbar { max-width: calc(100% - 16px); top: 8px; width: min(100%, var(--overlay-toolbar-available-width, 100vw)); }
   .overlay-toolbar-primary { justify-content: flex-start; }
   .overlay-toolbar-button { height: 44px; width: 44px; }
   .overlay-toolbar-inspector { max-width: max(0px, calc(var(--overlay-toolbar-available-width, 100vw) - 48px)); width: max(0px, calc(var(--overlay-toolbar-available-width, 100vw) - 48px)); }
@@ -2926,10 +2928,6 @@ code {
 }
 
 @media (pointer: coarse) {
-  .canvas-toolbar-shortcut {
-    display: none;
-  }
-
   .workspace-source-resize-handle {
     display: none;
   }
@@ -3222,10 +3220,6 @@ code {
   .canvas-toolbar-button {
     width: 44px !important;
     height: 44px !important;
-  }
-
-  .canvas-toolbar-shortcut {
-    display: none;
   }
 
   .canvas-empty-add-button {

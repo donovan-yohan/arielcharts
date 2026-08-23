@@ -748,6 +748,12 @@ describe('bounded focus and Hand seams', () => {
   it('keeps Hand from beginning a subgraph drag that can write node positions', () => {
     expect(canvasSource).toMatch(/const handleSubgraphPointerDown[^]*?if \(!canEditStructure \|\| overlay\?\.tool === 'hand' \|\| spacePressed \|\| event\.button !== 0/u);
   });
+
+  it('uses product blank-canvas copy and keeps shortcuts out of the toolbar chrome', () => {
+    expect(canvasSource).toContain("emptyMessage = 'Start from a template, or open Source to write Mermaid.'");
+    expect(workspaceSource).toContain("? 'Rendering your diagram…' : 'Start from a template, or open Source to write Mermaid.'");
+    expect(canvasSource).not.toContain('canvas-toolbar-shortcut');
+  });
 });
 
 describe('getFlowEdgePresentation', () => {

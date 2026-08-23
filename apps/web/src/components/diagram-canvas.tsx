@@ -885,7 +885,7 @@ function canHandleCanvasWheel(target: EventTarget | null, root: HTMLDivElement):
 
 export function DiagramCanvas({
   className,
-  emptyMessage = 'start typing mermaid syntax',
+  emptyMessage = 'Start from a template, or open Source to write Mermaid.',
   emptyState = null,
   graph,
   interactionMode,
@@ -4258,14 +4258,14 @@ export function DiagramCanvas({
               </ToolbarButton>
             ) : null}
             {selection.length > 0 ? (
-              <ToolbarButton label="Delete selected nodes" onClick={() => { onDeleteNodes?.(selection); }} shortcut="Delete or Backspace" hint="⌫">
+              <ToolbarButton label="Delete selected nodes" onClick={() => { onDeleteNodes?.(selection); }} shortcut="Delete or Backspace">
                 <Trash2 size={16} />
               </ToolbarButton>
             ) : null}
             <ToolbarButton label="Add node" onClick={addDefaultNode} shortcut="N">
               <Plus size={16} />
             </ToolbarButton>
-            <ToolbarButton label="Copy selected nodes" onClick={copySelectedNodes} shortcut="Ctrl/Cmd+C" hint="C">
+            <ToolbarButton label="Copy selected nodes" onClick={copySelectedNodes} shortcut="Ctrl/Cmd+C">
               <ClipboardCopy size={16} />
             </ToolbarButton>
 
@@ -4383,7 +4383,7 @@ export function DiagramCanvas({
               </ToolbarButton>
             ) : null}
             {isFlowchart && hasCanvasClipboard ? (
-              <ToolbarButton label="Paste copied nodes" onClick={pasteClipboard} shortcut="Ctrl/Cmd+V" hint="V">
+              <ToolbarButton label="Paste copied nodes" onClick={pasteClipboard} shortcut="Ctrl/Cmd+V">
                 <ClipboardPaste size={16} />
               </ToolbarButton>
             ) : null}
@@ -7749,14 +7749,12 @@ function ToolbarButton({
   disabled = false,
   label,
   onClick,
-  hint,
   shortcut,
 }: {
   children: ReactNode;
   disabled?: boolean;
   label: string;
   onClick: () => void;
-  hint?: string;
   shortcut?: string;
 }) {
   const title = shortcut?.startsWith('Mod')
@@ -7765,7 +7763,6 @@ function ToolbarButton({
   return (
     <button aria-label={label} className="canvas-toolbar-button" data-testid={`canvas-action-${toTestId(label)}`} disabled={disabled} onClick={onClick} style={{ ...TOOLBAR_BUTTON_STYLE, opacity: disabled ? 0.45 : 1, position: 'relative' }} title={title} type="button">
       {children}
-      {shortcut ? <span aria-hidden="true" className="canvas-toolbar-shortcut">{hint ?? shortcut}</span> : null}
     </button>
   );
 }

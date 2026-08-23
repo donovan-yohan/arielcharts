@@ -2711,7 +2711,7 @@ export function SessionWorkspace({
           <DiagramCanvas
             key={activeDiagramId ?? 'no-active-diagram'}
             className="diagram-canvas"
-            emptyMessage={renderedMermaidText.trim() ? 'rendering preview…' : 'start typing mermaid syntax'}
+            emptyMessage={renderedMermaidText.trim() ? 'Rendering your diagram…' : 'Start from a template, or open Source to write Mermaid.'}
             emptyState={onboardingVisible ? null : emptyState}
             graph={renderedPreview?.flowchartSnapshot ?? null}
             interactionMode={getMermaidCanvasTool(canvasTool, isFlowchart)}

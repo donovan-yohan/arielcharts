@@ -525,6 +525,18 @@ describe('board semantic editor fields', () => {
   });
 });
 
+describe('canvas empty-state guidance', () => {
+  it('renders no starter prompt when the workspace withholds its empty message', () => {
+    expect(canvasSource).toMatch(/emptyMessage\?: string \| null;/u);
+    expect(canvasSource).toMatch(/\) : \(!svg && emptyMessage \? \(/u);
+  });
+
+  it('routes both canvas starter prompts through the onboarding guidance seam', () => {
+    expect(workspaceSource).toMatch(/const canvasGuidance = getWorkspaceCanvasGuidance\(\{/u);
+    expect(workspaceSource).toMatch(/emptyMessage=\{canvasGuidance\.emptyMessage\}\s*emptyState=\{canvasGuidance\.emptyState\}/u);
+  });
+});
+
 describe('canvas blank-click selection ownership', () => {
   it('clears app-owned selection from both the generic canvas click and the React Flow pane while keeping focus roving-only', () => {
     const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');

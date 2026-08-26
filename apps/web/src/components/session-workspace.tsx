@@ -23,6 +23,7 @@ import { WorkspaceTabStrip, type WorkspaceDiagramTab } from './workspace-tab-str
 import {
   canShowWorkspaceOnboarding,
   dismissWorkspaceOnboarding,
+  getWorkspaceCanvasGuidance,
   isWorkspaceOnboardingDismissed,
   shouldDismissWorkspaceOnboardingForContent,
   WorkspaceOnboarding,
@@ -2416,6 +2417,12 @@ export function SessionWorkspace({
     source: activeDiagramSource,
   }) && !onboardingDismissed;
 
+  const canvasGuidance = getWorkspaceCanvasGuidance({
+    emptyMessage: renderedMermaidText.trim() ? 'Rendering your diagram…' : 'Start from a template, or open Source to write Mermaid.',
+    emptyState,
+    onboardingVisible,
+  });
+
   const dismissOnboarding = useCallback(() => {
     if (activeDiagramId) dismissWorkspaceOnboarding(sessionId, activeDiagramId);
     setOnboardingDismissalVersion((version) => version + 1);
@@ -2711,8 +2718,8 @@ export function SessionWorkspace({
           <DiagramCanvas
             key={activeDiagramId ?? 'no-active-diagram'}
             className="diagram-canvas"
-            emptyMessage={renderedMermaidText.trim() ? 'Rendering your diagram…' : 'Start from a template, or open Source to write Mermaid.'}
-            emptyState={onboardingVisible ? null : emptyState}
+            emptyMessage={canvasGuidance.emptyMessage}
+            emptyState={canvasGuidance.emptyState}
             graph={renderedPreview?.flowchartSnapshot ?? null}
             interactionMode={getMermaidCanvasTool(canvasTool, isFlowchart)}
             isFlowchart={isFlowchart}

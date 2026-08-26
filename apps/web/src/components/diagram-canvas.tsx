@@ -129,7 +129,7 @@ type SemanticFormActionResult = boolean | void | SemanticFormMutationResult;
 
 export interface DiagramCanvasProps {
   className?: string;
-  emptyMessage?: string;
+  emptyMessage?: string | null;
   graph: FlowchartSnapshot | null;
   interactionMode?: 'select' | 'connect' | 'laser';
   emptyState?: DiagramEmptyState;
@@ -4121,7 +4121,7 @@ export function DiagramCanvas({
               onSetAutonumber={onSetSequenceAutonumber}
               participants={sequenceParticipants}
             />
-          ) : (!svg ? (
+          ) : (!svg && emptyMessage ? (
           <div className="empty-state" style={{ alignItems: 'center', display: 'flex', height: '100%', justifyContent: 'center' }}>
             {emptyMessage}
           </div>

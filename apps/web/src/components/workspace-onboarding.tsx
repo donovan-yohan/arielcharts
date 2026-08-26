@@ -1,6 +1,7 @@
 import { FileText, Highlighter, Layers3, PenLine, StickyNote, X } from 'lucide-react';
 import React, { useEffect } from 'react';
 import { isHeaderOnlyFlowchartSource } from '../lib/diagram-mutations';
+import type { DiagramEmptyState } from './diagram-canvas';
 
 const ONBOARDING_DISMISSAL_PREFIX = 'arielcharts:onboarding-dismissed:v1:';
 // Storage can be unavailable in privacy-restricted browser contexts. Preserve
@@ -34,6 +35,18 @@ export function canShowWorkspaceOnboarding({
   source: string;
 }): boolean {
   return Boolean(activeDiagramId) && !hasCompetingModal && !openFlyout && isWorkspaceOnboardingEligible(source, overlayCount);
+}
+
+export function getWorkspaceCanvasGuidance({
+  emptyMessage,
+  emptyState,
+  onboardingVisible,
+}: {
+  emptyMessage: string;
+  emptyState: DiagramEmptyState;
+  onboardingVisible: boolean;
+}): { emptyMessage: string | null; emptyState: DiagramEmptyState } {
+  return onboardingVisible ? { emptyMessage: null, emptyState: null } : { emptyMessage, emptyState };
 }
 
 export function isWorkspaceOnboardingDismissed(sessionId: string, diagramId: string): boolean {

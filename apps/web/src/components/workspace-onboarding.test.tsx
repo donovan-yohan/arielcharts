@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   canShowWorkspaceOnboarding,
   dismissWorkspaceOnboarding,
+  getWorkspaceCanvasGuidance,
   getWorkspaceOnboardingDismissalKey,
   isWorkspaceOnboardingDismissed,
   isWorkspaceOnboardingEligible,
@@ -37,6 +38,32 @@ describe('workspace onboarding', () => {
     expect(canShowWorkspaceOnboarding(blank)).toBe(true);
     expect(canShowWorkspaceOnboarding({ ...blank, openFlyout: true })).toBe(false);
     expect(canShowWorkspaceOnboarding({ ...blank, hasCompetingModal: true })).toBe(false);
+  });
+
+  it('owns the blank-canvas guidance so no canvas starter prompt renders behind it', () => {
+    const guidance = { emptyMessage: 'Start from a template, or open Source to write Mermaid.', emptyState: 'chooser' as const };
+    expect(getWorkspaceCanvasGuidance({ ...guidance, onboardingVisible: true }))
+      .toEqual({ emptyMessage: null, emptyState: null });
+    expect(getWorkspaceCanvasGuidance({ ...guidance, onboardingVisible: false }))
+      .toEqual({ emptyMessage: 'Start from a template, or open Source to write Mermaid.', emptyState: 'chooser' });
+    expect(getWorkspaceCanvasGuidance({ emptyMessage: 'Rendering your diagram…', emptyState: null, onboardingVisible: false }))
+      .toEqual({ emptyMessage: 'Rendering your diagram…', emptyState: null });
+  });
+
+  it('restores the canvas starter prompt once onboarding is dismissed for the active diagram', () => {
+    const sessionId = 'guidance-session';
+    const diagramId = 'diagram-a';
+    const blank = { activeDiagramId: diagramId, hasCompetingModal: false, openFlyout: false, overlayCount: 0, source: '' };
+    const guidanceFor = (dismissed: boolean) => getWorkspaceCanvasGuidance({
+      emptyMessage: 'Start from a template, or open Source to write Mermaid.',
+      emptyState: 'chooser',
+      onboardingVisible: canShowWorkspaceOnboarding(blank) && !dismissed,
+    });
+    expect(guidanceFor(isWorkspaceOnboardingDismissed(sessionId, diagramId)))
+      .toEqual({ emptyMessage: null, emptyState: null });
+    dismissWorkspaceOnboarding(sessionId, diagramId);
+    expect(guidanceFor(isWorkspaceOnboardingDismissed(sessionId, diagramId)))
+      .toEqual({ emptyMessage: 'Start from a template, or open Source to write Mermaid.', emptyState: 'chooser' });
   });
 
   it('keeps browser dismissal scoped to the exact session and diagram', () => {

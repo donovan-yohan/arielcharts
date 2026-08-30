@@ -3753,23 +3753,27 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
     message: `${label} Select must retain focus while the direct toolbar resets to its first item.`,
   }).toBe(true);
   await settleCenterHitPoint(page, firstTool, `${label} first direct toolbar tool after reset`);
-  // Every rail in the pill shares one hit-testing contract: only the controls
-  // own their hits, and the blank spans between them still reach the canvas.
-  for (const rail of [directTools, annotateTools]) {
-    const blankRailPassThrough = await rail.evaluate((element) => {
-      const bounds = element.getBoundingClientRect();
-      const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
-      for (let x = bounds.left + 1; x < bounds.right - 1; x += 2) {
-        const hit = document.elementFromPoint(x, bounds.top + (bounds.height / 2));
-        if (hit instanceof Element && canvas?.contains(hit) && !hit.closest('.overlay-toolbar-button')) {
-          return { hit: { className: hit.getAttribute('class'), tag: hit.tagName, testId: hit.getAttribute('data-testid') }, passThrough: true };
-        }
+  // The always-visible primary row stays transparent between its controls, so a
+  // near-miss there still reaches the canvas. The disclosed content rails are
+  // solid instead: a near-miss with a shape or ink tool must not draw behind
+  // them.
+  const railPassesPointerToCanvas = (rail: Locator) => rail.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+    for (let x = bounds.left + 1; x < bounds.right - 1; x += 2) {
+      const hit = document.elementFromPoint(x, bounds.top + (bounds.height / 2));
+      if (hit instanceof Element && canvas?.contains(hit) && !hit.closest('.overlay-toolbar-button')) {
+        return { hit: { className: hit.getAttribute('class'), tag: hit.tagName, testId: hit.getAttribute('data-testid') }, passThrough: true };
       }
-      return { passThrough: false };
-    });
-    assert(blankRailPassThrough.passThrough,
-      `${label} blank ${await rail.getAttribute('data-testid')} rail did not pass through to the canvas: ${JSON.stringify(blankRailPassThrough)}.`);
-  }
+    }
+    return { passThrough: false };
+  });
+  const blankRailPassThrough = await railPassesPointerToCanvas(directTools);
+  assert(blankRailPassThrough.passThrough,
+    `${label} blank direct-toolbar rail did not pass through to the canvas: ${JSON.stringify(blankRailPassThrough)}.`);
+  const annotateRailPassThrough = await railPassesPointerToCanvas(annotateTools);
+  assert(!annotateRailPassThrough.passThrough,
+    `${label} annotate rail let a pointer through to the canvas: ${JSON.stringify(annotateRailPassThrough)}.`);
   const beforeScroll = await annotateTools.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollLeft: element.scrollLeft,
@@ -5893,15 +5897,23 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
       await expect(context).toBeHidden();
       await assertHitTarget(page, select, `${label} collapsed primary toolbar remains a canvas-safe hit target`);
       await assertHitTarget(page, canvas, `${label} collapsed contextual rail leaves the canvas interactive`);
+      // Collapsed, the pill occupies only the primary column it paints; a box
+      // wider than that would claim canvas the toolbar does not use.
+      const collapsedPill = await panel.boundingBox();
+      assert(primaryBeforeExpand && collapsedPill
+        && Math.abs(collapsedPill.width - primaryBeforeExpand.width) <= 3
+        && Math.abs(collapsedPill.height - primaryBeforeExpand.height) <= 3,
+      `${label} collapsed pill box is larger than the primary row it paints: ${JSON.stringify({ collapsedPill, primaryBeforeExpand })}.`);
       await ensureOverlaySecondaryRail(page);
       await expect(context).toBeVisible();
       const primaryAfterExpand = await primary.boundingBox();
+      const expandedPill = await panel.boundingBox();
       assert(primaryBeforeExpand && primaryAfterExpand
-        && Math.abs(primaryBeforeExpand.x - primaryAfterExpand.x) <= 1
         && Math.abs(primaryBeforeExpand.y - primaryAfterExpand.y) <= 1
-        && Math.abs(primaryBeforeExpand.width - primaryAfterExpand.width) <= 1
         && Math.abs(primaryBeforeExpand.height - primaryAfterExpand.height) <= 1,
-      `${label} expanding the contextual rail shifted primary toolbar bounds: ${JSON.stringify({ primaryAfterExpand, primaryBeforeExpand })}.`);
+      `${label} expanding the contextual rail moved the primary toolbar row out of its lane: ${JSON.stringify({ primaryAfterExpand, primaryBeforeExpand })}.`);
+      assert(expandedPill && primaryAfterExpand && expandedPill.width - primaryAfterExpand.width >= 44,
+        `${label} expanding the contextual rail did not grow the pill beside the primary row: ${JSON.stringify({ expandedPill, primaryAfterExpand })}.`);
       await expectSelectedContextSemanticEditorLane(page, label);
       await assertHitTarget(page, canvas, `${label} selected-context canvas center`);
       await assertTouchTarget(page, page.getByRole('button', { name: 'Add node to Mermaid text', exact: true }),
@@ -6871,6 +6883,11 @@ async function assertPhoneViewportEvidence(page: Page, label: string, state: str
     `${label} ${state} screenshot was ${screenshot.width}x${screenshot.height}, expected ${configuredViewport.width}x${configuredViewport.height} at deviceScaleFactor 1.`);
 }
 
+// The Mermaid-first primary rail is the only place that keeps a control visible
+// and disabled: its structural tools stay in the strip on non-flowchart
+// diagrams. Every other visible control must remain operable.
+const PHONE_VISIBLE_DISABLED_TOOLS = new Set(['Add flowchart node', 'Connect Mermaid nodes']);
+
 async function assertVisiblePhoneActionTargets(page: Page, label: string, state: string): Promise<void> {
   const targets = page.locator('button, [role="tab"]');
   const viewport = page.viewportSize();
@@ -6926,14 +6943,16 @@ async function assertVisiblePhoneActionTargets(page: Page, label: string, state:
     if (centerResult.clippedByScrollContainer) continue;
     if (centerResult.occludedByActiveSurface) continue;
     assert(centerResult.targetHit, `${label} ${state} ${name} is visible and centered in the viewport, but its center is hit by ${centerResult.hitDescription}.`);
-    // The Mermaid-first primary rail keeps its structural tools visible and
-    // disabled on non-flowchart diagrams. A disabled control still has to be
-    // reachable and finger-sized; only its activation is withheld.
-    if (await target.isEnabled()) {
-      await assertTouchTarget(page, target, `${label} ${state} ${name}`);
-    } else {
+    // An allowed disabled structural tool still has to be reachable and
+    // finger-sized; only its activation is withheld.
+    const withheldStructuralTool = PHONE_VISIBLE_DISABLED_TOOLS.has(name)
+      && !await target.isEnabled()
+      && await target.evaluate((element) => !!element.closest('[data-testid="overlay-toolbar-primary-tools"]'));
+    if (withheldStructuralTool) {
       assert(box.width >= 44 && box.height >= 44,
         `${label} ${state} disabled ${name} is ${box.width.toFixed(1)}x${box.height.toFixed(1)}px; phone action targets must be at least 44px.`);
+    } else {
+      await assertTouchTarget(page, target, `${label} ${state} ${name}`);
     }
     checked += 1;
   }

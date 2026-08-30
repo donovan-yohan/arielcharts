@@ -2714,7 +2714,7 @@ code {
   display: flex;
   gap: 3px;
   max-width: 100%;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .overlay-toolbar-annotate-actions,
@@ -2728,6 +2728,7 @@ code {
   box-sizing: border-box;
   overflow: hidden;
   padding: 4px;
+  pointer-events: none;
   width: 100%;
 }
 
@@ -2756,6 +2757,7 @@ code {
   box-sizing: border-box;
   overflow-x: auto;
   padding: 4px;
+  pointer-events: none;
   scrollbar-width: thin;
   width: 100%;
 }
@@ -2919,11 +2921,12 @@ code {
 }
 
 @media (min-width: 421px) and (max-height: 500px) {
-  .overlay-icon-toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 54px; justify-items: stretch; width: min(calc(100% - 24px), var(--overlay-toolbar-available-width, 100vw)); }
-  /* Collapsed, only the primary column is occupied. The chrome moves onto that
-     column so the pill never paints an empty half, and the transparent border
-     keeps the primary row in the same place in both states. */
-  .overlay-icon-toolbar:not([data-tools-expanded='true']) { background: none; border-color: transparent; box-shadow: none; }
+  .overlay-icon-toolbar { grid-template-rows: 54px; justify-items: stretch; }
+  .overlay-icon-toolbar[data-tools-expanded='true'] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: min(calc(100% - 24px), var(--overlay-toolbar-available-width, 100vw)); }
+  /* Collapsed, only the primary column is occupied, so the pill shrinks to it:
+     its box may not claim canvas the toolbar neither paints nor uses. The
+     chrome moves onto the column that paints. */
+  .overlay-icon-toolbar:not([data-tools-expanded='true']) { background: none; border-color: transparent; box-shadow: none; grid-template-columns: max-content 0; width: max-content; }
   .overlay-icon-toolbar:not([data-tools-expanded='true']) > .overlay-toolbar-primary { background: color-mix(in srgb, var(--control-surface) 94%, transparent); border: 1px solid var(--control-border); border-radius: 12px; box-shadow: 0 8px 24px color-mix(in srgb, #000 20%, transparent); }
   .overlay-toolbar-primary { grid-column: 1; grid-row: 1; min-width: 0; }
   .overlay-toolbar-secondary { border-left: 1px solid var(--control-border); display: flex; flex-direction: row; grid-column: 2; grid-row: 1; min-width: 0; overflow-x: auto; }
@@ -2934,13 +2937,17 @@ code {
 }
 
 @media (forced-colors: active) {
-  .overlay-icon-toolbar, .overlay-icon-toolbar:not([data-tools-expanded='true']) > .overlay-toolbar-primary, .overlay-toolbar-inspector-actions, .overlay-toolbar-secondary .overlay-toolbar-inspector { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  .overlay-icon-toolbar, .overlay-toolbar-inspector-actions, .overlay-toolbar-secondary .overlay-toolbar-inspector { background: Canvas; border-color: CanvasText; box-shadow: none; }
   .overlay-toolbar-annotate-actions, .overlay-toolbar-context, .overlay-toolbar-inspector, .overlay-toolbar-secondary, .overlay-toolbar-secondary-actions { border-left-color: CanvasText; border-top-color: CanvasText; }
   .overlay-toolbar-button { border-color: CanvasText; color: CanvasText; forced-color-adjust: none; }
   .overlay-toolbar-button[aria-pressed='true'], .overlay-toolbar-button:focus-visible { background: Highlight; color: HighlightText; outline: 2px solid Highlight; }
   .overlay-transform-handle::after { background: Highlight; border-color: Canvas; forced-color-adjust: none; }
   .overlay-rotation-handle::before { background: Highlight; forced-color-adjust: none; }
   .overlay-transform-handle:focus-visible { outline-color: Highlight; }
+}
+
+@media (forced-colors: active) and (min-width: 421px) and (max-height: 500px) {
+  .overlay-icon-toolbar:not([data-tools-expanded='true']) > .overlay-toolbar-primary { background: Canvas; border-color: CanvasText; box-shadow: none; }
 }
 
 @media (pointer: coarse) {

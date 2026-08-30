@@ -15,19 +15,29 @@ describe('mobile workspace CSS contracts', () => {
     expect(css).not.toMatch(/\.overlay-toolbar-primary,[^]*?\.overlay-toolbar-secondary-actions\s*\{[^}]*(background|border-radius|box-shadow):/u);
     expect(css).toMatch(/\.overlay-toolbar-annotate-actions,\s*\.overlay-toolbar-context,\s*\.overlay-toolbar-inspector,\s*\.overlay-toolbar-secondary-actions\s*\{\s*border-top:\s*1px solid var\(--control-border\);/u);
     expect(css).toMatch(/\.overlay-toolbar-inspector-actions\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--control-surface\) 94%, transparent\);[^}]*border:\s*1px solid var\(--control-border\);[^}]*border-radius:\s*12px;/u);
-    expect(css).toMatch(/@media \(forced-colors: active\)[^]*?\.overlay-icon-toolbar, \.overlay-icon-toolbar:not\(\[data-tools-expanded='true'\]\) > \.overlay-toolbar-primary, \.overlay-toolbar-inspector-actions, \.overlay-toolbar-secondary \.overlay-toolbar-inspector\s*\{[^}]*background:\s*Canvas;[^}]*border-color:\s*CanvasText;/u);
+    expect(css).toMatch(/@media \(forced-colors: active\)[^]*?\.overlay-icon-toolbar, \.overlay-toolbar-inspector-actions, \.overlay-toolbar-secondary \.overlay-toolbar-inspector\s*\{[^}]*background:\s*Canvas;[^}]*border-color:\s*CanvasText;/u);
     expect(css).toMatch(/@media \(forced-colors: active\)[^]*?\.overlay-toolbar-annotate-actions,[^{]*\{[^}]*border-left-color:\s*CanvasText;[^}]*border-top-color:\s*CanvasText;/u);
+    // Only short landscape moves the collapsed chrome onto the primary column,
+    // so its forced-colors twin carries the same media conditions.
+    expect(css).toMatch(/@media \(forced-colors: active\) and \(min-width: 421px\) and \(max-height: 500px\)\s*\{\s*\.overlay-icon-toolbar:not\(\[data-tools-expanded='true'\]\) > \.overlay-toolbar-primary\s*\{[^}]*background:\s*Canvas;[^}]*border-color:\s*CanvasText;/u);
     // The sidecar repaints its own surface inside the short-landscape block, so
     // the forced-colors override only wins if it is declared after it.
-    expect(css.indexOf('.overlay-icon-toolbar, .overlay-icon-toolbar:not([data-tools-expanded=\'true\']) > .overlay-toolbar-primary, .overlay-toolbar-inspector-actions, .overlay-toolbar-secondary .overlay-toolbar-inspector'))
-      .toBeGreaterThan(css.indexOf('@media (min-width: 421px) and (max-height: 500px)'));
+    for (const forcedColorsRule of [
+      '.overlay-icon-toolbar, .overlay-toolbar-inspector-actions, .overlay-toolbar-secondary .overlay-toolbar-inspector',
+      '@media (forced-colors: active) and (min-width: 421px) and (max-height: 500px)',
+    ]) {
+      expect(css.indexOf(forcedColorsRule)).toBeGreaterThan(css.indexOf('@media (min-width: 421px) and (max-height: 500px)'));
+    }
   });
 
-  it('gives every rail in the pill one hit-testing contract, with only controls and the inspector panel solid', () => {
-    for (const rail of ['\\.overlay-icon-toolbar', '\\.overlay-toolbar-primary-tools', '\\.overlay-toolbar-secondary']) {
+  it('keeps the pill shell and its transparent rows out of hit testing while content rails stay solid', () => {
+    for (const rail of ['\\.overlay-icon-toolbar', '\\.overlay-toolbar-primary', '\\.overlay-toolbar-primary-tools', '\\.overlay-toolbar-context', '\\.overlay-toolbar-secondary']) {
       expect(css).toMatch(new RegExp(`${rail}\\s*\\{[^}]*pointer-events:\\s*none;`, 'u'));
     }
-    expect(css).toMatch(/\.overlay-toolbar-primary,\s*\.overlay-toolbar-annotate-actions,[^]*?\.overlay-toolbar-secondary-actions\s*\{[^}]*pointer-events:\s*none;/u);
+    for (const rail of ['\\.overlay-toolbar-annotate-actions', '\\.overlay-toolbar-secondary-actions']) {
+      expect(css).not.toMatch(new RegExp(`${rail}\\s*\\{[^}]*pointer-events:\\s*none;`, 'u'));
+    }
+    expect(css).toMatch(/\.overlay-toolbar-primary,\s*\.overlay-toolbar-annotate-actions,[^]*?\.overlay-toolbar-secondary-actions\s*\{[^}]*pointer-events:\s*auto;/u);
     expect(css).toMatch(/\.overlay-toolbar-annotate-actions > \.overlay-toolbar-button,\s*\.overlay-toolbar-context > \.overlay-toolbar-button,\s*\.overlay-toolbar-primary-tools > \.overlay-toolbar-button,\s*\.overlay-toolbar-primary > \.overlay-toolbar-button,\s*\.overlay-toolbar-secondary-actions > \.overlay-toolbar-button\s*\{[^}]*pointer-events:\s*auto;[^}]*touch-action:\s*pan-x;/u);
     expect(css).toMatch(/\.overlay-toolbar-inspector\s*\{[^}]*pointer-events:\s*auto;/u);
     expect(css).toMatch(/\.overlay-toolbar-inspector-actions\s*\{[^}]*pointer-events:\s*auto;/u);
@@ -52,10 +62,11 @@ describe('mobile workspace CSS contracts', () => {
 
   it('keeps the primary row stable in short landscape while the rail remains inline', () => {
     const landscapeCss = css.slice(css.indexOf('@media (min-width: 421px) and (max-height: 500px)'));
-    expect(landscapeCss).toMatch(/\.overlay-icon-toolbar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\);[^}]*grid-template-rows:\s*54px;[^}]*width:\s*min\(calc\(100% - 24px\), var\(--overlay-toolbar-available-width, 100vw\)\);/u);
+    expect(landscapeCss).toMatch(/\.overlay-icon-toolbar\s*\{[^}]*grid-template-rows:\s*54px;[^}]*justify-items:\s*stretch;/u);
+    expect(landscapeCss).toMatch(/\.overlay-icon-toolbar\[data-tools-expanded='true'\]\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\);[^}]*width:\s*min\(calc\(100% - 24px\), var\(--overlay-toolbar-available-width, 100vw\)\);/u);
     // Collapsed, the second column is empty, so the chrome moves onto the
-    // primary column and the pill keeps a transparent border of the same width.
-    expect(landscapeCss).toMatch(/\.overlay-icon-toolbar:not\(\[data-tools-expanded='true'\]\)\s*\{[^}]*background:\s*none;[^}]*border-color:\s*transparent;[^}]*box-shadow:\s*none;/u);
+    // primary column and the pill's box shrinks to that painted column.
+    expect(landscapeCss).toMatch(/\.overlay-icon-toolbar:not\(\[data-tools-expanded='true'\]\)\s*\{[^}]*background:\s*none;[^}]*border-color:\s*transparent;[^}]*box-shadow:\s*none;[^}]*grid-template-columns:\s*max-content 0;[^}]*width:\s*max-content;/u);
     expect(landscapeCss).toMatch(/\.overlay-icon-toolbar:not\(\[data-tools-expanded='true'\]\) > \.overlay-toolbar-primary\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--control-surface\) 94%, transparent\);[^}]*border:\s*1px solid var\(--control-border\);[^}]*border-radius:\s*12px;[^}]*box-shadow:\s*0 8px 24px/u);
     expect(landscapeCss).not.toMatch(/\.overlay-icon-toolbar:not\(\[data-tools-expanded='true'\]\)\s*\{[^}]*border-width:/u);
     expect(landscapeCss).toMatch(/\.overlay-toolbar-secondary\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*row;[^}]*overflow-x:\s*auto;/u);

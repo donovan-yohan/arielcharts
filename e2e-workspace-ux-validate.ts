@@ -293,7 +293,13 @@ async function createOverlayAt(page: Page, name: string, candidateIndex = 0): Pr
     await collapseOverlaySecondaryRail(page);
   }
   if (!isPrimary) await ensureOverlaySecondaryRail(page);
-  await verifiedClick(page, page.getByRole('button', { name, exact: true }), `select overlay ${name}`);
+  // Annotate tools live in a disclosed scroller, so they have to be brought
+  // into their rail before they are clickable on a narrow phone.
+  const action = isPrimary
+    ? page.getByRole('button', { name, exact: true })
+    : await revealOverlaySecondaryAction(page, name);
+  if (isPrimary) await action.scrollIntoViewIfNeeded();
+  await verifiedClick(page, action, `select overlay ${name}`);
   const point = await page.getByTestId('diagram-canvas').evaluate((canvas, options) => {
     const root = canvas as HTMLElement;
     const bounds = root.getBoundingClientRect();
@@ -3747,19 +3753,23 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
     message: `${label} Select must retain focus while the direct toolbar resets to its first item.`,
   }).toBe(true);
   await settleCenterHitPoint(page, firstTool, `${label} first direct toolbar tool after reset`);
-  const blankRailPassThrough = await directTools.evaluate((rail) => {
-    const bounds = rail.getBoundingClientRect();
-    const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
-    for (let x = bounds.left + 1; x < bounds.right - 1; x += 2) {
-      const hit = document.elementFromPoint(x, bounds.top + (bounds.height / 2));
-      if (hit instanceof Element && canvas?.contains(hit) && !hit.closest('.overlay-toolbar-button')) {
-        return { hit: { className: hit.getAttribute('class'), tag: hit.tagName, testId: hit.getAttribute('data-testid') }, passThrough: true };
+  // Every rail in the pill shares one hit-testing contract: only the controls
+  // own their hits, and the blank spans between them still reach the canvas.
+  for (const rail of [directTools, annotateTools]) {
+    const blankRailPassThrough = await rail.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
+      for (let x = bounds.left + 1; x < bounds.right - 1; x += 2) {
+        const hit = document.elementFromPoint(x, bounds.top + (bounds.height / 2));
+        if (hit instanceof Element && canvas?.contains(hit) && !hit.closest('.overlay-toolbar-button')) {
+          return { hit: { className: hit.getAttribute('class'), tag: hit.tagName, testId: hit.getAttribute('data-testid') }, passThrough: true };
+        }
       }
-    }
-    return { passThrough: false };
-  });
-  assert(blankRailPassThrough.passThrough,
-    `${label} blank direct-toolbar rail did not pass through to the canvas: ${JSON.stringify(blankRailPassThrough)}.`);
+      return { passThrough: false };
+    });
+    assert(blankRailPassThrough.passThrough,
+      `${label} blank ${await rail.getAttribute('data-testid')} rail did not pass through to the canvas: ${JSON.stringify(blankRailPassThrough)}.`);
+  }
   const beforeScroll = await annotateTools.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollLeft: element.scrollLeft,
@@ -5757,6 +5767,28 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     `${label} inline overlay toolbar overlaps the bottom canvas toolbar.`);
     const panel = page.getByLabel('Overlay scene controls', { exact: true });
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
+    // Collapsed, the only visible row is the primary one, so nothing may paint a
+    // surface wider than it; dead painted space reads as a control that is not.
+    await collapseOverlaySecondaryRail(page);
+    const collapsedSurfaces = await panel.evaluate((pill) => {
+      const primaryRow = pill.querySelector<HTMLElement>('[data-testid="overlay-toolbar-primary"]');
+      if (!primaryRow) return null;
+      const rowBounds = primaryRow.getBoundingClientRect();
+      const transparent = ['transparent', 'rgba(0, 0, 0, 0)'];
+      const painted: Array<{ height: number; surface: string | null; width: number }> = [];
+      for (const element of [pill as HTMLElement, primaryRow]) {
+        const style = getComputedStyle(element);
+        if (transparent.includes(style.backgroundColor) && style.boxShadow === 'none'
+          && transparent.includes(style.borderTopColor)) continue;
+        const bounds = element.getBoundingClientRect();
+        painted.push({ height: bounds.height, surface: element.getAttribute('data-testid') ?? element.getAttribute('class'), width: bounds.width });
+      }
+      return { painted, row: { height: rowBounds.height, width: rowBounds.width } };
+    });
+    assert(collapsedSurfaces && collapsedSurfaces.painted.length > 0
+      && collapsedSurfaces.painted.every((surface) => surface.width - collapsedSurfaces.row.width <= 3
+        && surface.height - collapsedSurfaces.row.height <= 3),
+    `${label} collapsed overlay pill paints beyond its primary row: ${JSON.stringify(collapsedSurfaces)}.`);
     const actionNames = [...OVERLAY_PRIMARY_ACTIONS, ...OVERLAY_ANNOTATE_ACTIONS, 'Pen', 'Highlighter', 'Erase stroke', 'Undo canvas change', 'Redo canvas change'] as const;
     await ensureOverlaySecondaryRail(page);
     for (const actionName of actionNames) {
@@ -5832,6 +5864,9 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     await expect(inspectorPanel).toHaveCount(0);
     await createOverlayAt(page, 'Text');
     await expect(page.locator('[data-testid^="overlay-object-"]')).toHaveCount(objectCount + 1);
+    // Text is disclosed in the annotate rail now, so the rail has to be closed
+    // again before this scenario measures the collapsed toolbar.
+    await collapseOverlaySecondaryRail(page);
     await verifiedClick(page, page.getByRole('button', { name: 'Select tool', exact: true }), `${label} return to Select before choosing overlay`);
     const object = page.locator('[data-testid^="overlay-object-"]').last();
     const exposedPoint = await object.evaluate((element) => {
@@ -6891,7 +6926,15 @@ async function assertVisiblePhoneActionTargets(page: Page, label: string, state:
     if (centerResult.clippedByScrollContainer) continue;
     if (centerResult.occludedByActiveSurface) continue;
     assert(centerResult.targetHit, `${label} ${state} ${name} is visible and centered in the viewport, but its center is hit by ${centerResult.hitDescription}.`);
-    await assertTouchTarget(page, target, `${label} ${state} ${name}`);
+    // The Mermaid-first primary rail keeps its structural tools visible and
+    // disabled on non-flowchart diagrams. A disabled control still has to be
+    // reachable and finger-sized; only its activation is withheld.
+    if (await target.isEnabled()) {
+      await assertTouchTarget(page, target, `${label} ${state} ${name}`);
+    } else {
+      assert(box.width >= 44 && box.height >= 44,
+        `${label} ${state} disabled ${name} is ${box.width.toFixed(1)}x${box.height.toFixed(1)}px; phone action targets must be at least 44px.`);
+    }
     checked += 1;
   }
   assert(checked > 0, `${label} ${state} did not expose any visible action chrome.`);

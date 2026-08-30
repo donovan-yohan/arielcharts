@@ -131,18 +131,29 @@ type InkTool = 'select' | InkMode | 'eraser';
 const BOX_TRANSFORM_HANDLES: readonly OverlayResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 const BOX_TRANSFORM_KINDS = new Set<OverlayObjectRecord['kind']>(['annotation.text', 'annotation.sticky', 'shape.rectangle', 'shape.ellipse', 'shape.diamond', 'frame.section']);
 const LINE_TRANSFORM_KINDS = new Set<OverlayObjectRecord['kind']>(['shape.line', 'shape.arrow']);
-export const OVERLAY_TOOLBAR_PRIMARY_HEIGHT = 54;
+export const OVERLAY_TOOLBAR_PILL_BORDER = 1;
+export const OVERLAY_TOOLBAR_AVAILABLE_HEIGHT_BOTTOM_INSET = 8;
+export const OVERLAY_TOOLBAR_PRIMARY_ROW_HEIGHT = 52;
 export const OVERLAY_TOOLBAR_ANNOTATE_ACTIONS_HEIGHT = 54;
 export const OVERLAY_TOOLBAR_SECONDARY_ACTIONS_HEIGHT = 54;
 export const OVERLAY_TOOLBAR_STACKED_INNER_GAP = 0;
-export const OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET = 8;
+export const OVERLAY_TOOLBAR_COLLAPSED_PILL_HEIGHT = OVERLAY_TOOLBAR_PRIMARY_ROW_HEIGHT + (OVERLAY_TOOLBAR_PILL_BORDER * 2);
+export const OVERLAY_TOOLBAR_SHORT_LANDSCAPE_PRIMARY_ROW_HEIGHT = 54;
+export const OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_CSS_TOP = 62;
+export const OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET = OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_CSS_TOP
+  - OVERLAY_TOOLBAR_SHORT_LANDSCAPE_PRIMARY_ROW_HEIGHT;
 const OVERLAY_TOOLBAR_STACKED_ROWS_BELOW_PRIMARY = OVERLAY_TOOLBAR_STACKED_INNER_GAP + OVERLAY_TOOLBAR_ANNOTATE_ACTIONS_HEIGHT
   + OVERLAY_TOOLBAR_STACKED_INNER_GAP + OVERLAY_TOOLBAR_SECONDARY_ACTIONS_HEIGHT;
+export const OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_FROM_PILL = OVERLAY_TOOLBAR_PILL_BORDER
+  + OVERLAY_TOOLBAR_SHORT_LANDSCAPE_PRIMARY_ROW_HEIGHT + OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET;
+export const OVERLAY_TOOLBAR_STACKED_INSPECTOR_TOP_FROM_PILL = OVERLAY_TOOLBAR_PILL_BORDER
+  + OVERLAY_TOOLBAR_PRIMARY_ROW_HEIGHT + OVERLAY_TOOLBAR_STACKED_ROWS_BELOW_PRIMARY;
 
 /**
  * Caps a stale measured inspector immediately when DiagramCanvas has already
- * rendered a new bottom-controls reserve. `availableHeight` includes the
- * short-landscape outer offset, matching the fixed toolbar CSS topology.
+ * rendered a new bottom-controls reserve. `availableHeight` is published from
+ * the pill top and already drops the bottom inset, so the reserve above the
+ * inspector is its offset inside the pill minus that inset.
  */
 export function getImmediateOverlayInspectorCap(
   availableHeight: number,
@@ -150,9 +161,10 @@ export function getImmediateOverlayInspectorCap(
   shortLandscape: boolean,
 ): number | null {
   if (!Number.isFinite(controlsSafeBottom) || controlsSafeBottom <= 0) return null;
-  const fixedHeight = shortLandscape
-    ? OVERLAY_TOOLBAR_PRIMARY_HEIGHT
-    : OVERLAY_TOOLBAR_PRIMARY_HEIGHT + OVERLAY_TOOLBAR_STACKED_ROWS_BELOW_PRIMARY;
+  const inspectorTopFromPill = shortLandscape
+    ? OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_FROM_PILL
+    : OVERLAY_TOOLBAR_STACKED_INSPECTOR_TOP_FROM_PILL;
+  const fixedHeight = inspectorTopFromPill - OVERLAY_TOOLBAR_AVAILABLE_HEIGHT_BOTTOM_INSET;
   return Math.max(0, Math.floor(Math.max(0, availableHeight) - controlsSafeBottom - fixedHeight) - 1);
 }
 
@@ -411,11 +423,11 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       const viewportWidth = viewport.width;
       const minimumTop = canvasBounds.top + Math.max(headerInset, viewportY, 0) + 12;
       const defaultTop = Math.max(minimumTop, Math.min(canvasBounds.top + headerInset, header?.bottom ?? canvasBounds.top) + 12);
-      const toolbarHeight = 54;
-      const errorOverlapsTop = errorBounds && defaultTop < errorBounds.bottom && defaultTop + toolbarHeight > errorBounds.top;
+      const errorOverlapsTop = errorBounds && defaultTop < errorBounds.bottom
+        && defaultTop + OVERLAY_TOOLBAR_COLLAPSED_PILL_HEIGHT > errorBounds.top;
       const top = errorOverlapsTop ? errorBounds.bottom + 8 : defaultTop;
       const left = canvasBounds.left + viewportX + (viewportWidth / 2);
-      const primaryHeight = primaryToolbarRef.current?.getBoundingClientRect().height || toolbarHeight;
+      const primaryHeight = primaryToolbarRef.current?.getBoundingClientRect().height || OVERLAY_TOOLBAR_PRIMARY_ROW_HEIGHT;
       const contextHeight = contextToolbarRef.current?.getBoundingClientRect().height ?? 0;
       const hostControlsSafeBottom = canvasStyleHost
         ? getComputedStyle(canvasStyleHost).getPropertyValue('--canvas-controls-toolbar-safe-bottom').trim()
@@ -438,14 +450,16 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       const shortLandscape = window.matchMedia('(min-width: 421px) and (max-height: 500px)').matches;
       const stackedRowsAboveInspector = OVERLAY_TOOLBAR_STACKED_ROWS_BELOW_PRIMARY
         + (contextHeight ? OVERLAY_TOOLBAR_STACKED_INNER_GAP + contextHeight : 0);
-      const inspectorTop = top + primaryHeight + (shortLandscape ? OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET : stackedRowsAboveInspector);
+      const inspectorTop = top + OVERLAY_TOOLBAR_PILL_BORDER + primaryHeight
+        + (shortLandscape ? OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET : stackedRowsAboveInspector);
       const inspectorMaxHeight = inspectorCapacityPx(inspectorTop, bottomSafeTop);
-      setToolbarPosition((current) => current.availableHeight === Math.max(0, canvasBounds.bottom - top - 8)
+      const availableHeight = Math.max(0, canvasBounds.bottom - top - OVERLAY_TOOLBAR_AVAILABLE_HEIGHT_BOTTOM_INSET);
+      setToolbarPosition((current) => current.availableHeight === availableHeight
         && current.availableWidth === viewportWidth && current.inspectorMaxHeight === inspectorMaxHeight
         && current.left === left && current.top === top
         ? current
         : {
-          availableHeight: Math.max(0, canvasBounds.bottom - top - 8),
+          availableHeight,
           availableWidth: viewportWidth,
           inspectorMaxHeight,
           left,
@@ -565,14 +579,14 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     event.stopPropagation();
   }, []);
 
-  const directToolbarRailHandlers = {
+  const directToolbarRailHandlers = useMemo(() => ({
     onClickCapture: handleDirectToolbarClickCapture,
     onLostPointerCapture: (event: React.PointerEvent<HTMLDivElement>) => finishDirectToolbarPointer(event, true),
     onPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => finishDirectToolbarPointer(event, true),
     onPointerDown: handleDirectToolbarPointerDown,
     onPointerMove: handleDirectToolbarPointerMove,
     onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => finishDirectToolbarPointer(event, false),
-  };
+  }), [finishDirectToolbarPointer, handleDirectToolbarClickCapture, handleDirectToolbarPointerDown, handleDirectToolbarPointerMove]);
 
   const pointForEvent = useCallback((event: React.PointerEvent<HTMLDivElement>): InkPoint | null => {
     const bounds = canvasOwnerRef.current?.getBoundingClientRect();
@@ -1075,6 +1089,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
         className="overlay-icon-toolbar"
         data-canvas-selection-preserving="true"
         data-overlay-diagram-id={props.diagramId}
+        data-tools-expanded={toolsExpanded ? 'true' : 'false'}
         onClick={(event) => { event.stopPropagation(); }}
         onPointerDown={(event) => { event.stopPropagation(); }}
         ref={toolbarRef}
@@ -1086,7 +1101,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
             <ToolbarIconButton disabled={!writable} label="Hand tool" onClick={() => onToolChange('hand')} pressed={tool === 'hand'} shortcut={getCanvasToolShortcutLabel('hand')}><Hand size={18} /></ToolbarIconButton>
             <ToolbarDivider />
             <ToolbarIconButton disabled={!writable || !canConnectMermaidNodes} label="Connect Mermaid nodes" onClick={() => onToolChange('connect')} pressed={canConnectMermaidNodes && tool === 'connect'} shortcut={getCanvasToolShortcutLabel('connect')}><SquareDashedMousePointer size={18} /></ToolbarIconButton>
-            <ToolbarIconButton disabled={!writable || !canConnectMermaidNodes} label="Add flowchart node" onClick={() => props.onAddMermaidNode?.()} shortcut="N"><SquarePlus size={18} /></ToolbarIconButton>
+            <ToolbarIconButton disabled={!writable || !canConnectMermaidNodes || !props.onAddMermaidNode} label="Add flowchart node" onClick={() => props.onAddMermaidNode?.()} shortcut="N"><SquarePlus size={18} /></ToolbarIconButton>
           </div>
           <ToolbarDivider />
           <ToolbarIconButton controls={secondaryToolsId} expanded={toolsExpanded} label={toolsExpanded ? 'Collapse more canvas tools' : 'More canvas tools'} onClick={() => setToolsExpanded((open) => !open)} pressed={toolsExpanded} testId="overlay-toolbar-more-toggle"><ChevronDown size={18} /></ToolbarIconButton>
@@ -1101,7 +1116,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
             <ToolbarIconButton disabled={!writable} label="Line" onClick={() => onToolChange('line')} pressed={tool === 'line'} shortcut={getCanvasToolShortcutLabel('line')}><LineChart size={18} /></ToolbarIconButton>
             <ToolbarIconButton disabled={!writable} label="Arrow" onClick={() => onToolChange('arrow')} pressed={tool === 'arrow'} shortcut={getCanvasToolShortcutLabel('arrow')}><ArrowRight size={18} /></ToolbarIconButton>
           </div>
-          <div aria-label="Ink and history tools" className="overlay-toolbar-secondary-actions" onFocusCapture={handleToolbarFocus} onKeyDown={handleToolbarKeyDown} ref={secondaryToolbarRef} role="toolbar">
+          <div aria-label="Ink and history tools" className="overlay-toolbar-secondary-actions" onFocusCapture={handleToolbarFocus} onKeyDown={handleToolbarKeyDown} ref={secondaryToolbarRef} role="toolbar" {...directToolbarRailHandlers}>
             <ToolbarIconButton disabled={!writable} label="Laser pointer" onClick={() => onToolChange(tool === 'laser' ? 'select' : 'laser')} pressed={tool === 'laser'} shortcut={getCanvasToolShortcutLabel('laser')}><Crosshair size={18} /></ToolbarIconButton>
             <ToolbarIconButton disabled={!writable} label="Pen" onClick={() => onToolChange(tool === 'pen' ? 'select' : 'pen')} pressed={tool === 'pen'} shortcut={getCanvasToolShortcutLabel('pen')}><PenLine size={18} /></ToolbarIconButton>
             <ToolbarIconButton disabled={!writable} label="Highlighter" onClick={() => onToolChange(tool === 'highlighter' ? 'select' : 'highlighter')} pressed={tool === 'highlighter'}><Highlighter size={18} /></ToolbarIconButton>

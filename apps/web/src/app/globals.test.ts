@@ -184,3 +184,39 @@ describe('narrow hierarchy controls', () => {
     expect(narrowCanvasCss).not.toMatch(/\.canvas-hierarchy-editor\s*\{/u);
   });
 });
+
+describe('canvas context menu CSS contracts', () => {
+  const contextMenuCss = css.slice(css.indexOf('.canvas-context-menu {'));
+
+  it('paints a self-contained surface above the floating canvas toolbars', () => {
+    expect(contextMenuCss).toMatch(/\.canvas-context-menu\s*\{[^}]*background:\s*var\(--control-surface\);[^}]*border:\s*1px solid var\(--control-border\);[^}]*z-index:\s*95;/u);
+    expect(contextMenuCss).toMatch(/\.canvas-context-menu\s*\{[^}]*max-height:\s*calc\(100vh - 16px\);[^}]*overflow-y:\s*auto;[^}]*overscroll-behavior:\s*contain;/u);
+  });
+
+  it('keeps items touch-sized on coarse pointers and readable when disabled or dangerous', () => {
+    expect(contextMenuCss).toMatch(/\.canvas-context-menu-item\s*\{[^}]*min-height:\s*36px;/u);
+    expect(contextMenuCss).toMatch(/@media \(pointer: coarse\), \(max-width: 420px\)\s*\{\s*\.canvas-context-menu-item\s*\{\s*min-height:\s*44px;/u);
+    expect(contextMenuCss).toMatch(/\.canvas-context-menu-item:disabled\s*\{[^}]*cursor:\s*default;/u);
+    expect(contextMenuCss).toMatch(/\.canvas-context-menu-item\[data-danger='true'\]\s*\{\s*color:\s*var\(--status-danger-text\);/u);
+    expect(contextMenuCss).toMatch(/\.canvas-context-menu-item:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\);/u);
+  });
+
+  it('carries its own forced-colors block instead of extending the toolbar block', () => {
+    const forcedColors = contextMenuCss.slice(contextMenuCss.indexOf('@media (forced-colors: active)'));
+    expect(forcedColors).toMatch(/\.canvas-context-menu\s*\{[^}]*background:\s*Canvas;[^}]*border-color:\s*CanvasText;/u);
+    expect(forcedColors).toMatch(/\.canvas-context-menu-item:focus-visible\s*\{[^}]*background:\s*Highlight;[^}]*color:\s*HighlightText;/u);
+    expect(css.slice(0, css.indexOf('.canvas-context-menu {'))).not.toContain('canvas-context-menu');
+  });
+
+  it('overrides every author colour that outranks the plain item rule under forced colors', () => {
+    const forcedColors = contextMenuCss.slice(contextMenuCss.indexOf('@media (forced-colors: active)'));
+    for (const selector of [
+      /\.canvas-context-menu-item\[data-danger='true'\][^{:]*,?[^{]*\{[^}]*color:\s*CanvasText;/u,
+      /\.canvas-context-menu-item kbd[^{]*\{[^}]*color:\s*CanvasText;/u,
+      /\.canvas-context-menu-item:hover:not\(:disabled\)[^{]*\{[^}]*background:\s*Highlight;[^}]*color:\s*HighlightText;/u,
+      /\.canvas-context-menu-item\[data-danger='true'\]:hover:not\(:disabled\)[^{]*\{[^}]*background:\s*Highlight;/u,
+    ]) {
+      expect(forcedColors).toMatch(selector);
+    }
+  });
+});

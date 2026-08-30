@@ -3624,3 +3624,90 @@ code {
     min-width: 44px;
   }
 }
+
+/* Canvas right-click menu. Portal-mounted against the viewport, not the
+   canvas safe lane, so it stays reachable over floating toolbars. */
+
+.canvas-context-menu {
+  background: var(--control-surface);
+  border: 1px solid var(--control-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 20%, transparent);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  font: 13px/1.2 var(--font-sans);
+  max-height: calc(100vh - 16px);
+  max-width: min(280px, calc(100vw - 16px));
+  min-width: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  z-index: 95;
+}
+
+.canvas-context-menu:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.canvas-context-menu-item {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 0 10px;
+  text-align: left;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.canvas-context-menu-item:hover:not(:disabled) {
+  background: var(--selection-muted);
+  border-color: var(--focus-ring-muted);
+}
+
+.canvas-context-menu-item:focus-visible {
+  background: var(--selection-muted);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.canvas-context-menu-item:disabled {
+  color: var(--ink-muted);
+  cursor: default;
+  opacity: .55;
+}
+
+.canvas-context-menu-item[data-danger='true'] { color: var(--status-danger-text); }
+.canvas-context-menu-item[data-danger='true']:hover:not(:disabled) { background: var(--status-danger-surface); }
+.canvas-context-menu-item kbd { color: var(--ink-muted); font: 600 11px/1 var(--font-mono); }
+
+.canvas-context-menu-separator {
+  background: var(--control-border);
+  flex: 0 0 1px;
+  height: 1px;
+  margin: 3px 6px;
+}
+
+@media (pointer: coarse), (max-width: 420px) {
+  .canvas-context-menu-item { min-height: 44px; }
+}
+
+@media (forced-colors: active) {
+  .canvas-context-menu { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  .canvas-context-menu:focus-visible { outline-color: Highlight; }
+  .canvas-context-menu-item { border-color: CanvasText; color: CanvasText; forced-color-adjust: none; }
+  .canvas-context-menu-item[data-danger='true'], .canvas-context-menu-item kbd { color: CanvasText; }
+  .canvas-context-menu-item:hover:not(:disabled), .canvas-context-menu-item[data-danger='true']:hover:not(:disabled) { background: Highlight; border-color: Highlight; color: HighlightText; }
+  .canvas-context-menu-item:focus-visible { background: Highlight; color: HighlightText; outline: 2px solid Highlight; }
+  .canvas-context-menu-item:disabled { color: GrayText; }
+  .canvas-context-menu-separator { background: CanvasText; }
+}

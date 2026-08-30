@@ -35,7 +35,7 @@ const PENDING_PRUNE_FLOWCHART = `flowchart LR
 const PENDING_PRUNE_REMOVED = `flowchart LR
   B[Bridge] --> C[Keep]`;
 const NEGATIVE_OBSERVATION_WINDOW_MS = 300;
-const OVERLAY_PRIMARY_ACTIONS = new Set(['Select tool', 'Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow', 'More canvas tools']);
+const OVERLAY_PRIMARY_ACTIONS = new Set(['Select tool', 'Hand tool', 'Connect Mermaid nodes', 'Add flowchart node', 'More canvas tools']);
 const OVERLAY_POINT_CREATION_ACTIONS = new Set(['Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow']);
 
 async function ensureOverlaySecondaryRail(page: Page): Promise<void> {
@@ -527,7 +527,9 @@ async function clickOverlayTool(page: Page, name: string): Promise<void> {
   if (OVERLAY_POINT_CREATION_ACTIONS.has(name)) {
     const canvas = page.getByTestId('diagram-canvas');
     const bounds = await boxOf(canvas, `Canvas was missing while creating ${name}.`);
-    await page.mouse.click(bounds.x + bounds.width * 0.72, bounds.y + bounds.height * 0.38);
+    const toolbar = await page.getByLabel('Overlay scene controls', { exact: true }).boundingBox();
+    const clearOfToolbar = toolbar ? toolbar.y + toolbar.height + 40 : 0;
+    await page.mouse.click(bounds.x + bounds.width * 0.72, Math.max(bounds.y + bounds.height * 0.38, clearOfToolbar));
   }
 }
 
@@ -1031,9 +1033,12 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
     const canvasA = pageA.getByTestId('diagram-canvas');
     const canvasABox = await boxOf(canvasA, 'Laser canvas was missing.');
-    await pageA.mouse.move(canvasABox.x + 220, canvasABox.y + 180);
+    const overlayToolbarBox = await pageA.getByLabel('Overlay scene controls', { exact: true }).boundingBox();
+    // Laser samples must start on bare canvas below the expanded toolbar pill.
+    const laserBaseY = Math.max(canvasABox.y + 140, overlayToolbarBox ? overlayToolbarBox.y + overlayToolbarBox.height + 40 : 0);
+    await pageA.mouse.move(canvasABox.x + 220, laserBaseY + 40);
     await pageA.mouse.down();
-    await pageA.mouse.move(canvasABox.x + 300, canvasABox.y + 240, { steps: 4 });
+    await pageA.mouse.move(canvasABox.x + 300, laserBaseY + 100, { steps: 4 });
     const remoteLaser = remoteLaserForParticipant(pageB, pageAParticipantName);
     await remoteLaser.waitFor({ state: 'visible', timeout: 15_000 });
     const remoteLaserBeforeZoom = await boxOf(remoteLaser, 'Remote laser had no bounds before receiver zoom.');
@@ -1057,9 +1062,9 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
 
     const startLaserSample = async () => {
       await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
-      await pageA.mouse.move(canvasABox.x + 220, canvasABox.y + 180);
+      await pageA.mouse.move(canvasABox.x + 220, laserBaseY + 40);
       await pageA.mouse.down();
-      await pageA.mouse.move(canvasABox.x + 240, canvasABox.y + 200);
+      await pageA.mouse.move(canvasABox.x + 240, laserBaseY + 60);
       await remoteLaser.waitFor({ state: 'visible', timeout: 15_000 });
     };
     const expectLaserExit = async (exit: () => Promise<void>, label: string, options: { releaseBeforeExit?: boolean; restoresCanvasLaserControl?: boolean } = {}) => {
@@ -1095,10 +1100,10 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     }
 
     await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
-    await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 1, pointerType: 'pen', type: 'mousePressed', x: canvasABox.x + 180, y: canvasABox.y + 140 });
-    await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 1, pointerType: 'pen', type: 'mouseMoved', x: canvasABox.x + 200, y: canvasABox.y + 160 });
+    await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 1, pointerType: 'pen', type: 'mousePressed', x: canvasABox.x + 180, y: laserBaseY });
+    await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 1, pointerType: 'pen', type: 'mouseMoved', x: canvasABox.x + 200, y: laserBaseY + 20 });
     await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'visible', timeout: 15_000 });
-    await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 0, pointerType: 'pen', type: 'mouseReleased', x: canvasABox.x + 200, y: canvasABox.y + 160 });
+    await cdpA.send('Input.dispatchMouseEvent', { button: 'left', buttons: 0, pointerType: 'pen', type: 'mouseReleased', x: canvasABox.x + 200, y: laserBaseY + 20 });
     await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'detached', timeout: 15_000 });
     const [touchStart, touchMove] = await canvasOwnedTouchPoints(pageA);
     await cdpA.send('Input.dispatchTouchEvent', { touchPoints: [{ id: 92, x: touchStart!.x, y: touchStart!.y }], type: 'touchStart' });
@@ -1118,7 +1123,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
       'Laser gestures changed live Yjs source/layout/activity history.');
 
     await pageA.getByRole('button', { name: 'Laser pointer', exact: true }).click();
-    await pageA.mouse.move(canvasABox.x + 240, canvasABox.y + 200);
+    await pageA.mouse.move(canvasABox.x + 240, laserBaseY + 60);
     await pageA.mouse.down();
     await remoteLaserForParticipant(pageB, pageAParticipantName).waitFor({ state: 'visible', timeout: 15_000 });
     await pageA.evaluate(() => {

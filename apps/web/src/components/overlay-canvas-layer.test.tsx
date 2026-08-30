@@ -6,7 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OverlayGeometry, OverlayObjectRecord } from '@arielcharts/shared';
 import type { CanvasTool } from '../lib/canvas-interaction-state';
-import { getImmediateOverlayInspectorCap, getPlatformShortcutTitle, incrementalTextChange, inspectorCapacityPx, moveRovingToolbarFocus, OverlayCanvasLayer, OVERLAY_TOOLBAR_PRIMARY_HEIGHT, OVERLAY_TOOLBAR_SECONDARY_ACTIONS_HEIGHT, OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET, OVERLAY_TOOLBAR_STACKED_INNER_GAP, resolveOverlayInspectorSafeBottomTop, resolveOverlayToolbarViewport, viewportCenterToWorld } from './overlay-canvas-layer';
+import { getImmediateOverlayInspectorCap, getPlatformShortcutTitle, incrementalTextChange, inspectorCapacityPx, moveRovingToolbarFocus, OverlayCanvasLayer, OVERLAY_TOOLBAR_ANNOTATE_ACTIONS_HEIGHT, OVERLAY_TOOLBAR_AVAILABLE_HEIGHT_BOTTOM_INSET, OVERLAY_TOOLBAR_COLLAPSED_PILL_HEIGHT, OVERLAY_TOOLBAR_PILL_BORDER, OVERLAY_TOOLBAR_PRIMARY_ROW_HEIGHT, OVERLAY_TOOLBAR_SECONDARY_ACTIONS_HEIGHT, OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_CSS_TOP, OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_FROM_PILL, OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET, OVERLAY_TOOLBAR_STACKED_INNER_GAP, OVERLAY_TOOLBAR_STACKED_INSPECTOR_TOP_FROM_PILL, resolveOverlayInspectorSafeBottomTop, resolveOverlayToolbarViewport, viewportCenterToWorld } from './overlay-canvas-layer';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -186,14 +186,32 @@ describe('OverlayCanvasLayer', () => {
   });
 
   it('caps a stale inspector immediately from the synchronous controls reserve', () => {
-    expect(OVERLAY_TOOLBAR_PRIMARY_HEIGHT).toBe(54);
+    expect(OVERLAY_TOOLBAR_PILL_BORDER).toBe(1);
+    expect(OVERLAY_TOOLBAR_PRIMARY_ROW_HEIGHT).toBe(52);
+    expect(OVERLAY_TOOLBAR_ANNOTATE_ACTIONS_HEIGHT).toBe(54);
     expect(OVERLAY_TOOLBAR_SECONDARY_ACTIONS_HEIGHT).toBe(54);
-    expect(OVERLAY_TOOLBAR_STACKED_INNER_GAP).toBe(6);
+    expect(OVERLAY_TOOLBAR_STACKED_INNER_GAP).toBe(0);
+    expect(OVERLAY_TOOLBAR_COLLAPSED_PILL_HEIGHT).toBe(54);
+    // The sidecar is positioned inside the pill's padding box, so its real top
+    // is the pill border plus the `top` globals.css gives it.
+    expect(OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_CSS_TOP).toBe(62);
     expect(OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_OFFSET).toBe(8);
-    expect(getImmediateOverlayInspectorCap(203, 74, true)).toBe(74);
-    expect(getImmediateOverlayInspectorCap(300, 74, false)).toBe(111);
+    expect(OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_FROM_PILL).toBe(63);
+    expect(OVERLAY_TOOLBAR_STACKED_INSPECTOR_TOP_FROM_PILL).toBe(161);
+    expect(getImmediateOverlayInspectorCap(203, 74, true)).toBe(73);
+    expect(getImmediateOverlayInspectorCap(300, 74, false)).toBe(72);
     expect(getImmediateOverlayInspectorCap(128, 74, false)).toBe(0);
     expect(getImmediateOverlayInspectorCap(300, 0, false)).toBeNull();
+    // The immediate cap must land on the measured capacity rather than
+    // double-count the bottom inset availableHeight has already dropped.
+    const pillTop = 120;
+    const canvasBottom = 420;
+    const controlsSafeBottom = 74;
+    const availableHeight = canvasBottom - pillTop - OVERLAY_TOOLBAR_AVAILABLE_HEIGHT_BOTTOM_INSET;
+    expect(getImmediateOverlayInspectorCap(availableHeight, controlsSafeBottom, true))
+      .toBe(inspectorCapacityPx(pillTop + OVERLAY_TOOLBAR_SHORT_LANDSCAPE_INSPECTOR_TOP_FROM_PILL, canvasBottom - controlsSafeBottom));
+    expect(getImmediateOverlayInspectorCap(availableHeight, controlsSafeBottom, false))
+      .toBe(inspectorCapacityPx(pillTop + OVERLAY_TOOLBAR_STACKED_INSPECTOR_TOP_FROM_PILL, canvasBottom - controlsSafeBottom));
   });
 
   it('uses a positive published reserve first, otherwise only a visible in-canvas controls rail', () => {
@@ -253,8 +271,8 @@ describe('OverlayCanvasLayer', () => {
 
   it('keeps child controls interactive inside the pointer-transparent rail without bubbling to the canvas ancestor', async () => {
     const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
-    const onCanvasClick = vi.fn(); const onCanvasPointerDown = vi.fn();
-    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange: vi.fn() };
+    const onCanvasClick = vi.fn(); const onCanvasPointerDown = vi.fn(); const onAddMermaidNode = vi.fn();
+    const callbacks = { onAdd: vi.fn(), onAddMermaidNode, onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange: vi.fn() };
     await act(async () => root.render(<div onClick={onCanvasClick} onPointerDown={onCanvasPointerDown}><OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} /></div>));
     const more = document.body.querySelector<HTMLButtonElement>('[aria-label="More canvas tools"]')!;
     await act(async () => more.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
@@ -262,15 +280,26 @@ describe('OverlayCanvasLayer', () => {
     const connect = document.body.querySelector<HTMLButtonElement>('[aria-label="Connect Mermaid nodes"]')!;
     await act(async () => connect.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
     await act(async () => connect.click());
+    const addNode = document.body.querySelector<HTMLButtonElement>('[aria-label="Add flowchart node"]')!;
+    await act(async () => addNode.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
+    await act(async () => addNode.click());
     expect(onCanvasPointerDown).not.toHaveBeenCalled();
     expect(onCanvasClick).not.toHaveBeenCalled();
     expect(callbacks.onToolChange).toHaveBeenCalledWith('connect');
+    // Adding a Mermaid node is a fire action: it never becomes the active tool.
+    expect(onAddMermaidNode).toHaveBeenCalledTimes(1);
+    expect(callbacks.onToolChange).toHaveBeenCalledTimes(1);
+    expect(addNode.getAttribute('aria-pressed')).toBeNull();
     await act(async () => root.render(<div onClick={onCanvasClick} onPointerDown={onCanvasPointerDown}><OverlayCanvasLayer {...callbacks} canConnectMermaidNodes diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="connect" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} /></div>));
     expect(connect.disabled).toBe(false);
     expect(connect.getAttribute('aria-pressed')).toBe('true');
+    expect(addNode.disabled).toBe(false);
     await act(async () => root.render(<div onClick={onCanvasClick} onPointerDown={onCanvasPointerDown}><OverlayCanvasLayer {...callbacks} canConnectMermaidNodes={false} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="connect" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} /></div>));
     expect(connect.disabled).toBe(true);
     expect(connect.getAttribute('aria-pressed')).toBe('false');
+    expect(addNode.disabled).toBe(true);
+    await act(async () => addNode.click());
+    expect(onAddMermaidNode).toHaveBeenCalledTimes(1);
     await act(async () => root.unmount());
   });
 
@@ -279,19 +308,27 @@ describe('OverlayCanvasLayer', () => {
     const onToolChange = vi.fn();
     const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(), onToolChange };
     await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" tool="select" transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} />));
-    const rail = document.body.querySelector<HTMLElement>('[data-testid="overlay-toolbar-primary-tools"]')!;
-    const diamond = rail.querySelector<HTMLButtonElement>('[aria-label="Diamond"]')!;
-    const rectangle = rail.querySelector<HTMLButtonElement>('[aria-label="Rectangle"]')!;
-    rail.setPointerCapture = vi.fn(); rail.releasePointerCapture = vi.fn(); rail.hasPointerCapture = vi.fn(() => true);
-    const pointer = (type: string, x: number) => Object.assign(new Event(type, { bubbles: true, cancelable: true }), { button: 0, clientX: x, pointerId: 12, pointerType: 'touch' });
+    await act(async () => (document.body.querySelector('[data-testid="overlay-toolbar-more-toggle"]') as HTMLButtonElement).click());
+    const pointer = (type: string, x: number, pointerId: number) => Object.assign(new Event(type, { bubbles: true, cancelable: true }), { button: 0, clientX: x, pointerId, pointerType: 'touch' });
     const click = (pointerId: number) => Object.assign(new MouseEvent('click', { bubbles: true, cancelable: true }), { pointerId });
-    await act(async () => { diamond.dispatchEvent(pointer('pointerdown', 220)); diamond.dispatchEvent(pointer('pointermove', 160)); diamond.dispatchEvent(pointer('pointerup', 160)); });
-    expect(rail.scrollLeft).toBe(60);
-    await act(async () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())));
-    await act(async () => diamond.dispatchEvent(click(12)));
-    expect(onToolChange).not.toHaveBeenCalled();
-    await act(async () => rectangle.dispatchEvent(click(13)));
-    expect(onToolChange).toHaveBeenLastCalledWith('rectangle');
+    for (const [selector, dragged, other, tool, pointerId] of [
+      ['[data-testid="overlay-toolbar-annotate-actions"]', 'Diamond', 'Rectangle', 'rectangle', 12],
+      ['[data-testid="overlay-toolbar-primary-tools"]', 'Hand tool', 'Select tool', 'select', 22],
+      ['.overlay-toolbar-secondary-actions', 'Highlighter', 'Pen', 'pen', 32],
+    ] as const) {
+      const rail = document.body.querySelector<HTMLElement>(selector)!;
+      const draggedButton = rail.querySelector<HTMLButtonElement>(`[aria-label="${dragged}"]`)!;
+      const otherButton = rail.querySelector<HTMLButtonElement>(`[aria-label="${other}"]`)!;
+      rail.setPointerCapture = vi.fn(); rail.releasePointerCapture = vi.fn(); rail.hasPointerCapture = vi.fn(() => true);
+      await act(async () => { draggedButton.dispatchEvent(pointer('pointerdown', 220, pointerId)); draggedButton.dispatchEvent(pointer('pointermove', 160, pointerId)); draggedButton.dispatchEvent(pointer('pointerup', 160, pointerId)); });
+      expect(rail.scrollLeft).toBe(60);
+      await act(async () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())));
+      await act(async () => draggedButton.dispatchEvent(click(pointerId)));
+      expect(onToolChange).not.toHaveBeenCalled();
+      await act(async () => otherButton.dispatchEvent(click(pointerId + 1)));
+      expect(onToolChange).toHaveBeenLastCalledWith(tool);
+      onToolChange.mockClear();
+    }
     await act(async () => root.unmount());
   });
 
@@ -322,13 +359,23 @@ describe('OverlayCanvasLayer', () => {
     expect(primaryTools).not.toBeNull();
     expect(primaryTools.contains(more)).toBe(false);
     expect(more.getAttribute('aria-expanded')).toBe('false');
-    for (const label of ['Select tool', 'Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow']) {
+    for (const label of ['Select tool', 'Hand tool', 'Connect Mermaid nodes', 'Add flowchart node']) {
       expect(primaryTools.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
     }
+    for (const label of ['Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow']) {
+      expect(document.body.querySelector(`[data-testid="overlay-toolbar-primary"] [aria-label="${label}"]`)).toBeNull();
+    }
+    expect(document.body.querySelectorAll('[data-testid="overlay-toolbar-primary"] button')).toHaveLength(5);
     expect((document.body.querySelector('[data-testid="overlay-toolbar-secondary"]') as HTMLElement).getAttribute('aria-hidden')).toBe('true');
     await act(async () => more.click());
     expect(document.body.querySelector('[data-testid="overlay-toolbar-more-toggle"]')).toBe(more);
     expect(more.getAttribute('aria-expanded')).toBe('true');
+    const annotate = document.body.querySelector<HTMLElement>('[data-testid="overlay-toolbar-annotate-actions"]')!;
+    expect(annotate.getAttribute('aria-label')).toBe('Annotation and shape tools');
+    expect(annotate.getAttribute('role')).toBe('toolbar');
+    for (const label of ['Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow']) {
+      expect(annotate.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
+    }
     for (const label of ['Pen', 'Highlighter', 'Erase stroke', 'Undo canvas change', 'Redo canvas change', 'Objects and layers']) {
       expect(document.body.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
     }
@@ -548,8 +595,8 @@ describe('OverlayCanvasLayer', () => {
 
     expect(toolbar.style.top).toBe('338.78125px');
     expect(controls.getBoundingClientRect().top).toBe(635);
-    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBeLessThanOrEqual(226);
-    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(225);
+    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBeLessThanOrEqual(125);
+    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(124);
 
     // The same banner can resize without a child-list record. Its observed
     // geometry still updates placement and capacity together in one frame.
@@ -557,12 +604,12 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => {
       geometryObserver!.callback([], {} as ResizeObserver);
       expect(toolbar.style.top).toBe('338.78125px');
-      expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(225);
+      expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(124);
       expect(frames.size).toBe(1);
       flushFrames();
     });
     expect(toolbar.style.top).toBe('368.78125px');
-    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(195);
+    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(94);
 
     pane.removeChild(banner);
     await act(async () => paneObserver!.callback([], {} as MutationObserver));
@@ -605,8 +652,8 @@ describe('OverlayCanvasLayer', () => {
     const host = document.createElement('div'); canvas.append(host);
     canvasStyleHost.style.setProperty('--canvas-controls-toolbar-safe-bottom', '74px');
     expect(getComputedStyle(canvas).getPropertyValue('--canvas-controls-toolbar-safe-bottom')).toBe('');
-    const canvasBounds = () => ({ bottom: 331, height: 223, left: 0, right: 844, top: 108, width: 844, x: 0, y: 108, toJSON: () => ({}) }) as DOMRect;
-    const controlsBounds = () => ({ bottom: 319, height: 54, left: 586, right: 832, top: 265, width: 246, x: 586, y: 265, toJSON: () => ({}) }) as DOMRect;
+    const canvasBounds = () => ({ bottom: 431, height: 323, left: 0, right: 844, top: 108, width: 844, x: 0, y: 108, toJSON: () => ({}) }) as DOMRect;
+    const controlsBounds = () => ({ bottom: 419, height: 54, left: 586, right: 832, top: 365, width: 246, x: 586, y: 365, toJSON: () => ({}) }) as DOMRect;
     const detachedControlsBounds = () => ({ bottom: 0, height: 0, left: 0, right: 0, top: 0, width: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     let oldControlsAttached = true;
     canvas.getBoundingClientRect = canvasBounds;
@@ -625,19 +672,19 @@ describe('OverlayCanvasLayer', () => {
     };
     await act(async () => (document.body.querySelector('[aria-label="Objects and layers"]') as HTMLButtonElement).click());
     await act(async () => flushFrames());
-    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(74);
+    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(73);
 
     const geometryObserver = resizeObservers.find((observer) => !observer.disconnected && observer.targets.includes(canvas));
     const canvasObserver = mutationObservers.find((observer) => !observer.disconnected && observer.targets.includes(canvas));
     expect(geometryObserver).toBeDefined();
     expect(canvasObserver).toBeDefined();
-    expect(inspectorCapacityPx(182, 323)).toBe(140);
+    expect(inspectorCapacityPx(282, 423)).toBe(140);
     oldControlsAttached = false;
     canvas.removeChild(oldControls);
     await act(async () => canvasObserver!.callback([{ target: canvas, type: 'childList' } as unknown as MutationRecord], {} as MutationObserver));
     expect(frames.size).toBe(1);
     let replacementControlsOffCanvas = false;
-    let replacementControlsTop = 170;
+    let replacementControlsTop = 270;
     const newControls = document.createElement('div'); newControls.dataset.testid = 'canvas-controls-toolbar'; newControls.getBoundingClientRect = () => (replacementControlsOffCanvas
       ? { bottom: 97, height: 214, left: -21, right: -11, top: -117, width: 10, x: -21, y: -117, toJSON: () => ({}) }
       : { bottom: replacementControlsTop + 54, height: 54, left: 586, right: 832, top: replacementControlsTop, width: 246, x: 586, y: replacementControlsTop, toJSON: () => ({}) }) as DOMRect; canvas.append(newControls);
@@ -646,7 +693,7 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => flushFrames());
     // Replacement controls may be temporarily absent or move while rendering;
     // the inherited DiagramCanvas reserve remains the sole camera-safe bound.
-    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(74);
+    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(73);
     await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" readOnly={false} semanticAnchors={new Map()} sessionId="abc123de" transform={{ x: 0, y: 0, zoom: 1 }} viewport={{ height: 100, width: 400, x: 110, y: 14 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} />));
     await act(async () => flushFrames());
     expect(toolbar.style.getPropertyValue('--overlay-toolbar-available-width')).toBe('400px');
@@ -657,7 +704,7 @@ describe('OverlayCanvasLayer', () => {
     // is hidden/off-canvas, the inspector uses the canvas fallback.
     primaryTop = 134;
     canvasStyleHost.style.setProperty('--canvas-controls-toolbar-safe-bottom', '0px');
-    replacementControlsTop = 265;
+    replacementControlsTop = 365;
     replacementControlsOffCanvas = true;
     newControls.style.visibility = 'hidden';
     const currentCanvasObserver = mutationObservers.find((observer) => !observer.disconnected && observer.targets.includes(canvas));
@@ -667,7 +714,7 @@ describe('OverlayCanvasLayer', () => {
     await act(async () => currentCanvasObserver!.callback([{ target: newControls, type: 'attributes' } as unknown as MutationRecord], {} as MutationObserver));
     await act(async () => flushFrames());
     const zeroReserveCapacity = Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10);
-    expect(zeroReserveCapacity).toBe(126);
+    expect(zeroReserveCapacity).toBe(125);
     // The existing control becomes visible in-canvas without replacement. Its
     // attribute record schedules one frame, which publishes the narrowed
     // camera-safe inspector capacity before it can overlap the rail.
@@ -679,24 +726,24 @@ describe('OverlayCanvasLayer', () => {
       flushFrames();
     });
     const visibleZeroReserveCapacity = Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10);
-    expect(visibleZeroReserveCapacity).toBe(60);
-    expect(196 + visibleZeroReserveCapacity).toBeLessThanOrEqual(replacementControlsTop - 8);
+    expect(visibleZeroReserveCapacity).toBe(59);
+    expect(OVERLAY_TOOLBAR_STACKED_INSPECTOR_TOP_FROM_PILL + 136 + visibleZeroReserveCapacity).toBeLessThanOrEqual(replacementControlsTop - 8);
     // Hidden, off-canvas, and absent rails restore full canvas capacity.
     newControls.style.display = 'none';
     await act(async () => currentCanvasObserver!.callback([{ target: newControls, type: 'attributes' } as unknown as MutationRecord], {} as MutationObserver));
     await act(async () => flushFrames());
-    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(126);
+    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(125);
     newControls.style.display = 'flex';
     newControls.style.visibility = 'hidden';
     await act(async () => currentCanvasObserver!.callback([{ target: newControls, type: 'attributes' } as unknown as MutationRecord], {} as MutationObserver));
     await act(async () => flushFrames());
-    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(126);
+    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(125);
     newControls.style.visibility = 'visible';
     replacementControlsOffCanvas = true;
     newControls.className = 'off-canvas';
     await act(async () => currentCanvasObserver!.callback([{ target: newControls, type: 'attributes' } as unknown as MutationRecord], {} as MutationObserver));
     await act(async () => flushFrames());
-    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(126);
+    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(125);
     replacementControlsOffCanvas = false;
     newControls.className = '';
     // An absent publication retains a valid live control rail.
@@ -706,7 +753,7 @@ describe('OverlayCanvasLayer', () => {
       styleHostObserver!.callback([{ target: canvasStyleHost, type: 'attributes' } as unknown as MutationRecord], {} as MutationObserver);
     });
     await act(async () => flushFrames());
-    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(60);
+    expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(59);
     await act(async () => root.unmount());
     expect(mutationObservers.every((observer) => observer.disconnected)).toBe(true);
     expect(resizeObservers.every((observer) => observer.disconnected)).toBe(true);
@@ -714,24 +761,27 @@ describe('OverlayCanvasLayer', () => {
 
   it('uses one tab stop per toolbar and roves primary, contextual, and inspector actions', async () => {
     const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
-    const callbacks = { onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn() };
+    const callbacks = { onAdd: vi.fn(), onAddMermaidNode: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn() };
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView; const scrollIntoView = vi.fn(); HTMLElement.prototype.scrollIntoView = scrollIntoView;
     await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="primary" sessionId="abc123de" readOnly={false} semanticAnchors={new Map()} transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'primary', objects: [{ id: 'shape', kind: 'shape.rectangle', version: 1, order_key: 'a', geometry: { x: 1, y: 2, width: 180, height: 120, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: 'A label' }] }} />));
     const primary = document.body.querySelector<HTMLElement>('[data-testid="overlay-toolbar-primary"]')!;
     const select = primary.querySelector<HTMLButtonElement>('[aria-label="Select tool"]')!;
     const hand = primary.querySelector<HTMLButtonElement>('[aria-label="Hand tool"]')!;
-    const text = primary.querySelector<HTMLButtonElement>('[aria-label="Text"]')!;
+    const connect = primary.querySelector<HTMLButtonElement>('[aria-label="Connect Mermaid nodes"]')!;
+    const addNode = primary.querySelector<HTMLButtonElement>('[aria-label="Add flowchart node"]')!;
     const inspector = primary.querySelector<HTMLButtonElement>('[aria-label="More canvas tools"]')!;
     expect([...primary.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.tabIndex === 0)).toHaveLength(1);
     select.focus();
     await act(async () => primary.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })));
     expect(document.activeElement).toBe(hand); expect(hand.tabIndex).toBe(0); expect(select.tabIndex).toBe(-1);
     await act(async () => primary.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })));
-    expect(document.activeElement).toBe(text); expect(text.tabIndex).toBe(0);
-    text.disabled = true;
+    expect(document.activeElement).toBe(connect); expect(connect.tabIndex).toBe(0);
+    await act(async () => primary.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })));
+    expect(document.activeElement).toBe(addNode); expect(addNode.tabIndex).toBe(0);
+    addNode.disabled = true;
     await act(async () => { await Promise.resolve(); });
     expect(select.tabIndex).toBe(0);
-    text.remove();
+    addNode.remove();
     await act(async () => { await Promise.resolve(); });
     expect(select.tabIndex).toBe(0);
     await act(async () => primary.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'End' })));
@@ -873,9 +923,9 @@ describe('OverlayCanvasLayer', () => {
     ] };
     await act(async () => root.render(<OverlayCanvasLayer {...callbacks} diagramId="main" sessionId="abc123de" readOnly={false} scene={scene} semanticAnchors={new Map()} transform={{ x: 0, y: 0, zoom: 1 }} />));
     const button = (label: string) => [...document.body.querySelectorAll('button')].find((item) => item.getAttribute('aria-label') === label || item.textContent === label) as HTMLButtonElement;
+    await act(async () => button('More canvas tools').click());
     await act(async () => button('Rectangle').click());
     expect(callbacks.onToolChange).toHaveBeenCalledWith('rectangle');
-    await act(async () => button('More canvas tools').click());
     await act(async () => button('Objects and layers').click());
     const listButton = (prefix: string) => [...document.body.querySelectorAll('aside[aria-label="ArielCharts overlay list"] button')].find((item) => item.textContent?.startsWith(prefix)) as HTMLButtonElement;
     await act(async () => {

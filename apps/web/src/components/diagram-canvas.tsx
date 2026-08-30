@@ -3878,6 +3878,7 @@ export function DiagramCanvas({
         <OverlayCanvasLayer
           {...overlay}
           canConnectMermaidNodes={isFlowchart}
+          onAddMermaidNode={addDefaultNode}
           controlsSafeBottom={semanticControlsSafeBottom}
           onFitSelection={(bounds) => { if (bounds) fitBoundsToViewport(bounds, true); else fitToDiagram(true); }}
           semanticAnchors={overlaySemanticAnchors}

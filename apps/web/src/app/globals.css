@@ -2682,12 +2682,17 @@ code {
   }
 }
 
-/* The primary strip is stable; More grows a lane sized to whichever
-   conditional rows are active, capped by the measured available space. */
+/* One pill: the primary strip is stable and More grows rows inside the same
+   surface, capped by the measured available space. Rows stay transparent and
+   are separated by hairlines, so the pill reads as a single control. */
 .overlay-icon-toolbar {
   align-items: stretch;
+  background: color-mix(in srgb, var(--control-surface) 94%, transparent);
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 20%, transparent);
   display: grid;
-  gap: 8px;
+  gap: 0;
   justify-items: center;
   left: 50%;
   max-width: min(100% - 24px, var(--overlay-toolbar-available-width, 100vw));
@@ -2700,19 +2705,23 @@ code {
 }
 
 .overlay-toolbar-primary,
+.overlay-toolbar-annotate-actions,
 .overlay-toolbar-context,
 .overlay-toolbar-inspector,
 .overlay-toolbar-inspector-actions,
 .overlay-toolbar-secondary-actions {
   align-items: center;
-  background: color-mix(in srgb, var(--control-surface) 94%, transparent);
-  border: 1px solid var(--control-border);
-  border-radius: 12px;
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 20%, transparent);
   display: flex;
   gap: 3px;
   max-width: 100%;
   pointer-events: auto;
+}
+
+.overlay-toolbar-annotate-actions,
+.overlay-toolbar-context,
+.overlay-toolbar-inspector,
+.overlay-toolbar-secondary-actions {
+  border-top: 1px solid var(--control-border);
 }
 
 .overlay-toolbar-primary {
@@ -2735,8 +2744,11 @@ code {
   touch-action: pan-x;
 }
 
+.overlay-toolbar-annotate-actions > .overlay-toolbar-button,
+.overlay-toolbar-context > .overlay-toolbar-button,
 .overlay-toolbar-primary-tools > .overlay-toolbar-button,
-.overlay-toolbar-primary > .overlay-toolbar-button {
+.overlay-toolbar-primary > .overlay-toolbar-button,
+.overlay-toolbar-secondary-actions > .overlay-toolbar-button {
   pointer-events: auto;
   touch-action: pan-x;
 }
@@ -2750,35 +2762,30 @@ code {
   width: 100%;
 }
 
-.overlay-toolbar-context > .overlay-toolbar-button {
-  pointer-events: auto;
-  touch-action: pan-x;
-}
-
 .overlay-toolbar-secondary {
   align-content: start;
   display: grid;
-  gap: 6px;
+  gap: 0;
   height: 0;
   min-height: 0;
   overflow: hidden;
   overflow: clip;
   pointer-events: none;
-  grid-template-rows: 54px minmax(0, 1fr);
+  grid-template-rows: 54px 54px minmax(0, 1fr);
   visibility: hidden;
   width: 100%;
 }
 
 .overlay-toolbar-secondary.is-expanded {
-  /* Content-driven: one 54px actions row plus whatever contextual rows are
-     mounted. The cap reserves the 8px grid gap beneath the 54px primary row
-     so the lane can never push past the measured available height. */
+  /* Content-driven: the annotate and ink rows plus whatever contextual rows
+     are mounted. The cap reserves the 54px primary row above them so the lane
+     can never push past the measured available height. */
   height: auto;
-  max-height: calc(var(--overlay-toolbar-available-height, 100vh) - 62px);
-  pointer-events: none;
+  max-height: calc(var(--overlay-toolbar-available-height, 100vh) - 54px);
   visibility: visible;
 }
 
+.overlay-toolbar-annotate-actions,
 .overlay-toolbar-secondary-actions {
   box-sizing: border-box;
   flex-wrap: nowrap;
@@ -2789,6 +2796,8 @@ code {
   width: 100%;
 }
 
+/* The inspector is a panel rather than a rail: it owns its whole surface so
+   its list can be scrolled and its controls cannot be missed. */
 .overlay-toolbar-inspector {
   align-items: stretch;
   box-sizing: border-box;
@@ -2798,13 +2807,17 @@ code {
   min-height: 0;
   overflow: auto;
   padding: 6px;
+  pointer-events: auto;
   width: 100%;
 }
 
 .overlay-toolbar-inspector-actions {
-  box-shadow: none;
+  background: color-mix(in srgb, var(--control-surface) 94%, transparent);
+  border: 1px solid var(--control-border);
+  border-radius: 12px;
   justify-content: flex-start;
   padding: 2px;
+  pointer-events: auto;
 }
 
 .overlay-toolbar-section-label { color: var(--ink-muted); font: 600 10px/1.2 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
@@ -2899,15 +2912,6 @@ code {
 .overlay-line-endpoint { cursor: crosshair; }
 .overlay-transform-status { background: var(--control-surface); border: 1px solid var(--control-border); border-radius: 8px; color: var(--ink); font: 12px/1.2 var(--font-sans); left: 50%; padding: 6px 8px; pointer-events: none; position: absolute; top: 8px; transform: translateX(-50%); z-index: 5; }
 
-@media (forced-colors: active) {
-  .overlay-toolbar-primary, .overlay-toolbar-context, .overlay-toolbar-inspector, .overlay-toolbar-inspector-actions, .overlay-toolbar-secondary-actions { background: Canvas; border-color: CanvasText; box-shadow: none; }
-  .overlay-toolbar-button { border-color: CanvasText; color: CanvasText; forced-color-adjust: none; }
-  .overlay-toolbar-button[aria-pressed='true'], .overlay-toolbar-button:focus-visible { background: Highlight; color: HighlightText; outline: 2px solid Highlight; }
-  .overlay-transform-handle::after { background: Highlight; border-color: Canvas; forced-color-adjust: none; }
-  .overlay-rotation-handle::before { background: Highlight; forced-color-adjust: none; }
-  .overlay-transform-handle:focus-visible { outline-color: Highlight; }
-}
-
 @media (pointer: coarse), (max-width: 420px) {
   .overlay-icon-toolbar { max-width: calc(100% - 16px); top: 8px; width: min(100%, var(--overlay-toolbar-available-width, 100vw)); }
   .overlay-toolbar-primary { justify-content: flex-start; }
@@ -2917,14 +2921,33 @@ code {
 }
 
 @media (min-width: 421px) and (max-height: 500px) {
-  .overlay-icon-toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 54px; justify-items: stretch; width: min(calc(100% - 24px), var(--overlay-toolbar-available-width, 100vw)); }
+  .overlay-icon-toolbar { grid-template-rows: 54px; justify-items: stretch; }
+  .overlay-icon-toolbar[data-tools-expanded='true'] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); width: min(calc(100% - 24px), var(--overlay-toolbar-available-width, 100vw)); }
+  /* Collapsed, only the primary column is occupied, so the pill shrinks to it:
+     its box may not claim canvas the toolbar neither paints nor uses. The
+     chrome moves onto the column that paints. */
+  .overlay-icon-toolbar:not([data-tools-expanded='true']) { background: none; border-color: transparent; box-shadow: none; grid-template-columns: max-content 0; width: max-content; }
+  .overlay-icon-toolbar:not([data-tools-expanded='true']) > .overlay-toolbar-primary { background: color-mix(in srgb, var(--control-surface) 94%, transparent); border: 1px solid var(--control-border); border-radius: 12px; box-shadow: 0 8px 24px color-mix(in srgb, #000 20%, transparent); }
   .overlay-toolbar-primary { grid-column: 1; grid-row: 1; min-width: 0; }
-  .overlay-toolbar-secondary { display: grid; grid-column: 2; grid-row: 1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-width: 0; }
+  .overlay-toolbar-secondary { border-left: 1px solid var(--control-border); display: flex; flex-direction: row; grid-column: 2; grid-row: 1; min-width: 0; overflow-x: auto; }
   .overlay-toolbar-secondary.is-expanded { height: 54px; min-height: 54px; overflow: visible; }
-  .overlay-toolbar-secondary-actions, .overlay-toolbar-secondary > .overlay-toolbar-context { grid-row: 1; height: 54px; min-width: 0; width: 100%; }
-  .overlay-toolbar-secondary-actions { grid-column: 1; }
-  .overlay-toolbar-secondary > .overlay-toolbar-context { grid-column: 2; }
-  .overlay-toolbar-secondary .overlay-toolbar-inspector { max-height: var(--overlay-toolbar-inspector-max-height); max-width: min(320px, calc(50vw - 24px)); position: absolute; right: 24px; top: 62px; width: min(320px, calc(50vw - 24px)); }
+  .overlay-toolbar-annotate-actions, .overlay-toolbar-secondary-actions, .overlay-toolbar-secondary > .overlay-toolbar-context { border-top: none; flex: 1 1 0; height: 54px; min-width: 0; overflow-x: auto; width: 100%; }
+  .overlay-toolbar-secondary-actions, .overlay-toolbar-secondary > .overlay-toolbar-context { border-left: 1px solid var(--control-border); }
+  .overlay-toolbar-secondary .overlay-toolbar-inspector { background: color-mix(in srgb, var(--control-surface) 94%, transparent); border: 1px solid var(--control-border); border-radius: 12px; box-shadow: 0 8px 24px color-mix(in srgb, #000 20%, transparent); max-height: var(--overlay-toolbar-inspector-max-height); max-width: min(320px, calc(50vw - 24px)); position: absolute; right: 24px; top: 62px; width: min(320px, calc(50vw - 24px)); }
+}
+
+@media (forced-colors: active) {
+  .overlay-icon-toolbar, .overlay-toolbar-inspector-actions, .overlay-toolbar-secondary .overlay-toolbar-inspector { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  .overlay-toolbar-annotate-actions, .overlay-toolbar-context, .overlay-toolbar-inspector, .overlay-toolbar-secondary, .overlay-toolbar-secondary-actions { border-left-color: CanvasText; border-top-color: CanvasText; }
+  .overlay-toolbar-button { border-color: CanvasText; color: CanvasText; forced-color-adjust: none; }
+  .overlay-toolbar-button[aria-pressed='true'], .overlay-toolbar-button:focus-visible { background: Highlight; color: HighlightText; outline: 2px solid Highlight; }
+  .overlay-transform-handle::after { background: Highlight; border-color: Canvas; forced-color-adjust: none; }
+  .overlay-rotation-handle::before { background: Highlight; forced-color-adjust: none; }
+  .overlay-transform-handle:focus-visible { outline-color: Highlight; }
+}
+
+@media (forced-colors: active) and (min-width: 421px) and (max-height: 500px) {
+  .overlay-icon-toolbar:not([data-tools-expanded='true']) > .overlay-toolbar-primary { background: Canvas; border-color: CanvasText; box-shadow: none; }
 }
 
 @media (pointer: coarse) {

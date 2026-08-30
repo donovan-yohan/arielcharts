@@ -87,7 +87,9 @@ const ANCHORS = {
   topbar: '.workspace-topbar',
 };
 
-const OVERLAY_PRIMARY_ACTIONS = ['Select tool', 'Hand tool', 'Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow'] as const;
+const OVERLAY_PRIMARY_ACTIONS = ['Select tool', 'Hand tool', 'Connect Mermaid nodes', 'Add flowchart node'] as const;
+const OVERLAY_ANNOTATE_ACTIONS = ['Text', 'Sticky note', 'Rectangle', 'Ellipse', 'Diamond', 'Line', 'Arrow'] as const;
+const OVERLAY_DISCLOSED_SCROLLER_SELECTOR = '.overlay-toolbar-annotate-actions, .overlay-toolbar-secondary-actions';
 async function ensureOverlaySecondaryRail(page: Page): Promise<void> {
   const rail = page.getByTestId('overlay-toolbar-secondary');
   const more = page.getByTestId('overlay-toolbar-more-toggle');
@@ -111,15 +113,15 @@ async function collapseOverlaySecondaryRail(page: Page): Promise<void> {
 async function revealOverlaySecondaryAction(page: Page, label: string): Promise<Locator> {
   const action = page.getByTestId('overlay-toolbar-secondary').locator(`button[aria-label="${label}"]`);
   let latestEvidence: unknown = null;
-  await action.evaluate((button) => {
-    const actions = button.closest<HTMLElement>('.overlay-toolbar-secondary-actions');
+  await action.evaluate((button, scroller) => {
+    const actions = button.closest<HTMLElement>(scroller);
     if (!actions) return;
     actions.scrollLeft = Math.max(0, button.offsetLeft - actions.offsetLeft - 4);
-  });
+  }, OVERLAY_DISCLOSED_SCROLLER_SELECTOR);
   try {
     await expect.poll(async () => {
-      const evidence = await action.evaluate((button) => {
-    const actions = button.closest<HTMLElement>('.overlay-toolbar-secondary-actions');
+      const evidence = await action.evaluate((button, scroller) => {
+    const actions = button.closest<HTMLElement>(scroller);
     const rail = button.closest<HTMLElement>('[data-testid="overlay-toolbar-secondary"]');
     if (!actions || !rail) {
       return {
@@ -158,7 +160,7 @@ async function revealOverlaySecondaryAction(page: Page, label: string): Promise<
         scrollWidth: actions.scrollWidth,
       },
     };
-      });
+      }, OVERLAY_DISCLOSED_SCROLLER_SELECTOR);
       latestEvidence = evidence;
       return evidence;
     }, {
@@ -284,6 +286,8 @@ async function settleTreemapInputInteraction(page: Page, input: Locator, label: 
 
 async function createOverlayAt(page: Page, name: string, candidateIndex = 0): Promise<void> {
   const isPrimary = OVERLAY_PRIMARY_ACTIONS.includes(name as typeof OVERLAY_PRIMARY_ACTIONS[number]);
+  assert(isPrimary || OVERLAY_ANNOTATE_ACTIONS.includes(name as typeof OVERLAY_ANNOTATE_ACTIONS[number]),
+    `${name} is neither a primary nor an annotate overlay tool.`);
   const rail = page.getByTestId('overlay-toolbar-secondary');
   if (isPrimary && await rail.getAttribute('aria-hidden') === 'false') {
     await collapseOverlaySecondaryRail(page);
@@ -3673,6 +3677,9 @@ async function expectWardleySemanticEditor(
   assertAnchorsStable(anchorsBefore, await snapshotAnchors(page, ANCHORS));
   await expect.poll(() => canvasTransform(page), { message: 'Wardley original-tab camera restoration', timeout: 15_000 }).toBe(transformBefore);
   assert(await page.locator('.react-flow__node').count() === 0, 'Wardley exposed React Flow structural controls.');
+  for (const action of ['Connect Mermaid nodes', 'Add flowchart node'] as const) {
+    await expect(page.getByRole('button', { name: action, exact: true })).toBeDisabled();
+  }
 }
 
 async function assertAndClickBoardControl(
@@ -3688,7 +3695,7 @@ async function assertAndClickBoardControl(
 async function assertCompactErrorToolbarAndRecovery(page: Page, banner: Locator, recovery: Locator, label: string): Promise<void> {
   const primary = page.getByTestId('overlay-toolbar-primary');
   const select = page.getByRole('button', { name: 'Select tool', exact: true });
-  await expect(primary.getByRole('button')).toHaveCount(10);
+  await expect(primary.getByRole('button')).toHaveCount(5);
   await expect(select).toBeVisible();
   await assertClosedOverlayToggleBesideError(page, banner, `${label} inline toolbar`);
   await assertBoardControl(page, recovery, `${label} recovery remains hit-testable`);
@@ -3697,7 +3704,7 @@ async function assertCompactErrorToolbarAndRecovery(page: Page, banner: Locator,
 async function assertNormalMobileOverlayToolbar(page: Page, label: string): Promise<void> {
   const primary = page.getByTestId('overlay-toolbar-primary');
   const directTools = page.getByTestId('overlay-toolbar-primary-tools');
-  await expect(primary.getByRole('button')).toHaveCount(10);
+  await expect(primary.getByRole('button')).toHaveCount(5);
   for (const action of OVERLAY_PRIMARY_ACTIONS) {
     await expect(primary.getByRole('button', { name: action, exact: true })).toBeVisible();
   }
@@ -3712,10 +3719,16 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
   assert(Math.abs(primaryCenter - canvasCenter) <= 3,
     `${label} normal primary toolbar is not centered on the canvas: ${JSON.stringify({ canvasBounds, primaryBounds })}.`);
   const firstTool = primary.getByRole('button', { name: 'Select tool', exact: true });
+  const annotateTools = page.getByTestId('overlay-toolbar-annotate-actions');
+  await collapseOverlaySecondaryRail(page);
+  await expect(annotateTools).toBeHidden();
   await ensureOverlaySecondaryRail(page);
+  await expect(annotateTools).toBeVisible();
   const pinnedMore = primary.getByTestId('overlay-toolbar-more-toggle');
   await expect(pinnedMore).toHaveAttribute('aria-expanded', 'true');
-  const lastDirectTool = directTools.getByRole('button', { name: 'Arrow', exact: true });
+  // The Mermaid-first primary rail holds four tools, so the annotate row is the
+  // rail that still has to reach its last tool by touch on a phone.
+  const lastAnnotateTool = annotateTools.getByRole('button', { name: 'Arrow', exact: true });
   const resetToFirstTool = await firstTool.evaluate(async (button) => {
     const toolbar = button.closest<HTMLElement>('[role="toolbar"]');
     const rail = button.closest<HTMLElement>('[data-testid="overlay-toolbar-primary-tools"]');
@@ -3747,13 +3760,13 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
   });
   assert(blankRailPassThrough.passThrough,
     `${label} blank direct-toolbar rail did not pass through to the canvas: ${JSON.stringify(blankRailPassThrough)}.`);
-  const beforeScroll = await directTools.evaluate((element) => ({
+  const beforeScroll = await annotateTools.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollLeft: element.scrollLeft,
     scrollWidth: element.scrollWidth,
   }));
-  const lastDirectToolVisible = () => lastDirectTool.evaluate((button) => {
-    const rail = button.closest<HTMLElement>('[data-testid="overlay-toolbar-primary-tools"]');
+  const lastAnnotateToolVisible = () => lastAnnotateTool.evaluate((button) => {
+    const rail = button.closest<HTMLElement>('[data-testid="overlay-toolbar-annotate-actions"]');
     if (!rail) return false;
     const bounds = button.getBoundingClientRect();
     const railBounds = rail.getBoundingClientRect();
@@ -3762,13 +3775,13 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
       && bounds.top >= railBounds.top && bounds.bottom <= railBounds.bottom
       && hit instanceof Node && button.contains(hit);
   });
-  for (let attempt = 0; attempt < 2 && !await lastDirectToolVisible(); attempt += 1) {
-    const beforeAttemptScroll = await directTools.evaluate((element) => element.scrollLeft);
-    const railBounds = await directTools.boundingBox();
+  for (let attempt = 0; attempt < 2 && !await lastAnnotateToolVisible(); attempt += 1) {
+    const beforeAttemptScroll = await annotateTools.evaluate((element) => element.scrollLeft);
+    const railBounds = await annotateTools.boundingBox();
     assert(railBounds && railBounds.width >= 88 && railBounds.height >= 44,
-      `${label} direct toolbar rail is not large enough for a trusted touch swipe: ${JSON.stringify(railBounds)}.`);
-    const swipeOrigin = await directTools.locator('button:not(:disabled)').evaluateAll((buttons) => {
-      const rail = buttons[0]?.closest<HTMLElement>('[data-testid="overlay-toolbar-primary-tools"]');
+      `${label} annotate toolbar rail is not large enough for a trusted touch swipe: ${JSON.stringify(railBounds)}.`);
+    const swipeOrigin = await annotateTools.locator('button:not(:disabled)').evaluateAll((buttons) => {
+      const rail = buttons[0]?.closest<HTMLElement>('[data-testid="overlay-toolbar-annotate-actions"]');
       if (!rail) return null;
       const railBounds = rail.getBoundingClientRect();
       return buttons.map((button) => {
@@ -3788,12 +3801,12 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
         .sort((left, right) => right.center.x - left.center.x)[0] ?? null;
     });
     assert(swipeOrigin,
-      `${label} direct toolbar needs a fully-visible 44px direct action to begin a trusted swipe: ${JSON.stringify({ railBounds })}.`);
-    const swipeTool = directTools.getByRole('button', { name: swipeOrigin.label!, exact: true });
+      `${label} annotate toolbar needs a fully-visible 44px direct action to begin a trusted swipe: ${JSON.stringify({ railBounds })}.`);
+    const swipeTool = annotateTools.getByRole('button', { name: swipeOrigin.label!, exact: true });
     const swipeBounds = await swipeTool.boundingBox();
     assert(swipeBounds && swipeBounds.width >= 44 && swipeBounds.height >= 44,
-      `${label} direct toolbar swipe action lost its 44px target: ${JSON.stringify({ swipeBounds, swipeOrigin })}.`);
-    await settleCenterHitPoint(page, swipeTool, `${label} direct toolbar swipe action`);
+      `${label} annotate toolbar swipe action lost its 44px target: ${JSON.stringify({ swipeBounds, swipeOrigin })}.`);
+    await settleCenterHitPoint(page, swipeTool, `${label} annotate toolbar swipe action`);
     const session = await page.context().newCDPSession(page);
     const touch = (x: number) => ({ force: 1, id: 1, radiusX: 1, radiusY: 1, x, y: swipeOrigin.center.y });
     const start = swipeOrigin.center.x;
@@ -3807,21 +3820,21 @@ async function assertNormalMobileOverlayToolbar(page: Page, label: string): Prom
     } finally {
       await session.detach();
     }
-    await directTools.evaluate(() => new Promise<void>((resolve) => window.setTimeout(resolve, 100)));
+    await annotateTools.evaluate(() => new Promise<void>((resolve) => window.setTimeout(resolve, 100)));
     await expect(swipeTool).toHaveAttribute('aria-pressed', 'false');
-    await expect.poll(() => directTools.evaluate((element) => element.scrollLeft), {
-      message: `${label} direct toolbar swipe did not settle to a new scroll position.`,
+    await expect.poll(() => annotateTools.evaluate((element) => element.scrollLeft), {
+      message: `${label} annotate toolbar swipe did not settle to a new scroll position.`,
       timeout: 5_000,
     }).toBeGreaterThan(beforeAttemptScroll);
   }
-  await expect.poll(lastDirectToolVisible, {
-    message: `${label} direct toolbar last tool remained clipped after trusted touch swipes: ${JSON.stringify(beforeScroll)}.`,
+  await expect.poll(lastAnnotateToolVisible, {
+    message: `${label} annotate toolbar last tool remained clipped after trusted touch swipes: ${JSON.stringify(beforeScroll)}.`,
     timeout: 5_000,
   }).toBe(true);
-  await settleCenterHitPoint(page, lastDirectTool, `${label} last direct toolbar tool`);
-  await verifiedClick(page, lastDirectTool, `${label} normal Arrow tool tap after direct rail swipe`);
-  await expect(lastDirectTool).toHaveAttribute('aria-pressed', 'true');
-  await settleCenterHitPoint(page, pinnedMore, `${label} pinned More disclosure after direct toolbar scroll`);
+  await settleCenterHitPoint(page, lastAnnotateTool, `${label} last annotate toolbar tool`);
+  await verifiedClick(page, lastAnnotateTool, `${label} normal Arrow tool tap after annotate rail swipe`);
+  await expect(lastAnnotateTool).toHaveAttribute('aria-pressed', 'true');
+  await settleCenterHitPoint(page, pinnedMore, `${label} pinned More disclosure after annotate toolbar scroll`);
 }
 
 async function assertBoardControl(page: Page, target: Locator, label: string): Promise<void> {
@@ -4596,7 +4609,7 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   const canvas = page.getByTestId('diagram-canvas');
   const overlayInspector = page.getByRole('button', { name: 'Objects and layers', exact: true });
   const primaryToolbar = page.getByTestId('overlay-toolbar-primary');
-  await expect(primaryToolbar.getByRole('button')).toHaveCount(10);
+  await expect(primaryToolbar.getByRole('button')).toHaveCount(5);
   await expect(page.getByRole('button', { name: 'Overlay tools', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'More overlay tools', exact: true })).toHaveCount(0);
   await saveScreenshot(page, 'inline-overlay-toolbar-light');
@@ -4823,7 +4836,12 @@ async function expectMermaidStatesAndToolbar(page: Page): Promise<void> {
   await verifiedClick(page, nodeToolbar.getByRole('button', { name: 'Change shape', exact: true }), 'node toolbar Change shape');
   await verifiedClick(page, page.getByRole('button', { name: 'diamond', exact: true }), 'diamond shape picker action');
   await verifiedClick(page, firstNode, 'first diagram node after shape change');
-  await ensureOverlaySecondaryRail(page);
+  const nodesBeforeOverlayAdd = await page.locator('.mermaid-flow-node').count();
+  await verifiedClick(page, page.getByRole('button', { name: 'Add flowchart node', exact: true }), 'primary Add flowchart node');
+  await expect.poll(() => page.locator('.mermaid-flow-node').count(), {
+    message: 'The primary Add flowchart node control did not add a Mermaid node.',
+    timeout: 15_000,
+  }).toBe(nodesBeforeOverlayAdd + 1);
   await verifiedClick(page, page.getByRole('button', { name: 'Connect Mermaid nodes', exact: true }), 'unified Connect Mermaid nodes');
   await page.getByText('click target node [esc cancel]', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
   await page.getByTestId('diagram-canvas').press('Escape');
@@ -5739,7 +5757,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     `${label} inline overlay toolbar overlaps the bottom canvas toolbar.`);
     const panel = page.getByLabel('Overlay scene controls', { exact: true });
     await panel.waitFor({ state: 'visible', timeout: 5_000 });
-    const actionNames = [...OVERLAY_PRIMARY_ACTIONS, 'Pen', 'Highlighter', 'Erase stroke', 'Undo canvas change', 'Redo canvas change'] as const;
+    const actionNames = [...OVERLAY_PRIMARY_ACTIONS, ...OVERLAY_ANNOTATE_ACTIONS, 'Pen', 'Highlighter', 'Erase stroke', 'Undo canvas change', 'Redo canvas change'] as const;
     await ensureOverlaySecondaryRail(page);
     for (const actionName of actionNames) {
       const action = panel.getByRole('button', { name: actionName, exact: true });

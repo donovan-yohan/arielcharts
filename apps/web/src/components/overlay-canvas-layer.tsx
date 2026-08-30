@@ -112,6 +112,9 @@ export interface OverlayCanvasLayerProps {
   onOnboardingRequestComplete?: (requestId: number, createdTextId?: string) => void;
   requestedTextEditId?: string | null;
   onRequestedTextEditComplete?: (id: string) => void;
+  /** DiagramCanvas selects a right-clicked object before its menu opens. */
+  requestedSelection?: { id: number; objectIds: readonly string[] } | null;
+  onRequestedSelectionComplete?: (requestId: number) => void;
 }
 
 type InkDraft = { mode: InkMode; pointerId: number; points: InkPoint[] };
@@ -653,6 +656,14 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     });
     props.onRequestedTextEditComplete?.(id);
   }, [objects, props.onRequestedTextEditComplete, props.requestedTextEditId, replaceSelection, writable]);
+  const handledSelectionRequestIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    const request = props.requestedSelection;
+    if (!request || handledSelectionRequestIdRef.current === request.id) return;
+    handledSelectionRequestIdRef.current = request.id;
+    replaceSelection(request.objectIds, request.objectIds.at(-1) ?? null);
+    props.onRequestedSelectionComplete?.(request.id);
+  }, [props.onRequestedSelectionComplete, props.requestedSelection, replaceSelection]);
   useEffect(() => () => { props.onInkPreview?.(null); }, [props.onInkPreview]);
   useEffect(() => { if (inkTool === 'select') stopInk(false); }, [inkTool, stopInk]);
   useEffect(() => { stopInk(false); }, [props.diagramId, stopInk]);

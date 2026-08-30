@@ -1021,3 +1021,41 @@ describe('OverlayCanvasLayer', () => {
     expect(onInkPreview).toHaveBeenLastCalledWith(null);
   });
 });
+
+describe('OverlayCanvasLayer requested selection', () => {
+  it('applies a selection request once, acknowledges it, and ignores a repeated request id', async () => {
+    const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+    const onRequestedSelectionComplete = vi.fn();
+    const object = (id: string): OverlayObjectRecord => ({ id, kind: 'shape.rectangle', version: 1, order_key: id, geometry: { x: id === 'a' ? 10 : 60, y: 20, width: 30, height: 40, rotation: 0 }, style: {}, metadata: {}, payload: {}, body: '' });
+    const props = {
+      diagramId: 'main', sessionId: 'abc123de', readOnly: false,
+      scene: { version: 1 as const, diagram_id: 'main', objects: [object('a'), object('b')] },
+      transform: { x: 0, y: 0, zoom: 1 }, semanticAnchors: new Map(),
+      onAdd: vi.fn(), onAnchor: vi.fn(), onCopy: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onPaste: vi.fn(), onReorder: vi.fn(), onUndo: vi.fn(), onUpdate: vi.fn(), onEditText: vi.fn(), onDuplicate: vi.fn(), onBeginComposition: vi.fn(), onCommitComposition: vi.fn(),
+      onRequestedSelectionComplete,
+    };
+    const render = (requestedSelection: { id: number; objectIds: readonly string[] } | null) => act(async () => root.render(
+      <OverlayCanvasLayer {...props} requestedSelection={requestedSelection} tool="select" />,
+    ));
+    const selection = () => ['a', 'b'].filter((id) => host.querySelector(`[data-testid="overlay-object-${id}"]`)?.getAttribute('data-selected') === 'true');
+
+    await render(null);
+    expect(selection()).toEqual([]);
+    expect(onRequestedSelectionComplete).not.toHaveBeenCalled();
+
+    await render({ id: 1, objectIds: ['b'] });
+    expect(selection()).toEqual(['b']);
+    expect(onRequestedSelectionComplete).toHaveBeenCalledTimes(1);
+    expect(onRequestedSelectionComplete).toHaveBeenLastCalledWith(1);
+
+    await render({ id: 1, objectIds: ['a'] });
+    expect(selection()).toEqual(['b']);
+    expect(onRequestedSelectionComplete).toHaveBeenCalledTimes(1);
+
+    await render({ id: 2, objectIds: ['a', 'b'] });
+    expect(selection()).toEqual(['a', 'b']);
+    expect(onRequestedSelectionComplete).toHaveBeenCalledTimes(2);
+    expect(onRequestedSelectionComplete).toHaveBeenLastCalledWith(2);
+    await act(async () => root.unmount());
+  });
+});

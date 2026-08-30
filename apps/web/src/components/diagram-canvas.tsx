@@ -103,7 +103,11 @@ import { getMindmapNodeIdentity, type MindmapDiagramSnapshot, type MindmapNode, 
 import { getTreeViewNodeIdentity, type TreeViewDiagramSnapshot, type TreeViewNode, type TreeViewNodeIdentity } from '../lib/treeview-mutations';
 import { getIshikawaCauseIdentity, type IshikawaCause, type IshikawaCauseIdentity, type IshikawaCauseInput, type IshikawaDiagramSnapshot } from '../lib/ishikawa-mutations';
 import { getRailroadRuleIdentity, type RailroadDiagramSnapshot, type RailroadRule, type RailroadRuleIdentity } from '../lib/railroad-mutations';
-import { getPlatformModifierLabel, getPlatformShortcutTitle, OverlayCanvasLayer, type OverlayCanvasLayerProps } from './overlay-canvas-layer';
+import { getPlatformModifierLabel, getPlatformShortcutTitle, OverlayCanvasLayer, viewportCenterToWorld, type OverlayCanvasLayerProps } from './overlay-canvas-layer';
+import { CanvasContextMenu, type CanvasContextMenuEntry, type CanvasContextMenuItem } from './canvas-context-menu';
+import { CONTEXT_MENU_EXCLUSION_SELECTOR, isPointInsideRect } from '../lib/context-menu-position';
+import { isOverlayObjectLocked } from '../lib/overlay-scene';
+import { isPureFrameUnlock } from '../lib/use-overlay-scene';
 import { getPieSliceIdentity, type PieDiagramSnapshot, type PieSlice, type PieSliceIdentity } from '../lib/pie-mutations';
 import { getQuadrantPointIdentity, type QuadrantAxis, type QuadrantAxisName, type QuadrantDiagramSnapshot, type QuadrantNumber, type QuadrantPoint, type QuadrantPointIdentity } from '../lib/quadrant-mutations';
 import { getXySeriesIdentity, type XyAxis, type XyChartDiagramSnapshot, type XyChartOrientation, type XySeries, type XySeriesIdentity } from '../lib/xychart-mutations';
@@ -736,6 +740,176 @@ export function shouldEnableCanvasMarquee(
   return canEditStructure && mode === 'select' && !isCoarsePointer;
 }
 
+const OVERLAY_OBJECT_TESTID_PREFIX = 'overlay-object-';
+const OVERLAY_OBJECT_SELECTOR = `[data-testid^="${OVERLAY_OBJECT_TESTID_PREFIX}"]`;
+
+export type CanvasContextMenuKind = 'canvas' | 'mermaid-node' | 'overlay-object';
+
+export interface CanvasContextMenuTarget {
+  alreadySelected: boolean;
+  kind: CanvasContextMenuKind;
+  targetId: string;
+}
+
+export interface CanvasContextMenuHit {
+  exclusionMatch: boolean;
+  insideToolbar: boolean;
+  mermaidNodeId: string | null;
+  overlayDataSelected: string | null;
+  overlayTestId: string | null;
+}
+
+/**
+ * Right-click precedence: surfaces that own their native menu, then the
+ * click-through floating toolbar rect, then overlay object, Mermaid node,
+ * and finally the empty canvas.
+ */
+export function resolveCanvasContextMenuTarget(hit: CanvasContextMenuHit): CanvasContextMenuTarget | null {
+  if (hit.exclusionMatch || hit.insideToolbar) return null;
+  const overlayId = hit.overlayTestId?.startsWith(OVERLAY_OBJECT_TESTID_PREFIX)
+    ? hit.overlayTestId.slice(OVERLAY_OBJECT_TESTID_PREFIX.length)
+    : '';
+  if (overlayId) return { alreadySelected: hit.overlayDataSelected === 'true', kind: 'overlay-object', targetId: overlayId };
+  if (hit.mermaidNodeId) return { alreadySelected: false, kind: 'mermaid-node', targetId: hit.mermaidNodeId };
+  return { alreadySelected: false, kind: 'canvas', targetId: '' };
+}
+
+export function getCanvasContextMenuLabel(kind: CanvasContextMenuKind): string {
+  if (kind === 'overlay-object') return 'Overlay object actions';
+  return kind === 'mermaid-node' ? 'Mermaid node actions' : 'Canvas actions';
+}
+
+type CanvasContextMenuAction<Argument = void> = ((argument: Argument) => void) | null;
+
+export interface CanvasContextMenuCapabilities {
+  canEditOverlay: boolean;
+  canEditStructure: boolean;
+  canUnlockOverlayTarget: boolean;
+  hasMermaidNodes: boolean;
+  hasNodeRecord: boolean;
+  isFlowchart: boolean;
+  overlayTargetCount: number;
+  overlayTargetLocked: boolean;
+}
+
+export interface CanvasContextMenuActions {
+  addAnnotation: CanvasContextMenuAction<'annotation.sticky' | 'annotation.text'>;
+  addConnectedNode: CanvasContextMenuAction;
+  addFlowchartNode: CanvasContextMenuAction;
+  addShape: CanvasContextMenuAction<'shape.arrow' | 'shape.diamond' | 'shape.ellipse' | 'shape.line' | 'shape.rectangle'>;
+  alignOverlay: CanvasContextMenuAction<'left' | 'top'>;
+  copyOverlay: CanvasContextMenuAction;
+  deleteNode: CanvasContextMenuAction;
+  deleteOverlay: CanvasContextMenuAction;
+  duplicateOverlay: CanvasContextMenuAction;
+  editNodeLabel: CanvasContextMenuAction;
+  frameOverlay: CanvasContextMenuAction;
+  pasteOverlay: CanvasContextMenuAction;
+  reorderOverlay: CanvasContextMenuAction<'back' | 'front'>;
+  selectAllNodes: CanvasContextMenuAction;
+  toggleOverlayLock: CanvasContextMenuAction;
+}
+
+const CONTEXT_MENU_SHAPES = [
+  ['rectangle', 'shape.rectangle'],
+  ['ellipse', 'shape.ellipse'],
+  ['diamond', 'shape.diamond'],
+  ['line', 'shape.line'],
+  ['arrow', 'shape.arrow'],
+] as const;
+
+function contextMenuItem(id: string, label: string, action: CanvasContextMenuAction, blocked: boolean, extra: Pick<CanvasContextMenuItem, 'danger' | 'shortcut'> | Record<string, never> = {}): CanvasContextMenuItem {
+  return { ...extra, disabled: blocked || action === null, id, label, onSelect: () => { action?.(); } };
+}
+
+function bindContextMenuAction<Argument>(action: CanvasContextMenuAction<Argument>, argument: Argument): CanvasContextMenuAction {
+  return action === null ? null : () => { action(argument); };
+}
+
+/**
+ * Every entry stays disabled exactly where its underlying handler would be a
+ * no-op today, so the menu never silently swallows an action.
+ */
+export function buildCanvasContextMenuEntries(
+  target: CanvasContextMenuTarget | null,
+  capabilities: CanvasContextMenuCapabilities,
+  actions: CanvasContextMenuActions,
+): CanvasContextMenuEntry[] {
+  if (!target) return [];
+
+  if (target.kind === 'mermaid-node') {
+    const blocked = !capabilities.canEditStructure || !capabilities.hasNodeRecord;
+    return [
+      contextMenuItem('context-edit-node-label', 'Edit label', actions.editNodeLabel, blocked),
+      contextMenuItem('context-add-connected-node', 'Add connected node', actions.addConnectedNode, blocked),
+      { id: 'context-node-danger', type: 'separator' },
+      contextMenuItem('context-delete-node', 'Delete node', actions.deleteNode, blocked, { danger: true }),
+    ];
+  }
+
+  if (target.kind === 'overlay-object') {
+    const mutable = capabilities.canEditOverlay && !capabilities.overlayTargetLocked;
+    const single = capabilities.overlayTargetCount <= 1;
+    const entries: CanvasContextMenuEntry[] = [
+      contextMenuItem('context-duplicate-overlay', 'Duplicate', actions.duplicateOverlay, !mutable),
+      contextMenuItem('context-copy-overlay', 'Copy', actions.copyOverlay, !mutable),
+      { id: 'context-overlay-order', type: 'separator' },
+      contextMenuItem('context-bring-front', 'Bring to front', bindContextMenuAction(actions.reorderOverlay, 'front'), !mutable || !single),
+      contextMenuItem('context-send-back', 'Send to back', bindContextMenuAction(actions.reorderOverlay, 'back'), !mutable || !single),
+      { id: 'context-overlay-arrange', type: 'separator' },
+      contextMenuItem('context-frame-overlay', 'Frame selection', actions.frameOverlay, !capabilities.canEditOverlay),
+    ];
+    if (capabilities.overlayTargetCount >= 2) {
+      entries.push(
+        contextMenuItem('context-align-left', 'Align left', bindContextMenuAction(actions.alignOverlay, 'left'), !mutable),
+        contextMenuItem('context-align-top', 'Align top', bindContextMenuAction(actions.alignOverlay, 'top'), !mutable),
+      );
+    }
+    entries.push(
+      { id: 'context-overlay-danger', type: 'separator' },
+      contextMenuItem(
+        'context-toggle-overlay-lock',
+        capabilities.overlayTargetLocked ? 'Unlock' : 'Lock',
+        actions.toggleOverlayLock,
+        !capabilities.canEditOverlay || (capabilities.overlayTargetLocked && !capabilities.canUnlockOverlayTarget),
+      ),
+      contextMenuItem('context-delete-overlay', 'Delete', actions.deleteOverlay, !mutable, { danger: true }),
+    );
+    return entries;
+  }
+
+  const entries: CanvasContextMenuEntry[] = [
+    contextMenuItem('context-add-text', 'Add text here', bindContextMenuAction(actions.addAnnotation, 'annotation.text'), !capabilities.canEditOverlay),
+    contextMenuItem('context-add-sticky', 'Add sticky note here', bindContextMenuAction(actions.addAnnotation, 'annotation.sticky'), !capabilities.canEditOverlay),
+    { id: 'context-canvas-shapes', type: 'separator' },
+    ...CONTEXT_MENU_SHAPES.map(([name, kind]) => contextMenuItem(
+      `context-add-${name}`,
+      `Add ${name} here`,
+      bindContextMenuAction(actions.addShape, kind),
+      !capabilities.canEditOverlay,
+    )),
+    { id: 'context-canvas-clipboard', type: 'separator' },
+    contextMenuItem('context-paste-overlay', 'Paste', actions.pasteOverlay, !capabilities.canEditOverlay),
+  ];
+  const mermaidEntries: CanvasContextMenuEntry[] = [];
+  if (capabilities.isFlowchart) {
+    mermaidEntries.push(contextMenuItem('context-add-flowchart-node', 'Add flowchart node', actions.addFlowchartNode, !capabilities.canEditStructure, { shortcut: 'N' }));
+  }
+  if (capabilities.hasMermaidNodes) {
+    mermaidEntries.push(contextMenuItem('context-select-all-nodes', 'Select all', actions.selectAllNodes, !capabilities.canEditStructure));
+  }
+  if (mermaidEntries.length > 0) entries.push({ id: 'context-canvas-mermaid', type: 'separator' }, ...mermaidEntries);
+  return entries;
+}
+
+interface CanvasContextMenuState extends CanvasContextMenuTarget {
+  /** Overlay ids the menu acts on, snapshotted when the menu opened. */
+  ids: readonly string[];
+  point: { x: number; y: number };
+  x: number;
+  y: number;
+}
+
 function useCoarsePointer(): boolean {
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
 
@@ -1322,6 +1496,8 @@ export function DiagramCanvas({
   const [spacePressed, setSpacePressed] = useState(false);
   const spacePressedRef = useRef(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<CanvasContextMenuState | null>(null);
+  const [overlaySelectionRequest, setOverlaySelectionRequest] = useState<{ id: number; objectIds: readonly string[] } | null>(null);
   const shortcutsOriginRef = useRef<HTMLElement | null>(null);
   const shortcutsOriginNodeIdRef = useRef<string | null>(null);
   const shortcutsDialogRef = useRef<HTMLDivElement | null>(null);
@@ -3356,6 +3532,128 @@ export function DiagramCanvas({
     setEditingLabel(getNodeText(node));
   }, [canEditStructure]);
 
+  const closeContextMenu = useCallback(() => { setContextMenu(null); }, []);
+
+  const handleCanvasContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const canvas = containerRef.current;
+    if (!canvas || !(event.target instanceof Element)) return;
+    const overlayElement = event.target.closest(OVERLAY_OBJECT_SELECTOR);
+    const resolved = resolveCanvasContextMenuTarget({
+      exclusionMatch: Boolean(event.target.closest(CONTEXT_MENU_EXCLUSION_SELECTOR)),
+      insideToolbar: isPointInsideRect(
+        { x: event.clientX, y: event.clientY },
+        document.querySelector('.overlay-icon-toolbar')?.getBoundingClientRect() ?? null,
+      ),
+      mermaidNodeId: event.target.closest('.react-flow__node')?.getAttribute('data-id') ?? null,
+      overlayDataSelected: overlayElement?.getAttribute('data-selected') ?? null,
+      overlayTestId: overlayElement?.getAttribute('data-testid') ?? null,
+    });
+    if (!resolved) return;
+
+    event.preventDefault();
+    const bounds = canvas.getBoundingClientRect();
+    let ids: readonly string[] = [];
+    if (resolved.kind === 'overlay-object') {
+      ids = resolved.alreadySelected
+        ? [...canvas.querySelectorAll(`${OVERLAY_OBJECT_SELECTOR}[data-selected="true"]`)]
+          .map((element) => element.getAttribute('data-testid')?.slice(OVERLAY_OBJECT_TESTID_PREFIX.length) ?? '')
+          .filter((id) => id.length > 0)
+        : [resolved.targetId];
+      if (!resolved.alreadySelected) setOverlaySelectionRequest({ id: Date.now(), objectIds: [resolved.targetId] });
+    }
+    setContextMenu({
+      ...resolved,
+      ids,
+      point: {
+        x: (event.clientX - bounds.left - viewport.panX) / viewport.zoom,
+        y: (event.clientY - bounds.top - viewport.panY) / viewport.zoom,
+      },
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }, [viewport.panX, viewport.panY, viewport.zoom]);
+
+  useEffect(() => { setContextMenu(null); }, [overlay?.tool, shortcutsOpen, viewport.panX, viewport.panY, viewport.zoom]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = (event: Event) => {
+      if (event.target instanceof Element && event.target.closest('[data-testid="canvas-context-menu"]')) return;
+      setContextMenu(null);
+    };
+    window.addEventListener('scroll', close, { capture: true, passive: true });
+    return () => { window.removeEventListener('scroll', close, true); };
+  }, [contextMenu]);
+
+  const contextMenuEntries = useMemo(() => {
+    if (!contextMenu) return [];
+    const scene = overlay?.scene ?? null;
+    const canEditOverlay = Boolean(overlay) && overlay?.readOnly !== true && scene?.version === 1;
+    const targetObject = scene?.objects.find((object) => object.id === contextMenu.targetId) ?? null;
+    const locked = Boolean(scene && targetObject && isOverlayObjectLocked(scene, targetObject));
+    const lockPatch = targetObject ? { metadata: { ...targetObject.metadata, locked: !locked } } : null;
+    const node = nodeById.get(contextMenu.targetId) ?? null;
+    const nodeBounds = interactiveNodeBounds?.get(contextMenu.targetId) ?? null;
+
+    return buildCanvasContextMenuEntries(contextMenu, {
+      canEditOverlay,
+      canEditStructure,
+      canUnlockOverlayTarget: Boolean(locked && scene && targetObject && lockPatch && isPureFrameUnlock(scene, targetObject, lockPatch)),
+      hasMermaidNodes: orderedNodeIds.length > 0,
+      hasNodeRecord: node !== null,
+      isFlowchart,
+      overlayTargetCount: contextMenu.ids.length,
+      overlayTargetLocked: locked,
+    }, {
+      addAnnotation: overlay ? (kind) => { overlay.onAdd(contextMenu.point, kind); } : null,
+      addConnectedNode: onAddConnectedNode && nodeBounds
+        ? () => {
+          onAddConnectedNode(
+            contextMenu.targetId,
+            DEFAULT_NEW_NODE_LABEL,
+            DEFAULT_NEW_NODE_SHAPE,
+            { x: nodeBounds.x + nodeBounds.width + 48, y: nodeBounds.y },
+            selectedConnectionType,
+          );
+        }
+        : null,
+      addFlowchartNode: addDefaultNode,
+      addShape: overlay?.onAddShape ? (kind) => { overlay.onAddShape?.(contextMenu.point, kind); } : null,
+      alignOverlay: overlay?.onAlign ? (axis) => { overlay.onAlign?.(contextMenu.ids, axis); } : null,
+      copyOverlay: overlay ? () => { overlay.onCopy(contextMenu.ids); } : null,
+      deleteNode: onDeleteNodes ? () => { handleNodeClick(contextMenu.targetId, false); onDeleteNodes([contextMenu.targetId]); } : null,
+      deleteOverlay: overlay ? () => { overlay.onDelete(contextMenu.ids); } : null,
+      duplicateOverlay: overlay
+        ? () => {
+          if (contextMenu.ids.length > 1) overlay.onDuplicateMany?.(contextMenu.ids);
+          else overlay.onDuplicate(contextMenu.targetId);
+        }
+        : null,
+      editNodeLabel: node ? () => { handleNodeClick(contextMenu.targetId, false); openNodeEditor(node); } : null,
+      frameOverlay: overlay?.onAddFrame
+        ? () => {
+          const canvasBounds = containerRef.current?.getBoundingClientRect();
+          overlay.onAddFrame?.(
+            canvasBounds
+              ? viewportCenterToWorld(canvasBounds.width, canvasBounds.height, { x: viewport.panX, y: viewport.panY, zoom: viewport.zoom }, canvasViewport)
+              : { x: 0, y: 0 },
+            contextMenu.ids,
+          );
+        }
+        : null,
+      pasteOverlay: overlay ? () => { overlay.onPaste(); } : null,
+      reorderOverlay: overlay ? (direction) => { overlay.onReorder(contextMenu.targetId, direction); } : null,
+      selectAllNodes: () => { setSelection([...orderedNodeIds]); },
+      toggleOverlayLock: overlay && targetObject && lockPatch
+        ? () => { overlay.onUpdate(targetObject.id, lockPatch); }
+        : null,
+    });
+  }, [
+    addDefaultNode, canEditStructure, canvasViewport, contextMenu, handleNodeClick, interactiveNodeBounds, isFlowchart,
+    nodeById, onAddConnectedNode, onDeleteNodes, openNodeEditor, orderedNodeIds, overlay, selectedConnectionType,
+    setSelection, viewport.panX, viewport.panY, viewport.zoom,
+  ]);
+
   const registerNodeElement = useCallback((nodeId: string, element: HTMLElement | null) => {
     if (element) {
       nodeButtonRefs.current.set(nodeId, element);
@@ -3511,6 +3809,7 @@ export function DiagramCanvas({
         setCursorPoint(null);
         if (mode !== 'laser') onCanvasCursorChange?.(null);
       }}
+      onContextMenu={handleCanvasContextMenu}
       onPointerMove={handlePointerMove}
       onPointerMoveCapture={handleTouchPointerMove}
       onPointerCancel={handlePointerUp}
@@ -3885,8 +4184,18 @@ export function DiagramCanvas({
           spacePanning={spacePressed}
           transform={{ x: viewport.panX, y: viewport.panY, zoom: viewport.zoom }}
           viewport={canvasViewport}
+          requestedSelection={overlaySelectionRequest}
+          onRequestedSelectionComplete={(requestId) => { setOverlaySelectionRequest((current) => current?.id === requestId ? null : current); }}
         />
       ) : null}
+
+      <CanvasContextMenu
+        anchor={contextMenu}
+        entries={contextMenuEntries}
+        label={getCanvasContextMenuLabel(contextMenu?.kind ?? 'canvas')}
+        onClose={closeContextMenu}
+        returnFocusTo={containerRef.current}
+      />
 
       <LaserPointerLayer
         local={localLaser}

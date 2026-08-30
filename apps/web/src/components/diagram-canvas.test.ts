@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DiagramLink } from '../lib/diagram-mutations';
 import type { MermaidPresentation } from '../lib/mermaid-presentation';
 import type { SvgHitMap } from '../lib/svg-hit-map';
 import { getCanvasEdgeMarker } from '../lib/mermaid-presentation';
 import { getConnectModeSourceId } from '../lib/diagram-connect-state';
-import { areMermaidPresentationsEqual, areSvgHitMapsEqual, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getControlledConnectSessionTransition, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getMeasuredSemanticPanelPlacement, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRendererInteractionMode, getSankeyLinkControlLabel, getSemanticControlsSafeBottom, isSameNodeSelection, pruneInactivePersistentDrafts, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRejectCanvasShortcut, shouldRestoreCanvasFocusAfterPaste, syncCanvasToolbarSafeLane } from './diagram-canvas';
+import type { CanvasContextMenuActions, CanvasContextMenuCapabilities, CanvasContextMenuHit, CanvasContextMenuTarget } from './diagram-canvas';
+import type { CanvasContextMenuEntry } from './canvas-context-menu';
+import { areMermaidPresentationsEqual, areSvgHitMapsEqual, buildCanvasContextMenuEntries, CANVAS_PAN_EXCLUSION_SELECTOR, getCanvasContextMenuLabel, resolveCanvasContextMenuTarget, getCanvasHistoryShortcut, getCanonicalSelectionAttribute, getControlledConnectSessionTransition, getFlowEdgePresentation, getFlowSelectionChange, getGraphMembershipKey, getMeasuredSemanticPanelPlacement, getNodeClickSelection, getPacketFieldControlLabel, getPacketFieldFormKey, getRendererInteractionMode, getSankeyLinkControlLabel, getSemanticControlsSafeBottom, isSameNodeSelection, pruneInactivePersistentDrafts, shouldEnableCanvasMarquee, shouldHandleCanvasShortcut, shouldHandleCanvasSingleKeyShortcut, shouldHandleGlobalCanvasRenameShortcut, shouldRejectCanvasShortcut, shouldRestoreCanvasFocusAfterPaste, syncCanvasToolbarSafeLane } from './diagram-canvas';
 import { getDirtyDraftFields, reconcileCanonicalDraft } from '../lib/canonical-draft';
 
 const canvasSource = readFileSync(new URL('./diagram-canvas.tsx', import.meta.url), 'utf8');
@@ -782,5 +784,190 @@ describe('getFlowEdgePresentation', () => {
 
     expect(presentation.markerEnd).toBe(getCanvasEdgeMarker(type, '#d9480f').id);
     expect(presentation.style?.stroke).toBe('#d9480f');
+  });
+});
+
+const CONTEXT_MENU_HIT: CanvasContextMenuHit = {
+  exclusionMatch: false,
+  insideToolbar: false,
+  mermaidNodeId: null,
+  overlayDataSelected: null,
+  overlayTestId: null,
+};
+
+const CONTEXT_MENU_CAPABILITIES: CanvasContextMenuCapabilities = {
+  canEditOverlay: true,
+  canEditStructure: true,
+  canUnlockOverlayTarget: false,
+  hasMermaidNodes: true,
+  hasNodeRecord: true,
+  isFlowchart: true,
+  overlayTargetCount: 1,
+  overlayTargetLocked: false,
+};
+
+function contextMenuActions() {
+  return {
+    addAnnotation: vi.fn(), addConnectedNode: vi.fn(), addFlowchartNode: vi.fn(), addShape: vi.fn(),
+    alignOverlay: vi.fn(), copyOverlay: vi.fn(), deleteNode: vi.fn(), deleteOverlay: vi.fn(),
+    duplicateOverlay: vi.fn(), editNodeLabel: vi.fn(), frameOverlay: vi.fn(), pasteOverlay: vi.fn(),
+    reorderOverlay: vi.fn(), selectAllNodes: vi.fn(), toggleOverlayLock: vi.fn(),
+  } satisfies CanvasContextMenuActions;
+}
+
+function contextMenuEntries(
+  target: CanvasContextMenuTarget | null,
+  capabilities: Partial<CanvasContextMenuCapabilities> = {},
+  actions: CanvasContextMenuActions = contextMenuActions(),
+): CanvasContextMenuEntry[] {
+  return buildCanvasContextMenuEntries(target, { ...CONTEXT_MENU_CAPABILITIES, ...capabilities }, actions);
+}
+
+function contextMenuLabels(entries: readonly CanvasContextMenuEntry[]): string[] {
+  return entries.map((entry) => 'type' in entry ? '---' : entry.label);
+}
+
+function disabledContextMenuLabels(entries: readonly CanvasContextMenuEntry[]): string[] {
+  return entries.flatMap((entry) => 'type' in entry || !entry.disabled ? [] : [entry.label]);
+}
+
+function selectContextMenuItem(entries: readonly CanvasContextMenuEntry[], label: string): void {
+  const item = entries.find((entry): entry is Exclude<CanvasContextMenuEntry, { type: 'separator' }> => !('type' in entry) && entry.label === label);
+  if (!item) throw new Error(`No context menu item labelled ${label}.`);
+  item.onSelect();
+}
+
+describe('canvas context menu target resolution', () => {
+  it('leaves native right-click alone inside excluded surfaces and over the floating toolbar rect', () => {
+    expect(resolveCanvasContextMenuTarget({ ...CONTEXT_MENU_HIT, exclusionMatch: true })).toBeNull();
+    expect(resolveCanvasContextMenuTarget({ ...CONTEXT_MENU_HIT, insideToolbar: true })).toBeNull();
+    expect(resolveCanvasContextMenuTarget({ ...CONTEXT_MENU_HIT, exclusionMatch: true, overlayTestId: 'overlay-object-a' })).toBeNull();
+  });
+
+  it('prefers an overlay object over a Mermaid node and reports whether it was already selected', () => {
+    expect(resolveCanvasContextMenuTarget({ ...CONTEXT_MENU_HIT, mermaidNodeId: 'A', overlayTestId: 'overlay-object-overlay_1' }))
+      .toEqual({ alreadySelected: false, kind: 'overlay-object', targetId: 'overlay_1' });
+    expect(resolveCanvasContextMenuTarget({ ...CONTEXT_MENU_HIT, overlayDataSelected: 'true', overlayTestId: 'overlay-object-overlay_1' }))
+      .toEqual({ alreadySelected: true, kind: 'overlay-object', targetId: 'overlay_1' });
+  });
+
+  it('falls back to the Mermaid node and then to empty canvas', () => {
+    expect(resolveCanvasContextMenuTarget({ ...CONTEXT_MENU_HIT, mermaidNodeId: 'A' }))
+      .toEqual({ alreadySelected: false, kind: 'mermaid-node', targetId: 'A' });
+    expect(resolveCanvasContextMenuTarget(CONTEXT_MENU_HIT)).toEqual({ alreadySelected: false, kind: 'canvas', targetId: '' });
+    expect(resolveCanvasContextMenuTarget({ ...CONTEXT_MENU_HIT, overlayTestId: 'overlay-object-' }))
+      .toEqual({ alreadySelected: false, kind: 'canvas', targetId: '' });
+    expect(resolveCanvasContextMenuTarget({ ...CONTEXT_MENU_HIT, overlayTestId: 'overlay-line-a' }))
+      .toEqual({ alreadySelected: false, kind: 'canvas', targetId: '' });
+  });
+
+  it('names each menu after the surface it acts on', () => {
+    expect(getCanvasContextMenuLabel('canvas')).toBe('Canvas actions');
+    expect(getCanvasContextMenuLabel('overlay-object')).toBe('Overlay object actions');
+    expect(getCanvasContextMenuLabel('mermaid-node')).toBe('Mermaid node actions');
+  });
+});
+
+describe('canvas context menu entries', () => {
+  const canvasTarget: CanvasContextMenuTarget = { alreadySelected: false, kind: 'canvas', targetId: '' };
+  const overlayTarget: CanvasContextMenuTarget = { alreadySelected: true, kind: 'overlay-object', targetId: 'overlay_1' };
+  const nodeTarget: CanvasContextMenuTarget = { alreadySelected: false, kind: 'mermaid-node', targetId: 'A' };
+
+  it('offers placement, clipboard, and Mermaid actions on empty canvas', () => {
+    expect(contextMenuLabels(contextMenuEntries(canvasTarget))).toEqual([
+      'Add text here', 'Add sticky note here', '---',
+      'Add rectangle here', 'Add ellipse here', 'Add diamond here', 'Add line here', 'Add arrow here', '---',
+      'Paste', '---', 'Add flowchart node', 'Select all',
+    ]);
+    expect(contextMenuEntries(null)).toEqual([]);
+  });
+
+  it('drops the Mermaid group and its separator on a diagram with neither structure nor nodes', () => {
+    expect(contextMenuLabels(contextMenuEntries(canvasTarget, { hasMermaidNodes: false, isFlowchart: false })).at(-1)).toBe('Paste');
+    expect(contextMenuLabels(contextMenuEntries(canvasTarget, { hasMermaidNodes: false }))).toContain('Add flowchart node');
+    expect(contextMenuLabels(contextMenuEntries(canvasTarget, { hasMermaidNodes: false }))).not.toContain('Select all');
+  });
+
+  it('routes empty-canvas items to the world point and Mermaid handlers', () => {
+    const actions = contextMenuActions();
+    const entries = contextMenuEntries(canvasTarget, {}, actions);
+    selectContextMenuItem(entries, 'Add sticky note here');
+    selectContextMenuItem(entries, 'Add diamond here');
+    selectContextMenuItem(entries, 'Add flowchart node');
+    selectContextMenuItem(entries, 'Select all');
+    expect(actions.addAnnotation).toHaveBeenCalledWith('annotation.sticky');
+    expect(actions.addShape).toHaveBeenCalledWith('shape.diamond');
+    expect(actions.addFlowchartNode).toHaveBeenCalledTimes(1);
+    expect(actions.selectAllNodes).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables every write when the overlay scene or Mermaid structure is not writable', () => {
+    expect(disabledContextMenuLabels(contextMenuEntries(canvasTarget, { canEditOverlay: false, canEditStructure: false })))
+      .toEqual(contextMenuLabels(contextMenuEntries(canvasTarget)).filter((label) => label !== '---'));
+    expect(disabledContextMenuLabels(contextMenuEntries(canvasTarget, { canEditStructure: false })))
+      .toEqual(['Add flowchart node', 'Select all']);
+  });
+
+  it('disables an item whose underlying handler is absent instead of making it a silent no-op', () => {
+    const actions = { ...contextMenuActions(), addShape: null, alignOverlay: null };
+    expect(disabledContextMenuLabels(contextMenuEntries(canvasTarget, {}, actions)))
+      .toEqual(['Add rectangle here', 'Add ellipse here', 'Add diamond here', 'Add line here', 'Add arrow here']);
+    expect(disabledContextMenuLabels(contextMenuEntries(overlayTarget, { overlayTargetCount: 2 }, actions)))
+      .toEqual(['Bring to front', 'Send to back', 'Align left', 'Align top']);
+  });
+
+  it('keeps single-target reorder and multi-target align mutually exclusive on overlay objects', () => {
+    expect(contextMenuLabels(contextMenuEntries(overlayTarget))).toEqual([
+      'Duplicate', 'Copy', '---', 'Bring to front', 'Send to back', '---', 'Frame selection', '---', 'Lock', 'Delete',
+    ]);
+    expect(contextMenuLabels(contextMenuEntries(overlayTarget, { overlayTargetCount: 2 }))).toEqual([
+      'Duplicate', 'Copy', '---', 'Bring to front', 'Send to back', '---', 'Frame selection', 'Align left', 'Align top', '---', 'Lock', 'Delete',
+    ]);
+    expect(disabledContextMenuLabels(contextMenuEntries(overlayTarget, { overlayTargetCount: 2 }))).toEqual(['Bring to front', 'Send to back']);
+  });
+
+  it('only offers Unlock where the overlay mutation guard would accept it', () => {
+    const locked = contextMenuEntries(overlayTarget, { overlayTargetLocked: true });
+    expect(contextMenuLabels(locked)).toContain('Unlock');
+    expect(disabledContextMenuLabels(locked)).toEqual(['Duplicate', 'Copy', 'Bring to front', 'Send to back', 'Unlock', 'Delete']);
+    expect(disabledContextMenuLabels(contextMenuEntries(overlayTarget, { canUnlockOverlayTarget: true, overlayTargetLocked: true })))
+      .toEqual(['Duplicate', 'Copy', 'Bring to front', 'Send to back', 'Delete']);
+  });
+
+  it('marks the destructive overlay and node entries as danger and routes them to their handlers', () => {
+    const actions = contextMenuActions();
+    const overlayEntries = contextMenuEntries(overlayTarget, {}, actions);
+    const nodeEntries = contextMenuEntries(nodeTarget, {}, actions);
+    expect(overlayEntries.flatMap((entry) => 'type' in entry || !entry.danger ? [] : [entry.label])).toEqual(['Delete']);
+    expect(nodeEntries.flatMap((entry) => 'type' in entry || !entry.danger ? [] : [entry.label])).toEqual(['Delete node']);
+    selectContextMenuItem(overlayEntries, 'Bring to front');
+    selectContextMenuItem(overlayEntries, 'Delete');
+    selectContextMenuItem(nodeEntries, 'Delete node');
+    expect(actions.reorderOverlay).toHaveBeenCalledWith('front');
+    expect(actions.deleteOverlay).toHaveBeenCalledTimes(1);
+    expect(actions.deleteNode).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the Mermaid node menu to the three safe actions and gates them on a live node record', () => {
+    expect(contextMenuLabels(contextMenuEntries(nodeTarget))).toEqual(['Edit label', 'Add connected node', '---', 'Delete node']);
+    expect(disabledContextMenuLabels(contextMenuEntries(nodeTarget, { hasNodeRecord: false })))
+      .toEqual(['Edit label', 'Add connected node', 'Delete node']);
+    expect(disabledContextMenuLabels(contextMenuEntries(nodeTarget, { canEditStructure: false })))
+      .toEqual(['Edit label', 'Add connected node', 'Delete node']);
+  });
+});
+
+describe('canvas context menu wiring', () => {
+  it('captures right-click on the canvas container and mounts the menu outside the overlay block', () => {
+    expect(canvasSource).toMatch(/onContextMenu=\{handleCanvasContextMenu\}/u);
+    expect(canvasSource).toMatch(/const resolved = resolveCanvasContextMenuTarget\(\{[^]*?exclusionMatch: Boolean\(event\.target\.closest\(CONTEXT_MENU_EXCLUSION_SELECTOR\)\),[^]*?insideToolbar: isPointInsideRect\(/u);
+    expect(canvasSource).toMatch(/if \(!resolved\) return;\s*\n\s*event\.preventDefault\(\);/u);
+    expect(canvasSource).toMatch(/viewport=\{canvasViewport\}\s*\n\s*requestedSelection=\{overlaySelectionRequest\}\s*\n\s*onRequestedSelectionComplete=/u);
+    expect(canvasSource).toMatch(/\/>\s*\n\s*\) : null\}\s*\n\s*<CanvasContextMenu\b/u);
+  });
+
+  it('closes the open menu on the interactions that invalidate its anchor', () => {
+    expect(canvasSource).toMatch(/useEffect\(\(\) => \{ setContextMenu\(null\); \}, \[overlay\?\.tool, shortcutsOpen, viewport\.panX, viewport\.panY, viewport\.zoom\]\);/u);
+    expect(canvasSource).toMatch(/window\.addEventListener\('scroll', close, \{ capture: true, passive: true \}\);/u);
   });
 });

@@ -3646,6 +3646,11 @@ code {
   z-index: 95;
 }
 
+.canvas-context-menu:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 .canvas-context-menu-item {
   align-items: center;
   background: transparent;
@@ -3698,7 +3703,10 @@ code {
 
 @media (forced-colors: active) {
   .canvas-context-menu { background: Canvas; border-color: CanvasText; box-shadow: none; }
+  .canvas-context-menu:focus-visible { outline-color: Highlight; }
   .canvas-context-menu-item { border-color: CanvasText; color: CanvasText; forced-color-adjust: none; }
+  .canvas-context-menu-item[data-danger='true'], .canvas-context-menu-item kbd { color: CanvasText; }
+  .canvas-context-menu-item:hover:not(:disabled), .canvas-context-menu-item[data-danger='true']:hover:not(:disabled) { background: Highlight; border-color: Highlight; color: HighlightText; }
   .canvas-context-menu-item:focus-visible { background: Highlight; color: HighlightText; outline: 2px solid Highlight; }
   .canvas-context-menu-item:disabled { color: GrayText; }
   .canvas-context-menu-separator { background: CanvasText; }

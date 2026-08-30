@@ -130,18 +130,16 @@ describe('CanvasContextMenu', () => {
     expect(items()[2]?.tabIndex).toBe(0);
   });
 
-  it('activates with Enter, Space, and click, then closes and returns focus', async () => {
-    const returnFocusTo = document.createElement('div');
-    returnFocusTo.tabIndex = -1;
-    document.body.append(returnFocusTo);
+  it('activates with Enter, Space, and click, then closes and hands focus back to its owner', async () => {
+    const onReturnFocus = vi.fn();
     const onClose = vi.fn();
     const { entries, selects } = menuEntries();
-    const { render } = await mount({ entries, onClose, returnFocusTo });
+    const { render } = await mount({ entries, onClose, onReturnFocus });
 
     await act(async () => { press('Enter'); });
     expect(selects.first).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
-    expect(document.activeElement).toBe(returnFocusTo);
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
 
     await render({});
     await act(async () => { press(' '); });
@@ -151,28 +149,65 @@ describe('CanvasContextMenu', () => {
     await act(async () => { items()[2]!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
     expect(selects.last).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(3);
-    expect(document.activeElement).toBe(returnFocusTo);
+    expect(onReturnFocus).toHaveBeenCalledTimes(3);
     expect(selects.middle).not.toHaveBeenCalled();
   });
 
   it('closes on Escape and on an outside pointerdown without activating anything', async () => {
-    const returnFocusTo = document.createElement('div');
-    returnFocusTo.tabIndex = -1;
-    document.body.append(returnFocusTo);
+    const onReturnFocus = vi.fn();
     const onClose = vi.fn();
     const { entries, selects } = menuEntries();
-    await mount({ entries, onClose, returnFocusTo });
+    await mount({ entries, onClose, onReturnFocus });
 
     await act(async () => { menu()!.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
     expect(onClose).not.toHaveBeenCalled();
 
     await act(async () => { press('Escape'); });
     expect(onClose).toHaveBeenCalledTimes(1);
-    expect(document.activeElement).toBe(returnFocusTo);
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
     expect(selects.first).not.toHaveBeenCalled();
 
     await act(async () => { document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
     expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes on Tab so focus never leaves a menu that stays painted', async () => {
+    const onReturnFocus = vi.fn();
+    const onClose = vi.fn();
+    const { entries, selects } = menuEntries();
+    await mount({ entries, onClose, onReturnFocus });
+
+    let defaultPrevented = true;
+    await act(async () => { defaultPrevented = !press('Tab'); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
+    expect(defaultPrevented, 'Tab must keep its native focus move').toBe(false);
+    expect(selects.first).not.toHaveBeenCalled();
+  });
+
+  it('keeps an entirely disabled menu focusable so Escape still dismisses it', async () => {
+    const onReturnFocus = vi.fn();
+    const onClose = vi.fn();
+    const { entries } = menuEntries({ first: true, last: true });
+    await mount({ entries, onClose, onReturnFocus });
+
+    expect(menu()).not.toBeNull();
+    expect(items().every((item) => item.disabled)).toBe(true);
+    expect(document.activeElement).toBe(menu());
+    await act(async () => { press('Escape'); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onReturnFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the shortcut hint from the accessible name of its item', async () => {
+    const onSelect = vi.fn();
+    await mount({ entries: [{ id: 'first', label: 'Add flowchart node', onSelect, shortcut: 'N' }] });
+    const item = items()[0]!;
+    expect(item.querySelector('kbd')?.getAttribute('aria-hidden')).toBe('true');
+    expect(item.querySelector('kbd')?.textContent).toBe('N');
+    expect([...item.children].find((child) => child.getAttribute('aria-hidden') !== 'true')?.textContent)
+      .toBe('Add flowchart node');
   });
 
   it('renders nothing without an anchor or without an actionable entry', async () => {

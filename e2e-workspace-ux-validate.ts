@@ -8402,6 +8402,8 @@ async function canvasContextMenuPoint(page: Page, label: string): Promise<{ x: n
 }
 
 async function expectCanvasContextMenu(page: Page, label: string): Promise<void> {
+  await ensureSourceFlyoutOpen(page);
+  const sourceBefore = await canonicalSource(page);
   await replaceSource(page, FLOWCHART_FIXTURE);
   await waitForSource(page, FLOWCHART_FIXTURE);
   await closeFlyout(page, 'source');
@@ -8425,7 +8427,7 @@ async function expectCanvasContextMenu(page: Page, label: string): Promise<void>
   await saveScreenshot(page, 'canvas-context-menu');
   await page.keyboard.press('Escape');
   await expect(canvasMenu).toHaveCount(0);
-  await pollCanvasContainsFocus(page, canvas, `${label} context menu Escape did not return focus to the canvas`);
+  await waitForFocusedLocator(page, canvas, `${label} empty-canvas context menu Escape returned focus to the canvas container`);
 
   const objectsBefore = await objects.count();
   await page.mouse.click(emptyPoint.x, emptyPoint.y, { button: 'right' });
@@ -8439,14 +8441,19 @@ async function expectCanvasContextMenu(page: Page, label: string): Promise<void>
   const overlayMenu = page.getByRole('menu', { name: 'Overlay object actions', exact: true });
   await expect(overlayMenu).toBeVisible();
   await expect(object, `${label} right-click did not select the overlay object before opening its menu.`).toHaveAttribute('data-selected', 'true');
-  for (const name of ['Duplicate', 'Copy', 'Bring to front', 'Send to back', 'Frame selection', 'Lock', 'Delete']) {
+  for (const name of ['Duplicate', 'Copy', 'Bring to front', 'Send to back', 'Frame selection', 'Delete']) {
     await expect(overlayMenu.getByRole('menuitem', { name, exact: true }),
       `${label} overlay context menu is missing ${name}.`).toHaveCount(1);
   }
   await expect(overlayMenu.getByRole('menuitem', { name: 'Align left', exact: true }),
     `${label} single-object context menu offered a multi-object align.`).toHaveCount(0);
+  await expect(overlayMenu.getByRole('menuitem', { name: 'Lock', exact: true }),
+    `${label} context menu offered a one-way Lock on a shape no surface can unlock.`).toHaveCount(0);
   await verifiedClick(page, overlayMenu.getByRole('menuitem', { name: 'Delete', exact: true }), `${label} delete overlay from its context menu`);
   await expect(objects).toHaveCount(objectsBefore);
+  await expect(page.getByTestId('overlay-toolbar-context'),
+    `${label} selection toolbar row survived a context-menu Delete with a ghost selection.`).toHaveCount(0);
+  await pollCanvasContainsFocus(page, canvas, `${label} context-menu Delete dropped focus outside the canvas`);
 
   const node = page.locator('.mermaid-flow-node').first();
   await node.waitFor({ state: 'visible', timeout: 15_000 });
@@ -8461,6 +8468,7 @@ async function expectCanvasContextMenu(page: Page, label: string): Promise<void>
   }
   await page.keyboard.press('Escape');
   await expect(nodeMenu).toHaveCount(0);
+  await waitForFocusedLocator(page, node, `${label} node context menu Escape returned focus to the right-clicked node`);
 
   const pill = await page.locator('.overlay-icon-toolbar').boundingBox();
   assert(pill, `${label} overlay toolbar pill has no visible bounds.`);
@@ -8474,7 +8482,8 @@ async function expectCanvasContextMenu(page: Page, label: string): Promise<void>
   assert(editorBounds, `${label} source editor has no visible bounds for a right-click.`);
   await page.mouse.click(editorBounds.x + Math.min(48, editorBounds.width / 2), editorBounds.y + 12, { button: 'right' });
   await expect(customMenu, `${label} hijacked right-click inside the CodeMirror source editor.`).toHaveCount(0);
-  await closeFlyout(page, 'source');
+  await replaceSource(page, sourceBefore);
+  await waitForSource(page, sourceBefore);
 }
 
 async function expectLocalFirstWorkspaceEntry(browser: BrowserHarness, baseUrl: string, serverUrl: string): Promise<void> {

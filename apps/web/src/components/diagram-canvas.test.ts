@@ -798,6 +798,7 @@ const CONTEXT_MENU_HIT: CanvasContextMenuHit = {
 const CONTEXT_MENU_CAPABILITIES: CanvasContextMenuCapabilities = {
   canEditOverlay: true,
   canEditStructure: true,
+  canToggleOverlayLock: true,
   canUnlockOverlayTarget: false,
   hasMermaidNodes: true,
   hasNodeRecord: true,
@@ -926,6 +927,13 @@ describe('canvas context menu entries', () => {
     expect(disabledContextMenuLabels(contextMenuEntries(overlayTarget, { overlayTargetCount: 2 }))).toEqual(['Bring to front', 'Send to back']);
   });
 
+  it('never offers a lock it cannot undo on a kind no surface can unlock', () => {
+    expect(contextMenuLabels(contextMenuEntries(overlayTarget, { canToggleOverlayLock: false })))
+      .toEqual(['Duplicate', 'Copy', '---', 'Bring to front', 'Send to back', '---', 'Frame selection', '---', 'Delete']);
+    expect(contextMenuLabels(contextMenuEntries(overlayTarget, { canToggleOverlayLock: false, overlayTargetLocked: true })))
+      .not.toContain('Unlock');
+  });
+
   it('only offers Unlock where the overlay mutation guard would accept it', () => {
     const locked = contextMenuEntries(overlayTarget, { overlayTargetLocked: true });
     expect(contextMenuLabels(locked)).toContain('Unlock');
@@ -960,14 +968,22 @@ describe('canvas context menu entries', () => {
 describe('canvas context menu wiring', () => {
   it('captures right-click on the canvas container and mounts the menu outside the overlay block', () => {
     expect(canvasSource).toMatch(/onContextMenu=\{handleCanvasContextMenu\}/u);
-    expect(canvasSource).toMatch(/const resolved = resolveCanvasContextMenuTarget\(\{[^]*?exclusionMatch: Boolean\(event\.target\.closest\(CONTEXT_MENU_EXCLUSION_SELECTOR\)\),[^]*?insideToolbar: isPointInsideRect\(/u);
-    expect(canvasSource).toMatch(/if \(!resolved\) return;\s*\n\s*event\.preventDefault\(\);/u);
-    expect(canvasSource).toMatch(/viewport=\{canvasViewport\}\s*\n\s*requestedSelection=\{overlaySelectionRequest\}\s*\n\s*onRequestedSelectionComplete=/u);
-    expect(canvasSource).toMatch(/\/>\s*\n\s*\) : null\}\s*\n\s*<CanvasContextMenu\b/u);
+    expect(canvasSource).toMatch(/exclusionMatch: Boolean\(event\.target\.closest\(CONTEXT_MENU_EXCLUSION_SELECTOR\)\)/u);
+    const overlayMountEnd = canvasSource.indexOf(') : null}', canvasSource.search(/<OverlayCanvasLayer[\s{]/u));
+    expect(overlayMountEnd).toBeGreaterThan(0);
+    expect(canvasSource.search(/<CanvasContextMenu[\s>]/u)).toBeGreaterThan(overlayMountEnd);
+  });
+
+  it('scopes the click-through toolbar bail to the toolbar of the active diagram', () => {
+    expect(canvasSource).toMatch(/toolbar\.dataset\.overlayDiagramId === overlay\?\.diagramId/u);
+    expect(canvasSource).not.toMatch(/querySelector\('\.overlay-icon-toolbar'\)/u);
   });
 
   it('closes the open menu on the interactions that invalidate its anchor', () => {
-    expect(canvasSource).toMatch(/useEffect\(\(\) => \{ setContextMenu\(null\); \}, \[overlay\?\.tool, shortcutsOpen, viewport\.panX, viewport\.panY, viewport\.zoom\]\);/u);
-    expect(canvasSource).toMatch(/window\.addEventListener\('scroll', close, \{ capture: true, passive: true \}\);/u);
+    const closeDependencies = /useEffect\(\(\) => \{ setContextMenu\(null\); \}, \[([^\]]*)\]\)/u.exec(canvasSource)?.[1] ?? '';
+    for (const dependency of ['overlay?.tool', 'shortcutsOpen', 'viewport.panX', 'viewport.panY', 'viewport.zoom']) {
+      expect(closeDependencies, `the close effect ignores ${dependency}`).toContain(dependency);
+    }
+    expect(canvasSource).toMatch(/window\.addEventListener\('scroll', close/u);
   });
 });

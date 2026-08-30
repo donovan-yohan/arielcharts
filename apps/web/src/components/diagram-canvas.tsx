@@ -742,6 +742,9 @@ export function shouldEnableCanvasMarquee(
 
 const OVERLAY_OBJECT_TESTID_PREFIX = 'overlay-object-';
 const OVERLAY_OBJECT_SELECTOR = `[data-testid^="${OVERLAY_OBJECT_TESTID_PREFIX}"]`;
+/** Both flowchart renderers carry the node id; only their wrappers differ. */
+const MERMAID_NODE_ID_SELECTOR = '.react-flow__node, .diagram-node-target';
+const CANVAS_CONTEXT_MENU_FOCUS_SELECTOR = `${OVERLAY_OBJECT_SELECTOR}, .mermaid-flow-node, .diagram-node-target`;
 
 export type CanvasContextMenuKind = 'canvas' | 'mermaid-node' | 'overlay-object';
 
@@ -784,6 +787,7 @@ type CanvasContextMenuAction<Argument = void> = ((argument: Argument) => void) |
 export interface CanvasContextMenuCapabilities {
   canEditOverlay: boolean;
   canEditStructure: boolean;
+  canToggleOverlayLock: boolean;
   canUnlockOverlayTarget: boolean;
   hasMermaidNodes: boolean;
   hasNodeRecord: boolean;
@@ -865,16 +869,16 @@ export function buildCanvasContextMenuEntries(
         contextMenuItem('context-align-top', 'Align top', bindContextMenuAction(actions.alignOverlay, 'top'), !mutable),
       );
     }
-    entries.push(
-      { id: 'context-overlay-danger', type: 'separator' },
-      contextMenuItem(
+    entries.push({ id: 'context-overlay-danger', type: 'separator' });
+    if (capabilities.canToggleOverlayLock) {
+      entries.push(contextMenuItem(
         'context-toggle-overlay-lock',
         capabilities.overlayTargetLocked ? 'Unlock' : 'Lock',
         actions.toggleOverlayLock,
         !capabilities.canEditOverlay || (capabilities.overlayTargetLocked && !capabilities.canUnlockOverlayTarget),
-      ),
-      contextMenuItem('context-delete-overlay', 'Delete', actions.deleteOverlay, !mutable, { danger: true }),
-    );
+      ));
+    }
+    entries.push(contextMenuItem('context-delete-overlay', 'Delete', actions.deleteOverlay, !mutable, { danger: true }));
     return entries;
   }
 
@@ -903,6 +907,8 @@ export function buildCanvasContextMenuEntries(
 }
 
 interface CanvasContextMenuState extends CanvasContextMenuTarget {
+  /** The right-clicked node or object, so dismissal returns focus to it. */
+  element: HTMLElement | null;
   /** Overlay ids the menu acts on, snapshotted when the menu opened. */
   ids: readonly string[];
   point: { x: number; y: number };
@@ -1498,6 +1504,7 @@ export function DiagramCanvas({
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<CanvasContextMenuState | null>(null);
   const [overlaySelectionRequest, setOverlaySelectionRequest] = useState<{ id: number; objectIds: readonly string[] } | null>(null);
+  const overlaySelectionRequestIdRef = useRef(0);
   const shortcutsOriginRef = useRef<HTMLElement | null>(null);
   const shortcutsOriginNodeIdRef = useRef<string | null>(null);
   const shortcutsDialogRef = useRef<HTMLDivElement | null>(null);
@@ -3534,17 +3541,36 @@ export function DiagramCanvas({
 
   const closeContextMenu = useCallback(() => { setContextMenu(null); }, []);
 
+  const requestOverlaySelection = useCallback((objectIds: readonly string[]) => {
+    overlaySelectionRequestIdRef.current += 1;
+    setOverlaySelectionRequest({ id: overlaySelectionRequestIdRef.current, objectIds });
+  }, []);
+
+  const returnContextMenuFocus = useCallback(() => {
+    contextMenu?.element?.focus({ preventScroll: true });
+    // A destructive entry unmounts that element on the next commit, which drops
+    // focus to the body; the canvas keeps it without roving to an unrelated node.
+    const claimCanvasFocus = () => {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      suppressCanvasRovingFocusRef.current = Date.now();
+      containerRef.current?.focus({ preventScroll: true });
+    };
+    claimCanvasFocus();
+    window.requestAnimationFrame(claimCanvasFocus);
+  }, [contextMenu]);
+
   const handleCanvasContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     const canvas = containerRef.current;
     if (!canvas || !(event.target instanceof Element)) return;
     const overlayElement = event.target.closest(OVERLAY_OBJECT_SELECTOR);
+    const pointer = { x: event.clientX, y: event.clientY };
     const resolved = resolveCanvasContextMenuTarget({
       exclusionMatch: Boolean(event.target.closest(CONTEXT_MENU_EXCLUSION_SELECTOR)),
-      insideToolbar: isPointInsideRect(
-        { x: event.clientX, y: event.clientY },
-        document.querySelector('.overlay-icon-toolbar')?.getBoundingClientRect() ?? null,
+      insideToolbar: [...document.querySelectorAll<HTMLElement>('.overlay-icon-toolbar')].some(
+        (toolbar) => toolbar.dataset.overlayDiagramId === overlay?.diagramId
+          && isPointInsideRect(pointer, toolbar.getBoundingClientRect()),
       ),
-      mermaidNodeId: event.target.closest('.react-flow__node')?.getAttribute('data-id') ?? null,
+      mermaidNodeId: event.target.closest(MERMAID_NODE_ID_SELECTOR)?.getAttribute('data-id') ?? null,
       overlayDataSelected: overlayElement?.getAttribute('data-selected') ?? null,
       overlayTestId: overlayElement?.getAttribute('data-testid') ?? null,
     });
@@ -3559,10 +3585,11 @@ export function DiagramCanvas({
           .map((element) => element.getAttribute('data-testid')?.slice(OVERLAY_OBJECT_TESTID_PREFIX.length) ?? '')
           .filter((id) => id.length > 0)
         : [resolved.targetId];
-      if (!resolved.alreadySelected) setOverlaySelectionRequest({ id: Date.now(), objectIds: [resolved.targetId] });
+      if (!resolved.alreadySelected) requestOverlaySelection([resolved.targetId]);
     }
     setContextMenu({
       ...resolved,
+      element: event.target.closest<HTMLElement>(CANVAS_CONTEXT_MENU_FOCUS_SELECTOR),
       ids,
       point: {
         x: (event.clientX - bounds.left - viewport.panX) / viewport.zoom,
@@ -3571,7 +3598,7 @@ export function DiagramCanvas({
       x: event.clientX,
       y: event.clientY,
     });
-  }, [viewport.panX, viewport.panY, viewport.zoom]);
+  }, [overlay?.diagramId, requestOverlaySelection, viewport.panX, viewport.panY, viewport.zoom]);
 
   useEffect(() => { setContextMenu(null); }, [overlay?.tool, shortcutsOpen, viewport.panX, viewport.panY, viewport.zoom]);
 
@@ -3598,6 +3625,7 @@ export function DiagramCanvas({
     return buildCanvasContextMenuEntries(contextMenu, {
       canEditOverlay,
       canEditStructure,
+      canToggleOverlayLock: targetObject?.kind === 'frame.section',
       canUnlockOverlayTarget: Boolean(locked && scene && targetObject && lockPatch && isPureFrameUnlock(scene, targetObject, lockPatch)),
       hasMermaidNodes: orderedNodeIds.length > 0,
       hasNodeRecord: node !== null,
@@ -3622,11 +3650,16 @@ export function DiagramCanvas({
       alignOverlay: overlay?.onAlign ? (axis) => { overlay.onAlign?.(contextMenu.ids, axis); } : null,
       copyOverlay: overlay ? () => { overlay.onCopy(contextMenu.ids); } : null,
       deleteNode: onDeleteNodes ? () => { handleNodeClick(contextMenu.targetId, false); onDeleteNodes([contextMenu.targetId]); } : null,
-      deleteOverlay: overlay ? () => { overlay.onDelete(contextMenu.ids); } : null,
-      duplicateOverlay: overlay
+      deleteOverlay: overlay ? () => { overlay.onDelete(contextMenu.ids); requestOverlaySelection([]); } : null,
+      duplicateOverlay: overlay && (contextMenu.ids.length <= 1 || overlay.onDuplicateMany)
         ? () => {
-          if (contextMenu.ids.length > 1) overlay.onDuplicateMany?.(contextMenu.ids);
-          else overlay.onDuplicate(contextMenu.targetId);
+          if (contextMenu.ids.length > 1) {
+            const copies = overlay.onDuplicateMany?.(contextMenu.ids) ?? [];
+            if (copies.length > 0) requestOverlaySelection(copies);
+            return;
+          }
+          const copy = overlay.onDuplicate(contextMenu.targetId);
+          if (copy) requestOverlaySelection([copy]);
         }
         : null,
       editNodeLabel: node ? () => { handleNodeClick(contextMenu.targetId, false); openNodeEditor(node); } : null,
@@ -3650,8 +3683,8 @@ export function DiagramCanvas({
     });
   }, [
     addDefaultNode, canEditStructure, canvasViewport, contextMenu, handleNodeClick, interactiveNodeBounds, isFlowchart,
-    nodeById, onAddConnectedNode, onDeleteNodes, openNodeEditor, orderedNodeIds, overlay, selectedConnectionType,
-    setSelection, viewport.panX, viewport.panY, viewport.zoom,
+    nodeById, onAddConnectedNode, onDeleteNodes, openNodeEditor, orderedNodeIds, overlay, requestOverlaySelection,
+    selectedConnectionType, setSelection, viewport.panX, viewport.panY, viewport.zoom,
   ]);
 
   const registerNodeElement = useCallback((nodeId: string, element: HTMLElement | null) => {
@@ -3901,6 +3934,7 @@ export function DiagramCanvas({
                 <button
                   aria-label={ariaLabel}
                   className="diagram-node-target"
+                  data-id={nodeId}
                   key={nodeId}
                   onFocus={() => { setFocusedNodeId(nodeId); }}
                   onClick={(event) => {
@@ -4194,7 +4228,7 @@ export function DiagramCanvas({
         entries={contextMenuEntries}
         label={getCanvasContextMenuLabel(contextMenu?.kind ?? 'canvas')}
         onClose={closeContextMenu}
-        returnFocusTo={containerRef.current}
+        onReturnFocus={returnContextMenuFocus}
       />
 
       <LaserPointerLayer

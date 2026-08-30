@@ -202,8 +202,21 @@ describe('canvas context menu CSS contracts', () => {
   });
 
   it('carries its own forced-colors block instead of extending the toolbar block', () => {
-    expect(contextMenuCss).toMatch(/@media \(forced-colors: active\)\s*\{[^]*?\.canvas-context-menu\s*\{[^}]*background:\s*Canvas;[^}]*border-color:\s*CanvasText;/u);
-    expect(contextMenuCss).toMatch(/@media \(forced-colors: active\)\s*\{[^]*?\.canvas-context-menu-item:focus-visible\s*\{[^}]*background:\s*Highlight;[^}]*color:\s*HighlightText;/u);
-    expect(css).not.toMatch(/\.overlay-toolbar-primary,[^{]*\.canvas-context-menu/u);
+    const forcedColors = contextMenuCss.slice(contextMenuCss.indexOf('@media (forced-colors: active)'));
+    expect(forcedColors).toMatch(/\.canvas-context-menu\s*\{[^}]*background:\s*Canvas;[^}]*border-color:\s*CanvasText;/u);
+    expect(forcedColors).toMatch(/\.canvas-context-menu-item:focus-visible\s*\{[^}]*background:\s*Highlight;[^}]*color:\s*HighlightText;/u);
+    expect(css.slice(0, css.indexOf('.canvas-context-menu {'))).not.toContain('canvas-context-menu');
+  });
+
+  it('overrides every author colour that outranks the plain item rule under forced colors', () => {
+    const forcedColors = contextMenuCss.slice(contextMenuCss.indexOf('@media (forced-colors: active)'));
+    for (const selector of [
+      /\.canvas-context-menu-item\[data-danger='true'\][^{:]*,?[^{]*\{[^}]*color:\s*CanvasText;/u,
+      /\.canvas-context-menu-item kbd[^{]*\{[^}]*color:\s*CanvasText;/u,
+      /\.canvas-context-menu-item:hover:not\(:disabled\)[^{]*\{[^}]*background:\s*Highlight;[^}]*color:\s*HighlightText;/u,
+      /\.canvas-context-menu-item\[data-danger='true'\]:hover:not\(:disabled\)[^{]*\{[^}]*background:\s*Highlight;/u,
+    ]) {
+      expect(forcedColors).toMatch(selector);
+    }
   });
 });

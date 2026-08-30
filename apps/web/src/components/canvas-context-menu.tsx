@@ -21,7 +21,8 @@ export interface CanvasContextMenuProps {
   entries: readonly CanvasContextMenuEntry[];
   label: string;
   onClose: () => void;
-  returnFocusTo?: HTMLElement | null;
+  /** The owner decides where focus lands; the right-clicked element may be gone. */
+  onReturnFocus?: () => void;
 }
 
 type MenuFocusStep = 'down' | 'end' | 'home' | 'up';
@@ -47,7 +48,7 @@ export function nextEnabledMenuIndex(entries: readonly CanvasContextMenuEntry[],
   return enabled[(current + (step === 'down' ? 1 : enabled.length - 1)) % enabled.length]!;
 }
 
-export function CanvasContextMenu({ anchor, entries, label, onClose, returnFocusTo }: CanvasContextMenuProps) {
+export function CanvasContextMenu({ anchor, entries, label, onClose, onReturnFocus }: CanvasContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef(new Map<number, HTMLButtonElement>());
   const entriesRef = useRef(entries);
@@ -56,10 +57,10 @@ export function CanvasContextMenu({ anchor, entries, label, onClose, returnFocus
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const open = anchor !== null && entries.some(isCanvasContextMenuItem);
 
-  const close = useCallback((restoreFocus: boolean) => {
+  const close = useCallback(() => {
     onClose();
-    if (restoreFocus) returnFocusTo?.focus();
-  }, [onClose, returnFocusTo]);
+    onReturnFocus?.();
+  }, [onClose, onReturnFocus]);
 
   useLayoutEffect(() => {
     const menu = menuRef.current;
@@ -79,9 +80,12 @@ export function CanvasContextMenu({ anchor, entries, label, onClose, returnFocus
     setFocusedIndex(anchor ? nextEnabledMenuIndex(entriesRef.current, -1, 'home') : -1);
   }, [anchor]);
 
+  // An entirely disabled menu still has to own focus, or Escape never reaches it.
   useEffect(() => {
-    if (focusedIndex >= 0) itemRefs.current.get(focusedIndex)?.focus({ preventScroll: true });
-  }, [focusedIndex, position]);
+    if (!open) return;
+    const item = focusedIndex >= 0 ? itemRefs.current.get(focusedIndex) : null;
+    (item ?? menuRef.current)?.focus({ preventScroll: true });
+  }, [focusedIndex, open, position]);
 
   useEffect(() => {
     if (!open) return;
@@ -97,14 +101,19 @@ export function CanvasContextMenu({ anchor, entries, label, onClose, returnFocus
 
   const activate = (item: CanvasContextMenuItem) => {
     item.onSelect();
-    close(true);
+    close();
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      close(true);
+      close();
+      return;
+    }
+    // Tab leaves the menu; the portal would otherwise stay painted and deaf.
+    if (event.key === 'Tab') {
+      close();
       return;
     }
     const step: MenuFocusStep | null = event.key === 'ArrowDown' ? 'down'
@@ -134,6 +143,7 @@ export function CanvasContextMenu({ anchor, entries, label, onClose, returnFocus
       ref={menuRef}
       role="menu"
       style={{ left: position?.left ?? anchor.x, position: 'fixed', top: position?.top ?? anchor.y }}
+      tabIndex={-1}
     >
       {entries.map((entry, index) => isCanvasContextMenuItem(entry) ? (
         <button

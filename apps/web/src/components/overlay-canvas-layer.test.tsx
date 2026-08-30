@@ -1056,6 +1056,10 @@ describe('OverlayCanvasLayer requested selection', () => {
     expect(selection()).toEqual(['a', 'b']);
     expect(onRequestedSelectionComplete).toHaveBeenCalledTimes(2);
     expect(onRequestedSelectionComplete).toHaveBeenLastCalledWith(2);
+
+    await render({ id: 3, objectIds: [] });
+    expect(selection()).toEqual([]);
+    expect(onRequestedSelectionComplete).toHaveBeenLastCalledWith(3);
     await act(async () => root.unmount());
   });
 });

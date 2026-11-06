@@ -194,9 +194,9 @@ describe('session helpers', () => {
   });
 
   it('reports the exact current MCP agent count', () => {
-    expect(getAgentCountLabel(0)).toBe('0 MCP agents connected');
-    expect(getAgentCountLabel(1)).toBe('1 MCP agent connected');
-    expect(getAgentCountLabel(2)).toBe('2 MCP agents connected');
+    expect(getAgentCountLabel(0)).toBe('0 MCP agents in this workspace');
+    expect(getAgentCountLabel(1)).toBe('1 MCP agent in this workspace');
+    expect(getAgentCountLabel(2)).toBe('2 MCP agents in this workspace');
   });
 
   it('wraps modal focus only at its two boundaries', () => {

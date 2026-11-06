@@ -29,6 +29,16 @@ export function assertAnchorsStable(before: AnchorSnapshot, after: AnchorSnapsho
 export async function assertHitTarget(page: Page, target: Locator, label: string): Promise<void> {
   await target.waitFor({ state: 'visible', timeout: 15_000 });
   assert(await target.isEnabled(), `${label} is disabled.`);
+  // Labeled semantic records intentionally own an internal scroll region. Bring
+  // this source control into that native region before its unchanged point gate.
+  await target.evaluate((element) => {
+    const panel = element.closest<HTMLElement>('[data-workspace-panel="semantic"]');
+    if (!panel || !['auto', 'scroll'].includes(getComputedStyle(panel).overflowY) || panel.scrollHeight <= panel.clientHeight) return;
+    const bounds = element.getBoundingClientRect(); const area = panel.getBoundingClientRect();
+    if (bounds.top < area.top + panel.clientTop || bounds.bottom > area.top + panel.clientTop + panel.clientHeight) {
+      element.scrollIntoView({ block: 'center', inline: 'nearest' }); window.scrollTo(0, 0);
+    }
+  });
   const box = await target.boundingBox();
   assert(box && box.width > 0 && box.height > 0, `${label} has no clickable bounds.`);
   const hit = await target.evaluate((targetElement) => {
@@ -37,6 +47,9 @@ export async function assertHitTarget(page: Page, target: Locator, label: string
     const y = rect.y + (rect.height / 2);
     const hitElement = document.elementFromPoint(x, y);
     return {
+      target: rect.toJSON(),
+      panel: targetElement.closest('[data-workspace-panel="semantic"]')?.getBoundingClientRect().toJSON() ?? null,
+      scrollY: window.scrollY,
       className: hitElement instanceof HTMLElement || hitElement instanceof SVGElement ? hitElement.getAttribute('class') : null,
       matches: !!hitElement && (targetElement === hitElement || targetElement.contains(hitElement)),
       tagName: hitElement?.tagName ?? null,
@@ -53,7 +66,13 @@ export async function assertHitTarget(page: Page, target: Locator, label: string
  */
 export async function assertTouchTarget(page: Page, target: Locator, label: string, minimumPx = 44): Promise<void> {
   await assertHitTarget(page, target, label);
-  const box = await target.boundingBox();
+  // Native checkbox/radio glyphs stay 18px; their associated wrapping label is
+  // the browser's real activation target, not an oversized replacement glyph.
+  const isNativeChoice = await target.evaluate((element) => element instanceof HTMLInputElement && ['checkbox', 'radio'].includes(element.type));
+  const choiceLabel = target.locator('xpath=ancestor::label[1]');
+  const activationTarget = isNativeChoice && await choiceLabel.count() === 1 ? choiceLabel : target;
+  if (activationTarget !== target) await assertHitTarget(page, activationTarget, `${label} associated label`);
+  const box = await activationTarget.boundingBox();
   assert(box, `${label} has no clickable bounds.`);
   assert(box.width >= minimumPx && box.height >= minimumPx,
     `${label} is ${box.width.toFixed(1)}x${box.height.toFixed(1)}px; phone action targets must be at least ${minimumPx}px.`);

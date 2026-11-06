@@ -1,3 +1,4 @@
+import { WorkspaceButton } from './workspace-controls';
 import { EXTERNAL_MERMAID_PLUGIN_FAMILIES, getStarterTemplate, type StarterTemplate, type StarterTemplateId } from '@arielcharts/shared';
 import React, { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Plus } from 'lucide-react';
@@ -40,7 +41,7 @@ export function getTemplateMenuGroups(templates: readonly StarterTemplate[]): re
       groups.set(key, { id: key, label, templates: [template] });
     }
   }
-  return [...groups.values()];
+  return ['start', 'canvas', 'form-stable', 'form-beta'].flatMap((key) => { const group = groups.get(key); return group ? [group] : []; });
 }
 
 export function getTemplateMenuFocusIndex(key: string, currentIndex: number, itemCount: number): number | null {
@@ -143,7 +144,7 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, onOpenChange, openReq
 
   return (
     <div className="workspace-template-picker">
-      <button
+      <WorkspaceButton
         aria-controls="starter-template-menu"
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -162,7 +163,7 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, onOpenChange, openReq
         ref={triggerRef}
         title="Create diagram from template"
         type="button"
-      ><Plus aria-hidden="true" size={18} /></button>
+      ><Plus aria-hidden="true" size={18} /></WorkspaceButton>
       {open ? (
         <div
           aria-label="Starter templates"
@@ -184,7 +185,7 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, onOpenChange, openReq
                 const index = menuTemplates.findIndex((candidate) => candidate.id === template.id);
                 return (
                   <div className="workspace-template-menu-choice" key={template.id}>
-                    <button
+                    <WorkspaceButton
                       className="workspace-template-menu-item"
                       data-testid="starter-template-create"
                       onClick={() => { setOpen(false); onCreateDiagram(template.id as StarterTemplateId); }}
@@ -195,7 +196,7 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, onOpenChange, openReq
                     >
                       <span>{template.label}</span>
                       <small>{template.description}</small>
-                    </button>
+                    </WorkspaceButton>
                     {template.helpUrl ? <a aria-label={`Learn about ${template.label} Mermaid syntax`} className="workspace-template-menu-help" href={template.helpUrl} rel="noreferrer" target="_blank">Docs</a> : null}
                   </div>
                 );
@@ -210,7 +211,7 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, onOpenChange, openReq
               return (
               <div className="workspace-template-menu-choice" key={family.id}>
                 {template ? (
-                  <button
+                  <WorkspaceButton
                     className="workspace-template-menu-item"
                     data-testid="starter-template-create"
                     onClick={() => { setOpen(false); onCreateDiagram(template.id as StarterTemplateId); }}
@@ -221,7 +222,7 @@ export function WorkspaceTemplatePicker({ onCreateDiagram, onOpenChange, openReq
                   >
                     <span>{family.label} · lazy plugin</span>
                     <small>{family.help}</small>
-                  </button>
+                  </WorkspaceButton>
                 ) : (
                   <div aria-describedby={`starter-template-${family.id}-help`} aria-disabled="true" className="workspace-template-menu-item is-unavailable">
                     <span>{family.label} · plugin unavailable</span>

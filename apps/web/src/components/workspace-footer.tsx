@@ -1,3 +1,4 @@
+import React from 'react';
 import type { Participant } from '@arielcharts/shared';
 import { Activity, ChevronDown } from 'lucide-react';
 
@@ -46,9 +47,9 @@ export function WorkspaceFooter({
           data-testid="activity-flyout-toggle"
           onClick={(event) => { onActivityToggle(event.currentTarget); }}
           type="button"
-        ><Activity aria-hidden="true" size={15} /><span>{isLocalWorkspace ? 'activity' : 'activity & history'}</span><b>{activityCount}</b><ChevronDown aria-hidden="true" size={14} /></button>
-        <span className="workspace-collaborator-count">{activityStatusLabel}</span>
-        <div aria-label="Active collaborators" className="workspace-footer-avatars">
+        ><Activity aria-hidden="true" size={15} /><span>{isLocalWorkspace ? 'Activity' : 'Activity and history'}</span><b>{activityCount}</b><ChevronDown aria-hidden="true" size={14} /></button>
+        {!isLocalWorkspace ? <span className="workspace-collaborator-count">{activityStatusLabel}</span> : null}
+        {!isLocalWorkspace ? <div aria-label="Active collaborators" className="workspace-footer-avatars">
           {participants.map((participant) => (
             <span
               aria-label={`${getParticipantName(participant)}, ${participant.type}`}
@@ -61,11 +62,11 @@ export function WorkspaceFooter({
           {overflowCollaboratorCount > 0 ? (
             <span aria-label={`${overflowCollaboratorCount} more collaborators`} className="workspace-collaborator-overflow" data-testid="footer-collaborator-overflow">+{overflowCollaboratorCount}</span>
           ) : null}
-        </div>
+        </div> : null}
       </div>
       <div aria-label={saveStatusLabel} aria-live="polite" className="workspace-save-status" data-testid="live-save-status">
         <span aria-hidden="true" className={`workspace-save-dot workspace-save-dot-${connectionState}`} />
-        <span className="workspace-save-status-label">{saveStatusLabel}</span><span className="workspace-live-label">{isLocalWorkspace ? 'device' : 'live'}</span>
+        <span className="workspace-save-status-label">{saveStatusLabel}</span>
       </div>
     </footer>
   );

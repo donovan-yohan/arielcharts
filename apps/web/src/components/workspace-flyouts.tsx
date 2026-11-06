@@ -1,3 +1,4 @@
+import { WorkspaceButton } from './workspace-controls';
 import type { ActivityEvent, DiagramRevision, DiagramRevisionSummary, ListDiagramHistoryOutput, Participant } from '@arielcharts/shared';
 import { Check, Code2, Copy, Eye, History, RotateCcw, X } from 'lucide-react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, RefObject } from 'react';
@@ -41,6 +42,7 @@ interface WorkspaceFlyoutsProps {
   restorePending: boolean;
   restoreConfirmRef: RefObject<HTMLButtonElement | null>;
   sourceError: string | null;
+  sourcePreviewLabel?: string;
   sourceGitHubCopyState: 'idle' | 'copied' | 'error';
   sourceFlyoutWidth: number;
   onSourceFlyoutWidthChange: (width: number) => void;
@@ -87,6 +89,7 @@ export function WorkspaceFlyouts({
   restorePending,
   restoreConfirmRef,
   sourceError,
+  sourcePreviewLabel,
   sourceGitHubCopyState,
   sourceFlyoutWidth,
   onSourceFlyoutWidthChange,
@@ -156,15 +159,14 @@ export function WorkspaceFlyouts({
           />
           <header className="workspace-flyout-header">
             <div><Code2 aria-hidden="true" size={16} /><span>Mermaid source</span></div>
-            <button aria-label="Close source panel" className="workspace-icon-button workspace-touch-label" data-touch-label="Close" onClick={closeFlyout} type="button"><X aria-hidden="true" size={16} /></button>
+            <WorkspaceButton aria-label="Close source panel" className="workspace-icon-button workspace-touch-label" data-touch-label="Close" onClick={closeFlyout} type="button"><X aria-hidden="true" size={16} /></WorkspaceButton>
           </header>
           <div className="workspace-flyout-meta">
             <span>{activeDiagramName}</span>
             <span data-testid="connection-status-badge">{editorStatusLabel}</span>
           </div>
           <div className="workspace-source-github-copy">
-            <span>Paste this diagram into a GitHub PR.</span>
-            <button
+            <WorkspaceButton
               aria-describedby="source-github-copy-status"
               className="workspace-copy-button"
               data-testid="copy-github-mermaid"
@@ -173,14 +175,14 @@ export function WorkspaceFlyouts({
             >
               {sourceGitHubCopyState === 'copied' ? <Check aria-hidden="true" size={14} /> : <Copy aria-hidden="true" size={14} />}
               {sourceGitHubCopyLabel}
-            </button>
+            </WorkspaceButton>
             <span aria-live="polite" className="visually-hidden" id="source-github-copy-status" role="status">
               {sourceGitHubCopyState === 'copied' ? 'GitHub Mermaid block copied.' : sourceGitHubCopyState === 'error' ? 'Could not copy the GitHub Mermaid block.' : ''}
             </span>
           </div>
           {sourceError ? (
             <div aria-live="polite" className="workspace-source-status" data-testid="source-parse-status" role="status">
-              <strong>Preview kept on last valid diagram</strong>
+              <strong>{sourcePreviewLabel ?? 'Preview unavailable'}</strong>
               <span>{sourceError}</span>
             </div>
           ) : null}
@@ -192,11 +194,11 @@ export function WorkspaceFlyouts({
         <aside aria-label="Activity and history" className="workspace-flyout workspace-activity-flyout" data-testid="activity-flyout" id="activity-flyout">
           <header className="workspace-flyout-header">
             <div><History aria-hidden="true" size={16} /><span>Activity &amp; history</span></div>
-            <button aria-label="Close activity and history" className="workspace-icon-button workspace-touch-label" data-touch-label="Close" onClick={closeFlyout} ref={activityCloseRef} type="button"><X aria-hidden="true" size={16} /></button>
+            <WorkspaceButton aria-label="Close activity and history" className="workspace-icon-button workspace-touch-label" data-touch-label="Close" onClick={closeFlyout} ref={activityCloseRef} type="button"><X aria-hidden="true" size={16} /></WorkspaceButton>
           </header>
           <div aria-label="Activity and history view" className="workspace-flyout-switch" role="group">
-            {historyAvailable ? <button aria-pressed={historyView === 'history'} className={historyView === 'history' ? 'is-active' : ''} onClick={() => { onHistoryViewChange('history'); }} type="button">History</button> : null}
-            <button aria-pressed={historyView === 'activity'} className={historyView === 'activity' ? 'is-active' : ''} onClick={() => { onHistoryViewChange('activity'); }} type="button">Activity <span>{activity.length}</span></button>
+            {historyAvailable ? <WorkspaceButton aria-pressed={historyView === 'history'} className={historyView === 'history' ? 'is-active' : ''} onClick={() => { onHistoryViewChange('history'); }} type="button">History</WorkspaceButton> : null}
+            <WorkspaceButton aria-pressed={historyView === 'activity'} className={historyView === 'activity' ? 'is-active' : ''} onClick={() => { onHistoryViewChange('activity'); }} type="button">Activity <span>{activity.length}</span></WorkspaceButton>
           </div>
 
           {!historyAvailable || historyView === 'activity' ? (
@@ -226,7 +228,7 @@ export function WorkspaceFlyouts({
               {previewRevision ? (
                 <div className="history-preview-notice" data-testid="history-preview-notice">
                   <span>Previewing {getRevisionLabel(previewRevision)} locally</span>
-                  <button onClick={onCancelPreview} type="button">Cancel preview</button>
+                  <WorkspaceButton onClick={onCancelPreview} type="button">Cancel preview</WorkspaceButton>
                 </div>
               ) : null}
               {previewError ? <div className="history-error" role="status">{previewError}</div> : null}
@@ -255,8 +257,8 @@ export function WorkspaceFlyouts({
                         <span className="history-item-name">{revision.name}</span>
                         {isCurrentHead ? <span aria-label="Current head" className="history-current-head" data-testid="history-current-head-marker">Current</span> : null}
                         <div className="history-item-actions">
-                          <button aria-pressed={isPreviewing} onClick={() => { if (isPreviewing) onCancelPreview(); else onPreviewRevision(revision); }} type="button"><Eye aria-hidden="true" size={14} />{isPreviewing ? 'Previewing' : 'Preview'}</button>
-                          <button disabled={restorePending} onClick={(event) => { onRestoreRequest(revision, event.currentTarget); }} type="button"><RotateCcw aria-hidden="true" size={14} />Restore</button>
+                          <WorkspaceButton aria-pressed={isPreviewing} onClick={() => { if (isPreviewing) onCancelPreview(); else onPreviewRevision(revision); }} type="button"><Eye aria-hidden="true" size={14} />{isPreviewing ? 'Previewing' : 'Preview'}</WorkspaceButton>
+                          <WorkspaceButton disabled={restorePending} onClick={(event) => { onRestoreRequest(revision, event.currentTarget); }} type="button"><RotateCcw aria-hidden="true" size={14} />Restore</WorkspaceButton>
                         </div>
                       </li>
                     );
@@ -269,8 +271,8 @@ export function WorkspaceFlyouts({
                   <span>This keeps the current diagram name and all later history.</span>
                   {restoreError ? <span className="history-error">{restoreError}</span> : null}
                   <div className="history-item-actions">
-                    <button disabled={restorePending} onClick={onRestoreConfirm} ref={restoreConfirmRef} type="button">{restorePending ? 'Checking current head…' : 'Confirm restore'}</button>
-                    <button disabled={restorePending} onClick={onRestoreCancel} type="button">Cancel</button>
+                    <WorkspaceButton disabled={restorePending} onClick={onRestoreConfirm} ref={restoreConfirmRef} type="button">{restorePending ? 'Checking current head…' : 'Confirm restore'}</WorkspaceButton>
+                    <WorkspaceButton disabled={restorePending} onClick={onRestoreCancel} type="button">Cancel</WorkspaceButton>
                   </div>
                 </div>
               ) : null}

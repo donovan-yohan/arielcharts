@@ -57,6 +57,36 @@ The root browser workspace is local-first: its Yjs document is persisted in Inde
 
 ## Ingress and concurrency flow
 
+### Workspace replacement review
+
+The cookie-authenticated, no-store `GET /api/sessions/:sessionId/workspace`
+returns `{ revision, content }` from one synchronous document head. `content` is
+canonical JSON for raw `diagrams`, `diagramOrder` (under `order`), and `overlays`;
+it excludes presence, activity, history, and access material. The import UI
+compares that content with its captured visible workspace before offering
+replacement confirmation, then submits the same reviewed revision. A newer HTTP
+revision cannot authorize replacement of unseen WebSocket changes. Existing
+`POST` revision checks still reject changes after confirmation without retry.
+`workspace-consent.ts` owns the browser's document/session/content fence;
+`SessionManager` remains the revision and replacement authority.
+
+Local promotion uses the same authored-content fence before dispatch and after
+response, including pure deletions that do not advance a Yjs state vector.
+`local-workspace-durability.ts` verifies stored Yjs insertion and deletion coverage
+before reporting saved; a successful readonly ordering barrier alone is not a
+write acknowledgement. Failed or pending verification retains unload protection.
+
+### Browser presentation
+
+`workspace-controls.tsx` owns native field, action, record, and confirmation
+presentation. Domain editors retain grammar, identity, draft, and mutation
+ownership. `WorkspaceFeedbackStack` owns deduplicated stacked feedback; existing
+canvas measurement owns occupied lanes, not the individual notices. The
+[journey map](user-journeys.md) and [component registry](design-system.md) define
+consumer adoption and composition acceptance.
+
+### Request sequence
+
 1. The root browser route creates a local Yjs document and waits for `IndexeddbPersistence` hydration before seeding an empty catalog. It mounts local-only awareness, reports “Saved on this device,” and makes no server request or WebSocket.
 2. An explicit **Go online & share** or agent-connection action snapshots the bounded local workspace and sends it to `POST /api/rooms`. The server validates that bundle in a detached candidate, then atomically creates the protected session and verifier record and sets the creator's signed HttpOnly cookie. A failed request leaves the local document unchanged. If the local document changes while the request is pending, it remains editable and no handoff/navigation occurs. On an unchanged success, a non-secret session-id handoff marker is persisted before navigation while IndexedDB remains an archived recovery copy; root startup resumes that cookie-authorized room instead of exposing the archive as a fork. The returned `#roomKey` fragment is the shareable capability; another browser exchanges it through RoomGate for its own cookie and clears it before the online workspace mounts.
 3. A browser with that cookie attaches a `WebsocketProvider` to

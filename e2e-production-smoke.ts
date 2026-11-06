@@ -1,9 +1,10 @@
-import { chromium } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { launchBrowserHarness } from './e2e/support/browser.ts';
 import { WebSocket as NodeWebSocket } from 'ws';
 import { assert } from './e2e/support/assert.ts';
 import { ModernMcpClient, postModernMcp } from './e2e/support/mcp.ts';
 import { createRoom, rotateRoomAccess, type RoomAccess } from './e2e/support/room-access.ts';
-import { ensureSourceFlyoutOpen, visitWorkspace } from './e2e/support/workspace.ts';
+import { ensureSourceFlyoutOpen, replaceSource, visitWorkspace } from './e2e/support/workspace.ts';
 
 const PRODUCTION_BASE_URL = 'https://arielcharts.donovanyohan.com';
 const PRODUCTION_MCP_URL = 'https://api.arielcharts.donovanyohan.com/mcp';
@@ -132,9 +133,8 @@ async function waitForClosed(closed: Promise<void>, label: string): Promise<void
 async function run(): Promise<void> {
   const endpoints = requireProductionEndpoints();
   const origin = endpoints.baseUrl;
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  const browser = await launchBrowserHarness();
+  const { context, page } = await browser.newPage();
   let initialSocket: { closed: Promise<void>; terminate: () => void } | undefined;
   let reconnectedSocket: { closed: Promise<void>; terminate: () => void } | undefined;
   try {
@@ -180,7 +180,7 @@ async function run(): Promise<void> {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
     await ensureSourceFlyoutOpen(page);
-    await page.getByTestId('connection-status-badge').filter({ hasText: /^synced$/iu }).waitFor({ state: 'visible', timeout: 15_000 });
+    await page.getByTestId('connection-status-badge').filter({ hasText: /^Connected$/iu }).waitFor({ state: 'visible', timeout: 15_000 });
 
     initialSocket = await openAuthorizedWebSocket(endpoints.serverUrl, origin, credentials.sessionId, nodeAccess.cookie);
     initialSocket.terminate();
@@ -191,17 +191,27 @@ async function run(): Promise<void> {
     const session = await oldMcp.getSession(credentials.sessionId);
     assert(Array.isArray(session.diagrams) && typeof session.revision === 'string', 'MCP bearer did not read the protected session.');
 
+    const browserSource = 'flowchart LR\n  Browser[Browser smoke edit] --> API[Authorized API readback]';
+    await replaceSource(page, browserSource);
+    await expect.poll(async () => {
+      const readback = await fetchAuthorizedJson(endpoints.serverUrl, origin,
+        `/api/sessions/${encodeURIComponent(credentials.sessionId)}/diagrams/main`, nodeAccess.cookie, 'Browser edit API readback') as { diagram?: { mermaid_text?: string } };
+      return readback.diagram?.mermaid_text;
+    }, { timeout: 15_000, message: 'Browser edit did not converge to the authorized API.' }).toBe(browserSource);
+    await expect.poll(async () => (await oldMcp.readDiagram(credentials.sessionId, 'main')).mermaidText,
+      { timeout: 15_000, message: 'Browser edit did not converge to authorized MCP.' }).toBe(browserSource);
+
     const rotated = await rotateRoomAccess(endpoints.serverUrl, origin, nodeAccess);
     await waitForClosed(reconnectedSocket.closed, 'Open WebSocket after key rotation');
     await expectRejectedWebSocket(endpoints.serverUrl, origin, credentials.sessionId, nodeAccess.cookie);
 
     await page.waitForFunction(() => {
       const state = document.querySelector('[data-testid="connection-status-badge"]')?.textContent?.trim().toLowerCase();
-      return Boolean(state && state !== 'synced');
+      return Boolean(state && state !== 'connected');
     }, undefined, { timeout: 15_000 });
     await page.waitForTimeout(3_000);
     const browserConnectionState = await page.getByTestId('connection-status-badge').textContent();
-    assert(browserConnectionState?.trim().toLowerCase() !== 'synced',
+    assert(browserConnectionState?.trim().toLowerCase() !== 'connected',
       'Browser page reconnected with its revoked room cookie after rotation.');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByRole('heading', { name: 'Enter the room key', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });

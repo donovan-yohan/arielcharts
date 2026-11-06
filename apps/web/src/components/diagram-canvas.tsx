@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceButton, WorkspaceInput, WorkspaceSelect, WorkspaceTextarea, WorkspaceRecord, WorkspaceRecordError } from './workspace-controls';
 import type { CanvasLaserState, CanvasPresenceEntry, CanvasWorldPoint, Participant } from '@arielcharts/shared';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
@@ -398,49 +399,49 @@ export interface DiagramCanvasProps {
   onMoveRailroadRule?: (identity: RailroadRuleIdentity, direction: 'up' | 'down') => void;
   onEditPieTitle?: (title: string | null) => void;
   onSetPieShowData?: (showData: boolean) => void;
-  onAddPieSlice?: (value: PieSlice) => boolean | void;
-  onEditPieSlice?: (identity: PieSliceIdentity, value: Partial<PieSlice>) => boolean | void;
+  onAddPieSlice?: (value: PieSlice) => SemanticFormActionResult;
+  onEditPieSlice?: (identity: PieSliceIdentity, value: Partial<PieSlice>) => SemanticFormActionResult;
   onDeletePieSlice?: (identity: PieSliceIdentity) => void;
   onMovePieSlice?: (identity: PieSliceIdentity, direction: 'up' | 'down') => void;
   onEditQuadrantTitle?: (title: string | null) => void;
   onSetQuadrantAxis?: (axis: QuadrantAxisName, value: QuadrantAxis | null) => void;
   onSetQuadrantLabel?: (quadrant: QuadrantNumber, label: string | null) => void;
-  onAddQuadrantPoint?: (value: QuadrantPoint) => boolean | void;
-  onEditQuadrantPoint?: (identity: QuadrantPointIdentity, value: Partial<QuadrantPoint>) => boolean | void;
+  onAddQuadrantPoint?: (value: QuadrantPoint) => SemanticFormActionResult;
+  onEditQuadrantPoint?: (identity: QuadrantPointIdentity, value: Partial<QuadrantPoint>) => SemanticFormActionResult;
   onDeleteQuadrantPoint?: (identity: QuadrantPointIdentity) => void;
   onMoveQuadrantPoint?: (identity: QuadrantPointIdentity, direction: 'up' | 'down') => void;
   onEditXyTitle?: (title?: string) => void;
   onSetXyOrientation?: (orientation?: XyChartOrientation) => void;
-  onEditXyAxis?: (axis: 'x' | 'y', value: XyAxis) => boolean | void;
-  onAddXySeries?: (value: XySeries) => boolean | void;
-  onEditXySeries?: (identity: XySeriesIdentity, value: Partial<XySeries>) => boolean | void;
+  onEditXyAxis?: (axis: 'x' | 'y', value: XyAxis) => SemanticFormActionResult;
+  onAddXySeries?: (value: XySeries) => SemanticFormActionResult;
+  onEditXySeries?: (identity: XySeriesIdentity, value: Partial<XySeries>) => SemanticFormActionResult;
   onDeleteXySeries?: (identity: XySeriesIdentity) => void;
   onMoveXySeries?: (identity: XySeriesIdentity, direction: 'up' | 'down') => void;
   onEditRadarTitle?: (title?: string) => void;
-  onEditRadarOptions?: (value: Partial<RadarOptions>) => boolean | void;
-  onAddRadarAxis?: (value: RadarAxis, curveValues?: readonly number[]) => boolean | void;
+  onEditRadarOptions?: (value: Partial<RadarOptions>) => SemanticFormActionResult;
+  onAddRadarAxis?: (value: RadarAxis, curveValues?: readonly number[]) => SemanticFormActionResult;
   onEditRadarAxis?: (identity: RadarAxisIdentity, value: Partial<RadarAxis>) => void;
   onDeleteRadarAxis?: (identity: RadarAxisIdentity) => void;
   onMoveRadarAxis?: (identity: RadarAxisIdentity, direction: 'up' | 'down') => void;
-  onAddRadarCurve?: (value: RadarCurve) => boolean | void;
-  onEditRadarCurve?: (identity: RadarCurveIdentity, value: Partial<RadarCurve>) => boolean | void;
+  onAddRadarCurve?: (value: RadarCurve) => SemanticFormActionResult;
+  onEditRadarCurve?: (identity: RadarCurveIdentity, value: Partial<RadarCurve>) => SemanticFormActionResult;
   onDeleteRadarCurve?: (identity: RadarCurveIdentity) => void;
   onMoveRadarCurve?: (identity: RadarCurveIdentity, direction: 'up' | 'down') => void;
-  onAddSankeyLink?: (value: SankeyLink) => boolean | void;
-  onEditSankeyLink?: (identity: SankeyLinkIdentity, value: Partial<SankeyLink>) => boolean | void;
+  onAddSankeyLink?: (value: SankeyLink) => SemanticFormActionResult;
+  onEditSankeyLink?: (identity: SankeyLinkIdentity, value: Partial<SankeyLink>) => SemanticFormActionResult;
   onDeleteSankeyLink?: (identity: SankeyLinkIdentity) => void;
   onMoveSankeyLink?: (identity: SankeyLinkIdentity, direction: 'up' | 'down') => void;
-  onRenameSankeyNode?: (identity: SankeyNodeIdentity, label: string) => boolean | void;
-  onAddPacketField?: (value: PacketField) => boolean | void;
-  onEditPacketField?: (identity: PacketFieldIdentity, value: Partial<PacketField>) => boolean | void;
+  onRenameSankeyNode?: (identity: SankeyNodeIdentity, label: string) => SemanticFormActionResult;
+  onAddPacketField?: (value: PacketField) => SemanticFormActionResult;
+  onEditPacketField?: (identity: PacketFieldIdentity, value: Partial<PacketField>) => SemanticFormActionResult;
   onDeletePacketField?: (identity: PacketFieldIdentity) => void;
   onMovePacketField?: (identity: PacketFieldIdentity, direction: 'up' | 'down') => void;
-  onAddCynefinItem?: (value: CynefinItem) => boolean | void;
-  onEditCynefinItem?: (identity: CynefinItemIdentity, value: Partial<CynefinItem>) => boolean | void;
+  onAddCynefinItem?: (value: CynefinItem) => SemanticFormActionResult;
+  onEditCynefinItem?: (identity: CynefinItemIdentity, value: Partial<CynefinItem>) => SemanticFormActionResult;
   onDeleteCynefinItem?: (identity: CynefinItemIdentity) => void;
   onMoveCynefinItem?: (identity: CynefinItemIdentity, domain: CynefinDomainName, targetIndex: number) => void;
-  onAddCynefinTransition?: (value: CynefinTransition) => boolean | void;
-  onEditCynefinTransition?: (identity: CynefinTransitionIdentity, value: Partial<CynefinTransition>) => boolean | void;
+  onAddCynefinTransition?: (value: CynefinTransition) => SemanticFormActionResult;
+  onEditCynefinTransition?: (identity: CynefinTransitionIdentity, value: Partial<CynefinTransition>) => SemanticFormActionResult;
   onDeleteCynefinTransition?: (identity: CynefinTransitionIdentity) => void;
   onMoveCynefinTransition?: (identity: CynefinTransitionIdentity, direction: 'up' | 'down') => void;
   onAddTreemapNode?: (value: Pick<TreemapNode, 'label' | 'value'>, parent?: TreemapNodeIdentity) => SemanticFormActionResult;
@@ -929,19 +930,7 @@ function useCoarsePointer(): boolean {
 
   return isCoarsePointer;
 }
-const TOOLBAR_BUTTON_STYLE: CSSProperties = {
-  alignItems: 'center',
-  background: 'transparent',
-  border: 'none',
-  borderRadius: 4,
-  color: 'var(--ink-muted)',
-  display: 'inline-flex',
-  height: 24,
-  justifyContent: 'center',
-  padding: 0,
-  pointerEvents: 'auto',
-  width: 24,
-};
+const TOOLBAR_BUTTON_STYLE: CSSProperties = { pointerEvents: 'auto' };
 
 export const CANVAS_PAN_EXCLUSION_SELECTOR = 'a, button, input, select, textarea, form, [contenteditable="true"], [role="button"], [data-canvas-pan-exclusion="true"], [data-subgraph-drag-target="true"], [data-testid*="toolbar"], .react-flow__node, .react-flow__edge, .react-flow__handle';
 const CANVAS_WHEEL_EXCLUSION_SELECTOR = 'a, button, input, select, textarea, form, [contenteditable="true"], [data-canvas-pan-exclusion="true"], [data-testid*="toolbar"]';
@@ -3871,7 +3860,7 @@ export function DiagramCanvas({
         <div
           data-testid="shortcuts-dialog-backdrop"
           onClick={(event) => { if (event.target === event.currentTarget) closeShortcuts(); }}
-          style={{ background: 'rgb(15 23 42 / 16%)', inset: 0, pointerEvents: 'auto', position: 'absolute', zIndex: 99 }}
+          className="modal-backdrop"
         >
           <div
             aria-label="Canvas keyboard shortcuts"
@@ -3889,9 +3878,9 @@ export function DiagramCanvas({
             }}
             ref={shortcutsDialogRef}
             role="dialog"
-            style={{ background: 'var(--surface-raised)', border: '1px solid var(--control-border)', borderRadius: 10, boxShadow: '0 12px 36px rgb(0 0 0 / 20%)', left: '50%', maxHeight: 'calc(100% - 32px)', overflow: 'auto', padding: 18, pointerEvents: 'auto', position: 'absolute', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(460px, calc(100% - 32px))' }}
+            className="modal-dialog workspace-shortcuts-dialog"
           >
-            <button aria-label="Close keyboard shortcuts" onClick={closeShortcuts} style={{ float: 'right' }} type="button">Close</button>
+            <WorkspaceButton aria-label="Close keyboard shortcuts" onClick={closeShortcuts} style={{ float: 'right' }} type="button">Close</WorkspaceButton>
             <h2>Keyboard shortcuts</h2>
             {([
               ['Overlay', `${getCanvasToolShortcutSummary(['connect'])} · ${getPlatformModifierLabel()}+A Select all visible unlocked overlays · ${getPlatformModifierLabel()}+D Duplicate · Delete/Backspace Delete · Arrow Nudge 1 · Shift+Arrow Nudge 10 · Enter Edit text · Escape Commit text edit`],
@@ -3931,7 +3920,7 @@ export function DiagramCanvas({
               const ariaLabel = node ? getNodeAriaLabel(node.shape, getNodeText(node)) : getNodeAriaLabel('node', nodeId);
 
               return (
-                <button
+                <WorkspaceButton
                   aria-label={ariaLabel}
                   className="diagram-node-target"
                   data-id={nodeId}
@@ -4118,7 +4107,7 @@ export function DiagramCanvas({
                   width: screenBounds.width,
                 }}
               >
-                <button
+                <WorkspaceButton
                   aria-label={`Select section ${label}`}
                   data-subgraph-drag-target="true"
                   data-testid={`canvas-subgraph-header-${subgraph.id}`}
@@ -4175,7 +4164,7 @@ export function DiagramCanvas({
                   type="button"
                 >
                   {label}
-                </button>
+                </WorkspaceButton>
                 {([
                   { left: -4, right: -4, top: -4, height: 8 },
                   { bottom: -4, left: -4, right: -4, height: 8 },
@@ -4368,41 +4357,21 @@ export function DiagramCanvas({
             }}
           >
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>add node</span>
-            <input
+            <WorkspaceInput
               aria-label="New node label"
               onChange={(event) => { setNewNodeLabel(event.target.value); }}
               placeholder="label"
-              style={{
-                background: 'var(--surface-canvas)',
-                border: '1px solid var(--control-border)',
-                borderRadius: 6,
-                color: 'var(--ink)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 11,
-                outline: 'none',
-                padding: '5px 7px',
-                width: 'clamp(80px, 38vw, 140px)',
-              }}
               value={newNodeLabel}
             />
-            <select
+            <WorkspaceSelect
               aria-label="New node shape"
               onChange={(event) => { setNewNodeShape(event.target.value as DiagramNodeShape); }}
-              style={{
-                background: 'var(--surface-canvas)',
-                border: '1px solid var(--control-border)',
-                borderRadius: 6,
-                color: 'var(--ink)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 11,
-                padding: '5px 7px',
-              }}
               value={newNodeShape}
             >
               {SHAPE_OPTIONS.map((shape) => (
                 <option key={shape.value} value={shape.value}>{shape.label}</option>
               ))}
-            </select>
+            </WorkspaceSelect>
             <ToolbarButton label="Add node to Mermaid text" onClick={addNodeFromToolbar} shortcut="N">
               <Plus size={16} />
             </ToolbarButton>
@@ -4421,7 +4390,7 @@ export function DiagramCanvas({
               pointerEvents: 'none',
             }}
           >
-            <button
+            <WorkspaceButton
               className="canvas-empty-add-button"
               onClick={addDefaultNode}
               style={{
@@ -4435,7 +4404,7 @@ export function DiagramCanvas({
               type="button"
             >
               Add your first flowchart node
-            </button>
+            </WorkspaceButton>
           </div>
           ) : emptyState === 'sequence' && !readOnly ? (
             <SequenceEditorControls
@@ -4481,7 +4450,8 @@ export function DiagramCanvas({
 
         {isEr && !readOnly && erDiagram ? (
           <ErEditorControls
-            bottom={erEditorBottom}
+            bottom={semanticPanelPlacement.bottom}
+            maxHeight={semanticPanelPlacement.maxHeight}
             diagram={erDiagram}
             onAddAttribute={onAddErAttribute}
             onAddEntity={onAddErEntity}
@@ -4559,8 +4529,8 @@ export function DiagramCanvas({
             onEditService={onEditArchitectureService}
           />
         ) : null}
-        {isC4 && !readOnly && c4Diagram ? <><C4EditorControls bottom={erEditorBottom} diagram={c4Diagram} onAddBoundary={onAddC4Boundary} onAddElement={onAddC4Element} onAddRelationship={onAddC4Relationship} onDeleteBoundary={onDeleteC4Boundary} onDeleteElement={onDeleteC4Element} onDeleteRelationship={onDeleteC4Relationship} onEditBoundary={onEditC4Boundary} onEditElement={onEditC4Element} onEditRelationship={onEditC4Relationship} placement={pairedSemanticPanelPlacement?.editor} /><C4ContainmentControls bottom={erEditorBottom} boundaries={c4Diagram.boundaries} elements={c4Diagram.elements} onMoveBoundary={onMoveC4Boundary} onMoveElement={onMoveC4Element} placement={pairedSemanticPanelPlacement?.containment} /></> : null}
-        {isBlock && !readOnly && blockDiagram ? <><BlockEditorControls bottom={erEditorBottom} diagram={blockDiagram} onAddComposite={onAddBlockComposite} onAddLink={onAddBlockLink} onAddNode={onAddBlockNode} onDeleteComposite={onDeleteBlockComposite} onDeleteLink={onDeleteBlockLink} onDeleteNode={onDeleteBlockNode} onEditComposite={onEditBlockComposite} onEditLink={onEditBlockLink} onEditNode={onEditBlockNode} onSetColumns={onSetBlockColumns} placement={pairedSemanticPanelPlacement?.editor} /><BlockContainmentControls bottom={erEditorBottom} composites={blockDiagram.composites} nodes={blockDiagram.nodes} onMoveComposite={onMoveBlockComposite} onMoveNode={onMoveBlockNode} placement={pairedSemanticPanelPlacement?.containment} /></> : null}
+        {isC4 && !readOnly && c4Diagram ? <PairedSemanticPanels placement={pairedSemanticPanelPlacement} bottom={semanticPanelPlacement.bottom} maxHeight={semanticPanelPlacement.maxHeight}><C4EditorControls bottom={erEditorBottom} diagram={c4Diagram} onAddBoundary={onAddC4Boundary} onAddElement={onAddC4Element} onAddRelationship={onAddC4Relationship} onDeleteBoundary={onDeleteC4Boundary} onDeleteElement={onDeleteC4Element} onDeleteRelationship={onDeleteC4Relationship} onEditBoundary={onEditC4Boundary} onEditElement={onEditC4Element} onEditRelationship={onEditC4Relationship} placement={pairedSemanticPanelPlacement?.stacked ? undefined : pairedSemanticPanelPlacement?.editor} /><C4ContainmentControls bottom={erEditorBottom} boundaries={c4Diagram.boundaries} elements={c4Diagram.elements} onMoveBoundary={onMoveC4Boundary} onMoveElement={onMoveC4Element} placement={pairedSemanticPanelPlacement?.stacked ? undefined : pairedSemanticPanelPlacement?.containment} /></PairedSemanticPanels> : null}
+        {isBlock && !readOnly && blockDiagram ? <PairedSemanticPanels placement={pairedSemanticPanelPlacement} bottom={semanticPanelPlacement.bottom} maxHeight={semanticPanelPlacement.maxHeight}><BlockEditorControls bottom={erEditorBottom} diagram={blockDiagram} onAddComposite={onAddBlockComposite} onAddLink={onAddBlockLink} onAddNode={onAddBlockNode} onDeleteComposite={onDeleteBlockComposite} onDeleteLink={onDeleteBlockLink} onDeleteNode={onDeleteBlockNode} onEditComposite={onEditBlockComposite} onEditLink={onEditBlockLink} onEditNode={onEditBlockNode} onSetColumns={onSetBlockColumns} placement={pairedSemanticPanelPlacement?.stacked ? undefined : pairedSemanticPanelPlacement?.editor} /><BlockContainmentControls bottom={erEditorBottom} composites={blockDiagram.composites} nodes={blockDiagram.nodes} onMoveComposite={onMoveBlockComposite} onMoveNode={onMoveBlockNode} placement={pairedSemanticPanelPlacement?.stacked ? undefined : pairedSemanticPanelPlacement?.containment} /></PairedSemanticPanels> : null}
         {isSwimlane && !readOnly && swimlaneDiagram ? <SwimlaneEditorControls bottom={erEditorBottom} diagram={swimlaneDiagram} onAddHandoff={onAddSwimlaneHandoff} onAddLane={onAddSwimlane} onAddNode={onAddSwimlaneNode} onDeleteHandoff={onDeleteSwimlaneHandoff} onDeleteLane={onDeleteSwimlane} onDeleteNode={onDeleteSwimlaneNode} onEditHandoff={onEditSwimlaneHandoff} onEditLane={onEditSwimlane} onEditNode={onEditSwimlaneNode} onMoveNode={onMoveSwimlaneNode} /> : null}
         {isJourney && !readOnly && journeyDiagram ? <JourneyEditorControls bottom={erEditorBottom} diagram={journeyDiagram} onAddSection={onAddJourneySection} onAddTask={onAddJourneyTask} onDeleteSection={onDeleteJourneySection} onDeleteTask={onDeleteJourneyTask} onEditSection={onEditJourneySection} onEditTask={onEditJourneyTask} onMoveSection={onMoveJourneySection} onMoveTask={onMoveJourneyTask} /> : null}
         {isGantt && !readOnly && ganttDiagram ? <GanttEditorControls bottom={erEditorBottom} diagram={ganttDiagram} onAddSection={onAddGanttSection} onAddTask={onAddGanttTask} onDeleteSection={onDeleteGanttSection} onDeleteTask={onDeleteGanttTask} onEditSection={onEditGanttSection} onEditTask={onEditGanttTask} onMoveSection={onMoveGanttSection} onMoveTask={onMoveGanttTask} /> : null}
@@ -4635,7 +4605,7 @@ export function DiagramCanvas({
                   const active = currentNode?.shape === shape.value;
 
                   return (
-                    <button
+                    <WorkspaceButton
                       key={shape.value}
                       onClick={() => {
                         if (canEditStructure) {
@@ -4659,7 +4629,7 @@ export function DiagramCanvas({
                     >
                       <ShapePreview shape={shape.value} />
                       <span style={{ fontSize: 10 }}>{shape.label}</span>
-                    </button>
+                    </WorkspaceButton>
                   );
                 })}
               </div>
@@ -4761,7 +4731,7 @@ export function DiagramCanvas({
               width: 180,
             }}
           >
-            <input
+            <WorkspaceInput
               aria-label="Section label"
               autoFocus
               onBlur={commitSubgraphEdit}
@@ -4774,18 +4744,6 @@ export function DiagramCanvas({
                   setEditingSubgraphId(null);
                   setEditingSubgraphLabel('');
                 }
-              }}
-              style={{
-                background: 'var(--surface-canvas)',
-                border: '1px solid var(--control-border)',
-                borderBottomColor: 'var(--selection)',
-                borderRadius: 8,
-                color: 'var(--ink)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 12,
-                outline: 'none',
-                padding: '8px 10px',
-                width: '100%',
               }}
               value={editingSubgraphLabel}
             />
@@ -4802,7 +4760,7 @@ export function DiagramCanvas({
               width: Math.max(120, editingNodeBounds.width),
             }}
           >
-            <input
+            <WorkspaceInput
               autoFocus
               onBlur={commitNodeEdit}
               onChange={(event) => { setEditingLabel(event.target.value); }}
@@ -4815,17 +4773,7 @@ export function DiagramCanvas({
                   setEditingNodeId(null);
                 }
               }}
-              placeholder="node label"
-              style={{
-                background: 'var(--surface-canvas)',
-                border: '1px solid var(--control-border)',
-                borderBottomColor: 'var(--selection)',
-                borderRadius: 8,
-                color: 'var(--ink)',
-                outline: 'none',
-                padding: '8px 10px',
-                width: '100%',
-              }}
+              aria-label="Node label" placeholder="node label"
               value={editingLabel}
             />
           </div>
@@ -4842,7 +4790,7 @@ export function DiagramCanvas({
               width: editingSequenceAnchor.width,
             }}
           >
-            <input
+            <WorkspaceInput
               aria-label={`Edit sequence ${editingSequenceTarget.type}`}
               autoFocus
               onBlur={() => { closeSequenceEditor(true); }}
@@ -4857,18 +4805,6 @@ export function DiagramCanvas({
                   event.preventDefault();
                   closeSequenceEditor(false);
                 }
-              }}
-              style={{
-                background: 'var(--surface-canvas)',
-                border: '1px solid var(--control-border)',
-                borderBottomColor: 'var(--selection)',
-                borderRadius: 8,
-                color: 'var(--ink)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 12,
-                outline: 'none',
-                padding: '8px 10px',
-                width: '100%',
               }}
               value={editingSequenceText}
             />
@@ -4885,7 +4821,7 @@ export function DiagramCanvas({
               width: 180,
             }}
           >
-            <input
+            <WorkspaceInput
               aria-label="Edge label"
               autoFocus
               onBlur={commitEdgeEdit}
@@ -4901,18 +4837,6 @@ export function DiagramCanvas({
                 }
               }}
               placeholder="edge label"
-              style={{
-                background: 'var(--surface-canvas)',
-                border: '1px solid var(--control-border)',
-                borderBottomColor: 'var(--selection)',
-                borderRadius: 8,
-                color: 'var(--ink)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 12,
-                outline: 'none',
-                padding: '8px 10px',
-                width: '100%',
-              }}
               value={editingEdgeLabel}
             />
           </div>
@@ -4928,7 +4852,7 @@ export function DiagramCanvas({
               width: 180,
             }}
           >
-            <input
+            <WorkspaceInput
               autoFocus
               onBlur={() => { commitPendingEdge(pendingEdgeLabel.trim() || undefined); }}
               onChange={(event) => { setPendingEdgeLabel(event.target.value); }}
@@ -4945,18 +4869,7 @@ export function DiagramCanvas({
                   onCanvasToolChange?.('select');
                 }
               }}
-              placeholder="label (optional)"
-              style={{
-                background: 'var(--surface-canvas)',
-                border: '1px solid var(--control-border)',
-                borderRadius: 8,
-                color: 'var(--ink)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 12,
-                outline: 'none',
-                padding: '8px 10px',
-                width: '100%',
-              }}
+              aria-label="New edge label" placeholder="label (optional)"
               value={pendingEdgeLabel}
             />
           </div>
@@ -4972,7 +4885,7 @@ export function DiagramCanvas({
               width: 180,
             }}
           >
-            <input
+            <WorkspaceInput
               autoFocus
               onBlur={() => {
                 onGroupNodes?.(selection, groupPromptValue.trim() || 'New Group');
@@ -4988,18 +4901,7 @@ export function DiagramCanvas({
                   setShowGroupPrompt(false);
                 }
               }}
-              placeholder="group name"
-              style={{
-                background: 'var(--surface-canvas)',
-                border: '1px solid var(--control-border)',
-                borderRadius: 8,
-                color: 'var(--ink)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 12,
-                outline: 'none',
-                padding: '8px 10px',
-                width: '100%',
-              }}
+              aria-label="Group name" placeholder="group name"
               value={groupPromptValue}
             />
           </div>
@@ -5023,23 +4925,15 @@ export function DiagramCanvas({
             }}
           >
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>edge</span>
-            <select
+            <WorkspaceSelect
+              aria-label="Edge type"
               onChange={(event) => { setSelectedConnectionType(event.target.value as DiagramLinkType); }}
-              style={{
-                background: 'var(--surface-canvas)',
-                border: '1px solid var(--control-border)',
-                borderRadius: 6,
-                color: 'var(--ink)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 11,
-                padding: '4px 6px',
-              }}
               value={selectedConnectionType}
             >
               {CONNECTION_TYPE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
-            </select>
+            </WorkspaceSelect>
           </div>
         ) : null}
       </div>
@@ -5173,14 +5067,14 @@ function DiagramTypeChooser({ onChoose }: { onChoose?: (type: 'flowchart' | 'seq
         <span>Start a diagram</span>
         <strong>What are you mapping?</strong>
         <div className="canvas-empty-chooser-actions">
-          <button onClick={() => { onChoose?.('flowchart'); }} type="button">
+          <WorkspaceButton onClick={() => { onChoose?.('flowchart'); }} type="button">
             <ArrowRightFromLine size={18} />
             <span><strong>Flowchart</strong><small>Nodes and connections</small></span>
-          </button>
-          <button onClick={() => { onChoose?.('sequence'); }} type="button">
+          </WorkspaceButton>
+          <WorkspaceButton onClick={() => { onChoose?.('sequence'); }} type="button">
             <ScanSearch size={18} />
             <span><strong>Sequence</strong><small>Participants and messages</small></span>
-          </button>
+          </WorkspaceButton>
         </div>
       </div>
     </div>
@@ -5273,71 +5167,70 @@ function SequenceEditorControls({
   };
 
   return (
-    <div className={centered ? 'canvas-sequence-editor is-centered' : 'canvas-sequence-editor'} data-testid="sequence-editor-controls">
-      <form className="canvas-sequence-participant-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); addParticipant(); }}>
-        <span>participant</span>
-        <select aria-label="New sequence participant kind" onChange={(event) => { setParticipantKind(event.target.value as SequenceParticipantKind); }} value={participantKind}><option value="participant">participant</option><option value="actor">actor</option></select>
-        <input
+    <div data-workspace-panel="semantic" className={centered ? 'canvas-sequence-editor is-centered' : 'canvas-sequence-editor'} data-testid="sequence-editor-controls">
+      <WorkspaceRecord className="canvas-sequence-participant-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); addParticipant(); }}>
+        <span>Participant</span>
+        <WorkspaceSelect aria-label="New sequence participant kind" onChange={(event) => { setParticipantKind(event.target.value as SequenceParticipantKind); }} value={participantKind}><option value="participant">participant</option><option value="actor">actor</option></WorkspaceSelect>
+        <WorkspaceInput
           aria-label="New sequence participant"
           onChange={(event) => { setParticipantLabel(event.target.value); }}
           placeholder="name"
           value={participantLabel}
         />
-        <button aria-label="Add sequence participant" onClick={addParticipant} type="button"><Plus size={15} /></button>
-      </form>
+        <WorkspaceButton aria-label="Add sequence participant" onClick={addParticipant} type="button"><Plus size={15} /></WorkspaceButton>
+      </WorkspaceRecord>
       {participants.length > 0 ? (
-        <form className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); addMessage(); }}>
-          <span>message</span>
-          <select aria-label="Message sender" onChange={(event) => { setFrom(event.target.value); }} value={from}>
+        <WorkspaceRecord className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); addMessage(); }}>
+          <span>Message</span>
+          <WorkspaceSelect aria-label="Message sender" onChange={(event) => { setFrom(event.target.value); }} value={from}>
             {participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}
-          </select>
-          <span aria-hidden="true">→</span>
-          <select aria-label="Message recipient" onChange={(event) => { setTo(event.target.value); }} value={to}>
+          </WorkspaceSelect>
+          <WorkspaceSelect aria-label="Message recipient" onChange={(event) => { setTo(event.target.value); }} value={to}>
             {participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}
-          </select>
-          <select aria-label="Sequence message arrow" onChange={(event) => { setArrow(event.target.value as SequenceArrow); }} value={arrow}>{(['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '<<->>', '<<-->>'] as const).map((value) => <option key={value} value={value}>{value}</option>)}</select>
-          <input aria-label="Sequence message" onChange={(event) => { setMessage(event.target.value); }} placeholder="message" value={message} />
-          <button aria-label="Add sequence message" onClick={addMessage} type="button"><Plus size={15} /></button>
-        </form>
+          </WorkspaceSelect>
+          <WorkspaceSelect aria-label="Sequence message arrow" onChange={(event) => { setArrow(event.target.value as SequenceArrow); }} value={arrow}>{(['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '<<->>', '<<-->>'] as const).map((value) => <option key={value} value={value}>{value}</option>)}</WorkspaceSelect>
+          <WorkspaceInput aria-label="Sequence message" onChange={(event) => { setMessage(event.target.value); }} placeholder="message" value={message} />
+          <WorkspaceButton aria-label="Add sequence message" onClick={addMessage} type="button"><Plus size={15} /></WorkspaceButton>
+        </WorkspaceRecord>
       ) : <small>Add a participant to begin.</small>}
       {participants.length > 0 ? (
-        <form className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); addNote(); }}>
-          <span>note</span>
-          <select aria-label="Note participant" onChange={(event) => { setFrom(event.target.value); }} value={from}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</select>
-          <input aria-label="Sequence note" onChange={(event) => { setNote(event.target.value); }} placeholder="note" value={note} />
-          <button aria-label="Add sequence note" type="submit"><Plus size={15} /></button>
-        </form>
+        <WorkspaceRecord className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); addNote(); }}>
+          <span>Note</span>
+          <WorkspaceSelect aria-label="Note participant" onChange={(event) => { setFrom(event.target.value); }} value={from}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</WorkspaceSelect>
+          <WorkspaceInput aria-label="Sequence note" onChange={(event) => { setNote(event.target.value); }} placeholder="note" value={note} />
+          <WorkspaceButton aria-label="Add sequence note" type="submit"><Plus size={15} /></WorkspaceButton>
+        </WorkspaceRecord>
       ) : null}
       {participants.length > 0 ? (
-        <form className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); if (from) onAddActivation?.(activation, from); }}>
-          <span>activation</span>
-          <select aria-label="Sequence activation action" onChange={(event) => { setActivation(event.target.value as SequenceActivationAction); }} value={activation}><option value="activate">activate</option><option value="deactivate">deactivate</option></select>
-          <select aria-label="Sequence activation participant" onChange={(event) => { setFrom(event.target.value); }} value={from}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</select>
-          <button aria-label="Add sequence activation" type="submit"><Plus size={15} /></button>
-        </form>
+        <WorkspaceRecord className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); if (from) onAddActivation?.(activation, from); }}>
+          <span>Activation</span>
+          <WorkspaceSelect aria-label="Sequence activation action" onChange={(event) => { setActivation(event.target.value as SequenceActivationAction); }} value={activation}><option value="activate">activate</option><option value="deactivate">deactivate</option></WorkspaceSelect>
+          <WorkspaceSelect aria-label="Sequence activation participant" onChange={(event) => { setFrom(event.target.value); }} value={from}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</WorkspaceSelect>
+          <WorkspaceButton aria-label="Add sequence activation" type="submit"><Plus size={15} /></WorkspaceButton>
+        </WorkspaceRecord>
       ) : null}
-      <form className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); onAddFragment?.(fragment, fragmentLabel); setFragmentLabel(''); }}>
-        <span>fragment</span>
-        <select aria-label="Sequence fragment kind" onChange={(event) => { setFragment(event.target.value as SequenceFragmentKind); }} value={fragment}>{(['alt', 'opt', 'loop', 'par', 'critical', 'break'] as const).map((kind) => <option key={kind} value={kind}>{kind}</option>)}</select>
-        <input aria-label="Sequence fragment label" onChange={(event) => { setFragmentLabel(event.target.value); }} placeholder="condition" value={fragmentLabel} />
-        <button aria-label="Add sequence fragment" type="submit"><Plus size={15} /></button>
-      </form>
-      <form className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); onSetAutonumber?.(autonumber); }}>
-        <span>autonumber</span><input aria-label="Sequence autonumber" onChange={(event) => { setAutonumber(event.target.value); }} placeholder="optional start" value={autonumber} /><button aria-label="Set sequence autonumber" type="submit">set</button>
-      </form>
-      {diagram ? <details data-canvas-pan-exclusion="true"><summary>sequence items</summary>
-        {diagram.participants.filter((participant) => !participant.implicit).map((participant, index, items) => <div key={participant.id}><input aria-label="Sequence participant label" defaultValue={participant.label} onBlur={(event) => { onEditParticipant?.(participant.id, event.target.value); }} /><input aria-label="Sequence participant id" defaultValue={participant.id} onBlur={(event) => { onRenameParticipantId?.(participant.id, event.target.value); }} /><SequenceMoveButtons deleteLabel={`Delete ${participant.label}`} disabledDown={index === items.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteParticipant?.(participant.id); }} onDown={() => { onMoveParticipant?.(participant.id, 'down'); }} onUp={() => { onMoveParticipant?.(participant.id, 'up'); }} /></div>)}
-        {diagram.messages.map((item, index) => <div key={item.id}><select aria-label="Sequence message sender" defaultValue={item.from} onChange={(event) => { onEditMessage?.(item.id, { from: event.target.value }); }}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</select><select aria-label="Sequence message recipient" defaultValue={item.to} onChange={(event) => { onEditMessage?.(item.id, { to: event.target.value }); }}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</select><select aria-label="Sequence message arrow" defaultValue={item.arrow} onChange={(event) => { onEditMessage?.(item.id, { arrow: event.target.value as SequenceArrow }); }}>{(['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '<<->>', '<<-->>'] as const).map((value) => <option key={value} value={value}>{value}</option>)}</select><input aria-label="Sequence message text" defaultValue={item.text} onBlur={(event) => { onEditMessage?.(item.id, { text: event.target.value }); }} /><SequenceMoveButtons deleteLabel="Delete sequence message" disabledDown={index === diagram.messages.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteMessage?.(item.id); }} onDown={() => { onMoveMessage?.(item.id, 'down'); }} onUp={() => { onMoveMessage?.(item.id, 'up'); }} /></div>)}
-        {diagram.notes.map((item, index) => <div key={item.id}><select aria-label="Sequence note placement" defaultValue={item.placement} onChange={(event) => { onEditNote?.(item.id, { placement: event.target.value as SequenceNote['placement'] }); }}><option value="over">over</option><option value="left of">left of</option><option value="right of">right of</option></select><input aria-label="Sequence note targets" defaultValue={item.participants.join(',')} onBlur={(event) => { onEditNote?.(item.id, { participants: event.target.value.split(',').map((id) => id.trim()).filter(Boolean) }); }} /><input aria-label="Sequence note text" defaultValue={item.text} onBlur={(event) => { onEditNote?.(item.id, { text: event.target.value }); }} /><SequenceMoveButtons deleteLabel="Delete sequence note" disabledDown={index === diagram.notes.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteNote?.(item.id); }} onDown={() => { onMoveNote?.(item.id, 'down'); }} onUp={() => { onMoveNote?.(item.id, 'up'); }} /></div>)}
-        {diagram.activations.map((item, index) => <div key={item.id}><select aria-label="Sequence activation action" defaultValue={item.action} onChange={(event) => { onEditActivation?.(item.id, event.target.value as SequenceActivationAction, item.participant); }}><option value="activate">activate</option><option value="deactivate">deactivate</option></select><select aria-label="Sequence activation participant" defaultValue={item.participant} onChange={(event) => { onEditActivation?.(item.id, item.action, event.target.value); }}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</select><SequenceMoveButtons deleteLabel="Delete sequence activation" disabledDown={index === diagram.activations.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteActivation?.(item.id); }} onDown={() => { onMoveActivation?.(item.id, 'down'); }} onUp={() => { onMoveActivation?.(item.id, 'up'); }} /></div>)}
-        {diagram.fragments.map((item, index) => <div key={item.id}><span>{item.kind}</span><input aria-label="Sequence fragment label" defaultValue={item.label} onBlur={(event) => { onEditFragment?.(item.id, event.target.value); }} /><SequenceMoveButtons deleteLabel="Delete sequence fragment" disabledDown={index === diagram.fragments.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteFragment?.(item.id); }} onDown={() => { onMoveFragment?.(item.id, 'down'); }} onUp={() => { onMoveFragment?.(item.id, 'up'); }} /></div>)}
+      <WorkspaceRecord className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); onAddFragment?.(fragment, fragmentLabel); setFragmentLabel(''); }}>
+        <span>Fragment</span>
+        <WorkspaceSelect aria-label="Sequence fragment kind" onChange={(event) => { setFragment(event.target.value as SequenceFragmentKind); }} value={fragment}>{(['alt', 'opt', 'loop', 'par', 'critical', 'break'] as const).map((kind) => <option key={kind} value={kind}>{kind}</option>)}</WorkspaceSelect>
+        <WorkspaceInput aria-label="Sequence fragment label" onChange={(event) => { setFragmentLabel(event.target.value); }} placeholder="condition" value={fragmentLabel} />
+        <WorkspaceButton aria-label="Add sequence fragment" type="submit"><Plus size={15} /></WorkspaceButton>
+      </WorkspaceRecord>
+      <WorkspaceRecord className="canvas-sequence-message-form" data-canvas-pan-exclusion="true" onSubmit={(event) => { event.preventDefault(); onSetAutonumber?.(autonumber); }}>
+        <span>Autonumber</span><WorkspaceInput aria-label="Sequence autonumber" onChange={(event) => { setAutonumber(event.target.value); }} placeholder="optional start" value={autonumber} /><WorkspaceButton aria-label="Set sequence autonumber" type="submit">Set</WorkspaceButton>
+      </WorkspaceRecord>
+      {diagram ? <details data-canvas-pan-exclusion="true"><summary>Sequence items</summary>
+        {diagram.participants.filter((participant) => !participant.implicit).map((participant, index, items) => { const label = `Sequence participant ${participant.label} (${participant.id})`; return <div data-workspace-record="true" role="group" aria-label={label} key={participant.id}><strong className="workspace-record-heading">{label}</strong><WorkspaceInput aria-label="Sequence participant label" defaultValue={participant.label} onBlur={(event) => { onEditParticipant?.(participant.id, event.target.value); }} /><WorkspaceInput aria-label="Sequence participant id" defaultValue={participant.id} onBlur={(event) => { onRenameParticipantId?.(participant.id, event.target.value); }} /><SequenceMoveButtons targetLabel={label} disabledDown={index === items.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteParticipant?.(participant.id); }} onDown={() => { onMoveParticipant?.(participant.id, 'down'); }} onUp={() => { onMoveParticipant?.(participant.id, 'up'); }} /></div>; })}
+        {diagram.messages.map((item, index) => { const label = `Sequence message ${index + 1}: ${item.from} to ${item.to}`; return <div data-workspace-record="true" role="group" aria-label={label} key={item.id}><strong className="workspace-record-heading">{label}</strong><WorkspaceSelect aria-label="Sequence message sender" defaultValue={item.from} onChange={(event) => { onEditMessage?.(item.id, { from: event.target.value }); }}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label="Sequence message recipient" defaultValue={item.to} onChange={(event) => { onEditMessage?.(item.id, { to: event.target.value }); }}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label="Sequence message arrow" defaultValue={item.arrow} onChange={(event) => { onEditMessage?.(item.id, { arrow: event.target.value as SequenceArrow }); }}>{(['->', '-->', '->>', '-->>', '-x', '--x', '-)', '--)', '<<->>', '<<-->>'] as const).map((value) => <option key={value} value={value}>{value}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="Sequence message text" defaultValue={item.text} onBlur={(event) => { onEditMessage?.(item.id, { text: event.target.value }); }} /><SequenceMoveButtons targetLabel={label} disabledDown={index === diagram.messages.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteMessage?.(item.id); }} onDown={() => { onMoveMessage?.(item.id, 'down'); }} onUp={() => { onMoveMessage?.(item.id, 'up'); }} /></div>; })}
+        {diagram.notes.map((item, index) => { const label = `Sequence note ${index + 1}: ${item.participants.join(', ')}`; return <div data-workspace-record="true" role="group" aria-label={label} key={item.id}><strong className="workspace-record-heading">{label}</strong><WorkspaceSelect aria-label="Sequence note placement" defaultValue={item.placement} onChange={(event) => { onEditNote?.(item.id, { placement: event.target.value as SequenceNote['placement'] }); }}><option value="over">over</option><option value="left of">left of</option><option value="right of">right of</option></WorkspaceSelect><WorkspaceInput aria-label="Sequence note targets" defaultValue={item.participants.join(',')} onBlur={(event) => { onEditNote?.(item.id, { participants: event.target.value.split(',').map((id) => id.trim()).filter(Boolean) }); }} /><WorkspaceInput aria-label="Sequence note text" defaultValue={item.text} onBlur={(event) => { onEditNote?.(item.id, { text: event.target.value }); }} /><SequenceMoveButtons targetLabel={label} disabledDown={index === diagram.notes.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteNote?.(item.id); }} onDown={() => { onMoveNote?.(item.id, 'down'); }} onUp={() => { onMoveNote?.(item.id, 'up'); }} /></div>; })}
+        {diagram.activations.map((item, index) => { const label = `Sequence activation ${index + 1}: ${item.participant}`; return <div data-workspace-record="true" role="group" aria-label={label} key={item.id}><strong className="workspace-record-heading">{label}</strong><WorkspaceSelect aria-label="Sequence activation action" defaultValue={item.action} onChange={(event) => { onEditActivation?.(item.id, event.target.value as SequenceActivationAction, item.participant); }}><option value="activate">activate</option><option value="deactivate">deactivate</option></WorkspaceSelect><WorkspaceSelect aria-label="Sequence activation participant" defaultValue={item.participant} onChange={(event) => { onEditActivation?.(item.id, item.action, event.target.value); }}>{participants.map((participant) => <option key={participant.id} value={participant.id}>{participant.label}</option>)}</WorkspaceSelect><SequenceMoveButtons targetLabel={label} disabledDown={index === diagram.activations.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteActivation?.(item.id); }} onDown={() => { onMoveActivation?.(item.id, 'down'); }} onUp={() => { onMoveActivation?.(item.id, 'up'); }} /></div>; })}
+        {diagram.fragments.map((item, index) => { const label = `Sequence fragment ${index + 1}: ${item.kind}`; return <div data-workspace-record="true" role="group" aria-label={label} key={item.id}><strong className="workspace-record-heading">{label}</strong><span>{item.kind}</span><WorkspaceInput aria-label="Sequence fragment label" defaultValue={item.label} onBlur={(event) => { onEditFragment?.(item.id, event.target.value); }} /><SequenceMoveButtons targetLabel={label} disabledDown={index === diagram.fragments.length - 1} disabledUp={index === 0} onDelete={() => { onDeleteFragment?.(item.id); }} onDown={() => { onMoveFragment?.(item.id, 'down'); }} onUp={() => { onMoveFragment?.(item.id, 'up'); }} /></div>; })}
       </details> : null}
     </div>
   );
 }
 
-function SequenceMoveButtons({ deleteLabel, disabledDown, disabledUp, onDelete, onDown, onUp }: { deleteLabel: string; disabledDown: boolean; disabledUp: boolean; onDelete: () => void; onDown: () => void; onUp: () => void }) {
-  return <><button aria-label="Move up" disabled={disabledUp} onClick={onUp} type="button">↑</button><button aria-label="Move down" disabled={disabledDown} onClick={onDown} type="button">↓</button><button aria-label={deleteLabel} onClick={onDelete} type="button">×</button></>;
+function SequenceMoveButtons({ targetLabel, disabledDown, disabledUp, onDelete, onDown, onUp }: { targetLabel: string; disabledDown: boolean; disabledUp: boolean; onDelete: () => void; onDown: () => void; onUp: () => void }) {
+  return <><WorkspaceButton aria-label={`Move ${targetLabel} up`} disabled={disabledUp} onClick={onUp} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${targetLabel} down`} disabled={disabledDown} onClick={onDown} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ${targetLabel}`} onClick={onDelete} type="button">×</WorkspaceButton></>;
 }
 
 const ER_CARDINALITY_OPTIONS: Array<{ label: string; value: ErRelationship['leftCardinality'] }> = [
@@ -5349,6 +5242,7 @@ const ER_CARDINALITY_OPTIONS: Array<{ label: string; value: ErRelationship['left
 
 function ErEditorControls({
   bottom,
+  maxHeight,
   diagram,
   onAddAttribute,
   onAddEntity,
@@ -5363,6 +5257,7 @@ function ErEditorControls({
   onRenameEntity,
 }: {
   bottom: number;
+  maxHeight: number;
   diagram: ErDiagramSnapshot;
   onAddAttribute?: (entityName: string, attribute: Partial<ErAttribute>) => void;
   onAddEntity?: (name: string) => void;
@@ -5387,13 +5282,13 @@ function ErEditorControls({
   }), [diagram.entities]);
 
   return (
-  <aside className="canvas-er-editor" data-canvas-pan-exclusion="true" data-testid="er-editor-controls" style={{ background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8, bottom, maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12, width: 'min(400px, calc(100% - 24px))', zIndex: 9 }}>
-      <form onSubmit={(event) => { event.preventDefault(); onAddEntity?.(entityName); setEntityName('ENTITY'); }} style={{ display: 'flex', gap: 6 }}>
-        <strong style={{ fontSize: 12, whiteSpace: 'nowrap' }}>ER entities</strong>
-        <input aria-label="New ER entity" onChange={(event) => { setEntityName(event.target.value); }} value={entityName} />
-        <button aria-label="Add ER entity" type="submit">Add</button>
-      </form>
-      <div style={{ display: 'grid', gap: 10, marginTop: 10 }}>
+  <aside data-workspace-panel="semantic" className="canvas-er-editor" data-canvas-pan-exclusion="true" data-testid="er-editor-controls" style={{ bottom, maxHeight }}>
+      <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddEntity?.(entityName); setEntityName('ENTITY'); }}>
+        <strong>ER entities</strong>
+        <WorkspaceInput aria-label="New ER entity" onChange={(event) => { setEntityName(event.target.value); }} value={entityName} />
+        <WorkspaceButton aria-label="Add ER entity" type="submit">Add</WorkspaceButton>
+      </WorkspaceRecord>
+      <div data-workspace-record-list="true">
         {diagram.entities.map((entity, index) => (
           <ErEntityControls
             entity={entity}
@@ -5409,8 +5304,8 @@ function ErEditorControls({
           />
         ))}
       </div>
-      <section aria-label="ER relationships" style={{ borderTop: '1px solid var(--line-subtle)', marginTop: 10, paddingTop: 8 }}>
-        <strong style={{ fontSize: 12 }}>Relationships</strong>
+      <section aria-label="ER relationships">
+        <strong>Relationships</strong>
         {diagram.relationships.map((relationship, index) => (
           <ErRelationshipForm
             entities={diagram.entities.map((entity) => entity.name)}
@@ -5442,14 +5337,14 @@ function ErEntityControls({
   const [name, setName] = useState(entity.name);
   const [newAttributeName, setNewAttributeName] = useState('attribute');
   return (
-    <section style={{ border: '1px solid var(--line-subtle)', borderRadius: 6, padding: 7 }}>
-      <form onSubmit={(event) => { event.preventDefault(); onRenameEntity?.(entity.name, name); }} style={{ display: 'flex', gap: 4 }}>
-        <input aria-label={`ER entity ${entity.name}`} onChange={(event) => { setName(event.target.value); }} value={name} />
-        <button type="submit">Rename</button>
-        <button aria-label={`Move ${entity.name} up`} disabled={entityIndex === 0} onClick={() => { onMoveEntity?.(entity.name, 'up'); }} type="button">↑</button>
-        <button aria-label={`Move ${entity.name} down`} onClick={() => { onMoveEntity?.(entity.name, 'down'); }} type="button">↓</button>
-        <button aria-label={`Delete ${entity.name} and dependent relationships`} onClick={() => { onDeleteEntity?.(entity.name); }} type="button">Delete</button>
-      </form>
+    <section data-workspace-record-section="true">
+      <WorkspaceRecord aria-label={`ER entity ${entity.name}`} onSubmit={(event) => { event.preventDefault(); onRenameEntity?.(entity.name, name); }}>
+        <WorkspaceInput aria-label={`ER entity ${entity.name}`} onChange={(event) => { setName(event.target.value); }} value={name} />
+        <WorkspaceButton type="submit">Rename</WorkspaceButton>
+        <WorkspaceButton aria-label={`Move ${entity.name} up`} disabled={entityIndex === 0} onClick={() => { onMoveEntity?.(entity.name, 'up'); }} type="button">↑</WorkspaceButton>
+        <WorkspaceButton aria-label={`Move ${entity.name} down`} onClick={() => { onMoveEntity?.(entity.name, 'down'); }} type="button">↓</WorkspaceButton>
+        <WorkspaceButton aria-label={`Delete ${entity.name} and dependent relationships`} onClick={() => { onDeleteEntity?.(entity.name); }} type="button">Delete</WorkspaceButton>
+      </WorkspaceRecord>
       {entity.attributes.map((attribute, index) => (
         <ErAttributeForm
           attribute={attribute}
@@ -5461,10 +5356,10 @@ function ErEntityControls({
           showMoveUp={index > 0}
         />
       ))}
-      <form onSubmit={(event) => { event.preventDefault(); onAddAttribute?.(entity.name, { name: newAttributeName, type: 'string' }); setNewAttributeName('attribute'); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}>
-        <input aria-label={`New attribute for ${entity.name}`} onChange={(event) => { setNewAttributeName(event.target.value); }} value={newAttributeName} />
-        <button type="submit">Add attribute</button>
-      </form>
+      <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddAttribute?.(entity.name, { name: newAttributeName, type: 'string' }); setNewAttributeName('attribute'); }}>
+        <WorkspaceInput aria-label={`New attribute for ${entity.name}`} onChange={(event) => { setNewAttributeName(event.target.value); }} value={newAttributeName} />
+        <WorkspaceButton type="submit">Add attribute</WorkspaceButton>
+      </WorkspaceRecord>
     </section>
   );
 }
@@ -5474,34 +5369,28 @@ function ErAttributeForm({ attribute, entityName, onDelete, onMove, onSave, show
 }) {
   const [draft, setDraft] = useState(attribute);
   const setKeys = (marker: ErAttribute['keys'][number], checked: boolean) => setDraft((current) => ({ ...current, keys: checked ? [...new Set([...current.keys, marker])] : current.keys.filter((key) => key !== marker) }));
-  return <form aria-label={`Attribute ${attribute.name} on ${entityName}`} onSubmit={(event) => { event.preventDefault(); onSave(draft); }} style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-    <input aria-label={`Type for ${attribute.name}`} onChange={(event) => { setDraft((current) => ({ ...current, type: event.target.value })); }} value={draft.type} />
-    <input aria-label={`Name for ${attribute.name}`} onChange={(event) => { setDraft((current) => ({ ...current, name: event.target.value })); }} value={draft.name} />
-    {(['PK', 'FK', 'UK'] as const).map((marker) => <label key={marker}><input checked={draft.keys.includes(marker)} onChange={(event) => { setKeys(marker, event.target.checked); }} type="checkbox" />{marker}</label>)}
-    <input aria-label={`Comment for ${attribute.name}`} onChange={(event) => { setDraft((current) => ({ ...current, comment: event.target.value })); }} placeholder="comment" value={draft.comment ?? ''} />
-    <button type="submit">Save</button><button aria-label={`Move ${attribute.name} up`} disabled={!showMoveUp} onClick={() => { onMove('up'); }} type="button">↑</button><button aria-label={`Move ${attribute.name} down`} onClick={() => { onMove('down'); }} type="button">↓</button><button aria-label={`Delete attribute ${attribute.name}`} onClick={onDelete} type="button">Delete</button>
-  </form>;
+  return <WorkspaceRecord aria-label={`Attribute ${attribute.name} on ${entityName}`} onSubmit={(event) => { event.preventDefault(); onSave(draft); }}>
+    <WorkspaceInput aria-label={`Type for ${attribute.name}`} onChange={(event) => { setDraft((current) => ({ ...current, type: event.target.value })); }} value={draft.type} />
+    <WorkspaceInput aria-label={`Name for ${attribute.name}`} onChange={(event) => { setDraft((current) => ({ ...current, name: event.target.value })); }} value={draft.name} />
+    {(['PK', 'FK', 'UK'] as const).map((marker) => <label key={marker}><WorkspaceInput checked={draft.keys.includes(marker)} onChange={(event) => { setKeys(marker, event.target.checked); }} type="checkbox" />{marker}</label>)}
+    <WorkspaceInput aria-label={`Comment for ${attribute.name}`} onChange={(event) => { setDraft((current) => ({ ...current, comment: event.target.value })); }} placeholder="comment" value={draft.comment ?? ''} />
+    <WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ${attribute.name} up`} disabled={!showMoveUp} onClick={() => { onMove('up'); }} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${attribute.name} down`} onClick={() => { onMove('down'); }} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete attribute ${attribute.name}`} onClick={onDelete} type="button">Delete</WorkspaceButton>
+  </WorkspaceRecord>;
 }
 
 function ErRelationshipForm({ entities, onDelete, onSave, relationship }: { entities: string[]; onDelete?: () => void; onSave?: (relationship: ErRelationship) => void; relationship: ErRelationship }) {
   const [draft, setDraft] = useState(relationship);
-  return <form aria-label={`Relationship ${relationship.left} ${relationship.right}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-    <select aria-label="Relationship left entity" onChange={(event) => { setDraft((current) => ({ ...current, left: event.target.value })); }} value={draft.left}>{entities.map((entity) => <option key={entity} value={entity}>{entity}</option>)}</select>
-    <select aria-label="Relationship left cardinality" onChange={(event) => { setDraft((current) => ({ ...current, leftCardinality: event.target.value as ErRelationship['leftCardinality'] })); }} value={draft.leftCardinality}>{ER_CARDINALITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
-    <label><input checked={draft.identifying} onChange={(event) => { setDraft((current) => ({ ...current, identifying: event.target.checked })); }} type="checkbox" />identifying</label>
-    <select aria-label="Relationship right cardinality" onChange={(event) => { setDraft((current) => ({ ...current, rightCardinality: event.target.value as ErRelationship['rightCardinality'] })); }} value={draft.rightCardinality}>{ER_CARDINALITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
-    <select aria-label="Relationship right entity" onChange={(event) => { setDraft((current) => ({ ...current, right: event.target.value })); }} value={draft.right}>{entities.map((entity) => <option key={entity} value={entity}>{entity}</option>)}</select>
-    <input aria-label="Relationship label" onChange={(event) => { setDraft((current) => ({ ...current, label: event.target.value })); }} value={draft.label} />
-    <button type="submit">{onDelete ? 'Save' : 'Add relationship'}</button>{onDelete ? <button aria-label={`Delete relationship ${relationship.label}`} onClick={onDelete} type="button">Delete</button> : null}
-  </form>;
+  return <WorkspaceRecord aria-label={`Relationship ${relationship.left} ${relationship.right}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }}>
+    <WorkspaceSelect aria-label="Relationship left entity" onChange={(event) => { setDraft((current) => ({ ...current, left: event.target.value })); }} value={draft.left}>{entities.map((entity) => <option key={entity} value={entity}>{entity}</option>)}</WorkspaceSelect>
+    <WorkspaceSelect aria-label="Relationship left cardinality" onChange={(event) => { setDraft((current) => ({ ...current, leftCardinality: event.target.value as ErRelationship['leftCardinality'] })); }} value={draft.leftCardinality}>{ER_CARDINALITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</WorkspaceSelect>
+    <label><WorkspaceInput checked={draft.identifying} onChange={(event) => { setDraft((current) => ({ ...current, identifying: event.target.checked })); }} type="checkbox" />identifying</label>
+    <WorkspaceSelect aria-label="Relationship right cardinality" onChange={(event) => { setDraft((current) => ({ ...current, rightCardinality: event.target.value as ErRelationship['rightCardinality'] })); }} value={draft.rightCardinality}>{ER_CARDINALITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</WorkspaceSelect>
+    <WorkspaceSelect aria-label="Relationship right entity" onChange={(event) => { setDraft((current) => ({ ...current, right: event.target.value })); }} value={draft.right}>{entities.map((entity) => <option key={entity} value={entity}>{entity}</option>)}</WorkspaceSelect>
+    <WorkspaceInput aria-label="Relationship label" onChange={(event) => { setDraft((current) => ({ ...current, label: event.target.value })); }} value={draft.label} />
+    <WorkspaceButton type="submit">{onDelete ? 'Save' : 'Add relationship'}</WorkspaceButton>{onDelete ? <WorkspaceButton aria-label={`Delete relationship ${relationship.label}`} onClick={onDelete} type="button">Delete</WorkspaceButton> : null}
+  </WorkspaceRecord>;
 }
 
-const SEMANTIC_PANEL_STYLE: CSSProperties = {
-  background: 'var(--surface-canvas)', border: '1px solid var(--control-border)', borderRadius: 8,
-  maxHeight: 'min(58vh, 560px)', overflow: 'auto', padding: 10, pointerEvents: 'auto', position: 'absolute', right: 12,
-  width: 'min(400px, calc(100% - 24px))', zIndex: 9,
-};
-const HIERARCHY_CONTROL_STYLE: CSSProperties = { minHeight: 44, minWidth: 44 };
 const SEMANTIC_PANEL_TOP_INSET = 56;
 const SEMANTIC_PANEL_MAX_HEIGHT = 480;
 
@@ -5523,36 +5412,36 @@ function JourneyEditorControls({ bottom, diagram, onAddSection, onAddTask, onDel
   useEffect(() => {
     setTask((current) => ({ ...current, section: diagram.sections.some((item) => item.label === current.section) ? current.section : diagram.sections[0]?.label ?? '' }));
   }, [diagram.sections]);
-  return <aside className="canvas-semantic-editor canvas-journey-editor" data-canvas-pan-exclusion="true" data-testid="journey-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-journey-editor" data-canvas-pan-exclusion="true" data-testid="journey-editor-controls" style={{ bottom }}>
     <strong>User journey</strong>
-    <form onSubmit={(event) => { event.preventDefault(); onAddSection?.({ label: section }); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}>
-      <input aria-label="New journey section" onChange={(event) => setSection(event.target.value)} value={section} />
-      <button type="submit">Add section</button>
-    </form>
-    <form onSubmit={(event) => { event.preventDefault(); onAddTask?.(task); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-      <select aria-label="New journey task section" onChange={(event) => setTask((current) => ({ ...current, section: event.target.value }))} value={task.section}>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddSection?.({ label: section }); }}>
+      <WorkspaceInput aria-label="New journey section" onChange={(event) => setSection(event.target.value)} value={section} />
+      <WorkspaceButton type="submit">Add section</WorkspaceButton>
+    </WorkspaceRecord>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddTask?.(task); }}>
+      <WorkspaceSelect aria-label="New journey task section" onChange={(event) => setTask((current) => ({ ...current, section: event.target.value }))} value={task.section}>
         <option value="">No section</option>{diagram.sections.map((item) => <option key={item.label}>{item.label}</option>)}
-      </select>
-      <input aria-label="New journey task" onChange={(event) => setTask((current) => ({ ...current, text: event.target.value }))} value={task.text} />
-      <input aria-label="New journey score" max="5" min="1" onChange={(event) => setTask((current) => ({ ...current, score: Number(event.target.value) }))} type="number" value={task.score} />
-      <input aria-label="New journey actors" onChange={(event) => setTask((current) => ({ ...current, actors: event.target.value.split(',').map((actor) => actor.trim()).filter(Boolean) }))} value={task.actors.join(', ')} />
-      <button type="submit">Add task</button>
-    </form>
+      </WorkspaceSelect>
+      <WorkspaceInput aria-label="New journey task" onChange={(event) => setTask((current) => ({ ...current, text: event.target.value }))} value={task.text} />
+      <WorkspaceInput aria-label="New journey score" max="5" min="1" onChange={(event) => setTask((current) => ({ ...current, score: Number(event.target.value) }))} type="number" value={task.score} />
+      <WorkspaceInput aria-label="New journey actors" onChange={(event) => setTask((current) => ({ ...current, actors: event.target.value.split(',').map((actor) => actor.trim()).filter(Boolean) }))} value={task.actors.join(', ')} />
+      <WorkspaceButton type="submit">Add task</WorkspaceButton>
+    </WorkspaceRecord>
     {diagram.sections.map((item) => <SectionForm family="Journey" item={item} key={item.label} onDelete={onDeleteSection} onSave={onEditSection} onMove={onMoveSection} />)}
     {diagram.tasks.map((item, index) => <JourneyTaskForm identity={getJourneyTaskIdentity(item, index, diagram.tasks)} key={`${index}:${item.text}`} onDelete={onDeleteTask} onMove={onMoveTask} onSave={onEditTask} task={item} />)}
   </aside>;
 }
 function JourneyTaskForm({ identity, onDelete, onMove, onSave, task }: { identity: JourneyTaskIdentity; onDelete?: (identity: JourneyTaskIdentity) => void; onMove?: (identity: JourneyTaskIdentity, direction: 'up' | 'down') => void; onSave?: (identity: JourneyTaskIdentity, value: Partial<JourneyTask>) => void; task: JourneyTask }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(task);
-  return <form aria-label={`Journey task ${task.text}`} onSubmit={(event) => { event.preventDefault(); onSave?.(identity, draft); resetDraft(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-    <input aria-label={`Journey task ${task.text} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />
-    <input aria-label={`Journey task ${task.text} score`} max="5" min="1" onChange={(event) => updateDraft((current) => ({ ...current, score: Number(event.target.value) }))} type="number" value={draft.score} />
-    <input aria-label={`Journey task ${task.text} actors`} onChange={(event) => updateDraft((current) => ({ ...current, actors: event.target.value.split(',').map((actor) => actor.trim()).filter(Boolean) }))} value={draft.actors.join(', ')} />
-    <button type="submit">Save</button>
-    <button aria-label={`Move journey task ${task.text} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</button>
-    <button aria-label={`Move journey task ${task.text} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</button>
-    <button aria-label={`Delete journey task ${task.text}`} onClick={() => onDelete?.(identity)} type="button">Delete</button>
-  </form>;
+  return <WorkspaceRecord aria-label={`Journey task ${task.text}`} onSubmit={(event) => { event.preventDefault(); onSave?.(identity, draft); resetDraft(); }}>
+    <WorkspaceInput aria-label={`Journey task ${task.text} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />
+    <WorkspaceInput aria-label={`Journey task ${task.text} score`} max="5" min="1" onChange={(event) => updateDraft((current) => ({ ...current, score: Number(event.target.value) }))} type="number" value={draft.score} />
+    <WorkspaceInput aria-label={`Journey task ${task.text} actors`} onChange={(event) => updateDraft((current) => ({ ...current, actors: event.target.value.split(',').map((actor) => actor.trim()).filter(Boolean) }))} value={draft.actors.join(', ')} />
+    <WorkspaceButton type="submit">Save</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move journey task ${task.text} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move journey task ${task.text} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton>
+    <WorkspaceButton aria-label={`Delete journey task ${task.text}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton>
+  </WorkspaceRecord>;
 }
 
 function GanttEditorControls({ bottom, diagram, onAddSection, onAddTask, onDeleteSection, onDeleteTask, onEditSection, onEditTask, onMoveSection, onMoveTask }: { bottom: number; diagram: GanttDiagramSnapshot; onAddSection?: (value: { label: string }) => void; onAddTask?: (value: GanttTask) => void; onDeleteSection?: (label: string) => void; onDeleteTask?: (identity: GanttTaskIdentity) => void; onEditSection?: (label: string, value: { label?: string }) => void; onEditTask?: (identity: GanttTaskIdentity, value: Partial<GanttTask>) => void; onMoveSection?: (label: string, direction: 'up' | 'down') => void; onMoveTask?: (identity: GanttTaskIdentity, direction: 'up' | 'down') => void }) {
@@ -5561,23 +5450,23 @@ function GanttEditorControls({ bottom, diagram, onAddSection, onAddTask, onDelet
   useEffect(() => {
     setTask((current) => ({ ...current, section: diagram.sections.some((item) => item.label === current.section) ? current.section : diagram.sections[0]?.label ?? '' }));
   }, [diagram.sections]);
-  return <aside className="canvas-semantic-editor canvas-gantt-editor" data-canvas-pan-exclusion="true" data-testid="gantt-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-gantt-editor" data-canvas-pan-exclusion="true" data-testid="gantt-editor-controls" style={{ bottom }}>
     <strong>Gantt</strong>
-    <form onSubmit={(event) => { event.preventDefault(); onAddSection?.({ label: section }); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}>
-      <input aria-label="New Gantt section" onChange={(event) => setSection(event.target.value)} value={section} />
-      <button type="submit">Add section</button>
-    </form>
-    <form onSubmit={(event) => { event.preventDefault(); onAddTask?.(task); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-      <select aria-label="New Gantt task section" onChange={(event) => setTask((current) => ({ ...current, section: event.target.value }))} value={task.section}>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddSection?.({ label: section }); }}>
+      <WorkspaceInput aria-label="New Gantt section" onChange={(event) => setSection(event.target.value)} value={section} />
+      <WorkspaceButton type="submit">Add section</WorkspaceButton>
+    </WorkspaceRecord>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddTask?.(task); }}>
+      <WorkspaceSelect aria-label="New Gantt task section" onChange={(event) => setTask((current) => ({ ...current, section: event.target.value }))} value={task.section}>
         <option value="">No section</option>{diagram.sections.map((item) => <option key={item.label}>{item.label}</option>)}
-      </select>
-      <input aria-label="New Gantt task" onChange={(event) => setTask((current) => ({ ...current, text: event.target.value }))} value={task.text} />
-      <input aria-label="New Gantt task id" onChange={(event) => setTask((current) => ({ ...current, id: event.target.value }))} value={task.id} />
-      <input aria-label="New Gantt start or dependency" onChange={(event) => setTask((current) => ({ ...current, start: event.target.value }))} value={task.start} />
-      <input aria-label="New Gantt end or duration" onChange={(event) => setTask((current) => ({ ...current, end: event.target.value }))} value={task.end} />
+      </WorkspaceSelect>
+      <WorkspaceInput aria-label="New Gantt task" onChange={(event) => setTask((current) => ({ ...current, text: event.target.value }))} value={task.text} />
+      <WorkspaceInput aria-label="New Gantt task id" onChange={(event) => setTask((current) => ({ ...current, id: event.target.value }))} value={task.id} />
+      <WorkspaceInput aria-label="New Gantt start or dependency" onChange={(event) => setTask((current) => ({ ...current, start: event.target.value }))} value={task.start} />
+      <WorkspaceInput aria-label="New Gantt end or duration" onChange={(event) => setTask((current) => ({ ...current, end: event.target.value }))} value={task.end} />
       <GanttStatusControls ariaPrefix="New Gantt task status" statuses={task.statuses} onChange={(statuses) => setTask((current) => ({ ...current, statuses }))} />
-      <button type="submit">Add task</button>
-    </form>
+      <WorkspaceButton type="submit">Add task</WorkspaceButton>
+    </WorkspaceRecord>
     {diagram.sections.map((item) => <SectionForm family="Gantt" item={item} key={item.label} onDelete={onDeleteSection} onSave={onEditSection} onMove={onMoveSection} />)}
     {diagram.tasks.map((item, index) => <GanttTaskForm identity={getGanttTaskIdentity(item, index, diagram.tasks)} key={item.id} onDelete={onDeleteTask} onMove={onMoveTask} onSave={onEditTask} sections={diagram.sections.map((entry) => entry.label)} task={item} />)}
   </aside>;
@@ -5585,26 +5474,26 @@ function GanttEditorControls({ bottom, diagram, onAddSection, onAddTask, onDelet
 
 function GanttTaskForm({ identity, onDelete, onMove, onSave, sections, task }: { identity: GanttTaskIdentity; onDelete?: (identity: GanttTaskIdentity) => void; onMove?: (identity: GanttTaskIdentity, direction: 'up' | 'down') => void; onSave?: (identity: GanttTaskIdentity, value: Partial<GanttTask>) => void; sections: string[]; task: GanttTask }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(task);
-  return <form aria-label={`Gantt task ${task.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(identity, draft); resetDraft(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-    <select aria-label={`Gantt task ${task.id} section`} onChange={(event) => updateDraft((current) => ({ ...current, section: event.target.value }))} value={draft.section}>
+  return <WorkspaceRecord aria-label={`Gantt task ${task.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(identity, draft); resetDraft(); }}>
+    <WorkspaceSelect aria-label={`Gantt task ${task.id} section`} onChange={(event) => updateDraft((current) => ({ ...current, section: event.target.value }))} value={draft.section}>
       <option value="">No section</option>{sections.map((section) => <option key={section}>{section}</option>)}
-    </select>
-    <input aria-label={`Gantt task ${task.id} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />
-    <input aria-label={`Gantt task ${task.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} />
-    <input aria-label={`Gantt task ${task.id} start or dependency`} onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} value={draft.start} />
-    <input aria-label={`Gantt task ${task.id} end or duration`} onChange={(event) => updateDraft((current) => ({ ...current, end: event.target.value }))} value={draft.end} />
+    </WorkspaceSelect>
+    <WorkspaceInput aria-label={`Gantt task ${task.id} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />
+    <WorkspaceInput aria-label={`Gantt task ${task.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} />
+    <WorkspaceInput aria-label={`Gantt task ${task.id} start or dependency`} onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} value={draft.start} />
+    <WorkspaceInput aria-label={`Gantt task ${task.id} end or duration`} onChange={(event) => updateDraft((current) => ({ ...current, end: event.target.value }))} value={draft.end} />
     <GanttStatusControls ariaPrefix={`Gantt task ${task.id} status`} statuses={draft.statuses} onChange={(statuses) => updateDraft((current) => ({ ...current, statuses }))} />
-    <button type="submit">Save</button>
-    <button aria-label={`Move Gantt task ${task.id} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</button>
-    <button aria-label={`Move Gantt task ${task.id} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</button>
-    <button aria-label={`Delete Gantt task ${task.id}`} onClick={() => onDelete?.(identity)} type="button">Delete</button>
-  </form>;
+    <WorkspaceButton type="submit">Save</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move Gantt task ${task.id} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move Gantt task ${task.id} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton>
+    <WorkspaceButton aria-label={`Delete Gantt task ${task.id}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton>
+  </WorkspaceRecord>;
 }
 
 function GanttStatusControls({ ariaPrefix, onChange, statuses }: { ariaPrefix: string; onChange: (statuses: GanttTask['statuses']) => void; statuses: GanttTask['statuses'] }) {
   const options: GanttTask['statuses'][number][] = ['active', 'done', 'crit', 'milestone'];
   return <>{options.map((status) => <label key={status}>
-    <input aria-label={`${ariaPrefix} ${status}`} checked={statuses.includes(status)} onChange={(event) => onChange(event.target.checked ? [...statuses, status] : statuses.filter((candidate) => candidate !== status))} type="checkbox" />
+    <WorkspaceInput aria-label={`${ariaPrefix} ${status}`} checked={statuses.includes(status)} onChange={(event) => onChange(event.target.checked ? [...statuses, status] : statuses.filter((candidate) => candidate !== status))} type="checkbox" />
     {status}
   </label>)}</>;
 }
@@ -5620,30 +5509,30 @@ function TimelineEditorControls({ bottom, diagram, onAddEvent, onAddPeriod, onAd
       return selected ? { ...current, period: selected.label, section: selected.section } : { ...current, period: '', section: '' };
     });
   }, [diagram.periods, diagram.sections]);
-  return <aside className="canvas-semantic-editor canvas-timeline-editor" data-canvas-pan-exclusion="true" data-testid="timeline-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-timeline-editor" data-canvas-pan-exclusion="true" data-testid="timeline-editor-controls" style={{ bottom }}>
     <strong>Timeline</strong>
-    <label>Direction <select aria-label="Timeline direction" onChange={(event) => onSetDirection?.(event.target.value as TimelineDirection)} value={diagram.direction}><option>LR</option><option>TD</option></select></label>
-    <form onSubmit={(event) => { event.preventDefault(); onAddSection?.({ label: section }); }}>
-      <input aria-label="New timeline section" onChange={(event) => setSection(event.target.value)} value={section} />
-      <button type="submit">Add section</button>
-    </form>
-    <form onSubmit={(event) => { event.preventDefault(); onAddPeriod?.(period); }}>
-      <input aria-label="New timeline period label" onChange={(event) => setPeriod((current) => ({ ...current, label: event.target.value }))} value={period.label} />
-      <select aria-label="New timeline period section" onChange={(event) => setPeriod((current) => ({ ...current, section: event.target.value }))} value={period.section}>
+    <label>Direction <WorkspaceSelect aria-label="Timeline direction" onChange={(event) => onSetDirection?.(event.target.value as TimelineDirection)} value={diagram.direction}><option>LR</option><option>TD</option></WorkspaceSelect></label>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddSection?.({ label: section }); }}>
+      <WorkspaceInput aria-label="New timeline section" onChange={(event) => setSection(event.target.value)} value={section} />
+      <WorkspaceButton type="submit">Add section</WorkspaceButton>
+    </WorkspaceRecord>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddPeriod?.(period); }}>
+      <WorkspaceInput aria-label="New timeline period label" onChange={(event) => setPeriod((current) => ({ ...current, label: event.target.value }))} value={period.label} />
+      <WorkspaceSelect aria-label="New timeline period section" onChange={(event) => setPeriod((current) => ({ ...current, section: event.target.value }))} value={period.section}>
         <option value="">Top level</option>{diagram.sections.map((item) => <option key={item.label}>{item.label}</option>)}
-      </select>
-      <button type="submit">Add period</button>
-    </form>
-    <form onSubmit={(submitEvent) => { submitEvent.preventDefault(); onAddEvent?.(event); }}>
-      <select aria-label="New timeline event period" onChange={(changeEvent) => setEvent((current) => {
+      </WorkspaceSelect>
+      <WorkspaceButton type="submit">Add period</WorkspaceButton>
+    </WorkspaceRecord>
+    <WorkspaceRecord onSubmit={(submitEvent) => { submitEvent.preventDefault(); onAddEvent?.(event); }}>
+      <WorkspaceSelect aria-label="New timeline event period" onChange={(changeEvent) => setEvent((current) => {
         const selected = diagram.periods.find((item) => item.label === changeEvent.target.value);
         return selected ? { ...current, period: selected.label, section: selected.section } : current;
       })} value={event.period}>
         {diagram.periods.map((item) => <option key={item.label} value={item.label}>{item.label}</option>)}
-      </select>
-      <input aria-label="New timeline event" onChange={(changeEvent) => setEvent((current) => ({ ...current, text: changeEvent.target.value }))} value={event.text} />
-      <button type="submit">Add event</button>
-    </form>
+      </WorkspaceSelect>
+      <WorkspaceInput aria-label="New timeline event" onChange={(changeEvent) => setEvent((current) => ({ ...current, text: changeEvent.target.value }))} value={event.text} />
+      <WorkspaceButton type="submit">Add event</WorkspaceButton>
+    </WorkspaceRecord>
     {diagram.sections.map((item) => <SectionForm family="Timeline" item={item} key={item.label} onDelete={onDeleteSection} onMove={onMoveSection} onSave={onEditSection} />)}
     {diagram.periods.map((item) => <TimelinePeriodForm key={item.label} onDelete={onDeletePeriod} onEdit={onEditPeriod} onMove={onMovePeriod} period={item} sections={diagram.sections.map((section) => section.label)} />)}
     {diagram.events.map((item, index) => <TimelineEventForm identity={getTimelineEventIdentity(item, index, diagram.events)} key={`${index}:${item.text}`} onDelete={onDeleteEvent} onMove={onMoveEvent} onSave={onEditEvent} event={item} />)}
@@ -5652,26 +5541,26 @@ function TimelineEditorControls({ bottom, diagram, onAddEvent, onAddPeriod, onAd
 
 function TimelinePeriodForm({ onDelete, onEdit, onMove, period, sections }: { onDelete?: (label: string) => void; onEdit?: (label: string, value: Partial<TimelinePeriod>) => void; onMove?: (label: string, section: string) => void; period: TimelinePeriod; sections: string[] }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(period);
-  return <form aria-label={`Timeline period ${period.label}`} onSubmit={(event) => { event.preventDefault(); onEdit?.(period.label, draft); resetDraft(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
-    <input aria-label={`Timeline period ${period.label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} />
-    <select aria-label={`Timeline period ${period.label} destination`} onChange={(event) => updateDraft((current) => ({ ...current, section: event.target.value }))} value={draft.section}>
+  return <WorkspaceRecord aria-label={`Timeline period ${period.label}`} onSubmit={(event) => { event.preventDefault(); onEdit?.(period.label, draft); resetDraft(); }}>
+    <WorkspaceInput aria-label={`Timeline period ${period.label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} />
+    <WorkspaceSelect aria-label={`Timeline period ${period.label} destination`} onChange={(event) => updateDraft((current) => ({ ...current, section: event.target.value }))} value={draft.section}>
       <option value="">Top level</option>{sections.map((section) => <option key={section}>{section}</option>)}
-    </select>
-    <button type="submit">Save</button>
-    <button aria-label={`Move timeline period ${period.label} to top level`} onClick={() => onMove?.(period.label, '')} type="button">Top level</button>
-    <button aria-label={`Delete timeline period ${period.label}`} onClick={() => onDelete?.(period.label)} type="button">Delete</button>
-  </form>;
+    </WorkspaceSelect>
+    <WorkspaceButton type="submit">Save</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move timeline period ${period.label} to top level`} onClick={() => onMove?.(period.label, '')} type="button">Top level</WorkspaceButton>
+    <WorkspaceButton aria-label={`Delete timeline period ${period.label}`} onClick={() => onDelete?.(period.label)} type="button">Delete</WorkspaceButton>
+  </WorkspaceRecord>;
 }
 
 function TimelineEventForm({ event, identity, onDelete, onMove, onSave }: { event: TimelineEvent; identity: TimelineEventIdentity; onDelete?: (identity: TimelineEventIdentity) => void; onMove?: (identity: TimelineEventIdentity, direction: 'up' | 'down') => void; onSave?: (identity: TimelineEventIdentity, value: Partial<TimelineEvent>) => void }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(event);
-  return <form aria-label={`Timeline event ${event.text}`} onSubmit={(event) => { event.preventDefault(); onSave?.(identity, draft); resetDraft(); }}>
-    <input aria-label={`Timeline event ${event.text} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />
-    <button type="submit">Save</button>
-    <button aria-label={`Move timeline event ${event.text} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</button>
-    <button aria-label={`Move timeline event ${event.text} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</button>
-    <button aria-label={`Delete timeline event ${event.text}`} onClick={() => onDelete?.(identity)} type="button">Delete</button>
-  </form>;
+  return <WorkspaceRecord aria-label={`Timeline event ${event.text}`} onSubmit={(event) => { event.preventDefault(); onSave?.(identity, draft); resetDraft(); }}>
+    <WorkspaceInput aria-label={`Timeline event ${event.text} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />
+    <WorkspaceButton type="submit">Save</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move timeline event ${event.text} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move timeline event ${event.text} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton>
+    <WorkspaceButton aria-label={`Delete timeline event ${event.text}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton>
+  </WorkspaceRecord>;
 }
 
 function GitGraphEditorControls({ bottom, diagram, onAddBranch, onAddCheckout, onAddCherryPick, onAddCommit, onAddMerge, onDelete, onEditBranch, onEditCheckout, onEditCherryPick, onEditCommit, onEditMerge, onMove }: { bottom: number; diagram: GitGraphDiagramSnapshot; onAddBranch?: (value: GitGraphBranch) => void; onAddCheckout?: (value: GitGraphCheckout) => void; onAddCherryPick?: (value: GitGraphCherryPick) => void; onAddCommit?: (value: GitGraphCommit) => void; onAddMerge?: (value: GitGraphMerge) => void; onDelete?: (identity: GitGraphOperationIdentity) => void; onEditBranch?: (identity: GitGraphOperationIdentity, value: Partial<GitGraphBranch>) => void; onEditCheckout?: (identity: GitGraphOperationIdentity, value: Partial<GitGraphCheckout>) => void; onEditCherryPick?: (identity: GitGraphOperationIdentity, value: Partial<GitGraphCherryPick>) => void; onEditCommit?: (identity: GitGraphOperationIdentity, value: Partial<GitGraphCommit>) => void; onEditMerge?: (identity: GitGraphOperationIdentity, value: Partial<GitGraphMerge>) => void; onMove?: (identity: GitGraphOperationIdentity, direction: 'up' | 'down') => void }) {
@@ -5679,12 +5568,12 @@ function GitGraphEditorControls({ bottom, diagram, onAddBranch, onAddCheckout, o
   const branches = ['main', ...diagram.operations.filter((operation) => operation.kind === 'branch').map((operation) => operation.value.name)];
   const mergeBranches = branches.filter((name) => name !== 'main');
   useEffect(() => { setCheckout((current) => ({ ...current, branch: branches.includes(current.branch) ? current.branch : 'main' })); setMerge((current) => ({ ...current, branch: mergeBranches.includes(current.branch) ? current.branch : mergeBranches[0] ?? '' })); }, [branches.join('\u0000')]);
-  return <aside className="canvas-semantic-editor" data-canvas-pan-exclusion="true" data-testid="gitgraph-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}><strong>GitGraph</strong>
-    <form onSubmit={(event) => { event.preventDefault(); onAddCommit?.(commit); }}><input aria-label="New GitGraph commit id" onChange={(event) => setCommit((current) => ({ ...current, id: event.target.value }))} value={commit.id ?? ''} /><select aria-label="New GitGraph commit type" onChange={(event) => setCommit((current) => ({ ...current, type: (event.target.value || undefined) as GitGraphCommit['type'] }))} value={commit.type ?? ''}><option value="">Default type</option><option>HIGHLIGHT</option><option>NORMAL</option><option>REVERSE</option></select><input aria-label="New GitGraph commit tags" onChange={(event) => setCommit((current) => ({ ...current, tags: event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) }))} value={commit.tags.join(', ')} /><button type="submit">Add commit</button></form>
-    <form onSubmit={(event) => { event.preventDefault(); onAddBranch?.(branch); }}><input aria-label="New GitGraph branch" onChange={(event) => setBranch((current) => ({ ...current, name: event.target.value }))} value={branch.name} /><input aria-label="New GitGraph branch order" onChange={(event) => setBranch((current) => ({ ...current, order: event.target.value ? Number(event.target.value) : undefined }))} type="number" value={branch.order ?? ''} /><button type="submit">Add branch</button></form>
-    <form onSubmit={(event) => { event.preventDefault(); onAddCheckout?.(checkout); }}><select aria-label="GitGraph checkout kind" onChange={(event) => setCheckout((current) => ({ ...current, keyword: event.target.value as GitGraphCheckout['keyword'] }))} value={checkout.keyword}><option value="checkout">checkout</option><option value="switch">switch</option></select><select aria-label="GitGraph checkout branch" onChange={(event) => setCheckout((current) => ({ ...current, branch: event.target.value }))} value={checkout.branch}>{branches.map((name) => <option key={name}>{name}</option>)}</select><button type="submit">Add checkout</button></form>
-    <form onSubmit={(event) => { event.preventDefault(); onAddMerge?.(merge); }}><select aria-label="GitGraph merge branch" onChange={(event) => setMerge((current) => ({ ...current, branch: event.target.value }))} value={merge.branch}>{mergeBranches.map((name) => <option key={name}>{name}</option>)}</select><input aria-label="GitGraph merge id" onChange={(event) => setMerge((current) => ({ ...current, id: event.target.value || undefined }))} value={merge.id ?? ''} /><select aria-label="GitGraph merge type" onChange={(event) => setMerge((current) => ({ ...current, type: (event.target.value || undefined) as GitGraphMerge['type'] }))} value={merge.type ?? ''}><option value="">Default type</option><option>HIGHLIGHT</option><option>NORMAL</option><option>REVERSE</option></select><input aria-label="GitGraph merge tags" onChange={(event) => setMerge((current) => ({ ...current, tags: event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) }))} value={merge.tags.join(', ')} /><button type="submit">Add merge</button></form>
-    <form onSubmit={(event) => { event.preventDefault(); onAddCherryPick?.(pick); }}><input aria-label="GitGraph cherry-pick commit id" onChange={(event) => setPick((current) => ({ ...current, id: event.target.value }))} value={pick.id} /><input aria-label="GitGraph cherry-pick parent" onChange={(event) => setPick((current) => ({ ...current, parent: event.target.value || undefined }))} value={pick.parent ?? ''} /><input aria-label="GitGraph cherry-pick tags" onChange={(event) => setPick((current) => ({ ...current, tags: event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) }))} value={pick.tags.join(', ')} /><button type="submit">Add cherry-pick</button></form>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor" data-canvas-pan-exclusion="true" data-testid="gitgraph-editor-controls" style={{ bottom }}><strong>GitGraph</strong>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddCommit?.(commit); }}><WorkspaceInput aria-label="New GitGraph commit id" onChange={(event) => setCommit((current) => ({ ...current, id: event.target.value }))} value={commit.id ?? ''} /><WorkspaceSelect aria-label="New GitGraph commit type" onChange={(event) => setCommit((current) => ({ ...current, type: (event.target.value || undefined) as GitGraphCommit['type'] }))} value={commit.type ?? ''}><option value="">Default type</option><option>HIGHLIGHT</option><option>NORMAL</option><option>REVERSE</option></WorkspaceSelect><WorkspaceInput aria-label="New GitGraph commit tags" onChange={(event) => setCommit((current) => ({ ...current, tags: event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) }))} value={commit.tags.join(', ')} /><WorkspaceButton type="submit">Add commit</WorkspaceButton></WorkspaceRecord>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddBranch?.(branch); }}><WorkspaceInput aria-label="New GitGraph branch" onChange={(event) => setBranch((current) => ({ ...current, name: event.target.value }))} value={branch.name} /><WorkspaceInput aria-label="New GitGraph branch order" onChange={(event) => setBranch((current) => ({ ...current, order: event.target.value ? Number(event.target.value) : undefined }))} type="number" value={branch.order ?? ''} /><WorkspaceButton type="submit">Add branch</WorkspaceButton></WorkspaceRecord>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddCheckout?.(checkout); }}><WorkspaceSelect aria-label="GitGraph checkout kind" onChange={(event) => setCheckout((current) => ({ ...current, keyword: event.target.value as GitGraphCheckout['keyword'] }))} value={checkout.keyword}><option value="checkout">checkout</option><option value="switch">switch</option></WorkspaceSelect><WorkspaceSelect aria-label="GitGraph checkout branch" onChange={(event) => setCheckout((current) => ({ ...current, branch: event.target.value }))} value={checkout.branch}>{branches.map((name) => <option key={name}>{name}</option>)}</WorkspaceSelect><WorkspaceButton type="submit">Add checkout</WorkspaceButton></WorkspaceRecord>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddMerge?.(merge); }}><WorkspaceSelect aria-label="GitGraph merge branch" onChange={(event) => setMerge((current) => ({ ...current, branch: event.target.value }))} value={merge.branch}>{mergeBranches.map((name) => <option key={name}>{name}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="GitGraph merge id" onChange={(event) => setMerge((current) => ({ ...current, id: event.target.value || undefined }))} value={merge.id ?? ''} /><WorkspaceSelect aria-label="GitGraph merge type" onChange={(event) => setMerge((current) => ({ ...current, type: (event.target.value || undefined) as GitGraphMerge['type'] }))} value={merge.type ?? ''}><option value="">Default type</option><option>HIGHLIGHT</option><option>NORMAL</option><option>REVERSE</option></WorkspaceSelect><WorkspaceInput aria-label="GitGraph merge tags" onChange={(event) => setMerge((current) => ({ ...current, tags: event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) }))} value={merge.tags.join(', ')} /><WorkspaceButton type="submit">Add merge</WorkspaceButton></WorkspaceRecord>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddCherryPick?.(pick); }}><WorkspaceInput aria-label="GitGraph cherry-pick commit id" onChange={(event) => setPick((current) => ({ ...current, id: event.target.value }))} value={pick.id} /><WorkspaceInput aria-label="GitGraph cherry-pick parent" onChange={(event) => setPick((current) => ({ ...current, parent: event.target.value || undefined }))} value={pick.parent ?? ''} /><WorkspaceInput aria-label="GitGraph cherry-pick tags" onChange={(event) => setPick((current) => ({ ...current, tags: event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) }))} value={pick.tags.join(', ')} /><WorkspaceButton type="submit">Add cherry-pick</WorkspaceButton></WorkspaceRecord>
     {diagram.operations.map((operation, index) => <GitGraphOperationForm key={`${index}:${operation.kind}`} identity={getGitGraphOperationIdentity(operation, diagram.operations)} index={index} operation={operation} onDelete={onDelete} onEditBranch={onEditBranch} onEditCheckout={onEditCheckout} onEditCherryPick={onEditCherryPick} onEditCommit={onEditCommit} onEditMerge={onEditMerge} onMove={onMove} />)}
   </aside>;
 }
@@ -5693,36 +5582,36 @@ function GitGraphOperationForm({ identity, index, operation, onDelete, onEditBra
   const save = () => { if (operation.kind === 'commit') onEditCommit?.(identity, draft as Partial<GitGraphCommit>); else if (operation.kind === 'branch') onEditBranch?.(identity, draft as Partial<GitGraphBranch>); else if (operation.kind === 'checkout') onEditCheckout?.(identity, draft as Partial<GitGraphCheckout>); else if (operation.kind === 'merge') onEditMerge?.(identity, draft as Partial<GitGraphMerge>); else onEditCherryPick?.(identity, draft as Partial<GitGraphCherryPick>); resetDraft(); };
   const label = `GitGraph ${operation.kind} ${index + 1}`;
   const fields = operation.kind === 'commit'
-    ? <><input aria-label={`${label} id`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphCommit), id: event.target.value || undefined }))} value={(draft as GitGraphCommit).id ?? ''} /><GitGraphTypeSelect label={`${label} type`} onChange={(type) => updateDraft((current) => ({ ...(current as GitGraphCommit), type }))} value={(draft as GitGraphCommit).type} /><GitGraphTagsInput label={`${label} tags`} onChange={(tags) => updateDraft((current) => ({ ...(current as GitGraphCommit), tags }))} value={(draft as GitGraphCommit).tags} /></>
+    ? <><WorkspaceInput aria-label={`${label} id`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphCommit), id: event.target.value || undefined }))} value={(draft as GitGraphCommit).id ?? ''} /><GitGraphTypeSelect label={`${label} type`} onChange={(type) => updateDraft((current) => ({ ...(current as GitGraphCommit), type }))} value={(draft as GitGraphCommit).type} /><GitGraphTagsInput label={`${label} tags`} onChange={(tags) => updateDraft((current) => ({ ...(current as GitGraphCommit), tags }))} value={(draft as GitGraphCommit).tags} /></>
     : operation.kind === 'branch'
-      ? <><input aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphBranch), name: event.target.value }))} value={(draft as GitGraphBranch).name} /><input aria-label={`${label} order`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphBranch), order: event.target.value ? Number(event.target.value) : undefined }))} type="number" value={(draft as GitGraphBranch).order ?? ''} /></>
+      ? <><WorkspaceInput aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphBranch), name: event.target.value }))} value={(draft as GitGraphBranch).name} /><WorkspaceInput aria-label={`${label} order`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphBranch), order: event.target.value ? Number(event.target.value) : undefined }))} type="number" value={(draft as GitGraphBranch).order ?? ''} /></>
       : operation.kind === 'checkout'
-        ? <><select aria-label={`${label} kind`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphCheckout), keyword: event.target.value as GitGraphCheckout['keyword'] }))} value={(draft as GitGraphCheckout).keyword}><option value="checkout">checkout</option><option value="switch">switch</option></select><input aria-label={`${label} branch`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphCheckout), branch: event.target.value }))} value={(draft as GitGraphCheckout).branch} /></>
+        ? <><WorkspaceSelect aria-label={`${label} kind`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphCheckout), keyword: event.target.value as GitGraphCheckout['keyword'] }))} value={(draft as GitGraphCheckout).keyword}><option value="checkout">checkout</option><option value="switch">switch</option></WorkspaceSelect><WorkspaceInput aria-label={`${label} branch`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphCheckout), branch: event.target.value }))} value={(draft as GitGraphCheckout).branch} /></>
         : operation.kind === 'merge'
-          ? <><input aria-label={`${label} branch`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphMerge), branch: event.target.value }))} value={(draft as GitGraphMerge).branch} /><input aria-label={`${label} id`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphMerge), id: event.target.value || undefined }))} value={(draft as GitGraphMerge).id ?? ''} /><GitGraphTypeSelect label={`${label} type`} onChange={(type) => updateDraft((current) => ({ ...(current as GitGraphMerge), type }))} value={(draft as GitGraphMerge).type} /><GitGraphTagsInput label={`${label} tags`} onChange={(tags) => updateDraft((current) => ({ ...(current as GitGraphMerge), tags }))} value={(draft as GitGraphMerge).tags} /></>
-          : <><input aria-label={`${label} id`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphCherryPick), id: event.target.value }))} value={(draft as GitGraphCherryPick).id} /><input aria-label={`${label} parent`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphCherryPick), parent: event.target.value || undefined }))} value={(draft as GitGraphCherryPick).parent ?? ''} /><GitGraphTagsInput label={`${label} tags`} onChange={(tags) => updateDraft((current) => ({ ...(current as GitGraphCherryPick), tags }))} value={(draft as GitGraphCherryPick).tags} /></>;
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); save(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><strong>{operation.kind}</strong>{fields}<button type="submit">Save</button><button aria-label={`Move ${label} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</button><button aria-label={`Move ${label} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} type="button">Delete</button></form>;
+          ? <><WorkspaceInput aria-label={`${label} branch`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphMerge), branch: event.target.value }))} value={(draft as GitGraphMerge).branch} /><WorkspaceInput aria-label={`${label} id`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphMerge), id: event.target.value || undefined }))} value={(draft as GitGraphMerge).id ?? ''} /><GitGraphTypeSelect label={`${label} type`} onChange={(type) => updateDraft((current) => ({ ...(current as GitGraphMerge), type }))} value={(draft as GitGraphMerge).type} /><GitGraphTagsInput label={`${label} tags`} onChange={(tags) => updateDraft((current) => ({ ...(current as GitGraphMerge), tags }))} value={(draft as GitGraphMerge).tags} /></>
+          : <><WorkspaceInput aria-label={`${label} id`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphCherryPick), id: event.target.value }))} value={(draft as GitGraphCherryPick).id} /><WorkspaceInput aria-label={`${label} parent`} onChange={(event) => updateDraft((current) => ({ ...(current as GitGraphCherryPick), parent: event.target.value || undefined }))} value={(draft as GitGraphCherryPick).parent ?? ''} /><GitGraphTagsInput label={`${label} tags`} onChange={(tags) => updateDraft((current) => ({ ...(current as GitGraphCherryPick), tags }))} value={(draft as GitGraphCherryPick).tags} /></>;
+  return <WorkspaceRecord aria-label={label} onSubmit={(event) => { event.preventDefault(); save(); }}><strong>{operation.kind}</strong>{fields}<WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton></WorkspaceRecord>;
 }
-function GitGraphTagsInput({ label, onChange, value }: { label: string; onChange: (tags: string[]) => void; value: string[] }) { return <input aria-label={label} onChange={(event) => onChange(event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean))} value={value.join(', ')} />; }
-function GitGraphTypeSelect({ label, onChange, value }: { label: string; onChange: (type: GitGraphCommit['type']) => void; value?: GitGraphCommit['type'] }) { return <select aria-label={label} onChange={(event) => onChange((event.target.value || undefined) as GitGraphCommit['type'])} value={value ?? ''}><option value="">Default type</option><option>HIGHLIGHT</option><option>NORMAL</option><option>REVERSE</option></select>; }
+function GitGraphTagsInput({ label, onChange, value }: { label: string; onChange: (tags: string[]) => void; value: string[] }) { return <WorkspaceInput aria-label={label} onChange={(event) => onChange(event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean))} value={value.join(', ')} />; }
+function GitGraphTypeSelect({ label, onChange, value }: { label: string; onChange: (type: GitGraphCommit['type']) => void; value?: GitGraphCommit['type'] }) { return <WorkspaceSelect aria-label={label} onChange={(event) => onChange((event.target.value || undefined) as GitGraphCommit['type'])} value={value ?? ''}><option value="">Default type</option><option>HIGHLIGHT</option><option>NORMAL</option><option>REVERSE</option></WorkspaceSelect>; }
 
 function EventModelingEditorControls({ bottom, diagram, onAddData, onAddEntity, onAddTimeframe, onDeleteData, onDeleteEntity, onDeleteTimeframe, onEditData, onEditTimeframe, onMoveTimeframe, onRenameEntity }: { bottom: number; diagram: EventModelingDiagramSnapshot; onAddData?: (value: EventModelingDataBlock) => void; onAddEntity?: (name: string) => void; onAddTimeframe?: (value: EventModelingTimeframe) => void; onDeleteData?: (name: string) => void; onDeleteEntity?: (name: string) => void; onDeleteTimeframe?: (index: string) => void; onEditData?: (name: string, value: Partial<EventModelingDataBlock>) => void; onEditTimeframe?: (index: string, value: Partial<EventModelingTimeframe>) => void; onMoveTimeframe?: (index: string, target: number) => void; onRenameEntity?: (name: string, next: string) => void }) {
   const [entity, setEntity] = useState('Order'); const [timeframe, setTimeframe] = useState<EventModelingTimeframe>({ entity: 'Order', entityType: 'cmd', index: '01', kind: 'tf', links: [] }); const [data, setData] = useState<EventModelingDataBlock>({ name: 'OrderData', dataType: 'json', payload: '  {}\n' });
   useEffect(() => { setTimeframe((current) => ({ ...current, entity: diagram.entities.some((item) => item.name === current.entity) ? current.entity : diagram.entities[0]?.name ?? current.entity, dataId: diagram.dataBlocks.some((item) => item.name === current.dataId) ? current.dataId : undefined, links: current.links.filter((link) => diagram.timeframes.some((item) => item.index === link)) })); }, [diagram.dataBlocks, diagram.entities, diagram.timeframes]);
-  return <aside className="canvas-semantic-editor" data-canvas-pan-exclusion="true" data-testid="event-modeling-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}><strong>Event modeling</strong><form onSubmit={(event) => { event.preventDefault(); onAddEntity?.(entity); }}><input aria-label="New Event Modeling entity" onChange={(event) => setEntity(event.target.value)} value={entity} /><button type="submit">Add entity</button></form><form onSubmit={(event) => { event.preventDefault(); onAddTimeframe?.(timeframe); }}><input aria-label="New Event Modeling timeframe index" onChange={(event) => setTimeframe((current) => ({ ...current, index: event.target.value }))} value={timeframe.index} /><EventFrameFields prefix="New Event Modeling timeframe" update={setTimeframe} value={timeframe} entities={diagram.entities.map((item) => item.name)} dataBlocks={diagram.dataBlocks.map((item) => item.name)} /><button type="submit">Add timeframe</button></form><form onSubmit={(event) => { event.preventDefault(); onAddData?.(data); }}><input aria-label="New Event Modeling data name" onChange={(event) => setData((current) => ({ ...current, name: event.target.value }))} value={data.name} /><EventDataTypeSelect label="New Event Modeling data type" onChange={(dataType) => setData((current) => ({ ...current, dataType }))} value={data.dataType} /><textarea aria-label="New Event Modeling data payload" onChange={(event) => setData((current) => ({ ...current, payload: event.target.value }))} value={data.payload} /><button type="submit">Add data</button></form>{diagram.entities.map((item) => <EventEntityForm entity={item.name} key={item.name} onDelete={onDeleteEntity} onRename={onRenameEntity} />)}{diagram.timeframes.map((item, index) => <EventTimeframeForm dataBlocks={diagram.dataBlocks.map((entry) => entry.name)} entities={diagram.entities.map((entry) => entry.name)} index={index} key={item.index} onDelete={onDeleteTimeframe} onMove={onMoveTimeframe} onSave={onEditTimeframe} value={item} />)}{diagram.dataBlocks.map((item) => <EventDataForm data={item} key={item.name} onDelete={onDeleteData} onSave={onEditData} />)}</aside>;
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor" data-canvas-pan-exclusion="true" data-testid="event-modeling-editor-controls" style={{ bottom }}><strong>Event modeling</strong><WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddEntity?.(entity); }}><WorkspaceInput aria-label="New Event Modeling entity" onChange={(event) => setEntity(event.target.value)} value={entity} /><WorkspaceButton type="submit">Add entity</WorkspaceButton></WorkspaceRecord><WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddTimeframe?.(timeframe); }}><WorkspaceInput aria-label="New Event Modeling timeframe index" onChange={(event) => setTimeframe((current) => ({ ...current, index: event.target.value }))} value={timeframe.index} /><EventFrameFields prefix="New Event Modeling timeframe" update={setTimeframe} value={timeframe} entities={diagram.entities.map((item) => item.name)} dataBlocks={diagram.dataBlocks.map((item) => item.name)} /><WorkspaceButton type="submit">Add timeframe</WorkspaceButton></WorkspaceRecord><WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddData?.(data); }}><WorkspaceInput aria-label="New Event Modeling data name" onChange={(event) => setData((current) => ({ ...current, name: event.target.value }))} value={data.name} /><EventDataTypeSelect label="New Event Modeling data type" onChange={(dataType) => setData((current) => ({ ...current, dataType }))} value={data.dataType} /><WorkspaceTextarea aria-label="New Event Modeling data payload" onChange={(event) => setData((current) => ({ ...current, payload: event.target.value }))} value={data.payload} /><WorkspaceButton type="submit">Add data</WorkspaceButton></WorkspaceRecord>{diagram.entities.map((item) => <EventEntityForm entity={item.name} key={item.name} onDelete={onDeleteEntity} onRename={onRenameEntity} />)}{diagram.timeframes.map((item, index) => <EventTimeframeForm dataBlocks={diagram.dataBlocks.map((entry) => entry.name)} entities={diagram.entities.map((entry) => entry.name)} index={index} key={item.index} onDelete={onDeleteTimeframe} onMove={onMoveTimeframe} onSave={onEditTimeframe} value={item} />)}{diagram.dataBlocks.map((item) => <EventDataForm data={item} key={item.name} onDelete={onDeleteData} onSave={onEditData} />)}</aside>;
 }
-function EventEntityForm({ entity, onDelete, onRename }: { entity: string; onDelete?: (value: string) => void; onRename?: (value: string, next: string) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft({ name: entity }); return <form aria-label={`Event Modeling entity ${entity}`} onSubmit={(event) => { event.preventDefault(); onRename?.(entity, draft.name); resetDraft(); }}><input aria-label={`Event Modeling entity ${entity} name`} onChange={(event) => updateDraft(() => ({ name: event.target.value }))} value={draft.name} /><button type="submit">Save</button><button aria-label={`Delete Event Modeling entity ${entity}`} onClick={() => onDelete?.(entity)} type="button">Delete</button></form>; }
-function EventFrameFields({ dataBlocks, entities, prefix, update, value }: { dataBlocks: string[]; entities: string[]; prefix: string; update: (value: (current: EventModelingTimeframe) => EventModelingTimeframe) => void; value: EventModelingTimeframe }) { return <><select aria-label={`${prefix} kind`} onChange={(event) => update((current) => ({ ...current, kind: event.target.value as EventModelingTimeframe['kind'] }))} value={value.kind}>{['tf', 'timeframe', 'rf', 'resetframe'].map((kind) => <option key={kind}>{kind}</option>)}</select><select aria-label={`${prefix} type`} onChange={(event) => update((current) => ({ ...current, entityType: event.target.value as EventModelingTimeframe['entityType'] }))} value={value.entityType}>{['cmd', 'command', 'evt', 'event', 'pcr', 'processor', 'readmodel', 'rmo', 'ui'].map((type) => <option key={type}>{type}</option>)}</select><select aria-label={`${prefix} entity`} onChange={(event) => update((current) => ({ ...current, entity: event.target.value }))} value={value.entity}>{entities.map((name) => <option key={name}>{name}</option>)}</select><input aria-label={`${prefix} links`} onChange={(event) => update((current) => ({ ...current, links: event.target.value.split(',').map((link) => link.trim()).filter(Boolean) }))} value={value.links.join(', ')} /><select aria-label={`${prefix} data`} onChange={(event) => update((current) => ({ ...current, dataId: event.target.value || undefined }))} value={value.dataId ?? ''}><option value="">No data</option>{dataBlocks.map((name) => <option key={name}>{name}</option>)}</select></>; }
-function EventTimeframeForm({ dataBlocks, entities, index, onDelete, onMove, onSave, value }: { dataBlocks: string[]; entities: string[]; index: number; onDelete?: (value: string) => void; onMove?: (value: string, target: number) => void; onSave?: (index: string, value: Partial<EventModelingTimeframe>) => void; value: EventModelingTimeframe }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(value); return <form aria-label={`Event Modeling timeframe ${value.index}`} onSubmit={(event) => { event.preventDefault(); onSave?.(value.index, draft); resetDraft(); }}><input aria-label={`Event Modeling timeframe ${value.index} index`} onChange={(event) => updateDraft((current) => ({ ...current, index: event.target.value }))} value={draft.index} /><EventFrameFields dataBlocks={dataBlocks} entities={entities} prefix={`Event Modeling timeframe ${value.index}`} update={updateDraft} value={draft} /><button type="submit">Save</button><button aria-label={`Move Event Modeling timeframe ${value.index} up`} onClick={() => onMove?.(value.index, index - 1)} type="button">↑</button><button aria-label={`Move Event Modeling timeframe ${value.index} down`} onClick={() => onMove?.(value.index, index + 1)} type="button">↓</button><button aria-label={`Delete Event Modeling timeframe ${value.index}`} onClick={() => onDelete?.(value.index)} type="button">Delete</button></form>; }
-function EventDataTypeSelect({ label, onChange, value }: { label: string; onChange: (value: EventModelingDataBlock['dataType']) => void; value?: EventModelingDataBlock['dataType'] }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value as EventModelingDataBlock['dataType'])} value={value ?? 'json'}>{['json', 'jsobj', 'figma', 'salt', 'uri', 'md', 'html', 'text'].map((type) => <option key={type}>{type}</option>)}</select>; }
-function EventDataForm({ data, onDelete, onSave }: { data: EventModelingDataBlock; onDelete?: (name: string) => void; onSave?: (name: string, value: Partial<EventModelingDataBlock>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(data); return <form aria-label={`Event Modeling data ${data.name}`} onSubmit={(event) => { event.preventDefault(); onSave?.(data.name, draft); resetDraft(); }}><input aria-label={`Event Modeling data ${data.name} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} value={draft.name} /><EventDataTypeSelect label={`Event Modeling data ${data.name} type`} onChange={(dataType) => updateDraft((current) => ({ ...current, dataType }))} value={draft.dataType} /><textarea aria-label={`Event Modeling data ${data.name} payload`} onChange={(event) => updateDraft((current) => ({ ...current, payload: event.target.value }))} value={draft.payload} /><button type="submit">Save</button><button aria-label={`Delete Event Modeling data ${data.name}`} onClick={() => onDelete?.(data.name)} type="button">Delete</button></form>; }
+function EventEntityForm({ entity, onDelete, onRename }: { entity: string; onDelete?: (value: string) => void; onRename?: (value: string, next: string) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft({ name: entity }); return <WorkspaceRecord aria-label={`Event Modeling entity ${entity}`} onSubmit={(event) => { event.preventDefault(); onRename?.(entity, draft.name); resetDraft(); }}><WorkspaceInput aria-label={`Event Modeling entity ${entity} name`} onChange={(event) => updateDraft(() => ({ name: event.target.value }))} value={draft.name} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete Event Modeling entity ${entity}`} onClick={() => onDelete?.(entity)} type="button">Delete</WorkspaceButton></WorkspaceRecord>; }
+function EventFrameFields({ dataBlocks, entities, prefix, update, value }: { dataBlocks: string[]; entities: string[]; prefix: string; update: (value: (current: EventModelingTimeframe) => EventModelingTimeframe) => void; value: EventModelingTimeframe }) { return <><WorkspaceSelect aria-label={`${prefix} kind`} onChange={(event) => update((current) => ({ ...current, kind: event.target.value as EventModelingTimeframe['kind'] }))} value={value.kind}>{['tf', 'timeframe', 'rf', 'resetframe'].map((kind) => <option key={kind}>{kind}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label={`${prefix} type`} onChange={(event) => update((current) => ({ ...current, entityType: event.target.value as EventModelingTimeframe['entityType'] }))} value={value.entityType}>{['cmd', 'command', 'evt', 'event', 'pcr', 'processor', 'readmodel', 'rmo', 'ui'].map((type) => <option key={type}>{type}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label={`${prefix} entity`} onChange={(event) => update((current) => ({ ...current, entity: event.target.value }))} value={value.entity}>{entities.map((name) => <option key={name}>{name}</option>)}</WorkspaceSelect><WorkspaceInput aria-label={`${prefix} links`} onChange={(event) => update((current) => ({ ...current, links: event.target.value.split(',').map((link) => link.trim()).filter(Boolean) }))} value={value.links.join(', ')} /><WorkspaceSelect aria-label={`${prefix} data`} onChange={(event) => update((current) => ({ ...current, dataId: event.target.value || undefined }))} value={value.dataId ?? ''}><option value="">No data</option>{dataBlocks.map((name) => <option key={name}>{name}</option>)}</WorkspaceSelect></>; }
+function EventTimeframeForm({ dataBlocks, entities, index, onDelete, onMove, onSave, value }: { dataBlocks: string[]; entities: string[]; index: number; onDelete?: (value: string) => void; onMove?: (value: string, target: number) => void; onSave?: (index: string, value: Partial<EventModelingTimeframe>) => void; value: EventModelingTimeframe }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(value); return <WorkspaceRecord aria-label={`Event Modeling timeframe ${value.index}`} onSubmit={(event) => { event.preventDefault(); onSave?.(value.index, draft); resetDraft(); }}><WorkspaceInput aria-label={`Event Modeling timeframe ${value.index} index`} onChange={(event) => updateDraft((current) => ({ ...current, index: event.target.value }))} value={draft.index} /><EventFrameFields dataBlocks={dataBlocks} entities={entities} prefix={`Event Modeling timeframe ${value.index}`} update={updateDraft} value={draft} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move Event Modeling timeframe ${value.index} up`} onClick={() => onMove?.(value.index, index - 1)} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move Event Modeling timeframe ${value.index} down`} onClick={() => onMove?.(value.index, index + 1)} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete Event Modeling timeframe ${value.index}`} onClick={() => onDelete?.(value.index)} type="button">Delete</WorkspaceButton></WorkspaceRecord>; }
+function EventDataTypeSelect({ label, onChange, value }: { label: string; onChange: (value: EventModelingDataBlock['dataType']) => void; value?: EventModelingDataBlock['dataType'] }) { return <WorkspaceSelect aria-label={label} onChange={(event) => onChange(event.target.value as EventModelingDataBlock['dataType'])} value={value ?? 'json'}>{['json', 'jsobj', 'figma', 'salt', 'uri', 'md', 'html', 'text'].map((type) => <option key={type}>{type}</option>)}</WorkspaceSelect>; }
+function EventDataForm({ data, onDelete, onSave }: { data: EventModelingDataBlock; onDelete?: (name: string) => void; onSave?: (name: string, value: Partial<EventModelingDataBlock>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(data); return <WorkspaceRecord aria-label={`Event Modeling data ${data.name}`} onSubmit={(event) => { event.preventDefault(); onSave?.(data.name, draft); resetDraft(); }}><WorkspaceInput aria-label={`Event Modeling data ${data.name} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} value={draft.name} /><EventDataTypeSelect label={`Event Modeling data ${data.name} type`} onChange={(dataType) => updateDraft((current) => ({ ...current, dataType }))} value={draft.dataType} /><WorkspaceTextarea aria-label={`Event Modeling data ${data.name} payload`} onChange={(event) => updateDraft((current) => ({ ...current, payload: event.target.value }))} value={draft.payload} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete Event Modeling data ${data.name}`} onClick={() => onDelete?.(data.name)} type="button">Delete</WorkspaceButton></WorkspaceRecord>; }
 
 function KanbanEditorControls({ bottom, diagram, onAddCard, onAddColumn, onDeleteCard, onDeleteColumn, onEditCard, onEditColumn, onMoveCard }: { bottom: number; diagram: KanbanDiagramSnapshot; onAddCard?: (value: KanbanCard) => void; onAddColumn?: (value: KanbanColumn) => void; onDeleteCard?: (id: string) => void; onDeleteColumn?: (id: string) => void; onEditCard?: (id: string, value: Partial<Omit<KanbanCard, 'columnId'>>) => void; onEditColumn?: (id: string, value: Partial<KanbanColumn>) => void; onMoveCard?: (id: string, column: string, target: number) => void }) {
   const [column, setColumn] = useState<KanbanColumn>({ id: 'todo', title: 'Todo' }); const [card, setCard] = useState<KanbanCard>({ columnId: diagram.columns[0]?.id ?? '', id: 'task', metadata: {}, title: 'Task' }); useEffect(() => { setCard((current) => ({ ...current, columnId: diagram.columns.some((item) => item.id === current.columnId) ? current.columnId : diagram.columns[0]?.id ?? '' })); }, [diagram.columns]);
-  return <aside className="canvas-semantic-editor" data-canvas-pan-exclusion="true" data-testid="kanban-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}><strong>Kanban</strong><form onSubmit={(event) => { event.preventDefault(); onAddColumn?.(column); }}><input aria-label="New Kanban column id" onChange={(event) => setColumn((current) => ({ ...current, id: event.target.value }))} value={column.id} /><input aria-label="New Kanban column title" onChange={(event) => setColumn((current) => ({ ...current, title: event.target.value }))} value={column.title} /><button type="submit">Add column</button></form><form onSubmit={(event) => { event.preventDefault(); onAddCard?.(card); }}><select aria-label="New Kanban card column" onChange={(event) => setCard((current) => ({ ...current, columnId: event.target.value }))} value={card.columnId}>{diagram.columns.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><input aria-label="New Kanban card id" onChange={(event) => setCard((current) => ({ ...current, id: event.target.value }))} value={card.id} /><input aria-label="New Kanban card title" onChange={(event) => setCard((current) => ({ ...current, title: event.target.value }))} value={card.title} /><button type="submit">Add card</button></form>{diagram.columns.map((item) => <KanbanColumnForm column={item} key={item.id} onDelete={onDeleteColumn} onSave={onEditColumn} />)}{diagram.cards.map((item) => <KanbanCardForm card={item} cards={diagram.cards} columns={diagram.columns} key={item.id} onDelete={onDeleteCard} onMove={onMoveCard} onSave={onEditCard} />)}</aside>;
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor" data-canvas-pan-exclusion="true" data-testid="kanban-editor-controls" style={{ bottom }}><strong>Kanban</strong><WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddColumn?.(column); }}><WorkspaceInput aria-label="New Kanban column id" onChange={(event) => setColumn((current) => ({ ...current, id: event.target.value }))} value={column.id} /><WorkspaceInput aria-label="New Kanban column title" onChange={(event) => setColumn((current) => ({ ...current, title: event.target.value }))} value={column.title} /><WorkspaceButton type="submit">Add column</WorkspaceButton></WorkspaceRecord><WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddCard?.(card); }}><WorkspaceSelect aria-label="New Kanban card column" onChange={(event) => setCard((current) => ({ ...current, columnId: event.target.value }))} value={card.columnId}>{diagram.columns.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="New Kanban card id" onChange={(event) => setCard((current) => ({ ...current, id: event.target.value }))} value={card.id} /><WorkspaceInput aria-label="New Kanban card title" onChange={(event) => setCard((current) => ({ ...current, title: event.target.value }))} value={card.title} /><WorkspaceButton type="submit">Add card</WorkspaceButton></WorkspaceRecord>{diagram.columns.map((item) => <KanbanColumnForm column={item} key={item.id} onDelete={onDeleteColumn} onSave={onEditColumn} />)}{diagram.cards.map((item) => <KanbanCardForm card={item} cards={diagram.cards} columns={diagram.columns} key={item.id} onDelete={onDeleteCard} onMove={onMoveCard} onSave={onEditCard} />)}</aside>;
 }
-function KanbanColumnForm({ column, onDelete, onSave }: { column: KanbanColumn; onDelete?: (id: string) => void; onSave?: (id: string, value: Partial<KanbanColumn>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(column); return <form aria-label={`Kanban column ${column.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(column.id, draft); resetDraft(); }}><input aria-label={`Kanban column ${column.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><input aria-label={`Kanban column ${column.id} title`} onChange={(event) => updateDraft((current) => ({ ...current, title: event.target.value }))} value={draft.title} /><button type="submit">Save</button><button aria-label={`Delete Kanban column ${column.id}`} onClick={() => onDelete?.(column.id)} type="button">Delete</button></form>; }
-function KanbanCardForm({ card, cards, columns, onDelete, onMove, onSave }: { card: KanbanCard; cards: KanbanCard[]; columns: KanbanColumn[]; onDelete?: (id: string) => void; onMove?: (id: string, column: string, target: number) => void; onSave?: (id: string, value: Partial<Omit<KanbanCard, 'columnId'>>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(card); const [metadataKey, setMetadataKey] = useState(''); const [metadataValue, setMetadataValue] = useState(''); const label = `Kanban card ${card.id}`; const addMetadata = () => { if (!metadataKey.trim()) return; updateDraft((current) => ({ ...current, metadata: { ...current.metadata, [metadataKey.trim()]: metadataValue } })); setMetadataKey(''); setMetadataValue(''); }; return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); onSave?.(card.id, { id: draft.id, metadata: draft.metadata, title: draft.title }); resetDraft(); }}><select aria-label={`${label} column`} onChange={(event) => onMove?.(card.id, event.target.value, cards.filter((item) => item.columnId === event.target.value && item.id !== card.id).length)} value={card.columnId}>{columns.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select><input aria-label={`${label} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><input aria-label={`${label} title`} onChange={(event) => updateDraft((current) => ({ ...current, title: event.target.value }))} value={draft.title} />{Object.entries(draft.metadata).map(([key, value]) => <span key={key}><input aria-label={`${label} metadata ${key} key`} onChange={(event) => updateDraft((current) => { const metadata = { ...current.metadata }; delete metadata[key]; return { ...current, metadata: { ...metadata, [event.target.value]: value } }; })} value={key} /><input aria-label={`${label} metadata ${key} value`} onChange={(event) => updateDraft((current) => ({ ...current, metadata: { ...current.metadata, [key]: event.target.value } }))} value={value} /><button aria-label={`Delete ${label} metadata ${key}`} onClick={() => updateDraft((current) => { const metadata = { ...current.metadata }; delete metadata[key]; return { ...current, metadata }; })} type="button">×</button></span>)}<input aria-label={`${label} new metadata key`} onChange={(event) => setMetadataKey(event.target.value)} value={metadataKey} /><input aria-label={`${label} new metadata value`} onChange={(event) => setMetadataValue(event.target.value)} value={metadataValue} /><button aria-label={`Add ${label} metadata`} onClick={addMetadata} type="button">Add metadata</button><button type="submit">Save</button><button aria-label={`Delete Kanban card ${card.id}`} onClick={() => onDelete?.(card.id)} type="button">Delete</button></form>; }
+function KanbanColumnForm({ column, onDelete, onSave }: { column: KanbanColumn; onDelete?: (id: string) => void; onSave?: (id: string, value: Partial<KanbanColumn>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(column); return <WorkspaceRecord aria-label={`Kanban column ${column.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(column.id, draft); resetDraft(); }}><WorkspaceInput aria-label={`Kanban column ${column.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><WorkspaceInput aria-label={`Kanban column ${column.id} title`} onChange={(event) => updateDraft((current) => ({ ...current, title: event.target.value }))} value={draft.title} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete Kanban column ${column.id}`} onClick={() => onDelete?.(column.id)} type="button">Delete</WorkspaceButton></WorkspaceRecord>; }
+function KanbanCardForm({ card, cards, columns, onDelete, onMove, onSave }: { card: KanbanCard; cards: KanbanCard[]; columns: KanbanColumn[]; onDelete?: (id: string) => void; onMove?: (id: string, column: string, target: number) => void; onSave?: (id: string, value: Partial<Omit<KanbanCard, 'columnId'>>) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(card); const [metadataKey, setMetadataKey] = useState(''); const [metadataValue, setMetadataValue] = useState(''); const label = `Kanban card ${card.id}`; const addMetadata = () => { if (!metadataKey.trim()) return; updateDraft((current) => ({ ...current, metadata: { ...current.metadata, [metadataKey.trim()]: metadataValue } })); setMetadataKey(''); setMetadataValue(''); }; return <WorkspaceRecord aria-label={label} onSubmit={(event) => { event.preventDefault(); onSave?.(card.id, { id: draft.id, metadata: draft.metadata, title: draft.title }); resetDraft(); }}><WorkspaceSelect aria-label={`${label} column`} onChange={(event) => onMove?.(card.id, event.target.value, cards.filter((item) => item.columnId === event.target.value && item.id !== card.id).length)} value={card.columnId}>{columns.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</WorkspaceSelect><WorkspaceInput aria-label={`${label} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><WorkspaceInput aria-label={`${label} title`} onChange={(event) => updateDraft((current) => ({ ...current, title: event.target.value }))} value={draft.title} />{Object.entries(draft.metadata).map(([key, value]) => <span key={key}><WorkspaceInput aria-label={`${label} metadata ${key} key`} onChange={(event) => updateDraft((current) => { const metadata = { ...current.metadata }; delete metadata[key]; return { ...current, metadata: { ...metadata, [event.target.value]: value } }; })} value={key} /><WorkspaceInput aria-label={`${label} metadata ${key} value`} onChange={(event) => updateDraft((current) => ({ ...current, metadata: { ...current.metadata, [key]: event.target.value } }))} value={value} /><WorkspaceButton aria-label={`Delete ${label} metadata ${key}`} onClick={() => updateDraft((current) => { const metadata = { ...current.metadata }; delete metadata[key]; return { ...current, metadata }; })} type="button">×</WorkspaceButton></span>)}<WorkspaceInput aria-label={`${label} new metadata key`} onChange={(event) => setMetadataKey(event.target.value)} value={metadataKey} /><WorkspaceInput aria-label={`${label} new metadata value`} onChange={(event) => setMetadataValue(event.target.value)} value={metadataValue} /><WorkspaceButton aria-label={`Add ${label} metadata`} onClick={addMetadata} type="button">Add metadata</WorkspaceButton><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete Kanban card ${card.id}`} onClick={() => onDelete?.(card.id)} type="button">Delete</WorkspaceButton></WorkspaceRecord>; }
 
 function hierarchyPath(node: { ancestorLabels?: readonly string[]; label: string }): string { return [...(node.ancestorLabels ?? []), node.label].join(' / '); }
 function hierarchyParentIndex<Node extends { ancestorLabels?: readonly string[]; label: string }>(nodes: readonly Node[], node: Node): number {
@@ -5739,17 +5628,17 @@ function isSafeHierarchyIdentity(identity: { occurrenceCount: number }): boolean
 
 function MindmapEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onReparent }: { bottom: number; diagram: MindmapDiagramSnapshot; maxHeight: number; onAdd?: (value: Omit<MindmapNode, 'parentLabel'>, parent?: MindmapNodeIdentity) => void; onDelete?: (identity: MindmapNodeIdentity) => void; onEdit?: (identity: MindmapNodeIdentity, value: Partial<Omit<MindmapNode, 'parentLabel'>>) => void; onMove?: (identity: MindmapNodeIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: MindmapNodeIdentity, parent: MindmapNodeIdentity) => void }) {
   const [node, setNode] = useState<Omit<MindmapNode, 'parentLabel'>>({ classes: [], label: 'Node', shape: 'default' }); const [parentIndex, setParentIndex] = useState(0); useEffect(() => setParentIndex((current) => Math.min(current, Math.max(0, diagram.nodes.length - 1))), [diagram.nodes.length]); const parent = diagram.nodes[parentIndex]; const parentIdentity = parent ? getMindmapNodeIdentity(parent, diagram.nodes) : undefined; const canAdd = parentIdentity ? isSafeHierarchyIdentity(parentIdentity) : false;
-  return <aside className="canvas-semantic-editor canvas-hierarchy-editor" data-canvas-pan-exclusion="true" data-testid="mindmap-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}><strong>Mindmap</strong><form onSubmit={(event) => { event.preventDefault(); if (canAdd) onAdd?.(node, parentIdentity); }}><select aria-label="New Mindmap parent" onChange={(event) => setParentIndex(Number(event.target.value))} style={HIERARCHY_CONTROL_STYLE} value={parentIndex}>{diagram.nodes.map((item, index) => <option disabled={!isSafeHierarchyIdentity(getMindmapNodeIdentity(item, diagram.nodes))} key={`${index}:${hierarchyPath(item)}`} value={index}>{hierarchyPath(item)}</option>)}</select><input aria-label="New Mindmap label" onChange={(event) => setNode((current) => ({ ...current, label: event.target.value }))} value={node.label} /><MindmapFields prefix="New Mindmap" update={setNode} value={node} /><button disabled={!canAdd} style={HIERARCHY_CONTROL_STYLE} type="submit">Add node</button></form>{diagram.nodes.map((item, index) => <MindmapNodeForm index={index} key={`${index}:${item.id ?? item.label}:${hierarchyPath(item)}`} node={item} nodes={diagram.nodes} onDelete={onDelete} onEdit={onEdit} onMove={onMove} onReparent={onReparent} />)}</aside>;
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-hierarchy-editor" data-canvas-pan-exclusion="true" data-testid="mindmap-editor-controls" style={{ bottom, maxHeight }}><strong>Mindmap</strong><WorkspaceRecord onSubmit={(event) => { event.preventDefault(); if (canAdd) onAdd?.(node, parentIdentity); }}><WorkspaceSelect aria-label="New Mindmap parent" onChange={(event) => setParentIndex(Number(event.target.value))} value={parentIndex}>{diagram.nodes.map((item, index) => <option disabled={!isSafeHierarchyIdentity(getMindmapNodeIdentity(item, diagram.nodes))} key={`${index}:${hierarchyPath(item)}`} value={index}>{hierarchyPath(item)}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="New Mindmap label" onChange={(event) => setNode((current) => ({ ...current, label: event.target.value }))} value={node.label} /><MindmapFields prefix="New Mindmap" update={setNode} value={node} /><WorkspaceButton disabled={!canAdd} type="submit">Add node</WorkspaceButton></WorkspaceRecord>{diagram.nodes.map((item, index) => <MindmapNodeForm index={index} key={`${index}:${item.id ?? item.label}:${hierarchyPath(item)}`} node={item} nodes={diagram.nodes} onDelete={onDelete} onEdit={onEdit} onMove={onMove} onReparent={onReparent} />)}</aside>;
 }
-function MindmapFields({ prefix, update, value }: { prefix: string; update: (value: (current: Omit<MindmapNode, 'parentLabel'>) => Omit<MindmapNode, 'parentLabel'>) => void; value: Omit<MindmapNode, 'parentLabel'> }) { return <><select aria-label={`${prefix} shape`} onChange={(event) => update((current) => ({ ...current, shape: event.target.value as MindmapNodeShape, ...(event.target.value === 'default' ? { id: undefined } : {}) }))} value={value.shape}>{['default', 'square', 'rounded', 'circle', 'bang', 'cloud', 'hexagon'].map((shape) => <option key={shape}>{shape}</option>)}</select>{value.shape !== 'default' ? <input aria-label={`${prefix} id`} onChange={(event) => update((current) => ({ ...current, id: event.target.value || undefined }))} value={value.id ?? ''} /> : null}<input aria-label={`${prefix} classes`} onChange={(event) => update((current) => ({ ...current, classes: event.target.value.split(/\s+/).filter(Boolean) }))} value={value.classes.join(' ')} /><input aria-label={`${prefix} icon`} onChange={(event) => update((current) => ({ ...current, icon: event.target.value || undefined }))} value={value.icon ?? ''} /></>; }
-function MindmapNodeForm({ index, node, nodes, onDelete, onEdit, onMove, onReparent }: { index: number; node: MindmapNode; nodes: MindmapNode[]; onDelete?: (identity: MindmapNodeIdentity) => void; onEdit?: (identity: MindmapNodeIdentity, value: Partial<Omit<MindmapNode, 'parentLabel'>>) => void; onMove?: (identity: MindmapNodeIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: MindmapNodeIdentity, parent: MindmapNodeIdentity) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(node); const label = `Mindmap node ${node.label}`; const identity = getMindmapNodeIdentity(node, nodes); const safe = isSafeHierarchyIdentity(identity); const parentIndex = hierarchyParentIndex(nodes, node); return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe) onEdit?.(identity, draft); resetDraft(); }}><input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><MindmapFields prefix={label} update={updateDraft} value={draft} /><select aria-label={`${label} parent`} disabled={!safe || parentIndex < 0} onChange={(event) => { const candidate = Number(event.target.value); const parent = nodes[candidate]; const parentIdentity = parent ? getMindmapNodeIdentity(parent, nodes) : undefined; if (parentIdentity && safe && isSafeHierarchyIdentity(parentIdentity) && !isInvalidHierarchyParent(nodes, index, candidate)) onReparent?.(identity, parentIdentity); }} style={HIERARCHY_CONTROL_STYLE} value={parentIndex}><option value={-1}>Root node</option>{nodes.map((item, candidate) => <option disabled={isInvalidHierarchyParent(nodes, index, candidate) || !isSafeHierarchyIdentity(getMindmapNodeIdentity(item, nodes))} key={`${candidate}:${hierarchyPath(item)}`} value={candidate}>{hierarchyPath(item)}</option>)}</select><button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move Mindmap node ${node.label} up`} disabled={!safe} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move Mindmap node ${node.label} down`} disabled={!safe} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>{node.parentLabel ? <button aria-label={`Delete Mindmap node ${node.label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button> : null}</form>; }
+function MindmapFields({ prefix, update, value }: { prefix: string; update: (value: (current: Omit<MindmapNode, 'parentLabel'>) => Omit<MindmapNode, 'parentLabel'>) => void; value: Omit<MindmapNode, 'parentLabel'> }) { return <><WorkspaceSelect aria-label={`${prefix} shape`} onChange={(event) => update((current) => ({ ...current, shape: event.target.value as MindmapNodeShape, ...(event.target.value === 'default' ? { id: undefined } : {}) }))} value={value.shape}>{['default', 'square', 'rounded', 'circle', 'bang', 'cloud', 'hexagon'].map((shape) => <option key={shape}>{shape}</option>)}</WorkspaceSelect>{value.shape !== 'default' ? <WorkspaceInput aria-label={`${prefix} id`} onChange={(event) => update((current) => ({ ...current, id: event.target.value || undefined }))} value={value.id ?? ''} /> : null}<WorkspaceInput aria-label={`${prefix} classes`} onChange={(event) => update((current) => ({ ...current, classes: event.target.value.split(/\s+/).filter(Boolean) }))} value={value.classes.join(' ')} /><WorkspaceInput aria-label={`${prefix} icon`} onChange={(event) => update((current) => ({ ...current, icon: event.target.value || undefined }))} value={value.icon ?? ''} /></>; }
+function MindmapNodeForm({ index, node, nodes, onDelete, onEdit, onMove, onReparent }: { index: number; node: MindmapNode; nodes: MindmapNode[]; onDelete?: (identity: MindmapNodeIdentity) => void; onEdit?: (identity: MindmapNodeIdentity, value: Partial<Omit<MindmapNode, 'parentLabel'>>) => void; onMove?: (identity: MindmapNodeIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: MindmapNodeIdentity, parent: MindmapNodeIdentity) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(node); const label = `Mindmap node ${node.label}`; const identity = getMindmapNodeIdentity(node, nodes); const safe = isSafeHierarchyIdentity(identity); const parentIndex = hierarchyParentIndex(nodes, node); return <WorkspaceRecord aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe) onEdit?.(identity, draft); resetDraft(); }}><WorkspaceInput aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><MindmapFields prefix={label} update={updateDraft} value={draft} /><WorkspaceSelect aria-label={`${label} parent`} disabled={!safe || parentIndex < 0} onChange={(event) => { const candidate = Number(event.target.value); const parent = nodes[candidate]; const parentIdentity = parent ? getMindmapNodeIdentity(parent, nodes) : undefined; if (parentIdentity && safe && isSafeHierarchyIdentity(parentIdentity) && !isInvalidHierarchyParent(nodes, index, candidate)) onReparent?.(identity, parentIdentity); }} value={parentIndex}><option value={-1}>Root node</option>{nodes.map((item, candidate) => <option disabled={isInvalidHierarchyParent(nodes, index, candidate) || !isSafeHierarchyIdentity(getMindmapNodeIdentity(item, nodes))} key={`${candidate}:${hierarchyPath(item)}`} value={candidate}>{hierarchyPath(item)}</option>)}</WorkspaceSelect><WorkspaceButton disabled={!safe} type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move Mindmap node ${node.label} up`} disabled={!safe} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move Mindmap node ${node.label} down`} disabled={!safe} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton>{node.parentLabel ? <WorkspaceButton aria-label={`Delete Mindmap node ${node.label}`} disabled={!safe} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton> : null}</WorkspaceRecord>; }
 
-function TreeViewEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onReparent }: { bottom: number; diagram: TreeViewDiagramSnapshot; maxHeight: number; onAdd?: (value: Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>, parent?: TreeViewNodeIdentity) => void; onDelete?: (identity: TreeViewNodeIdentity) => void; onEdit?: (identity: TreeViewNodeIdentity, value: Partial<Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>>) => void; onMove?: (identity: TreeViewNodeIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: TreeViewNodeIdentity, parent: TreeViewNodeIdentity) => void }) { const [node, setNode] = useState<Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>>({ classes: [], directory: false, label: 'file.txt', quoted: false }); const [parentIndex, setParentIndex] = useState(0); useEffect(() => setParentIndex((current) => Math.min(current, Math.max(0, diagram.nodes.length - 1))), [diagram.nodes.length]); const parent = diagram.nodes[parentIndex]; const parentIdentity = parent ? getTreeViewNodeIdentity(parent, diagram.nodes) : undefined; const canAdd = parentIdentity ? isSafeHierarchyIdentity(parentIdentity) : false; return <aside className="canvas-semantic-editor canvas-hierarchy-editor" data-canvas-pan-exclusion="true" data-testid="treeview-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}><strong>TreeView</strong><form onSubmit={(event) => { event.preventDefault(); if (canAdd) onAdd?.(node, parentIdentity); }}><select aria-label="New TreeView parent" onChange={(event) => setParentIndex(Number(event.target.value))} style={HIERARCHY_CONTROL_STYLE} value={parentIndex}>{diagram.nodes.map((item, index) => <option disabled={!isSafeHierarchyIdentity(getTreeViewNodeIdentity(item, diagram.nodes))} key={`${index}:${hierarchyPath(item)}`} value={index}>{hierarchyPath(item)}</option>)}</select><TreeViewFields prefix="New TreeView" update={setNode} value={node} /><button disabled={!canAdd} style={HIERARCHY_CONTROL_STYLE} type="submit">Add node</button></form>{diagram.nodes.map((item, index) => <TreeViewNodeForm index={index} key={`${index}:${hierarchyPath(item)}`} node={item} nodes={diagram.nodes} onDelete={onDelete} onEdit={onEdit} onMove={onMove} onReparent={onReparent} />)}</aside>; }
-function TreeViewFields({ prefix, update, value }: { prefix: string; update: (value: (current: Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>) => Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>) => void; value: Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'> }) { return <><input aria-label={`${prefix} label`} onChange={(event) => update((current) => ({ ...current, label: event.target.value }))} value={value.label} /><label><input aria-label={`${prefix} directory`} checked={value.directory} onChange={(event) => update((current) => ({ ...current, directory: event.target.checked }))} type="checkbox" />Directory</label><label><input aria-label={`${prefix} quoted`} checked={value.quoted} onChange={(event) => update((current) => ({ ...current, quoted: event.target.checked }))} type="checkbox" />Quoted</label><input aria-label={`${prefix} description`} onChange={(event) => update((current) => ({ ...current, description: event.target.value || undefined }))} value={value.description ?? ''} /><input aria-label={`${prefix} classes`} onChange={(event) => update((current) => ({ ...current, classes: event.target.value.split(/\s+/).filter(Boolean) }))} value={value.classes.join(' ')} /><input aria-label={`${prefix} icon`} onChange={(event) => update((current) => ({ ...current, icon: event.target.value || undefined }))} value={value.icon ?? ''} /></>; }
-function TreeViewNodeForm({ index, node, nodes, onDelete, onEdit, onMove, onReparent }: { index: number; node: TreeViewNode; nodes: TreeViewNode[]; onDelete?: (identity: TreeViewNodeIdentity) => void; onEdit?: (identity: TreeViewNodeIdentity, value: Partial<Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>>) => void; onMove?: (identity: TreeViewNodeIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: TreeViewNodeIdentity, parent: TreeViewNodeIdentity) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(node); const label = `TreeView node ${node.label}`; const identity = getTreeViewNodeIdentity(node, nodes); const safe = isSafeHierarchyIdentity(identity); const parentIndex = hierarchyParentIndex(nodes, node); const editable = { classes: draft.classes, description: draft.description, directory: draft.directory, icon: draft.icon, label: draft.label, quoted: draft.quoted }; return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe) onEdit?.(identity, editable); resetDraft(); }}><TreeViewFields prefix={label} update={(updater) => updateDraft((current) => ({ ...current, ...updater({ classes: current.classes, description: current.description, directory: current.directory, icon: current.icon, label: current.label, quoted: current.quoted }) }))} value={editable} /><select aria-label={`${label} parent`} disabled={!safe || parentIndex < 0} onChange={(event) => { const candidate = Number(event.target.value); const parent = nodes[candidate]; const parentIdentity = parent ? getTreeViewNodeIdentity(parent, nodes) : undefined; if (parentIdentity && safe && isSafeHierarchyIdentity(parentIdentity) && !isInvalidHierarchyParent(nodes, index, candidate)) onReparent?.(identity, parentIdentity); }} style={HIERARCHY_CONTROL_STYLE} value={parentIndex}><option value={-1}>Root node</option>{nodes.map((item, candidate) => <option disabled={isInvalidHierarchyParent(nodes, index, candidate) || !isSafeHierarchyIdentity(getTreeViewNodeIdentity(item, nodes))} key={`${candidate}:${hierarchyPath(item)}`} value={candidate}>{hierarchyPath(item)}</option>)}</select><button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move TreeView node ${node.label} up`} disabled={!safe} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move TreeView node ${node.label} down`} disabled={!safe} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>{node.parentLabel ? <button aria-label={`Delete TreeView node ${node.label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button> : null}</form>; }
+function TreeViewEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onReparent }: { bottom: number; diagram: TreeViewDiagramSnapshot; maxHeight: number; onAdd?: (value: Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>, parent?: TreeViewNodeIdentity) => void; onDelete?: (identity: TreeViewNodeIdentity) => void; onEdit?: (identity: TreeViewNodeIdentity, value: Partial<Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>>) => void; onMove?: (identity: TreeViewNodeIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: TreeViewNodeIdentity, parent: TreeViewNodeIdentity) => void }) { const [node, setNode] = useState<Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>>({ classes: [], directory: false, label: 'file.txt', quoted: false }); const [parentIndex, setParentIndex] = useState(0); useEffect(() => setParentIndex((current) => Math.min(current, Math.max(0, diagram.nodes.length - 1))), [diagram.nodes.length]); const parent = diagram.nodes[parentIndex]; const parentIdentity = parent ? getTreeViewNodeIdentity(parent, diagram.nodes) : undefined; const canAdd = parentIdentity ? isSafeHierarchyIdentity(parentIdentity) : false; return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-hierarchy-editor" data-canvas-pan-exclusion="true" data-testid="treeview-editor-controls" style={{ bottom, maxHeight }}><strong>TreeView</strong><WorkspaceRecord onSubmit={(event) => { event.preventDefault(); if (canAdd) onAdd?.(node, parentIdentity); }}><WorkspaceSelect aria-label="New TreeView parent" onChange={(event) => setParentIndex(Number(event.target.value))} value={parentIndex}>{diagram.nodes.map((item, index) => <option disabled={!isSafeHierarchyIdentity(getTreeViewNodeIdentity(item, diagram.nodes))} key={`${index}:${hierarchyPath(item)}`} value={index}>{hierarchyPath(item)}</option>)}</WorkspaceSelect><TreeViewFields prefix="New TreeView" update={setNode} value={node} /><WorkspaceButton disabled={!canAdd} type="submit">Add node</WorkspaceButton></WorkspaceRecord>{diagram.nodes.map((item, index) => <TreeViewNodeForm index={index} key={`${index}:${hierarchyPath(item)}`} node={item} nodes={diagram.nodes} onDelete={onDelete} onEdit={onEdit} onMove={onMove} onReparent={onReparent} />)}</aside>; }
+function TreeViewFields({ prefix, update, value }: { prefix: string; update: (value: (current: Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>) => Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>) => void; value: Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'> }) { return <><WorkspaceInput aria-label={`${prefix} label`} onChange={(event) => update((current) => ({ ...current, label: event.target.value }))} value={value.label} /><label><WorkspaceInput aria-label={`${prefix} directory`} checked={value.directory} onChange={(event) => update((current) => ({ ...current, directory: event.target.checked }))} type="checkbox" />Directory</label><label><WorkspaceInput aria-label={`${prefix} quoted`} checked={value.quoted} onChange={(event) => update((current) => ({ ...current, quoted: event.target.checked }))} type="checkbox" />Quoted</label><WorkspaceInput aria-label={`${prefix} description`} onChange={(event) => update((current) => ({ ...current, description: event.target.value || undefined }))} value={value.description ?? ''} /><WorkspaceInput aria-label={`${prefix} classes`} onChange={(event) => update((current) => ({ ...current, classes: event.target.value.split(/\s+/).filter(Boolean) }))} value={value.classes.join(' ')} /><WorkspaceInput aria-label={`${prefix} icon`} onChange={(event) => update((current) => ({ ...current, icon: event.target.value || undefined }))} value={value.icon ?? ''} /></>; }
+function TreeViewNodeForm({ index, node, nodes, onDelete, onEdit, onMove, onReparent }: { index: number; node: TreeViewNode; nodes: TreeViewNode[]; onDelete?: (identity: TreeViewNodeIdentity) => void; onEdit?: (identity: TreeViewNodeIdentity, value: Partial<Omit<TreeViewNode, 'parentLabel' | 'sourceStyle'>>) => void; onMove?: (identity: TreeViewNodeIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: TreeViewNodeIdentity, parent: TreeViewNodeIdentity) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(node); const label = `TreeView node ${node.label}`; const identity = getTreeViewNodeIdentity(node, nodes); const safe = isSafeHierarchyIdentity(identity); const parentIndex = hierarchyParentIndex(nodes, node); const editable = { classes: draft.classes, description: draft.description, directory: draft.directory, icon: draft.icon, label: draft.label, quoted: draft.quoted }; return <WorkspaceRecord aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe) onEdit?.(identity, editable); resetDraft(); }}><TreeViewFields prefix={label} update={(updater) => updateDraft((current) => ({ ...current, ...updater({ classes: current.classes, description: current.description, directory: current.directory, icon: current.icon, label: current.label, quoted: current.quoted }) }))} value={editable} /><WorkspaceSelect aria-label={`${label} parent`} disabled={!safe || parentIndex < 0} onChange={(event) => { const candidate = Number(event.target.value); const parent = nodes[candidate]; const parentIdentity = parent ? getTreeViewNodeIdentity(parent, nodes) : undefined; if (parentIdentity && safe && isSafeHierarchyIdentity(parentIdentity) && !isInvalidHierarchyParent(nodes, index, candidate)) onReparent?.(identity, parentIdentity); }} value={parentIndex}><option value={-1}>Root node</option>{nodes.map((item, candidate) => <option disabled={isInvalidHierarchyParent(nodes, index, candidate) || !isSafeHierarchyIdentity(getTreeViewNodeIdentity(item, nodes))} key={`${candidate}:${hierarchyPath(item)}`} value={candidate}>{hierarchyPath(item)}</option>)}</WorkspaceSelect><WorkspaceButton disabled={!safe} type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move TreeView node ${node.label} up`} disabled={!safe} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move TreeView node ${node.label} down`} disabled={!safe} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton>{node.parentLabel ? <WorkspaceButton aria-label={`Delete TreeView node ${node.label}`} disabled={!safe} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton> : null}</WorkspaceRecord>; }
 
-function IshikawaEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onEditEffect, onMove, onReparent }: { bottom: number; diagram: IshikawaDiagramSnapshot; maxHeight: number; onAdd?: (value: IshikawaCauseInput) => void; onDelete?: (identity: IshikawaCauseIdentity) => void; onEdit?: (identity: IshikawaCauseIdentity, value: Partial<Pick<IshikawaCause, 'label'>>) => void; onEditEffect?: (value: string) => void; onMove?: (identity: IshikawaCauseIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: IshikawaCauseIdentity, parent: IshikawaCauseIdentity | null) => void }) { const [effect, setEffect] = useState(diagram.effect); const [cause, setCause] = useState('Cause'); const [parentIndex, setParentIndex] = useState(-1); useEffect(() => { setEffect(diagram.effect); setParentIndex((current) => Math.min(current, diagram.causes.length - 1)); }, [diagram.causes.length, diagram.effect]); const parent = parentIndex >= 0 ? diagram.causes[parentIndex] : undefined; const parentIdentity = parent ? getIshikawaCauseIdentity(parent, diagram.causes) : null; const canAdd = parentIdentity === null || isSafeHierarchyIdentity(parentIdentity); return <aside className="canvas-semantic-editor canvas-hierarchy-editor" data-canvas-pan-exclusion="true" data-testid="ishikawa-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}><strong>Ishikawa</strong><form onSubmit={(event) => { event.preventDefault(); onEditEffect?.(effect); }}><input aria-label="Ishikawa effect" onChange={(event) => setEffect(event.target.value)} value={effect} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save effect</button></form><form onSubmit={(event) => { event.preventDefault(); if (canAdd) onAdd?.({ label: cause, parent: parentIdentity }); }}><input aria-label="New Ishikawa cause" onChange={(event) => setCause(event.target.value)} value={cause} /><select aria-label="New Ishikawa parent" onChange={(event) => setParentIndex(Number(event.target.value))} style={HIERARCHY_CONTROL_STYLE} value={parentIndex}><option value={-1}>Root cause</option>{diagram.causes.map((item, index) => <option disabled={!isSafeHierarchyIdentity(getIshikawaCauseIdentity(item, diagram.causes))} key={`${index}:${hierarchyPath(item)}`} value={index}>{hierarchyPath(item)}</option>)}</select><button disabled={!canAdd} style={HIERARCHY_CONTROL_STYLE} type="submit">Add cause</button></form>{diagram.causes.map((item, index) => <IshikawaCauseForm cause={item} causes={diagram.causes} index={index} key={`${index}:${hierarchyPath(item)}`} onDelete={onDelete} onEdit={onEdit} onMove={onMove} onReparent={onReparent} />)}</aside>; }
-function IshikawaCauseForm({ cause, causes, index, onDelete, onEdit, onMove, onReparent }: { cause: IshikawaCause; causes: IshikawaCause[]; index: number; onDelete?: (identity: IshikawaCauseIdentity) => void; onEdit?: (identity: IshikawaCauseIdentity, value: Partial<Pick<IshikawaCause, 'label'>>) => void; onMove?: (identity: IshikawaCauseIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: IshikawaCauseIdentity, parent: IshikawaCauseIdentity | null) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(cause); const label = `Ishikawa cause ${cause.label}`; const identity = getIshikawaCauseIdentity(cause, causes); const safe = isSafeHierarchyIdentity(identity); const parentIndex = hierarchyParentIndex(causes, cause); return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe) onEdit?.(identity, { label: draft.label }); resetDraft(); }}><input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><select aria-label={`${label} parent`} disabled={!safe} onChange={(event) => { const candidate = Number(event.target.value); const parent = candidate < 0 ? null : causes[candidate]; const parentIdentity = parent ? getIshikawaCauseIdentity(parent, causes) : null; if (safe && (parentIdentity === null || isSafeHierarchyIdentity(parentIdentity)) && (candidate < 0 || !isInvalidHierarchyParent(causes, index, candidate))) onReparent?.(identity, parentIdentity); }} style={HIERARCHY_CONTROL_STYLE} value={parentIndex}><option value={-1}>Root cause</option>{causes.map((item, candidate) => <option disabled={isInvalidHierarchyParent(causes, index, candidate) || !isSafeHierarchyIdentity(getIshikawaCauseIdentity(item, causes))} key={`${candidate}:${hierarchyPath(item)}`} value={candidate}>{hierarchyPath(item)}</option>)}</select><button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move Ishikawa cause ${cause.label} up`} disabled={!safe} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move Ishikawa cause ${cause.label} down`} disabled={!safe} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete Ishikawa cause ${cause.label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>; }
+function IshikawaEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onEditEffect, onMove, onReparent }: { bottom: number; diagram: IshikawaDiagramSnapshot; maxHeight: number; onAdd?: (value: IshikawaCauseInput) => void; onDelete?: (identity: IshikawaCauseIdentity) => void; onEdit?: (identity: IshikawaCauseIdentity, value: Partial<Pick<IshikawaCause, 'label'>>) => void; onEditEffect?: (value: string) => void; onMove?: (identity: IshikawaCauseIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: IshikawaCauseIdentity, parent: IshikawaCauseIdentity | null) => void }) { const [effect, setEffect] = useState(diagram.effect); const [cause, setCause] = useState('Cause'); const [parentIndex, setParentIndex] = useState(-1); useEffect(() => { setEffect(diagram.effect); setParentIndex((current) => Math.min(current, diagram.causes.length - 1)); }, [diagram.causes.length, diagram.effect]); const parent = parentIndex >= 0 ? diagram.causes[parentIndex] : undefined; const parentIdentity = parent ? getIshikawaCauseIdentity(parent, diagram.causes) : null; const canAdd = parentIdentity === null || isSafeHierarchyIdentity(parentIdentity); return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-hierarchy-editor" data-canvas-pan-exclusion="true" data-testid="ishikawa-editor-controls" style={{ bottom, maxHeight }}><strong>Ishikawa</strong><WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onEditEffect?.(effect); }}><WorkspaceInput aria-label="Ishikawa effect" onChange={(event) => setEffect(event.target.value)} value={effect} /><WorkspaceButton type="submit">Save effect</WorkspaceButton></WorkspaceRecord><WorkspaceRecord onSubmit={(event) => { event.preventDefault(); if (canAdd) onAdd?.({ label: cause, parent: parentIdentity }); }}><WorkspaceInput aria-label="New Ishikawa cause" onChange={(event) => setCause(event.target.value)} value={cause} /><WorkspaceSelect aria-label="New Ishikawa parent" onChange={(event) => setParentIndex(Number(event.target.value))} value={parentIndex}><option value={-1}>Root cause</option>{diagram.causes.map((item, index) => <option disabled={!isSafeHierarchyIdentity(getIshikawaCauseIdentity(item, diagram.causes))} key={`${index}:${hierarchyPath(item)}`} value={index}>{hierarchyPath(item)}</option>)}</WorkspaceSelect><WorkspaceButton disabled={!canAdd} type="submit">Add cause</WorkspaceButton></WorkspaceRecord>{diagram.causes.map((item, index) => <IshikawaCauseForm cause={item} causes={diagram.causes} index={index} key={`${index}:${hierarchyPath(item)}`} onDelete={onDelete} onEdit={onEdit} onMove={onMove} onReparent={onReparent} />)}</aside>; }
+function IshikawaCauseForm({ cause, causes, index, onDelete, onEdit, onMove, onReparent }: { cause: IshikawaCause; causes: IshikawaCause[]; index: number; onDelete?: (identity: IshikawaCauseIdentity) => void; onEdit?: (identity: IshikawaCauseIdentity, value: Partial<Pick<IshikawaCause, 'label'>>) => void; onMove?: (identity: IshikawaCauseIdentity, direction: 'up' | 'down') => void; onReparent?: (identity: IshikawaCauseIdentity, parent: IshikawaCauseIdentity | null) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(cause); const label = `Ishikawa cause ${cause.label}`; const identity = getIshikawaCauseIdentity(cause, causes); const safe = isSafeHierarchyIdentity(identity); const parentIndex = hierarchyParentIndex(causes, cause); return <WorkspaceRecord aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe) onEdit?.(identity, { label: draft.label }); resetDraft(); }}><WorkspaceInput aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><WorkspaceSelect aria-label={`${label} parent`} disabled={!safe} onChange={(event) => { const candidate = Number(event.target.value); const parent = candidate < 0 ? null : causes[candidate]; const parentIdentity = parent ? getIshikawaCauseIdentity(parent, causes) : null; if (safe && (parentIdentity === null || isSafeHierarchyIdentity(parentIdentity)) && (candidate < 0 || !isInvalidHierarchyParent(causes, index, candidate))) onReparent?.(identity, parentIdentity); }} value={parentIndex}><option value={-1}>Root cause</option>{causes.map((item, candidate) => <option disabled={isInvalidHierarchyParent(causes, index, candidate) || !isSafeHierarchyIdentity(getIshikawaCauseIdentity(item, causes))} key={`${candidate}:${hierarchyPath(item)}`} value={candidate}>{hierarchyPath(item)}</option>)}</WorkspaceSelect><WorkspaceButton disabled={!safe} type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move Ishikawa cause ${cause.label} up`} disabled={!safe} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move Ishikawa cause ${cause.label} down`} disabled={!safe} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete Ishikawa cause ${cause.label}`} disabled={!safe} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton></WorkspaceRecord>; }
 
 function railroadDialectLabel(notation: RailroadDiagramSnapshot['notation']): string {
   return notation === 'ir' ? 'IR' : notation.toUpperCase();
@@ -5776,18 +5665,17 @@ function RailroadEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, o
   useEffect(() => { setRule(createRailroadRuleDraft(diagram.notation)); }, [diagram.notation]);
   const dialect = railroadDialectLabel(diagram.notation);
 
-  return <aside
+  return <aside data-workspace-panel="semantic"
     className="canvas-semantic-editor canvas-railroad-editor"
     data-canvas-pan-exclusion="true"
-    data-testid="railroad-editor-controls"
-    style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}
+    data-testid="railroad-editor-controls" style={{ bottom, maxHeight }}
   >
     <strong>Railroad <small>{dialect} safe subset</small></strong>
-    <form aria-label={`New Railroad ${dialect} production`} onSubmit={(event) => { event.preventDefault(); onAdd?.(rule); }} style={{ display: 'grid', gap: 4, marginTop: 5 }}>
-      <input aria-label="New Railroad production name" onChange={(event) => setRule((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={rule.name} />
-      <textarea aria-label="New Railroad production expression" onChange={(event) => setRule((current) => ({ ...current, definition: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={rule.definition} />
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add production</button>
-    </form>
+    <WorkspaceRecord aria-label={`New Railroad ${dialect} production`} onSubmit={(event) => { event.preventDefault(); onAdd?.(rule); }}>
+      <WorkspaceInput aria-label="New Railroad production name" onChange={(event) => setRule((current) => ({ ...current, name: event.target.value }))} value={rule.name} />
+      <WorkspaceTextarea aria-label="New Railroad production expression" onChange={(event) => setRule((current) => ({ ...current, definition: event.target.value }))} value={rule.definition} />
+      <WorkspaceButton type="submit">Add production</WorkspaceButton>
+    </WorkspaceRecord>
     {diagram.rules.map((rule) => <RailroadRuleForm key={`${rule.name}:${rule.definition}`} notation={diagram.notation} onDelete={onDelete} onEdit={onEdit} onMove={onMove} onRename={onRename} rule={rule} rules={diagram.rules} />)}
   </aside>;
 }
@@ -5807,22 +5695,22 @@ function RailroadRuleForm({ notation, onDelete, onEdit, onMove, onRename, rule, 
   const label = `Railroad production ${rule.name}`;
   const dialect = railroadDialectLabel(notation);
 
-  return <form aria-label={label} onSubmit={(event) => {
+  return <WorkspaceRecord aria-label={label} onSubmit={(event) => {
     event.preventDefault();
     if (safe) onEdit?.(identity, { definition: draft.definition });
     resetDraft();
-  }} style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+  }}>
     <small>{dialect} production</small>
-    <input aria-label={`${label} name`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.name} />
-    <textarea aria-label={`${label} expression`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, definition: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.definition} />
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-      <button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save expression</button>
-      <button aria-label={`Rename Railroad production ${rule.name}`} disabled={!safe} onClick={() => { onRename?.(identity, draft.name); resetDraft(); }} style={HIERARCHY_CONTROL_STYLE} type="button">Rename</button>
-      <button aria-label={`Move Railroad production ${rule.name} up`} disabled={!safe} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
-      <button aria-label={`Move Railroad production ${rule.name} down`} disabled={!safe} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
-      <button aria-label={`Delete Railroad production ${rule.name}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
+    <WorkspaceInput aria-label={`${label} name`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} value={draft.name} />
+    <WorkspaceTextarea aria-label={`${label} expression`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, definition: event.target.value }))} value={draft.definition} />
+    <div>
+      <WorkspaceButton disabled={!safe} type="submit">Save expression</WorkspaceButton>
+      <WorkspaceButton aria-label={`Rename Railroad production ${rule.name}`} disabled={!safe} onClick={() => { onRename?.(identity, draft.name); resetDraft(); }} type="button">Rename</WorkspaceButton>
+      <WorkspaceButton aria-label={`Move Railroad production ${rule.name} up`} disabled={!safe} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton>
+      <WorkspaceButton aria-label={`Move Railroad production ${rule.name} down`} disabled={!safe} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton>
+      <WorkspaceButton aria-label={`Delete Railroad production ${rule.name}`} disabled={!safe} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton>
     </div>
-  </form>;
+  </WorkspaceRecord>;
 }
 
 function parseSemanticNumber(value: string, label: string): number {
@@ -5840,7 +5728,7 @@ function parseSemanticNumberList(value: string, label: string): number[] {
 function runSemanticForm(setError: (value: string | null) => void, action: () => SemanticFormActionResult): boolean {
   try {
     const result = action();
-    if (result === false) { setError('The diagram update could not be applied.'); return false; }
+    if (result === false) { setError(null); return false; }
     if (result && typeof result === 'object' && !result.applied) {
       setError(result.error ?? 'The diagram update could not be applied.');
       return false;
@@ -5852,7 +5740,7 @@ function runSemanticForm(setError: (value: string | null) => void, action: () =>
 const runNumericForm = runSemanticForm;
 
 function NumericEditorError({ error }: { error: string | null }) {
-  return error ? <small className="semantic-editor-error" role="alert">{error}</small> : null;
+  return <WorkspaceRecordError error={error} />;
 }
 
 function parsePacketInteger(value: string, label: string): number {
@@ -5886,11 +5774,11 @@ export function getPacketFieldControlLabel(field: PacketField, index: number, fi
 
 function SankeyEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onRenameNode }: {
   bottom: number; diagram: SankeyDiagramSnapshot; maxHeight: number;
-  onAdd?: (value: SankeyLink) => boolean | void;
+  onAdd?: (value: SankeyLink) => SemanticFormActionResult;
   onDelete?: (identity: SankeyLinkIdentity) => void;
-  onEdit?: (identity: SankeyLinkIdentity, value: Partial<SankeyLink>) => boolean | void;
+  onEdit?: (identity: SankeyLinkIdentity, value: Partial<SankeyLink>) => SemanticFormActionResult;
   onMove?: (identity: SankeyLinkIdentity, direction: 'up' | 'down') => void;
-  onRenameNode?: (identity: SankeyNodeIdentity, label: string) => boolean | void;
+  onRenameNode?: (identity: SankeyNodeIdentity, label: string) => SemanticFormActionResult;
 }) {
   const canonicalLink = {
     source: diagram.nodes[0]?.label ?? 'Source',
@@ -5899,80 +5787,85 @@ function SankeyEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onE
   };
   const { draft, updateDraft } = useCanonicalDraft(canonicalLink);
   const [error, setError] = useState<string | null>(null);
-  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="sankey-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="sankey-editor-controls" style={{ bottom, maxHeight }}>
     <strong>Sankey</strong>
-    <form aria-label="New Sankey link" onSubmit={(event) => {
+    <WorkspaceRecord aria-label="New Sankey link" error={error} onSubmit={(event) => {
       event.preventDefault();
       runNumericForm(setError, () => onAdd?.({ source: draft.source, target: draft.target, value: parseSemanticNumber(draft.value, 'Sankey link weight') }));
     }}>
-      <input aria-label="New Sankey link source" onChange={(event) => updateDraft((current) => ({ ...current, source: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.source} />
-      <input aria-label="New Sankey link target" onChange={(event) => updateDraft((current) => ({ ...current, target: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.target} />
-      <input aria-label="New Sankey link weight" inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.value} />
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add link</button>
-    </form>
-    <NumericEditorError error={error} />
-    {diagram.links.map((link, index) => <SankeyLinkForm index={index} item={link} items={diagram.links} key={`${link.source}:${link.target}:${link.value}`} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} />)}
+      <WorkspaceInput aria-label="New Sankey link source" onChange={(event) => updateDraft((current) => ({ ...current, source: event.target.value }))} value={draft.source} />
+      <WorkspaceInput aria-label="New Sankey link target" onChange={(event) => updateDraft((current) => ({ ...current, target: event.target.value }))} value={draft.target} />
+      <WorkspaceInput aria-label="New Sankey link weight" inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, value: event.target.value }))} value={draft.value} />
+      <WorkspaceButton type="submit">Add link</WorkspaceButton>
+      <NumericEditorError error={error} />
+    </WorkspaceRecord>
+
+    {diagram.links.map((link, index) => <SankeyLinkForm index={index} item={link} items={diagram.links} key={`${link.source}:${link.target}:${link.value}`} onDelete={onDelete} onEdit={onEdit} onMove={onMove} />)}
     <section aria-label="Sankey nodes">
       <strong>Nodes</strong>
-      {diagram.nodes.map((node) => <SankeyNodeForm key={node.label} links={diagram.links} node={node} onError={setError} onRename={onRenameNode} />)}
+      {diagram.nodes.map((node) => <SankeyNodeForm key={node.label} links={diagram.links} node={node} onRename={onRenameNode} />)}
     </section>
   </aside>;
 }
 
-function SankeyLinkForm({ index, item, items, onDelete, onEdit, onError, onMove }: {
+function SankeyLinkForm({ index, item, items, onDelete, onEdit, onMove }: {
   index: number; item: SankeyLink; items: SankeyLink[];
   onDelete?: (identity: SankeyLinkIdentity) => void;
-  onEdit?: (identity: SankeyLinkIdentity, value: Partial<SankeyLink>) => boolean | void;
-  onError: (value: string | null) => void;
+  onEdit?: (identity: SankeyLinkIdentity, value: Partial<SankeyLink>) => SemanticFormActionResult;
+
   onMove?: (identity: SankeyLinkIdentity, direction: 'up' | 'down') => void;
 }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical = { source: item.source, target: item.target, value: String(item.value) };
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical);
   const identity = getSankeyLinkIdentity(item, items);
   const label = getSankeyLinkControlLabel(item, index, items);
-  return <form aria-label={label} onSubmit={(event) => {
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => {
     event.preventDefault();
     if (runNumericForm(onError, () => onEdit?.(identity, { source: draft.source, target: draft.target, value: parseSemanticNumber(draft.value, 'Sankey link weight') }))) resetDraft();
   }}>
-    <input aria-label={`${label} source`} onChange={(event) => updateDraft((current) => ({ ...current, source: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.source} />
-    <input aria-label={`${label} target`} onChange={(event) => updateDraft((current) => ({ ...current, target: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.target} />
-    <input aria-label={`${label} weight`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.value} />
-    <button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>
-    <button aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
-    <button aria-label={`Move ${label} down`} disabled={index === items.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
-    <button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
-  </form>;
+    <WorkspaceInput aria-label={`${label} source`} onChange={(event) => updateDraft((current) => ({ ...current, source: event.target.value }))} value={draft.source} />
+    <WorkspaceInput aria-label={`${label} target`} onChange={(event) => updateDraft((current) => ({ ...current, target: event.target.value }))} value={draft.target} />
+    <WorkspaceInput aria-label={`${label} weight`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, value: event.target.value }))} value={draft.value} />
+    <WorkspaceButton type="submit">Save</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move ${label} down`} disabled={index === items.length - 1} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton>
+    <WorkspaceButton aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton>
+    <NumericEditorError error={error} />
+  </WorkspaceRecord>;
 }
 
-function SankeyNodeForm({ links, node, onError, onRename }: {
+function SankeyNodeForm({ links, node, onRename }: {
   links: SankeyLink[]; node: SankeyDiagramSnapshot['nodes'][number];
-  onError: (value: string | null) => void;
-  onRename?: (identity: SankeyNodeIdentity, label: string) => boolean | void;
+
+  onRename?: (identity: SankeyNodeIdentity, label: string) => SemanticFormActionResult;
 }) {
+  const [error, onError] = useState<string | null>(null);
   const { draft, resetDraft, updateDraft } = useCanonicalDraft({ label: node.label });
   const identity = getSankeyNodeIdentity(node, links);
-  return <form aria-label={`Sankey node ${node.label}`} onSubmit={(event) => {
+  return <WorkspaceRecord aria-label={`Sankey node ${node.label}`} error={error} onSubmit={(event) => {
     event.preventDefault();
     if (runNumericForm(onError, () => onRename?.(identity, draft.label))) resetDraft();
   }}>
-    <input aria-label={`Sankey node ${node.label} label`} onChange={(event) => updateDraft(() => ({ label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
-    <button style={HIERARCHY_CONTROL_STYLE} type="submit">Rename</button>
-  </form>;
+    <WorkspaceInput aria-label={`Sankey node ${node.label} label`} onChange={(event) => updateDraft(() => ({ label: event.target.value }))} value={draft.label} />
+    <WorkspaceButton type="submit">Rename</WorkspaceButton>
+    <NumericEditorError error={error} />
+  </WorkspaceRecord>;
 }
 
 function PacketEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove }: {
   bottom: number; diagram: PacketDiagramSnapshot; maxHeight: number;
-  onAdd?: (value: PacketField) => boolean | void;
+  onAdd?: (value: PacketField) => SemanticFormActionResult;
   onDelete?: (identity: PacketFieldIdentity) => void;
-  onEdit?: (identity: PacketFieldIdentity, value: Partial<PacketField>) => boolean | void;
+  onEdit?: (identity: PacketFieldIdentity, value: Partial<PacketField>) => SemanticFormActionResult;
   onMove?: (identity: PacketFieldIdentity, direction: 'up' | 'down') => void;
 }) {
   const canonicalField = { label: 'Field', start: String((diagram.fields.at(-1)?.end ?? -1) + 1), width: '1' };
   const { draft, updateDraft } = useCanonicalDraft(canonicalField);
   const [error, setError] = useState<string | null>(null);
-  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="packet-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="packet-editor-controls" style={{ bottom, maxHeight }}>
     <strong>Packet</strong>
-    <form aria-label="New Packet field" onSubmit={(event) => {
+    <WorkspaceRecord aria-label="New Packet field" error={error} onSubmit={(event) => {
       event.preventDefault();
       runNumericForm(setError, () => {
         const start = parsePacketInteger(draft.start, 'Packet field start');
@@ -5982,29 +5875,31 @@ function PacketEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onE
         return onAdd?.({ end: start + width - 1, label: draft.label, start });
       });
     }}>
-      <input aria-label="New Packet field label" onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
-      <input aria-label="New Packet field start" inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.start} />
-      <input aria-label="New Packet field width" inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, width: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.width} />
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add field</button>
-    </form>
-    <NumericEditorError error={error} />
-    {diagram.fields.map((field, index) => <PacketFieldForm field={field} fields={diagram.fields} index={index} key={getPacketFieldFormKey(field, diagram.fields)} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} />)}
+      <WorkspaceInput aria-label="New Packet field label" onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} />
+      <WorkspaceInput aria-label="New Packet field start" inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} value={draft.start} />
+      <WorkspaceInput aria-label="New Packet field width" inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, width: event.target.value }))} value={draft.width} />
+      <WorkspaceButton type="submit">Add field</WorkspaceButton>
+      <NumericEditorError error={error} />
+    </WorkspaceRecord>
+
+    {diagram.fields.map((field, index) => <PacketFieldForm field={field} fields={diagram.fields} index={index} key={getPacketFieldFormKey(field, diagram.fields)} onDelete={onDelete} onEdit={onEdit} onMove={onMove} />)}
   </aside>;
 }
 
-function PacketFieldForm({ field, fields, index, onDelete, onEdit, onError, onMove }: {
+function PacketFieldForm({ field, fields, index, onDelete, onEdit, onMove }: {
   field: PacketField; fields: PacketField[]; index: number;
   onDelete?: (identity: PacketFieldIdentity) => void;
-  onEdit?: (identity: PacketFieldIdentity, value: Partial<PacketField>) => boolean | void;
-  onError: (value: string | null) => void;
+  onEdit?: (identity: PacketFieldIdentity, value: Partial<PacketField>) => SemanticFormActionResult;
+
   onMove?: (identity: PacketFieldIdentity, direction: 'up' | 'down') => void;
 }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical = { label: field.label, start: String(field.start), width: String(field.end - field.start + 1) };
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical);
   const identity = getPacketFieldIdentity(field, fields);
   const safe = identity.occurrenceCount === 1;
   const label = getPacketFieldControlLabel(field, index, fields);
-  return <form aria-label={label} onSubmit={(event) => {
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => {
     event.preventDefault();
     if (!safe) return;
     if (runNumericForm(onError, () => {
@@ -6015,14 +5910,15 @@ function PacketFieldForm({ field, fields, index, onDelete, onEdit, onError, onMo
       return onEdit?.(identity, { end: start + width - 1, label: draft.label, start });
     })) resetDraft();
   }}>
-    <input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
-    <input aria-label={`${label} start`} disabled={!safe} inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.start} />
-    <input aria-label={`${label} width`} disabled={!safe} inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, width: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.width} />
-    <button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>
-    <button aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
-    <button aria-label={`Move ${label} down`} disabled={!safe || index === fields.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
-    <button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
-  </form>;
+    <WorkspaceInput aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} />
+    <WorkspaceInput aria-label={`${label} start`} disabled={!safe} inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} value={draft.start} />
+    <WorkspaceInput aria-label={`${label} width`} disabled={!safe} inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, width: event.target.value }))} value={draft.width} />
+    <WorkspaceButton disabled={!safe} type="submit">Save</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move ${label} down`} disabled={!safe || index === fields.length - 1} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton>
+    <WorkspaceButton aria-label={`Delete ${label}`} disabled={!safe} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton>
+    <NumericEditorError error={error} />
+  </WorkspaceRecord>;
 }
 
 function CynefinDomainSelect({ disabled = false, label, onChange, value }: {
@@ -6031,9 +5927,9 @@ function CynefinDomainSelect({ disabled = false, label, onChange, value }: {
   onChange: (value: CynefinDomainName) => void;
   value: CynefinDomainName;
 }) {
-  return <select aria-label={label} disabled={disabled} onChange={(event) => onChange(event.target.value as CynefinDomainName)} style={HIERARCHY_CONTROL_STYLE} value={value}>
+  return <WorkspaceSelect aria-label={label} disabled={disabled} onChange={(event) => onChange(event.target.value as CynefinDomainName)} value={value}>
     {CYNEFIN_DOMAIN_NAMES.map((domain) => <option key={domain} value={domain}>{formatCynefinDomain(domain)}</option>)}
-  </select>;
+  </WorkspaceSelect>;
 }
 
 function formatCynefinDomain(domain: CynefinDomainName): string {
@@ -6140,12 +6036,12 @@ function CynefinEditorControls({
   itemDraftCache: PersistentCanonicalDraftCache<CynefinItem>;
   itemKeys: Map<CynefinItem, string>;
   maxHeight: number;
-  onAddItem?: (value: CynefinItem) => boolean | void;
-  onAddTransition?: (value: CynefinTransition) => boolean | void;
+  onAddItem?: (value: CynefinItem) => SemanticFormActionResult;
+  onAddTransition?: (value: CynefinTransition) => SemanticFormActionResult;
   onDeleteItem?: (identity: CynefinItemIdentity) => void;
   onDeleteTransition?: (identity: CynefinTransitionIdentity) => void;
-  onEditItem?: (identity: CynefinItemIdentity, value: Partial<CynefinItem>) => boolean | void;
-  onEditTransition?: (identity: CynefinTransitionIdentity, value: Partial<CynefinTransition>) => boolean | void;
+  onEditItem?: (identity: CynefinItemIdentity, value: Partial<CynefinItem>) => SemanticFormActionResult;
+  onEditTransition?: (identity: CynefinTransitionIdentity, value: Partial<CynefinTransition>) => SemanticFormActionResult;
   onMoveItem?: (identity: CynefinItemIdentity, domain: CynefinDomainName, targetIndex: number) => void;
   onMoveTransition?: (identity: CynefinTransitionIdentity, direction: 'up' | 'down') => void;
   transitionDraftCache: PersistentCanonicalDraftCache<CynefinTransition>;
@@ -6162,22 +6058,21 @@ function CynefinEditorControls({
   });
   const allItems = diagram.domains.flatMap((domain) => domain.items);
 
-  return <aside
+  return <aside data-workspace-panel="semantic"
     aria-label="Cynefin editor"
     className="canvas-semantic-editor canvas-hierarchy-editor"
     data-canvas-pan-exclusion="true"
-    data-testid="cynefin-editor-controls"
-    style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}
+    data-testid="cynefin-editor-controls" style={{ bottom, maxHeight }}
   >
     <strong>Cynefin</strong>
-    <form aria-label="New Cynefin item" onSubmit={(event) => {
+    <WorkspaceRecord aria-label="New Cynefin item" onSubmit={(event) => {
       event.preventDefault();
       if (onAddItem?.(newItem) === true) resetNewItem();
     }}>
       <CynefinDomainSelect label="New Cynefin item domain" onChange={(domain) => updateNewItem((current) => ({ ...current, domain }))} value={newItem.domain} />
-      <input aria-label="New Cynefin item label" onChange={(event) => updateNewItem((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newItem.label} />
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add item</button>
-    </form>
+      <WorkspaceInput aria-label="New Cynefin item label" onChange={(event) => updateNewItem((current) => ({ ...current, label: event.target.value }))} value={newItem.label} />
+      <WorkspaceButton type="submit">Add item</WorkspaceButton>
+    </WorkspaceRecord>
     {diagram.domains.map((domain) => <section aria-label={`Cynefin domain ${formatCynefinDomain(domain.name)}`} key={domain.name}>
       <h3>{formatCynefinDomain(domain.name)}</h3>
       {domain.items.map((item, index) => <CynefinItemForm
@@ -6194,15 +6089,15 @@ function CynefinEditorControls({
     </section>)}
     <section aria-label="Cynefin transitions">
       <h3>Transitions</h3>
-      <form aria-label="New Cynefin transition" onSubmit={(event) => {
+      <WorkspaceRecord aria-label="New Cynefin transition" onSubmit={(event) => {
         event.preventDefault();
         if (onAddTransition?.(newTransition) === true) resetNewTransition();
       }}>
         <CynefinDomainSelect label="New Cynefin transition source" onChange={(from) => updateNewTransition((current) => ({ ...current, from }))} value={newTransition.from} />
         <CynefinDomainSelect label="New Cynefin transition target" onChange={(to) => updateNewTransition((current) => ({ ...current, to }))} value={newTransition.to} />
-        <input aria-label="New Cynefin transition label" onChange={(event) => updateNewTransition((current) => ({ ...current, label: event.target.value || null }))} style={HIERARCHY_CONTROL_STYLE} value={newTransition.label ?? ''} />
-        <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add transition</button>
-      </form>
+        <WorkspaceInput aria-label="New Cynefin transition label" onChange={(event) => updateNewTransition((current) => ({ ...current, label: event.target.value || null }))} value={newTransition.label ?? ''} />
+        <WorkspaceButton type="submit">Add transition</WorkspaceButton>
+      </WorkspaceRecord>
       {diagram.transitions.map((transition, index) => <CynefinTransitionForm
         draftCache={transitionDraftCache}
         index={index}
@@ -6224,7 +6119,7 @@ function CynefinItemForm({ diagram, draftCache, index, item, onDelete, onEdit, o
   index: number;
   item: CynefinItem;
   onDelete?: (identity: CynefinItemIdentity) => void;
-  onEdit?: (identity: CynefinItemIdentity, value: Partial<CynefinItem>) => boolean | void;
+  onEdit?: (identity: CynefinItemIdentity, value: Partial<CynefinItem>) => SemanticFormActionResult;
   onMove?: (identity: CynefinItemIdentity, domain: CynefinDomainName, targetIndex: number) => void;
   renderKey: string;
 }) {
@@ -6234,24 +6129,24 @@ function CynefinItemForm({ diagram, draftCache, index, item, onDelete, onEdit, o
   const peers = diagram.domains.find((domain) => domain.name === item.domain)?.items ?? [];
   const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(item, renderKey, draftCache);
   const label = `Cynefin item ${formatCynefinDomain(item.domain)} ${item.label}`;
-  return <form aria-label={label} onSubmit={(event) => {
+  return <WorkspaceRecord aria-label={label} onSubmit={(event) => {
     event.preventDefault();
     if (safe && onEdit?.(identity, draft) === true) resetDraft();
   }}>
-    <input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
+    <WorkspaceInput aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} />
     <CynefinDomainSelect disabled={!safe} label={`${label} domain`} onChange={(domain) => updateDraft((current) => ({ ...current, domain }))} value={draft.domain} />
-    <button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>
-    <button aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => onMove?.(identity, item.domain, index - 1)} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
-    <button aria-label={`Move ${label} down`} disabled={!safe || index === peers.length - 1} onClick={() => onMove?.(identity, item.domain, index + 1)} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
-    <button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
-  </form>;
+    <WorkspaceButton disabled={!safe} type="submit">Save</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => onMove?.(identity, item.domain, index - 1)} type="button">↑</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move ${label} down`} disabled={!safe || index === peers.length - 1} onClick={() => onMove?.(identity, item.domain, index + 1)} type="button">↓</WorkspaceButton>
+    <WorkspaceButton aria-label={`Delete ${label}`} disabled={!safe} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton>
+  </WorkspaceRecord>;
 }
 
 function CynefinTransitionForm({ draftCache, index, onDelete, onEdit, onMove, renderKey, transition, transitions }: {
   draftCache: PersistentCanonicalDraftCache<CynefinTransition>;
   index: number;
   onDelete?: (identity: CynefinTransitionIdentity) => void;
-  onEdit?: (identity: CynefinTransitionIdentity, value: Partial<CynefinTransition>) => boolean | void;
+  onEdit?: (identity: CynefinTransitionIdentity, value: Partial<CynefinTransition>) => SemanticFormActionResult;
   onMove?: (identity: CynefinTransitionIdentity, direction: 'up' | 'down') => void;
   renderKey: string;
   transition: CynefinTransition;
@@ -6261,18 +6156,18 @@ function CynefinTransitionForm({ draftCache, index, onDelete, onEdit, onMove, re
   const safe = identity.occurrenceCount === 1;
   const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(transition, renderKey, draftCache);
   const label = `Cynefin transition ${formatCynefinDomain(transition.from)} to ${formatCynefinDomain(transition.to)}${transition.label ? ` ${transition.label}` : ''}`;
-  return <form aria-label={label} onSubmit={(event) => {
+  return <WorkspaceRecord aria-label={label} onSubmit={(event) => {
     event.preventDefault();
     if (safe && onEdit?.(identity, { ...draft, label: draft.label || null }) === true) resetDraft();
   }}>
     <CynefinDomainSelect disabled={!safe} label={`${label} source`} onChange={(from) => updateDraft((current) => ({ ...current, from }))} value={draft.from} />
     <CynefinDomainSelect disabled={!safe} label={`${label} target`} onChange={(to) => updateDraft((current) => ({ ...current, to }))} value={draft.to} />
-    <input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value || null }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label ?? ''} />
-    <button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>
-    <button aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
-    <button aria-label={`Move ${label} down`} disabled={!safe || index === transitions.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
-    <button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
-  </form>;
+    <WorkspaceInput aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value || null }))} value={draft.label ?? ''} />
+    <WorkspaceButton disabled={!safe} type="submit">Save</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move ${label} down`} disabled={!safe || index === transitions.length - 1} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton>
+    <WorkspaceButton aria-label={`Delete ${label}`} disabled={!safe} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton>
+  </WorkspaceRecord>;
 }
 
 function TreemapEditorControls({ bottom, diagram, draftCache, keys, maxHeight, onAdd, onDelete, onEdit, onMove, onReparent }: {
@@ -6287,15 +6182,16 @@ function TreemapEditorControls({ bottom, diagram, draftCache, keys, maxHeight, o
   const parents = diagram.nodes.filter((node) => node.value === null);
   const parentKey = JSON.stringify(parents.map(treemapPathKey));
   useEffect(() => { setNewNode((current) => parents.some((node) => treemapPathKey(node) === current.parent) ? current : { ...current, parent: parents[0] ? treemapPathKey(parents[0]) : '' }); }, [parentKey]);
-  return <aside aria-label="Treemap editor" className="canvas-semantic-editor canvas-treemap-venn-editor" data-canvas-pan-exclusion="true" data-testid="treemap-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+  return <aside data-workspace-panel="semantic" aria-label="Treemap editor" className="canvas-semantic-editor canvas-treemap-venn-editor" data-canvas-pan-exclusion="true" data-testid="treemap-editor-controls" style={{ bottom, maxHeight }}>
     <strong>Treemap</strong>
-    <form aria-label="New Treemap node" onSubmit={(event) => { event.preventDefault(); const parent = parents.find((node) => treemapPathKey(node) === newNode.parent); if (runNumericForm(setError, () => onAdd?.({ label: newNode.label, value: newNode.value.trim() ? parseSemanticNumber(newNode.value, 'Treemap value') : null }, parent ? getTreemapNodeIdentity(parent, diagram.nodes) : undefined)) === true) setNewNode((current) => ({ ...current, label: 'Node', value: '' })); }}>
-      <input aria-label="New Treemap node label" onChange={(event) => setNewNode((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.label} />
-      <input aria-label="New Treemap node value" inputMode="decimal" onChange={(event) => setNewNode((current) => ({ ...current, value: event.target.value }))} placeholder="optional leaf value" style={HIERARCHY_CONTROL_STYLE} value={newNode.value} />
-      {parents.length ? <select aria-label="New Treemap node parent" onChange={(event) => setNewNode((current) => ({ ...current, parent: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.parent}>{parents.map((node) => <option key={treemapPathKey(node)} value={treemapPathKey(node)}>{treemapPathLabel(node)}</option>)}</select> : null}
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add node</button>
-    </form>
-    <NumericEditorError error={error} />{diagram.nodes.map((node) => <TreemapNodeForm allNodes={diagram.nodes} draftCache={draftCache} key={keys.get(node)} node={node} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} onReparent={onReparent} renderKey={keys.get(node)!} />)}
+    <WorkspaceRecord aria-label="New Treemap node" error={error} onSubmit={(event) => { event.preventDefault(); const parent = parents.find((node) => treemapPathKey(node) === newNode.parent); if (runNumericForm(setError, () => onAdd?.({ label: newNode.label, value: newNode.value.trim() ? parseSemanticNumber(newNode.value, 'Treemap value') : null }, parent ? getTreemapNodeIdentity(parent, diagram.nodes) : undefined)) === true) setNewNode((current) => ({ ...current, label: 'Node', value: '' })); }}>
+      <WorkspaceInput aria-label="New Treemap node label" onChange={(event) => setNewNode((current) => ({ ...current, label: event.target.value }))} value={newNode.label} />
+      <WorkspaceInput aria-label="New Treemap node value" inputMode="decimal" onChange={(event) => setNewNode((current) => ({ ...current, value: event.target.value }))} placeholder="optional leaf value" value={newNode.value} />
+      {parents.length ? <WorkspaceSelect aria-label="New Treemap node parent" onChange={(event) => setNewNode((current) => ({ ...current, parent: event.target.value }))} value={newNode.parent}>{parents.map((node) => <option key={treemapPathKey(node)} value={treemapPathKey(node)}>{treemapPathLabel(node)}</option>)}</WorkspaceSelect> : null}
+      <WorkspaceButton type="submit">Add node</WorkspaceButton>
+      <NumericEditorError error={error} />
+    </WorkspaceRecord>
+    {diagram.nodes.map((node) => <TreemapNodeForm allNodes={diagram.nodes} draftCache={draftCache} key={keys.get(node)} node={node} onDelete={onDelete} onEdit={onEdit} onMove={onMove} onReparent={onReparent} renderKey={keys.get(node)!} />)}
   </aside>;
 }
 
@@ -6309,23 +6205,25 @@ function isTreemapDescendant(candidate: TreemapNode, ancestor: TreemapNode): boo
     && ancestorPath.every((segment, index) => candidate.ancestorLabels[index] === segment);
 }
 
-function TreemapNodeForm({ allNodes, draftCache, node, onDelete, onEdit, onError, onMove, onReparent, renderKey }: {
+function TreemapNodeForm({ allNodes, draftCache, node, onDelete, onEdit, onMove, onReparent, renderKey }: {
   allNodes: TreemapNode[]; draftCache: PersistentCanonicalDraftCache<TreemapNode>; node: TreemapNode; renderKey: string;
   onDelete?: (identity: TreemapNodeIdentity) => SemanticFormActionResult; onEdit?: (identity: TreemapNodeIdentity, value: Partial<Pick<TreemapNode, 'label' | 'value'>>) => SemanticFormActionResult;
-  onError: (error: string | null) => void;
+
   onMove?: (identity: TreemapNodeIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onReparent?: (identity: TreemapNodeIdentity, parent: TreemapNodeIdentity) => SemanticFormActionResult;
 }) {
+  const [error, onError] = useState<string | null>(null);
   const identity = getTreemapNodeIdentity(node, allNodes); const safe = identity.occurrenceCount === 1; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(node, renderKey, draftCache); const { draft: valueDraft, resetDraft: resetValueDraft, updateDraft: updateValueDraft } = useCanonicalDraft({ value: node.value === null ? '' : String(node.value) });
   const label = `Treemap node ${treemapPathLabel(node)}`; const isRoot = node.ancestorLabels.length === 0; const descendants = allNodes.filter((candidate) => isTreemapDescendant(candidate, node));
   const peers = allNodes.filter((candidate) => sameTreemapPath(candidate.ancestorLabels, node.ancestorLabels)); const peerIndex = peers.indexOf(node);
   const possibleParents = allNodes.filter((candidate) => candidate.value === null && candidate !== node && !isTreemapDescendant(candidate, node));
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe && runNumericForm(onError, () => onEdit?.(identity, { label: draft.label, value: valueDraft.value.trim() ? parseSemanticNumber(valueDraft.value, 'Treemap value') : null })) === true) { resetDraft(); resetValueDraft(); } }}>
-    <span>{'— '.repeat(node.ancestorLabels.length)}{node.label}</span><input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
-    <input aria-label={`${label} value`} disabled={!safe || descendants.length > 0} inputMode="decimal" onChange={(event) => updateValueDraft(() => ({ value: event.target.value }))} placeholder="branch" style={HIERARCHY_CONTROL_STYLE} value={valueDraft.value} />
-    <button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ${label} up`} disabled={!safe || isRoot || peerIndex === 0} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={!safe || isRoot || peerIndex === peers.length - 1} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
-    {!isRoot ? <select aria-label={`Move ${label} to parent`} disabled={!safe} onChange={(event) => { const parent = possibleParents.find((candidate) => treemapPathKey(candidate) === event.target.value); if (parent) runSemanticForm(onError, () => onReparent?.(identity, getTreemapNodeIdentity(parent, allNodes))); }} style={HIERARCHY_CONTROL_STYLE} value=""><option value="">Move subtree…</option>{possibleParents.map((parent) => <option key={treemapPathKey(parent)} value={treemapPathKey(parent)}>{treemapPathLabel(parent)}</option>)}</select> : null}
-    {!isRoot ? <button aria-label={`Delete ${label} subtree containing ${descendants.length + 1} ${descendants.length === 0 ? 'node' : 'nodes'}`} disabled={!safe} onClick={() => runSemanticForm(onError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">{descendants.length ? `Delete subtree (${descendants.length + 1} nodes)` : 'Delete'}</button> : null}
-  </form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (safe && runNumericForm(onError, () => onEdit?.(identity, { label: draft.label, value: valueDraft.value.trim() ? parseSemanticNumber(valueDraft.value, 'Treemap value') : null })) === true) { resetDraft(); resetValueDraft(); } }}>
+    <span>{'— '.repeat(node.ancestorLabels.length)}{node.label}</span><WorkspaceInput aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} />
+    <WorkspaceInput aria-label={`${label} value`} disabled={!safe || descendants.length > 0} inputMode="decimal" onChange={(event) => updateValueDraft(() => ({ value: event.target.value }))} placeholder="branch" value={valueDraft.value} />
+    <WorkspaceButton disabled={!safe} type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} up`} disabled={!safe || isRoot || peerIndex === 0} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'up'))} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} down`} disabled={!safe || isRoot || peerIndex === peers.length - 1} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'down'))} type="button">↓</WorkspaceButton>
+    {!isRoot ? <WorkspaceSelect aria-label={`Move ${label} to parent`} disabled={!safe} onChange={(event) => { const parent = possibleParents.find((candidate) => treemapPathKey(candidate) === event.target.value); if (parent) runSemanticForm(onError, () => onReparent?.(identity, getTreemapNodeIdentity(parent, allNodes))); }} value=""><option value="">Move subtree…</option>{possibleParents.map((parent) => <option key={treemapPathKey(parent)} value={treemapPathKey(parent)}>{treemapPathLabel(parent)}</option>)}</WorkspaceSelect> : null}
+    {!isRoot ? <WorkspaceButton aria-label={`Delete ${label} subtree containing ${descendants.length + 1} ${descendants.length === 0 ? 'node' : 'nodes'}`} disabled={!safe} onClick={() => runSemanticForm(onError, () => onDelete?.(identity))} type="button">{descendants.length ? `Delete subtree (${descendants.length + 1} nodes)` : 'Delete'}</WorkspaceButton> : null}
+    <NumericEditorError error={error} />
+  </WorkspaceRecord>;
 }
 
 const VENN_STYLE_PROPERTIES = ['color', 'fill', 'fill-opacity', 'opacity', 'stroke', 'stroke-opacity', 'stroke-width'] as const;
@@ -6334,160 +6232,174 @@ function VennEditorControls({ bottom, diagram, maxHeight, onAddStyle, onAddSubse
   onAddSubset?: (value: VennSubset) => SemanticFormActionResult; onEditSubset?: (identity: VennSubsetIdentity, value: Partial<VennSubset>) => SemanticFormActionResult; onDeleteSubset?: (identity: VennSubsetIdentity) => SemanticFormActionResult; onMoveSubset?: (identity: VennSubsetIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onRenameSet?: (identity: VennSubsetIdentity, value: string) => SemanticFormActionResult;
   onAddStyle?: (value: VennStyle) => SemanticFormActionResult; onEditStyle?: (identity: VennStyleIdentity, value: Partial<VennStyle>) => SemanticFormActionResult; onDeleteStyle?: (identity: VennStyleIdentity) => SemanticFormActionResult; onMoveStyle?: (identity: VennStyleIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
 }) {
-  const setNames = diagram.subsets.filter((subset) => subset.sets.length === 1).map((subset) => subset.sets[0]!); const setNameKey = setNames.join('\u0000'); const [subset, setSubset] = useState({ label: '', setId: 'C', sets: [] as string[], value: '1' }); const [style, setStyle] = useState({ property: 'fill', sets: setNames.slice(0, 1), value: '#60a5fa' }); const [error, setError] = useState<string | null>(null);
+  const [newSubsetError, setNewSubsetError] = useState<string | null>(null);
+  const [newStyleError, setNewStyleError] = useState<string | null>(null);
+  const setNames = diagram.subsets.filter((subset) => subset.sets.length === 1).map((subset) => subset.sets[0]!); const setNameKey = setNames.join('\u0000'); const [subset, setSubset] = useState({ label: '', setId: 'C', sets: [] as string[], value: '1' }); const [style, setStyle] = useState({ property: 'fill', sets: setNames.slice(0, 1), value: '#60a5fa' });
   useEffect(() => { setSubset((current) => ({ ...current, sets: current.sets.filter((name) => setNames.includes(name)) })); setStyle((current) => ({ ...current, sets: current.sets.filter((name) => setNames.includes(name)).length ? current.sets.filter((name) => setNames.includes(name)) : setNames.slice(0, 1) })); }, [setNameKey]);
-  return <aside aria-label="Venn editor" className="canvas-semantic-editor canvas-treemap-venn-editor" data-canvas-pan-exclusion="true" data-testid="venn-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
-    <strong>Venn</strong><form aria-label="New Venn subset" onSubmit={(event) => { event.preventDefault(); if (runNumericForm(setError, () => { if (subset.sets.length === 1) throw new Error('A Venn overlap requires at least two authored sets.'); const sets = subset.sets.length ? subset.sets : [subset.setId]; return onAddSubset?.({ label: subset.label || null, sets, value: parseSemanticNumber(subset.value, 'Venn subset value') }); }) === true) setSubset((current) => ({ ...current, label: '', setId: 'Set', sets: [] })); }}><input aria-label="New Venn set id" disabled={subset.sets.length > 0} onChange={(event) => setSubset((current) => ({ ...current, setId: event.target.value }))} placeholder="new set id" style={HIERARCHY_CONTROL_STYLE} value={subset.setId} /><select aria-label="New Venn overlap sets" multiple onChange={(event) => { const sets = [...event.currentTarget.selectedOptions].map((option) => option.value); setSubset((current) => ({ ...current, sets })); }} style={HIERARCHY_CONTROL_STYLE} value={subset.sets}>{setNames.map((name) => <option key={name}>{name}</option>)}</select><input aria-label="New Venn subset label" onChange={(event) => setSubset((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={subset.label} /><input aria-label="New Venn subset value" inputMode="decimal" onChange={(event) => setSubset((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={subset.value} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add subset</button></form>
-    <NumericEditorError error={error} />{diagram.subsets.map((item) => <VennSubsetForm all={diagram.subsets} draftCache={subsetDraftCache} item={item} key={subsetKeys.get(item)} onDelete={onDeleteSubset} onEdit={onEditSubset} onError={setError} onMove={onMoveSubset} onRename={onRenameSet} renameDraftCache={renameDraftCache} renderKey={subsetKeys.get(item)!} />)}
-    <section aria-label="Venn styles"><h3>Styles</h3><form aria-label="New Venn style" onSubmit={(event) => { event.preventDefault(); runSemanticForm(setError, () => onAddStyle?.({ properties: [{ name: style.property, value: style.value }], sets: style.sets })); }}><select aria-label="New Venn style target" onChange={(event) => { const target = diagram.subsets.find((candidate) => candidate.sets.join('\u0000') === event.target.value); if (target) setStyle((current) => ({ ...current, sets: target.sets })); }} style={HIERARCHY_CONTROL_STYLE} value={style.sets.join('\u0000')}>{diagram.subsets.map((target) => <option key={target.sets.join('\u0000')} value={target.sets.join('\u0000')}>{target.sets.join(', ')}</option>)}</select><select aria-label="New Venn style property" onChange={(event) => setStyle((current) => ({ ...current, property: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={style.property}>{VENN_STYLE_PROPERTIES.map((property) => <option key={property}>{property}</option>)}</select><input aria-label="New Venn style value" onChange={(event) => setStyle((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={style.value} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add style</button></form>{diagram.styles.map((item, index) => <VennStyleForm all={diagram.styles} draftCache={styleDraftCache} index={index} item={item} key={styleKeys.get(item)} onDelete={onDeleteStyle} onEdit={onEditStyle} onError={setError} onMove={onMoveStyle} renderKey={styleKeys.get(item)!} targets={diagram.subsets} />)}</section>
+  return <aside data-workspace-panel="semantic" aria-label="Venn editor" className="canvas-semantic-editor canvas-treemap-venn-editor" data-canvas-pan-exclusion="true" data-testid="venn-editor-controls" style={{ bottom, maxHeight }}>
+    <strong>Venn</strong><WorkspaceRecord aria-label="New Venn subset" error={newSubsetError} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(setNewSubsetError, () => { if (subset.sets.length === 1) throw new Error('A Venn overlap requires at least two authored sets.'); const sets = subset.sets.length ? subset.sets : [subset.setId]; return onAddSubset?.({ label: subset.label || null, sets, value: parseSemanticNumber(subset.value, 'Venn subset value') }); }) === true) setSubset((current) => ({ ...current, label: '', setId: 'Set', sets: [] })); }}><WorkspaceInput aria-label="New Venn set id" disabled={subset.sets.length > 0} onChange={(event) => setSubset((current) => ({ ...current, setId: event.target.value }))} placeholder="new set id" value={subset.setId} /><WorkspaceSelect aria-label="New Venn overlap sets" multiple onChange={(event) => { const sets = [...event.currentTarget.selectedOptions].map((option) => option.value); setSubset((current) => ({ ...current, sets })); }} value={subset.sets}>{setNames.map((name) => <option key={name}>{name}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="New Venn subset label" onChange={(event) => setSubset((current) => ({ ...current, label: event.target.value }))} value={subset.label} /><WorkspaceInput aria-label="New Venn subset value" inputMode="decimal" onChange={(event) => setSubset((current) => ({ ...current, value: event.target.value }))} value={subset.value} /><WorkspaceButton type="submit">Add subset</WorkspaceButton><NumericEditorError error={newSubsetError} /></WorkspaceRecord>
+    {diagram.subsets.map((item) => <VennSubsetForm all={diagram.subsets} draftCache={subsetDraftCache} item={item} key={subsetKeys.get(item)} onDelete={onDeleteSubset} onEdit={onEditSubset} onMove={onMoveSubset} onRename={onRenameSet} renameDraftCache={renameDraftCache} renderKey={subsetKeys.get(item)!} />)}
+    <section aria-label="Venn styles"><h3>Styles</h3><WorkspaceRecord aria-label="New Venn style" error={newStyleError} onSubmit={(event) => { event.preventDefault(); runSemanticForm(setNewStyleError, () => onAddStyle?.({ properties: [{ name: style.property, value: style.value }], sets: style.sets })); }}><WorkspaceSelect aria-label="New Venn style target" onChange={(event) => { const target = diagram.subsets.find((candidate) => candidate.sets.join('\u0000') === event.target.value); if (target) setStyle((current) => ({ ...current, sets: target.sets })); }} value={style.sets.join('\u0000')}>{diagram.subsets.map((target) => <option key={target.sets.join('\u0000')} value={target.sets.join('\u0000')}>{target.sets.join(', ')}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label="New Venn style property" onChange={(event) => setStyle((current) => ({ ...current, property: event.target.value }))} value={style.property}>{VENN_STYLE_PROPERTIES.map((property) => <option key={property}>{property}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="New Venn style value" onChange={(event) => setStyle((current) => ({ ...current, value: event.target.value }))} value={style.value} /><WorkspaceButton type="submit">Add style</WorkspaceButton><NumericEditorError error={newStyleError} /></WorkspaceRecord>{diagram.styles.map((item, index) => <VennStyleForm all={diagram.styles} draftCache={styleDraftCache} index={index} item={item} key={styleKeys.get(item)} onDelete={onDeleteStyle} onEdit={onEditStyle} onMove={onMoveStyle} renderKey={styleKeys.get(item)!} targets={diagram.subsets} />)}</section>
   </aside>;
 }
 
-function VennSubsetForm({ all, draftCache, item, onDelete, onEdit, onError, onMove, onRename, renameDraftCache, renderKey }: { all: VennSubset[]; draftCache: PersistentCanonicalDraftCache<VennSubset>; item: VennSubset; renderKey: string; renameDraftCache: PersistentCanonicalDraftCache<{ value: string }>; onDelete?: (identity: VennSubsetIdentity) => SemanticFormActionResult; onEdit?: (identity: VennSubsetIdentity, value: Partial<VennSubset>) => SemanticFormActionResult; onError: (error: string | null) => void; onMove?: (identity: VennSubsetIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onRename?: (identity: VennSubsetIdentity, value: string) => SemanticFormActionResult; }) {
+function VennSubsetForm({ all, draftCache, item, onDelete, onEdit, onMove, onRename, renameDraftCache, renderKey }: { all: VennSubset[]; draftCache: PersistentCanonicalDraftCache<VennSubset>; item: VennSubset; renderKey: string; renameDraftCache: PersistentCanonicalDraftCache<{ value: string }>; onDelete?: (identity: VennSubsetIdentity) => SemanticFormActionResult; onEdit?: (identity: VennSubsetIdentity, value: Partial<VennSubset>) => SemanticFormActionResult; onMove?: (identity: VennSubsetIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onRename?: (identity: VennSubsetIdentity, value: string) => SemanticFormActionResult; }) {
+  const [error, onError] = useState<string | null>(null);
   const identity = getVennSubsetIdentity(item, all); const safe = identity.occurrenceCount === 1; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(item, renderKey, draftCache); const { draft: valueDraft, resetDraft: resetValueDraft, updateDraft: updateValueDraft } = useCanonicalDraft({ value: String(item.value) }); const { draft: renameDraft, resetDraft: resetRenameDraft, updateDraft: updateRenameDraft } = usePersistentCanonicalDraft({ value: item.sets.length === 1 ? item.sets[0]! : '' }, `${renderKey}:rename`, renameDraftCache); const label = `Venn ${item.sets.length === 1 ? 'set' : 'overlap'} ${item.sets.join(' and ')}`;
   const baseSetNames = all.filter((subset) => subset.sets.length === 1).map((subset) => subset.sets[0]!); const peers = all.filter((subset) => (subset.sets.length === 1) === (item.sets.length === 1)); const peerIndex = peers.indexOf(item);
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (!safe) return; if (runNumericForm(onError, () => { const patch: Partial<VennSubset> = { label: draft.label || null, sets: draft.sets }; if (valueDraft.value !== String(item.value)) patch.value = parseSemanticNumber(valueDraft.value, 'Venn subset value'); return onEdit?.(identity, patch); }) === true) { resetDraft(); resetValueDraft(); } }}>{item.sets.length === 1 ? <input aria-label={`${label} sets`} disabled style={HIERARCHY_CONTROL_STYLE} value={draft.sets[0]} /> : <select aria-label={`${label} sets`} disabled={!safe} multiple onChange={(event) => { const sets = [...event.currentTarget.selectedOptions].map((option) => option.value); updateDraft((current) => ({ ...current, sets })); }} style={HIERARCHY_CONTROL_STYLE} value={draft.sets}>{baseSetNames.map((name) => <option key={name}>{name}</option>)}</select>}<input aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value || null }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label ?? ''} /><input aria-label={`${label} value`} disabled={!safe} inputMode="decimal" onChange={(event) => updateValueDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={valueDraft.value} /><button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>{item.sets.length === 1 ? <><input aria-label={`Rename ${label}`} disabled={!safe} onChange={(event) => updateRenameDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={renameDraft.value} /><button aria-label={`Save rename ${label}`} disabled={!safe || renameDraft.value === item.sets[0]} onClick={() => { if (runSemanticForm(onError, () => onRename?.(identity, renameDraft.value))) resetRenameDraft(); }} style={HIERARCHY_CONTROL_STYLE} type="button">Rename</button></> : null}<button aria-label={`Move ${label} up`} disabled={!safe || peerIndex === 0} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={!safe || peerIndex === peers.length - 1} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => runSemanticForm(onError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (!safe) return; if (runNumericForm(onError, () => { const patch: Partial<VennSubset> = { label: draft.label || null, sets: draft.sets }; if (valueDraft.value !== String(item.value)) patch.value = parseSemanticNumber(valueDraft.value, 'Venn subset value'); return onEdit?.(identity, patch); }) === true) { resetDraft(); resetValueDraft(); } }}>{item.sets.length === 1 ? <WorkspaceInput aria-label={`${label} sets`} disabled value={draft.sets[0]} /> : <WorkspaceSelect aria-label={`${label} sets`} disabled={!safe} multiple onChange={(event) => { const sets = [...event.currentTarget.selectedOptions].map((option) => option.value); updateDraft((current) => ({ ...current, sets })); }} value={draft.sets}>{baseSetNames.map((name) => <option key={name}>{name}</option>)}</WorkspaceSelect>}<WorkspaceInput aria-label={`${label} label`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value || null }))} value={draft.label ?? ''} /><WorkspaceInput aria-label={`${label} value`} disabled={!safe} inputMode="decimal" onChange={(event) => updateValueDraft(() => ({ value: event.target.value }))} value={valueDraft.value} /><WorkspaceButton disabled={!safe} type="submit">Save</WorkspaceButton>{item.sets.length === 1 ? <><WorkspaceInput aria-label={`Rename ${label}`} disabled={!safe} onChange={(event) => updateRenameDraft(() => ({ value: event.target.value }))} value={renameDraft.value} /><WorkspaceButton aria-label={`Save rename ${label}`} disabled={!safe || renameDraft.value === item.sets[0]} onClick={() => { if (runSemanticForm(onError, () => onRename?.(identity, renameDraft.value))) resetRenameDraft(); }} type="button">Rename</WorkspaceButton></> : null}<WorkspaceButton aria-label={`Move ${label} up`} disabled={!safe || peerIndex === 0} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'up'))} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} down`} disabled={!safe || peerIndex === peers.length - 1} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'down'))} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ${label}`} disabled={!safe} onClick={() => runSemanticForm(onError, () => onDelete?.(identity))} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>;
 }
 
-function VennStyleForm({ all, draftCache, index, item, onDelete, onEdit, onError, onMove, renderKey, targets }: { all: VennStyle[]; draftCache: PersistentCanonicalDraftCache<VennStyle>; index: number; item: VennStyle; renderKey: string; targets: VennSubset[]; onDelete?: (identity: VennStyleIdentity) => SemanticFormActionResult; onEdit?: (identity: VennStyleIdentity, value: Partial<VennStyle>) => SemanticFormActionResult; onError: (error: string | null) => void; onMove?: (identity: VennStyleIdentity, direction: 'up' | 'down') => SemanticFormActionResult; }) {
+function VennStyleForm({ all, draftCache, index, item, onDelete, onEdit, onMove, renderKey, targets }: { all: VennStyle[]; draftCache: PersistentCanonicalDraftCache<VennStyle>; index: number; item: VennStyle; renderKey: string; targets: VennSubset[]; onDelete?: (identity: VennStyleIdentity) => SemanticFormActionResult; onEdit?: (identity: VennStyleIdentity, value: Partial<VennStyle>) => SemanticFormActionResult; onMove?: (identity: VennStyleIdentity, direction: 'up' | 'down') => SemanticFormActionResult; }) {
+  const [error, onError] = useState<string | null>(null);
   const identity = getVennStyleIdentity(item, all); const safe = identity.occurrenceCount === 1; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(item, renderKey, draftCache); const label = `Venn style ${item.sets.join(' and ')}`;
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (safe && runSemanticForm(onError, () => onEdit?.(identity, draft))) resetDraft(); }}><select aria-label={`${label} target`} disabled={!safe} onChange={(event) => { const target = targets.find((candidate) => candidate.sets.join('\u0000') === event.target.value); if (target) updateDraft((current) => ({ ...current, sets: target.sets })); }} style={HIERARCHY_CONTROL_STYLE} value={draft.sets.join('\u0000')}>{targets.map((target) => <option key={target.sets.join('\u0000')} value={target.sets.join('\u0000')}>{target.sets.join(', ')}</option>)}</select><select aria-label={`${label} property`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, properties: [{ ...current.properties[0]!, name: event.target.value }] }))} style={HIERARCHY_CONTROL_STYLE} value={draft.properties[0]?.name ?? 'fill'}>{VENN_STYLE_PROPERTIES.map((property) => <option key={property}>{property}</option>)}</select><input aria-label={`${label} value`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, properties: [{ ...current.properties[0]!, value: event.target.value }] }))} style={HIERARCHY_CONTROL_STYLE} value={draft.properties[0]?.value ?? ''} /><button disabled={!safe} style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={!safe || index === all.length - 1} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} disabled={!safe} onClick={() => runSemanticForm(onError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (safe && runSemanticForm(onError, () => onEdit?.(identity, draft))) resetDraft(); }}><WorkspaceSelect aria-label={`${label} target`} disabled={!safe} onChange={(event) => { const target = targets.find((candidate) => candidate.sets.join('\u0000') === event.target.value); if (target) updateDraft((current) => ({ ...current, sets: target.sets })); }} value={draft.sets.join('\u0000')}>{targets.map((target) => <option key={target.sets.join('\u0000')} value={target.sets.join('\u0000')}>{target.sets.join(', ')}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label={`${label} property`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, properties: [{ ...current.properties[0]!, name: event.target.value }] }))} value={draft.properties[0]?.name ?? 'fill'}>{VENN_STYLE_PROPERTIES.map((property) => <option key={property}>{property}</option>)}</WorkspaceSelect><WorkspaceInput aria-label={`${label} value`} disabled={!safe} onChange={(event) => updateDraft((current) => ({ ...current, properties: [{ ...current.properties[0]!, value: event.target.value }] }))} value={draft.properties[0]?.value ?? ''} /><WorkspaceButton disabled={!safe} type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} up`} disabled={!safe || index === 0} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'up'))} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} down`} disabled={!safe || index === all.length - 1} onClick={() => runSemanticForm(onError, () => onMove?.(identity, 'down'))} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ${label}`} disabled={!safe} onClick={() => runSemanticForm(onError, () => onDelete?.(identity))} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>;
 }
 
 function PieEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onSetShowData, onSetTitle }: {
   bottom: number; diagram: PieDiagramSnapshot; maxHeight: number;
-  onAdd?: (value: PieSlice) => boolean | void; onDelete?: (identity: PieSliceIdentity) => void;
-  onEdit?: (identity: PieSliceIdentity, value: Partial<PieSlice>) => boolean | void;
+  onAdd?: (value: PieSlice) => SemanticFormActionResult; onDelete?: (identity: PieSliceIdentity) => void;
+  onEdit?: (identity: PieSliceIdentity, value: Partial<PieSlice>) => SemanticFormActionResult;
   onMove?: (identity: PieSliceIdentity, direction: 'up' | 'down') => void;
   onSetShowData?: (value: boolean) => void; onSetTitle?: (title: string | null) => void;
 }) {
   const { draft: titleDraft, updateDraft: updateTitleDraft } = useCanonicalDraft({ value: diagram.title ?? '' });
   const [slice, setSlice] = useState({ label: 'Slice', value: '1' });
   const [error, setError] = useState<string | null>(null);
-  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="pie-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="pie-editor-controls" style={{ bottom, maxHeight }}>
     <strong>Pie</strong>
-    <form aria-label="Pie options" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() ? titleDraft.value : null); }}>
-      <input aria-label="Pie title" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={titleDraft.value} />
-      <label><input aria-label="Pie show data" checked={diagram.showData} onChange={(event) => onSetShowData?.(event.target.checked)} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Show values</label>
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Save Pie options</button>
-    </form>
-    <form aria-label="New Pie slice" onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAdd?.({ label: slice.label, value: parseSemanticNumber(slice.value, 'Pie slice value') })); }}>
-      <input aria-label="New Pie slice label" onChange={(event) => setSlice((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={slice.label} />
-      <input aria-label="New Pie slice value" inputMode="decimal" onChange={(event) => setSlice((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={slice.value} />
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add slice</button>
-    </form>
-    <NumericEditorError error={error} />
-    {diagram.slices.map((item) => <PieSliceForm item={item} items={diagram.slices} key={`${item.label}:${item.value}`} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} />)}
+    <WorkspaceRecord aria-label="Pie options" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() ? titleDraft.value : null); }}>
+      <WorkspaceInput aria-label="Pie title" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} value={titleDraft.value} />
+      <label><WorkspaceInput aria-label="Pie show data" checked={diagram.showData} onChange={(event) => onSetShowData?.(event.target.checked)} type="checkbox" />Show values</label>
+      <WorkspaceButton type="submit">Save Pie options</WorkspaceButton>
+    </WorkspaceRecord>
+    <WorkspaceRecord aria-label="New Pie slice" error={error} onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAdd?.({ label: slice.label, value: parseSemanticNumber(slice.value, 'Pie slice value') })); }}>
+      <WorkspaceInput aria-label="New Pie slice label" onChange={(event) => setSlice((current) => ({ ...current, label: event.target.value }))} value={slice.label} />
+      <WorkspaceInput aria-label="New Pie slice value" inputMode="decimal" onChange={(event) => setSlice((current) => ({ ...current, value: event.target.value }))} value={slice.value} />
+      <WorkspaceButton type="submit">Add slice</WorkspaceButton>
+      <NumericEditorError error={error} />
+    </WorkspaceRecord>
+    {diagram.slices.map((item) => <PieSliceForm item={item} items={diagram.slices} key={`${item.label}:${item.value}`} onDelete={onDelete} onEdit={onEdit} onMove={onMove} />)}
   </aside>;
 }
 
-function PieSliceForm({ item, items, onDelete, onEdit, onError, onMove }: { item: PieSlice; items: PieSlice[]; onDelete?: (identity: PieSliceIdentity) => void; onEdit?: (identity: PieSliceIdentity, value: Partial<PieSlice>) => boolean | void; onError: (value: string | null) => void; onMove?: (identity: PieSliceIdentity, direction: 'up' | 'down') => void }) {
+function PieSliceForm({ item, items, onDelete, onEdit, onMove }: { item: PieSlice; items: PieSlice[]; onDelete?: (identity: PieSliceIdentity) => void; onEdit?: (identity: PieSliceIdentity, value: Partial<PieSlice>) => SemanticFormActionResult; onMove?: (identity: PieSliceIdentity, direction: 'up' | 'down') => void }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical = { label: item.label, value: String(item.value) }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const identity = getPieSliceIdentity(item, items); const label = `Pie slice ${item.label}`;
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { label: draft.label, value: parseSemanticNumber(draft.value, 'Pie slice value') }))) resetDraft(); }}>
-    <input aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
-    <input aria-label={`${label} value`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.value} />
-    <button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button>
-    <button aria-label={`Move Pie slice ${item.label} up`} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button>
-    <button aria-label={`Move Pie slice ${item.label} down`} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button>
-    <button aria-label={`Delete Pie slice ${item.label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
-  </form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { label: draft.label, value: parseSemanticNumber(draft.value, 'Pie slice value') }))) resetDraft(); }}>
+    <WorkspaceInput aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} />
+    <WorkspaceInput aria-label={`${label} value`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, value: event.target.value }))} value={draft.value} />
+    <WorkspaceButton type="submit">Save</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move Pie slice ${item.label} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton>
+    <WorkspaceButton aria-label={`Move Pie slice ${item.label} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton>
+    <WorkspaceButton aria-label={`Delete Pie slice ${item.label}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton>
+    <NumericEditorError error={error} />
+  </WorkspaceRecord>;
 }
 
 function QuadrantEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onMove, onSetAxis, onSetLabel, onSetTitle }: {
   bottom: number; diagram: QuadrantDiagramSnapshot; maxHeight: number;
-  onAdd?: (value: QuadrantPoint) => boolean | void; onDelete?: (identity: QuadrantPointIdentity) => void;
-  onEdit?: (identity: QuadrantPointIdentity, value: Partial<QuadrantPoint>) => boolean | void;
+  onAdd?: (value: QuadrantPoint) => SemanticFormActionResult; onDelete?: (identity: QuadrantPointIdentity) => void;
+  onEdit?: (identity: QuadrantPointIdentity, value: Partial<QuadrantPoint>) => SemanticFormActionResult;
   onMove?: (identity: QuadrantPointIdentity, direction: 'up' | 'down') => void;
   onSetAxis?: (axis: QuadrantAxisName, value: QuadrantAxis | null) => void;
   onSetLabel?: (quadrant: QuadrantNumber, label: string | null) => void; onSetTitle?: (title: string | null) => void;
 }) {
   const { draft: titleDraft, updateDraft: updateTitleDraft } = useCanonicalDraft({ value: diagram.title ?? '' }); const [point, setPoint] = useState({ label: 'Point', x: '0.5', y: '0.5' }); const [error, setError] = useState<string | null>(null);
-  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="quadrant-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="quadrant-editor-controls" style={{ bottom, maxHeight }}>
     <strong>Quadrant chart</strong>
-    <form aria-label="Quadrant title" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() ? titleDraft.value : null); }}><input aria-label="Quadrant title text" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={titleDraft.value} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save title</button></form>
+    <WorkspaceRecord aria-label="Quadrant title" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() ? titleDraft.value : null); }}><WorkspaceInput aria-label="Quadrant title text" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} value={titleDraft.value} /><WorkspaceButton type="submit">Save title</WorkspaceButton></WorkspaceRecord>
     {(['x', 'y'] as const).map((axis) => <QuadrantAxisForm axis={axis} key={axis} onSave={onSetAxis} value={diagram.axes[axis]} />)}
     {([1, 2, 3, 4] as const).map((quadrant) => <QuadrantLabelForm key={quadrant} onSave={onSetLabel} quadrant={quadrant} value={diagram.quadrants[quadrant]} />)}
-    <form aria-label="New Quadrant point" onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAdd?.({ label: point.label, styles: {}, x: parseSemanticNumber(point.x, 'Quadrant x coordinate'), y: parseSemanticNumber(point.y, 'Quadrant y coordinate') })); }}>
-      <input aria-label="New Quadrant point label" onChange={(event) => setPoint((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={point.label} />
-      <input aria-label="New Quadrant point x" inputMode="decimal" onChange={(event) => setPoint((current) => ({ ...current, x: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={point.x} />
-      <input aria-label="New Quadrant point y" inputMode="decimal" onChange={(event) => setPoint((current) => ({ ...current, y: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={point.y} />
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add point</button>
-    </form>
-    <NumericEditorError error={error} />
-    {diagram.points.map((item) => <QuadrantPointForm item={item} items={diagram.points} key={`${item.label}:${item.x}:${item.y}`} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} />)}
+    <WorkspaceRecord aria-label="New Quadrant point" error={error} onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAdd?.({ label: point.label, styles: {}, x: parseSemanticNumber(point.x, 'Quadrant x coordinate'), y: parseSemanticNumber(point.y, 'Quadrant y coordinate') })); }}>
+      <WorkspaceInput aria-label="New Quadrant point label" onChange={(event) => setPoint((current) => ({ ...current, label: event.target.value }))} value={point.label} />
+      <WorkspaceInput aria-label="New Quadrant point x" inputMode="decimal" onChange={(event) => setPoint((current) => ({ ...current, x: event.target.value }))} value={point.x} />
+      <WorkspaceInput aria-label="New Quadrant point y" inputMode="decimal" onChange={(event) => setPoint((current) => ({ ...current, y: event.target.value }))} value={point.y} />
+      <WorkspaceButton type="submit">Add point</WorkspaceButton>
+      <NumericEditorError error={error} />
+    </WorkspaceRecord>
+
+    {diagram.points.map((item) => <QuadrantPointForm item={item} items={diagram.points} key={`${item.label}:${item.x}:${item.y}`} onDelete={onDelete} onEdit={onEdit} onMove={onMove} />)}
   </aside>;
 }
 
 function QuadrantAxisForm({ axis, onSave, value }: { axis: QuadrantAxisName; onSave?: (axis: QuadrantAxisName, value: QuadrantAxis | null) => void; value: QuadrantAxis | null }) {
   const canonical = value ?? { start: '', end: '' }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const prefix = `Quadrant ${axis}-axis`;
-  return <form aria-label={prefix} onSubmit={(event) => { event.preventDefault(); onSave?.(axis, draft.start.trim() || draft.end.trim() ? draft : null); resetDraft(); }}><input aria-label={`${prefix} start`} onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.start} /><input aria-label={`${prefix} end`} onChange={(event) => updateDraft((current) => ({ ...current, end: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.end} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save {axis}-axis</button></form>;
+  return <WorkspaceRecord aria-label={prefix} onSubmit={(event) => { event.preventDefault(); onSave?.(axis, draft.start.trim() || draft.end.trim() ? draft : null); resetDraft(); }}><WorkspaceInput aria-label={`${prefix} start`} onChange={(event) => updateDraft((current) => ({ ...current, start: event.target.value }))} value={draft.start} /><WorkspaceInput aria-label={`${prefix} end`} onChange={(event) => updateDraft((current) => ({ ...current, end: event.target.value }))} value={draft.end} /><WorkspaceButton type="submit">Save {axis}-axis</WorkspaceButton></WorkspaceRecord>;
 }
 
 function QuadrantLabelForm({ onSave, quadrant, value }: { onSave?: (quadrant: QuadrantNumber, value: string | null) => void; quadrant: QuadrantNumber; value: string | null }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft({ value: value ?? '' });
-  return <form aria-label={`Quadrant ${quadrant} label`} onSubmit={(event) => { event.preventDefault(); onSave?.(quadrant, draft.value.trim() ? draft.value : null); resetDraft(); }}><input aria-label={`Quadrant ${quadrant} label text`} onChange={(event) => updateDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.value} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save quadrant {quadrant}</button></form>;
+  return <WorkspaceRecord aria-label={`Quadrant ${quadrant} label`} onSubmit={(event) => { event.preventDefault(); onSave?.(quadrant, draft.value.trim() ? draft.value : null); resetDraft(); }}><WorkspaceInput aria-label={`Quadrant ${quadrant} label text`} onChange={(event) => updateDraft(() => ({ value: event.target.value }))} value={draft.value} /><WorkspaceButton type="submit">Save quadrant {quadrant}</WorkspaceButton></WorkspaceRecord>;
 }
 
-function QuadrantPointForm({ item, items, onDelete, onEdit, onError, onMove }: { item: QuadrantPoint; items: QuadrantPoint[]; onDelete?: (identity: QuadrantPointIdentity) => void; onEdit?: (identity: QuadrantPointIdentity, value: Partial<QuadrantPoint>) => boolean | void; onError: (value: string | null) => void; onMove?: (identity: QuadrantPointIdentity, direction: 'up' | 'down') => void }) {
+function QuadrantPointForm({ item, items, onDelete, onEdit, onMove }: { item: QuadrantPoint; items: QuadrantPoint[]; onDelete?: (identity: QuadrantPointIdentity) => void; onEdit?: (identity: QuadrantPointIdentity, value: Partial<QuadrantPoint>) => SemanticFormActionResult; onMove?: (identity: QuadrantPointIdentity, direction: 'up' | 'down') => void }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical = { label: item.label, x: String(item.x), y: String(item.y), radius: item.styles.radius === undefined ? '' : String(item.styles.radius), color: item.styles.color ?? '', strokeColor: item.styles.strokeColor ?? '', strokeWidth: item.styles.strokeWidth ?? '' }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const identity = getQuadrantPointIdentity(item, items); const label = `Quadrant point ${item.label}`;
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { label: draft.label, x: parseSemanticNumber(draft.x, 'Quadrant x coordinate'), y: parseSemanticNumber(draft.y, 'Quadrant y coordinate'), styles: { ...(draft.radius.trim() ? { radius: parseSemanticNumber(draft.radius, 'Quadrant point radius') } : {}), ...(draft.color.trim() ? { color: draft.color } : {}), ...(draft.strokeColor.trim() ? { strokeColor: draft.strokeColor } : {}), ...(draft.strokeWidth.trim() ? { strokeWidth: draft.strokeWidth } : {}) } }))) resetDraft(); }}>
-    <input aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />
-    <input aria-label={`${label} x`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, x: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.x} />
-    <input aria-label={`${label} y`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, y: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.y} />
-    <input aria-label={`${label} radius`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, radius: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.radius} />
-    <input aria-label={`${label} color`} onChange={(event) => updateDraft((current) => ({ ...current, color: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.color} />
-    <input aria-label={`${label} stroke color`} onChange={(event) => updateDraft((current) => ({ ...current, strokeColor: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.strokeColor} />
-    <input aria-label={`${label} stroke width`} onChange={(event) => updateDraft((current) => ({ ...current, strokeWidth: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.strokeWidth} />
-    <button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move Quadrant point ${item.label} up`} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move Quadrant point ${item.label} down`} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete Quadrant point ${item.label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button>
-  </form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { label: draft.label, x: parseSemanticNumber(draft.x, 'Quadrant x coordinate'), y: parseSemanticNumber(draft.y, 'Quadrant y coordinate'), styles: { ...(draft.radius.trim() ? { radius: parseSemanticNumber(draft.radius, 'Quadrant point radius') } : {}), ...(draft.color.trim() ? { color: draft.color } : {}), ...(draft.strokeColor.trim() ? { strokeColor: draft.strokeColor } : {}), ...(draft.strokeWidth.trim() ? { strokeWidth: draft.strokeWidth } : {}) } }))) resetDraft(); }}>
+    <WorkspaceInput aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} />
+    <WorkspaceInput aria-label={`${label} x`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, x: event.target.value }))} value={draft.x} />
+    <WorkspaceInput aria-label={`${label} y`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, y: event.target.value }))} value={draft.y} />
+    <WorkspaceInput aria-label={`${label} radius`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, radius: event.target.value }))} value={draft.radius} />
+    <WorkspaceInput aria-label={`${label} color`} onChange={(event) => updateDraft((current) => ({ ...current, color: event.target.value }))} value={draft.color} />
+    <WorkspaceInput aria-label={`${label} stroke color`} onChange={(event) => updateDraft((current) => ({ ...current, strokeColor: event.target.value }))} value={draft.strokeColor} />
+    <WorkspaceInput aria-label={`${label} stroke width`} onChange={(event) => updateDraft((current) => ({ ...current, strokeWidth: event.target.value }))} value={draft.strokeWidth} />
+    <WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move Quadrant point ${item.label} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move Quadrant point ${item.label} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete Quadrant point ${item.label}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton>
+    <NumericEditorError error={error} />
+  </WorkspaceRecord>;
 }
 
 function XyChartEditorControls({ bottom, diagram, maxHeight, onAdd, onDelete, onEdit, onEditAxis, onMove, onSetOrientation, onSetTitle }: {
-  bottom: number; diagram: XyChartDiagramSnapshot; maxHeight: number; onAdd?: (value: XySeries) => boolean | void;
-  onDelete?: (identity: XySeriesIdentity) => void; onEdit?: (identity: XySeriesIdentity, value: Partial<XySeries>) => boolean | void;
-  onEditAxis?: (axis: 'x' | 'y', value: XyAxis) => boolean | void; onMove?: (identity: XySeriesIdentity, direction: 'up' | 'down') => void;
+  bottom: number; diagram: XyChartDiagramSnapshot; maxHeight: number; onAdd?: (value: XySeries) => SemanticFormActionResult;
+  onDelete?: (identity: XySeriesIdentity) => void; onEdit?: (identity: XySeriesIdentity, value: Partial<XySeries>) => SemanticFormActionResult;
+  onEditAxis?: (axis: 'x' | 'y', value: XyAxis) => SemanticFormActionResult; onMove?: (identity: XySeriesIdentity, direction: 'up' | 'down') => void;
   onSetOrientation?: (value?: XyChartOrientation) => void; onSetTitle?: (value?: string) => void;
 }) {
   const { draft: titleDraft, updateDraft: updateTitleDraft } = useCanonicalDraft({ value: diagram.title ?? '' }); const { draft: series, updateDraft: updateSeries } = useCanonicalDraft({ kind: 'line' as XySeries['kind'], label: 'Series', values: diagram.xAxis.labels?.map(() => '1').join(', ') ?? '1, 2' }); const [error, setError] = useState<string | null>(null);
-  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="xychart-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="xychart-editor-controls" style={{ bottom, maxHeight }}>
     <strong>XY chart</strong>
-    <form aria-label="XY chart options" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() || undefined); }}><input aria-label="XY chart title" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={titleDraft.value} /><select aria-label="XY chart orientation" onChange={(event) => onSetOrientation?.(event.target.value ? event.target.value as XyChartOrientation : undefined)} style={HIERARCHY_CONTROL_STYLE} value={diagram.orientation ?? ''}><option value="">Default</option><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save XY options</button></form>
-    <XyAxisForm axis="x" onError={setError} onSave={onEditAxis} value={diagram.xAxis} /><XyAxisForm axis="y" onError={setError} onSave={onEditAxis} value={diagram.yAxis} />
-    <form aria-label="New XY series" onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAdd?.({ kind: series.kind, label: series.label || undefined, values: parseSemanticNumberList(series.values, 'XY series values') })); }}><select aria-label="New XY series kind" onChange={(event) => updateSeries((current) => ({ ...current, kind: event.target.value as XySeries['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={series.kind}><option value="line">Line</option><option value="bar">Bar</option></select><input aria-label="New XY series label" onChange={(event) => updateSeries((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={series.label} /><input aria-label="New XY series values" onChange={(event) => updateSeries((current) => ({ ...current, values: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={series.values} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add series</button></form>
-    <NumericEditorError error={error} />
-    {diagram.series.map((item) => <XySeriesForm item={item} items={diagram.series} key={`${item.kind}:${item.label}:${item.values.join(',')}`} onDelete={onDelete} onEdit={onEdit} onError={setError} onMove={onMove} />)}
+    <WorkspaceRecord aria-label="XY chart options" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() || undefined); }}><WorkspaceInput aria-label="XY chart title" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} value={titleDraft.value} /><WorkspaceSelect aria-label="XY chart orientation" onChange={(event) => onSetOrientation?.(event.target.value ? event.target.value as XyChartOrientation : undefined)} value={diagram.orientation ?? ''}><option value="">Default</option><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></WorkspaceSelect><WorkspaceButton type="submit">Save XY options</WorkspaceButton></WorkspaceRecord>
+    <XyAxisForm axis="x" onSave={onEditAxis} value={diagram.xAxis} /><XyAxisForm axis="y" onSave={onEditAxis} value={diagram.yAxis} />
+    <WorkspaceRecord aria-label="New XY series" error={error} onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAdd?.({ kind: series.kind, label: series.label || undefined, values: parseSemanticNumberList(series.values, 'XY series values') })); }}><WorkspaceSelect aria-label="New XY series kind" onChange={(event) => updateSeries((current) => ({ ...current, kind: event.target.value as XySeries['kind'] }))} value={series.kind}><option value="line">Line</option><option value="bar">Bar</option></WorkspaceSelect><WorkspaceInput aria-label="New XY series label" onChange={(event) => updateSeries((current) => ({ ...current, label: event.target.value }))} value={series.label} /><WorkspaceInput aria-label="New XY series values" onChange={(event) => updateSeries((current) => ({ ...current, values: event.target.value }))} value={series.values} /><WorkspaceButton type="submit">Add series</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>
+
+    {diagram.series.map((item) => <XySeriesForm item={item} items={diagram.series} key={`${item.kind}:${item.label}:${item.values.join(',')}`} onDelete={onDelete} onEdit={onEdit} onMove={onMove} />)}
   </aside>;
 }
 
-function XyAxisForm({ axis, onError, onSave, value }: { axis: 'x' | 'y'; onError: (value: string | null) => void; onSave?: (axis: 'x' | 'y', value: XyAxis) => boolean | void; value: XyAxis }) {
+function XyAxisForm({ axis, onSave, value }: { axis: 'x' | 'y'; onSave?: (axis: 'x' | 'y', value: XyAxis) => SemanticFormActionResult; value: XyAxis }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical = { label: value.label ?? '', mode: value.labels ? 'labels' : 'range', data: value.labels?.join(', ') ?? value.range?.join(', ') ?? '' }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const prefix = `XY ${axis}-axis`;
-  return <form aria-label={prefix} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => { const next = draft.mode === 'labels' ? { label: draft.label || undefined, labels: draft.data.split(',').map((part) => part.trim()).filter(Boolean) } : { label: draft.label || undefined, range: parseSemanticNumberList(draft.data, `${prefix} range`) as [number, number] }; return onSave?.(axis, next); })) resetDraft(); }}><input aria-label={`${prefix} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} />{axis === 'x' ? <select aria-label={`${prefix} mode`} onChange={(event) => updateDraft((current) => ({ ...current, mode: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.mode}><option value="labels">Labels</option><option value="range">Range</option></select> : null}<input aria-label={`${prefix} values`} onChange={(event) => updateDraft((current) => ({ ...current, data: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.data} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save {axis}-axis</button></form>;
+  return <WorkspaceRecord aria-label={prefix} error={error} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => { const next = draft.mode === 'labels' ? { label: draft.label || undefined, labels: draft.data.split(',').map((part) => part.trim()).filter(Boolean) } : { label: draft.label || undefined, range: parseSemanticNumberList(draft.data, `${prefix} range`) as [number, number] }; return onSave?.(axis, next); })) resetDraft(); }}><WorkspaceInput aria-label={`${prefix} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} />{axis === 'x' ? <WorkspaceSelect aria-label={`${prefix} mode`} onChange={(event) => updateDraft((current) => ({ ...current, mode: event.target.value }))} value={draft.mode}><option value="labels">Labels</option><option value="range">Range</option></WorkspaceSelect> : null}<WorkspaceInput aria-label={`${prefix} values`} onChange={(event) => updateDraft((current) => ({ ...current, data: event.target.value }))} value={draft.data} /><WorkspaceButton type="submit">Save {axis}-axis</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>;
 }
 
-function XySeriesForm({ item, items, onDelete, onEdit, onError, onMove }: { item: XySeries; items: XySeries[]; onDelete?: (identity: XySeriesIdentity) => void; onEdit?: (identity: XySeriesIdentity, value: Partial<XySeries>) => boolean | void; onError: (value: string | null) => void; onMove?: (identity: XySeriesIdentity, direction: 'up' | 'down') => void }) {
+function XySeriesForm({ item, items, onDelete, onEdit, onMove }: { item: XySeries; items: XySeries[]; onDelete?: (identity: XySeriesIdentity) => void; onEdit?: (identity: XySeriesIdentity, value: Partial<XySeries>) => SemanticFormActionResult; onMove?: (identity: XySeriesIdentity, direction: 'up' | 'down') => void }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical = { ...item, label: item.label ?? '', valuesText: item.values.join(', ') }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const identity = getXySeriesIdentity(item, items); const label = `XY series ${item.label ?? item.kind}`;
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { kind: draft.kind, label: draft.label || undefined, values: parseSemanticNumberList(draft.valuesText, 'XY series values') }))) resetDraft(); }}><select aria-label={`${label} kind`} onChange={(event) => updateDraft((current) => ({ ...current, kind: event.target.value as XySeries['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={draft.kind}><option value="line">Line</option><option value="bar">Bar</option></select><input aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} /><input aria-label={`${label} values`} onChange={(event) => updateDraft((current) => ({ ...current, valuesText: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.valuesText} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ${label} up`} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { kind: draft.kind, label: draft.label || undefined, values: parseSemanticNumberList(draft.valuesText, 'XY series values') }))) resetDraft(); }}><WorkspaceSelect aria-label={`${label} kind`} onChange={(event) => updateDraft((current) => ({ ...current, kind: event.target.value as XySeries['kind'] }))} value={draft.kind}><option value="line">Line</option><option value="bar">Bar</option></WorkspaceSelect><WorkspaceInput aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><WorkspaceInput aria-label={`${label} values`} onChange={(event) => updateDraft((current) => ({ ...current, valuesText: event.target.value }))} value={draft.valuesText} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>;
 }
 
 function RadarEditorControls({ bottom, diagram, maxHeight, onAddAxis, onAddCurve, onDeleteAxis, onDeleteCurve, onEditAxis, onEditCurve, onEditOptions, onMoveAxis, onMoveCurve, onSetTitle }: {
-  bottom: number; diagram: RadarDiagramSnapshot; maxHeight: number; onAddAxis?: (value: RadarAxis, curveValues?: readonly number[]) => boolean | void; onAddCurve?: (value: RadarCurve) => boolean | void;
+  bottom: number; diagram: RadarDiagramSnapshot; maxHeight: number; onAddAxis?: (value: RadarAxis, curveValues?: readonly number[]) => SemanticFormActionResult; onAddCurve?: (value: RadarCurve) => SemanticFormActionResult;
   onDeleteAxis?: (identity: RadarAxisIdentity) => void; onDeleteCurve?: (identity: RadarCurveIdentity) => void; onEditAxis?: (identity: RadarAxisIdentity, value: Partial<RadarAxis>) => void;
-  onEditCurve?: (identity: RadarCurveIdentity, value: Partial<RadarCurve>) => boolean | void; onEditOptions?: (value: Partial<RadarOptions>) => boolean | void;
+  onEditCurve?: (identity: RadarCurveIdentity, value: Partial<RadarCurve>) => SemanticFormActionResult; onEditOptions?: (value: Partial<RadarOptions>) => SemanticFormActionResult;
   onMoveAxis?: (identity: RadarAxisIdentity, direction: 'up' | 'down') => void; onMoveCurve?: (identity: RadarCurveIdentity, direction: 'up' | 'down') => void; onSetTitle?: (value?: string) => void;
 }) {
-  const { draft: titleDraft, updateDraft: updateTitleDraft } = useCanonicalDraft({ value: diagram.title ?? '' }); const { draft: axis, updateDraft: updateAxis } = useCanonicalDraft({ name: 'axis', label: 'Axis', values: diagram.curves.map(() => '1').join(', ') }); const { draft: curve, updateDraft: updateCurve } = useCanonicalDraft({ name: 'curve', label: 'Curve', values: diagram.axes.map(() => '1').join(', ') }); const [error, setError] = useState<string | null>(null);
-  return <aside className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="radar-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
-    <strong>Radar</strong><form aria-label="Radar title" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() || undefined); }}><input aria-label="Radar title text" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={titleDraft.value} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save title</button></form>
-    <RadarOptionsForm onError={setError} onSave={onEditOptions} value={diagram.options} />
-    <form aria-label="New Radar axis" onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAddAxis?.({ name: axis.name, label: axis.label || undefined }, diagram.curves.length ? parseSemanticNumberList(axis.values, 'Radar axis curve values') : undefined)); }}><input aria-label="New Radar axis name" onChange={(event) => updateAxis((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={axis.name} /><input aria-label="New Radar axis label" onChange={(event) => updateAxis((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={axis.label} />{diagram.curves.length ? <input aria-label="New Radar axis curve values" onChange={(event) => updateAxis((current) => ({ ...current, values: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={axis.values} /> : null}<button style={HIERARCHY_CONTROL_STYLE} type="submit">Add axis</button></form>
-    <form aria-label="New Radar curve" onSubmit={(event) => { event.preventDefault(); runNumericForm(setError, () => onAddCurve?.({ name: curve.name, label: curve.label || undefined, values: parseSemanticNumberList(curve.values, 'Radar curve values') })); }}><input aria-label="New Radar curve name" onChange={(event) => updateCurve((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={curve.name} /><input aria-label="New Radar curve label" onChange={(event) => updateCurve((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={curve.label} /><input aria-label="New Radar curve values" onChange={(event) => updateCurve((current) => ({ ...current, values: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={curve.values} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add curve</button></form>
-    <NumericEditorError error={error} />
+  const [newAxisError, setNewAxisError] = useState<string | null>(null);
+  const [newCurveError, setNewCurveError] = useState<string | null>(null);
+  const { draft: titleDraft, updateDraft: updateTitleDraft } = useCanonicalDraft({ value: diagram.title ?? '' }); const { draft: axis, updateDraft: updateAxis } = useCanonicalDraft({ name: 'axis', label: 'Axis', values: diagram.curves.map(() => '1').join(', ') }); const { draft: curve, updateDraft: updateCurve } = useCanonicalDraft({ name: 'curve', label: 'Curve', values: diagram.axes.map(() => '1').join(', ') });
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="radar-editor-controls" style={{ bottom, maxHeight }}>
+    <strong>Radar</strong><WorkspaceRecord aria-label="Radar title" onSubmit={(event) => { event.preventDefault(); onSetTitle?.(titleDraft.value.trim() || undefined); }}><WorkspaceInput aria-label="Radar title text" onChange={(event) => updateTitleDraft(() => ({ value: event.target.value }))} value={titleDraft.value} /><WorkspaceButton type="submit">Save title</WorkspaceButton></WorkspaceRecord>
+    <RadarOptionsForm onSave={onEditOptions} value={diagram.options} />
+    <WorkspaceRecord aria-label="New Radar axis" error={newAxisError} onSubmit={(event) => { event.preventDefault(); runNumericForm(setNewAxisError, () => onAddAxis?.({ name: axis.name, label: axis.label || undefined }, diagram.curves.length ? parseSemanticNumberList(axis.values, 'Radar axis curve values') : undefined)); }}><WorkspaceInput aria-label="New Radar axis name" onChange={(event) => updateAxis((current) => ({ ...current, name: event.target.value }))} value={axis.name} /><WorkspaceInput aria-label="New Radar axis label" onChange={(event) => updateAxis((current) => ({ ...current, label: event.target.value }))} value={axis.label} />{diagram.curves.length ? <WorkspaceInput aria-label="New Radar axis curve values" onChange={(event) => updateAxis((current) => ({ ...current, values: event.target.value }))} value={axis.values} /> : null}<WorkspaceButton type="submit">Add axis</WorkspaceButton><NumericEditorError error={newAxisError} /></WorkspaceRecord>
+    <WorkspaceRecord aria-label="New Radar curve" error={newCurveError} onSubmit={(event) => { event.preventDefault(); runNumericForm(setNewCurveError, () => onAddCurve?.({ name: curve.name, label: curve.label || undefined, values: parseSemanticNumberList(curve.values, 'Radar curve values') })); }}><WorkspaceInput aria-label="New Radar curve name" onChange={(event) => updateCurve((current) => ({ ...current, name: event.target.value }))} value={curve.name} /><WorkspaceInput aria-label="New Radar curve label" onChange={(event) => updateCurve((current) => ({ ...current, label: event.target.value }))} value={curve.label} /><WorkspaceInput aria-label="New Radar curve values" onChange={(event) => updateCurve((current) => ({ ...current, values: event.target.value }))} value={curve.values} /><WorkspaceButton type="submit">Add curve</WorkspaceButton><NumericEditorError error={newCurveError} /></WorkspaceRecord>
+
     {diagram.axes.map((item) => <RadarAxisForm item={item} items={diagram.axes} key={item.name} onDelete={onDeleteAxis} onEdit={onEditAxis} onMove={onMoveAxis} />)}
-    {diagram.curves.map((item) => <RadarCurveForm item={item} items={diagram.curves} key={item.name} onDelete={onDeleteCurve} onEdit={onEditCurve} onError={setError} onMove={onMoveCurve} />)}
+    {diagram.curves.map((item) => <RadarCurveForm item={item} items={diagram.curves} key={item.name} onDelete={onDeleteCurve} onEdit={onEditCurve} onMove={onMoveCurve} />)}
   </aside>;
 }
 
-function RadarOptionsForm({ onError, onSave, value }: { onError: (value: string | null) => void; onSave?: (value: Partial<RadarOptions>) => boolean | void; value: RadarOptions }) {
+function RadarOptionsForm({ onSave, value }: { onSave?: (value: Partial<RadarOptions>) => SemanticFormActionResult; value: RadarOptions }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical = {
     graticule: value.graticule ?? 'circle', graticulePresent: value.graticule !== undefined,
     max: value.max === undefined ? '' : String(value.max), maxPresent: value.max !== undefined,
@@ -6496,7 +6408,7 @@ function RadarOptionsForm({ onError, onSave, value }: { onError: (value: string 
     ticks: String(value.ticks ?? 5), ticksPresent: value.ticks !== undefined,
   };
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical);
-  return <form aria-label="Radar options" onSubmit={(event) => {
+  return <WorkspaceRecord aria-label="Radar options" error={error} onSubmit={(event) => {
     event.preventDefault();
     const succeeded = runNumericForm(onError, () => onSave?.({
       graticule: draft.graticulePresent ? draft.graticule as RadarOptions['graticule'] : undefined,
@@ -6507,31 +6419,33 @@ function RadarOptionsForm({ onError, onSave, value }: { onError: (value: string 
     }));
     if (succeeded) resetDraft();
   }}>
-    <label><input aria-label="Radar set minimum" checked={draft.minPresent} onChange={(event) => updateDraft((current) => ({ ...current, minPresent: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Set minimum</label>
-    <input aria-label="Radar minimum" disabled={!draft.minPresent} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, min: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.min} />
-    <label><input aria-label="Radar set maximum" checked={draft.maxPresent} onChange={(event) => updateDraft((current) => ({ ...current, maxPresent: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Set maximum</label>
-    <input aria-label="Radar maximum" disabled={!draft.maxPresent} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, max: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.max} />
-    <label><input aria-label="Radar set ticks" checked={draft.ticksPresent} onChange={(event) => updateDraft((current) => ({ ...current, ticksPresent: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Set ticks</label>
-    <input aria-label="Radar ticks" disabled={!draft.ticksPresent} inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, ticks: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.ticks} />
-    <label><input aria-label="Radar set graticule" checked={draft.graticulePresent} onChange={(event) => updateDraft((current) => ({ ...current, graticulePresent: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Set graticule</label>
-    <select aria-label="Radar graticule" disabled={!draft.graticulePresent} onChange={(event) => updateDraft((current) => ({ ...current, graticule: event.target.value as NonNullable<RadarOptions['graticule']> }))} style={HIERARCHY_CONTROL_STYLE} value={draft.graticule}><option value="circle">Circle</option><option value="polygon">Polygon</option></select>
-    <label><input aria-label="Radar set show legend" checked={draft.showLegendPresent} onChange={(event) => updateDraft((current) => ({ ...current, showLegendPresent: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Set legend visibility</label>
-    <label><input aria-label="Radar show legend" checked={draft.showLegend} disabled={!draft.showLegendPresent} onChange={(event) => updateDraft((current) => ({ ...current, showLegend: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Show legend</label>
-    <button style={HIERARCHY_CONTROL_STYLE} type="submit">Save Radar options</button>
-  </form>;
+    <label><WorkspaceInput aria-label="Radar set minimum" checked={draft.minPresent} onChange={(event) => updateDraft((current) => ({ ...current, minPresent: event.target.checked }))} type="checkbox" />Set minimum</label>
+    <WorkspaceInput aria-label="Radar minimum" disabled={!draft.minPresent} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, min: event.target.value }))} value={draft.min} />
+    <label><WorkspaceInput aria-label="Radar set maximum" checked={draft.maxPresent} onChange={(event) => updateDraft((current) => ({ ...current, maxPresent: event.target.checked }))} type="checkbox" />Set maximum</label>
+    <WorkspaceInput aria-label="Radar maximum" disabled={!draft.maxPresent} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, max: event.target.value }))} value={draft.max} />
+    <label><WorkspaceInput aria-label="Radar set ticks" checked={draft.ticksPresent} onChange={(event) => updateDraft((current) => ({ ...current, ticksPresent: event.target.checked }))} type="checkbox" />Set ticks</label>
+    <WorkspaceInput aria-label="Radar ticks" disabled={!draft.ticksPresent} inputMode="numeric" onChange={(event) => updateDraft((current) => ({ ...current, ticks: event.target.value }))} value={draft.ticks} />
+    <label><WorkspaceInput aria-label="Radar set graticule" checked={draft.graticulePresent} onChange={(event) => updateDraft((current) => ({ ...current, graticulePresent: event.target.checked }))} type="checkbox" />Set graticule</label>
+    <WorkspaceSelect aria-label="Radar graticule" disabled={!draft.graticulePresent} onChange={(event) => updateDraft((current) => ({ ...current, graticule: event.target.value as NonNullable<RadarOptions['graticule']> }))} value={draft.graticule}><option value="circle">Circle</option><option value="polygon">Polygon</option></WorkspaceSelect>
+    <label><WorkspaceInput aria-label="Radar set show legend" checked={draft.showLegendPresent} onChange={(event) => updateDraft((current) => ({ ...current, showLegendPresent: event.target.checked }))} type="checkbox" />Set legend visibility</label>
+    <label><WorkspaceInput aria-label="Radar show legend" checked={draft.showLegend} disabled={!draft.showLegendPresent} onChange={(event) => updateDraft((current) => ({ ...current, showLegend: event.target.checked }))} type="checkbox" />Show legend</label>
+    <WorkspaceButton type="submit">Save Radar options</WorkspaceButton>
+    <NumericEditorError error={error} />
+  </WorkspaceRecord>;
 }
 
 function RadarAxisForm({ item, items, onDelete, onEdit, onMove }: { item: RadarAxis; items: RadarAxis[]; onDelete?: (identity: RadarAxisIdentity) => void; onEdit?: (identity: RadarAxisIdentity, value: Partial<RadarAxis>) => void; onMove?: (identity: RadarAxisIdentity, direction: 'up' | 'down') => void }) {
   const canonical = { ...item, label: item.label ?? '' }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const identity = getRadarAxisIdentity(item, items); const label = `Radar axis ${item.name}`;
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); onEdit?.(identity, { name: draft.name, label: draft.label || undefined }); resetDraft(); }}><input aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.name} /><input aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move Radar axis ${item.name} up`} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move Radar axis ${item.name} down`} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete Radar axis ${item.name}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={label} onSubmit={(event) => { event.preventDefault(); onEdit?.(identity, { name: draft.name, label: draft.label || undefined }); resetDraft(); }}><WorkspaceInput aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} value={draft.name} /><WorkspaceInput aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move Radar axis ${item.name} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move Radar axis ${item.name} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete Radar axis ${item.name}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton></WorkspaceRecord>;
 }
 
-function RadarCurveForm({ item, items, onDelete, onEdit, onError, onMove }: { item: RadarCurve; items: RadarCurve[]; onDelete?: (identity: RadarCurveIdentity) => void; onEdit?: (identity: RadarCurveIdentity, value: Partial<RadarCurve>) => boolean | void; onError: (value: string | null) => void; onMove?: (identity: RadarCurveIdentity, direction: 'up' | 'down') => void }) {
+function RadarCurveForm({ item, items, onDelete, onEdit, onMove }: { item: RadarCurve; items: RadarCurve[]; onDelete?: (identity: RadarCurveIdentity) => void; onEdit?: (identity: RadarCurveIdentity, value: Partial<RadarCurve>) => SemanticFormActionResult; onMove?: (identity: RadarCurveIdentity, direction: 'up' | 'down') => void }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical = { ...item, label: item.label ?? '', valuesText: item.values.join(', ') }; const { draft, resetDraft, updateDraft } = useCanonicalDraft(canonical); const identity = getRadarCurveIdentity(item, items); const label = `Radar curve ${item.name}`;
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { name: draft.name, label: draft.label || undefined, values: parseSemanticNumberList(draft.valuesText, 'Radar curve values') }))) resetDraft(); }}><input aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.name} /><input aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.label} /><input aria-label={`${label} values`} onChange={(event) => updateDraft((current) => ({ ...current, valuesText: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.valuesText} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move Radar curve ${item.name} up`} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move Radar curve ${item.name} down`} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete Radar curve ${item.name}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (runNumericForm(onError, () => onEdit?.(identity, { name: draft.name, label: draft.label || undefined, values: parseSemanticNumberList(draft.valuesText, 'Radar curve values') }))) resetDraft(); }}><WorkspaceInput aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} value={draft.name} /><WorkspaceInput aria-label={`${label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><WorkspaceInput aria-label={`${label} values`} onChange={(event) => updateDraft((current) => ({ ...current, valuesText: event.target.value }))} value={draft.valuesText} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move Radar curve ${item.name} up`} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move Radar curve ${item.name} down`} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete Radar curve ${item.name}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>;
 }
 
-function SectionForm({ family, item, onDelete, onMove, onSave }: { family: string; item: { label: string }; onDelete?: (label: string) => void; onMove?: (label: string, direction: 'up' | 'down') => void; onSave?: (label: string, value: { label?: string }) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(item); return <form aria-label={`${family} section ${item.label}`} onSubmit={(event) => { event.preventDefault(); onSave?.(item.label, draft); resetDraft(); }}><input aria-label={`${family} section ${item.label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><button type="submit">Save</button><button aria-label={`Move ${family} section ${item.label} up`} onClick={() => onMove?.(item.label, 'up')} type="button">↑</button><button aria-label={`Move ${family} section ${item.label} down`} onClick={() => onMove?.(item.label, 'down')} type="button">↓</button><button aria-label={`Delete ${family} section ${item.label}`} onClick={() => onDelete?.(item.label)} type="button">Delete</button></form>; }
+function SectionForm({ family, item, onDelete, onMove, onSave }: { family: string; item: { label: string }; onDelete?: (label: string) => void; onMove?: (label: string, direction: 'up' | 'down') => void; onSave?: (label: string, value: { label?: string }) => void }) { const { draft, resetDraft, updateDraft } = useCanonicalDraft(item); return <WorkspaceRecord aria-label={`${family} section ${item.label}`} onSubmit={(event) => { event.preventDefault(); onSave?.(item.label, draft); resetDraft(); }}><WorkspaceInput aria-label={`${family} section ${item.label} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ${family} section ${item.label} up`} onClick={() => onMove?.(item.label, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${family} section ${item.label} down`} onClick={() => onMove?.(item.label, 'down')} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ${family} section ${item.label}`} onClick={() => onDelete?.(item.label)} type="button">Delete</WorkspaceButton></WorkspaceRecord>; }
 
 function ClassEditorControls({
   bottom, diagram, onAddAnnotation, onAddClass, onAddMember, onAddRelationship, onDeleteAnnotation, onDeleteClass,
@@ -6549,13 +6463,13 @@ function ClassEditorControls({
   const [name, setName] = useState('Class');
   const [relationship, setRelationship] = useState<ClassRelationship>({ from: diagram.classes[0]?.name ?? '', relation: '-->', to: diagram.classes[1]?.name ?? diagram.classes[0]?.name ?? '' });
   useEffect(() => { setRelationship((current) => ({ ...current, from: diagram.classes.some((item) => item.name === current.from) ? current.from : diagram.classes[0]?.name ?? '', to: diagram.classes.some((item) => item.name === current.to) ? current.to : diagram.classes[1]?.name ?? diagram.classes[0]?.name ?? '' })); }, [diagram.classes]);
-  return <aside className="canvas-semantic-editor canvas-class-editor" data-canvas-pan-exclusion="true" data-testid="class-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
-    <form onSubmit={(event) => { event.preventDefault(); onAddClass?.(name); setName('Class'); }} style={{ display: 'flex', gap: 6 }}>
-      <strong style={{ fontSize: 12, whiteSpace: 'nowrap' }}>Classes</strong><input aria-label="New class" onChange={(event) => setName(event.target.value)} value={name} /><button aria-label="Add class" type="submit">Add</button>
-    </form>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-class-editor" data-canvas-pan-exclusion="true" data-testid="class-editor-controls" style={{ bottom }}>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddClass?.(name); setName('Class'); }}>
+      <strong>Classes</strong><WorkspaceInput aria-label="New class" onChange={(event) => setName(event.target.value)} value={name} /><WorkspaceButton aria-label="Add class" type="submit">Add</WorkspaceButton>
+    </WorkspaceRecord>
     {diagram.classes.map((item) => <ClassEntityForm entity={item} key={item.name} onAddAnnotation={onAddAnnotation} onAddMember={onAddMember} onDeleteAnnotation={onDeleteAnnotation} onDelete={onDeleteClass} onDeleteMember={onDeleteMember} onEdit={onEditClass} onEditMember={onEditMember} />)}
-    <section aria-label="Class relationships" style={{ borderTop: '1px solid var(--line-subtle)', marginTop: 10, paddingTop: 8 }}>
-      <strong style={{ fontSize: 12 }}>Relationships</strong>
+    <section aria-label="Class relationships">
+      <strong>Relationships</strong>
       {diagram.relationships.map((item, index) => <ClassRelationshipForm classes={diagram.classes.map((entry) => entry.name)} key={`${index}:${item.from}:${item.to}:${item.relation}`} onDelete={() => onDeleteRelationship?.(getClassRelationshipIdentity(item, index, diagram.relationships))} onSave={(next) => onEditRelationship?.(getClassRelationshipIdentity(item, index, diagram.relationships), next)} relationship={item} />)}
       {diagram.classes.length > 0 ? <ClassRelationshipForm classes={diagram.classes.map((entry) => entry.name)} onSave={onAddRelationship} relationship={relationship} /> : <small>Add classes before relating them.</small>}
     </section>
@@ -6568,23 +6482,23 @@ function ClassEntityForm({ entity, onAddAnnotation, onAddMember, onDeleteAnnotat
   onEdit?: (name: string, patch: Partial<Pick<ClassEntity, 'name' | 'label'>>) => void; onEditMember?: (name: string, identity: ClassMemberIdentity, member: ClassMember) => void;
 }) {
   const [id, setId] = useState(entity.name); const [label, setLabel] = useState(entity.label ?? entity.name); const [member, setMember] = useState('member'); const [annotation, setAnnotation] = useState('');
-  return <section style={{ border: '1px solid var(--line-subtle)', borderRadius: 6, marginTop: 8, padding: 7 }}>
-    <form onSubmit={(event) => { event.preventDefault(); onEdit?.(entity.name, { name: id, label }); }} style={{ display: 'flex', gap: 4 }}><input aria-label={`Class ${entity.name} id`} onChange={(event) => setId(event.target.value)} value={id} /><input aria-label={`Class ${entity.name} label`} onChange={(event) => setLabel(event.target.value)} value={label} /><button type="submit">Save</button><button aria-label={`Delete class ${entity.name}`} onClick={() => onDelete?.(entity.name)} type="button">Delete</button></form>
+  return <section>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onEdit?.(entity.name, { name: id, label }); }}><WorkspaceInput aria-label={`Class ${entity.name} id`} onChange={(event) => setId(event.target.value)} value={id} /><WorkspaceInput aria-label={`Class ${entity.name} label`} onChange={(event) => setLabel(event.target.value)} value={label} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete class ${entity.name}`} onClick={() => onDelete?.(entity.name)} type="button">Delete</WorkspaceButton></WorkspaceRecord>
     {entity.members.map((item, index) => <ClassMemberForm className={entity.name} identity={getClassMemberIdentity(entity.name, item, index, entity.members)} key={`${index}:${item.name}`} member={item} onDelete={onDeleteMember} onSave={onEditMember} />)}
-    <form onSubmit={(event) => { event.preventDefault(); onAddMember?.(entity.name, { name: member }); setMember('member'); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label={`New member for ${entity.name}`} onChange={(event) => setMember(event.target.value)} value={member} /><button type="submit">Add member</button></form>
-    {entity.annotations.map((item) => <div key={item}><span>{item}</span><button aria-label={`Delete annotation ${item}`} onClick={() => onDeleteAnnotation?.(entity.name, item)} type="button">×</button></div>)}
-    <form onSubmit={(event) => { event.preventDefault(); if (annotation.trim()) onAddAnnotation?.(entity.name, annotation); setAnnotation(''); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label={`New annotation for ${entity.name}`} onChange={(event) => setAnnotation(event.target.value)} value={annotation} /><button type="submit">Add annotation</button></form>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddMember?.(entity.name, { name: member }); setMember('member'); }}><WorkspaceInput aria-label={`New member for ${entity.name}`} onChange={(event) => setMember(event.target.value)} value={member} /><WorkspaceButton type="submit">Add member</WorkspaceButton></WorkspaceRecord>
+    {entity.annotations.map((item) => <div key={item}><span>{item}</span><WorkspaceButton aria-label={`Delete annotation ${item}`} onClick={() => onDeleteAnnotation?.(entity.name, item)} type="button">×</WorkspaceButton></div>)}
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); if (annotation.trim()) onAddAnnotation?.(entity.name, annotation); setAnnotation(''); }}><WorkspaceInput aria-label={`New annotation for ${entity.name}`} onChange={(event) => setAnnotation(event.target.value)} value={annotation} /><WorkspaceButton type="submit">Add annotation</WorkspaceButton></WorkspaceRecord>
   </section>;
 }
 
 function ClassMemberForm({ className, identity, member, onDelete, onSave }: { className: string; identity: ClassMemberIdentity; member: ClassMember; onDelete?: (name: string, identity: ClassMemberIdentity) => void; onSave?: (name: string, identity: ClassMemberIdentity, member: ClassMember) => void }) {
   const [draft, setDraft] = useState(member);
-  return <form aria-label={`Member ${member.name} on ${className}`} onSubmit={(event) => { event.preventDefault(); onSave?.(className, identity, draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><input aria-label={`Name for ${member.name}`} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} value={draft.name} /><input aria-label={`Signature for ${member.name}`} onChange={(event) => setDraft((current) => ({ ...current, signature: event.target.value || undefined }))} placeholder="signature" value={draft.signature ?? ''} /><input aria-label={`Return type for ${member.name}`} onChange={(event) => setDraft((current) => ({ ...current, returnType: event.target.value || undefined }))} placeholder="return type" value={draft.returnType ?? ''} /><button type="submit">Save</button><button aria-label={`Delete member ${member.name}`} onClick={() => onDelete?.(className, identity)} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={`Member ${member.name} on ${className}`} onSubmit={(event) => { event.preventDefault(); onSave?.(className, identity, draft); }}><WorkspaceInput aria-label={`Name for ${member.name}`} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} value={draft.name} /><WorkspaceInput aria-label={`Signature for ${member.name}`} onChange={(event) => setDraft((current) => ({ ...current, signature: event.target.value || undefined }))} placeholder="signature" value={draft.signature ?? ''} /><WorkspaceInput aria-label={`Return type for ${member.name}`} onChange={(event) => setDraft((current) => ({ ...current, returnType: event.target.value || undefined }))} placeholder="return type" value={draft.returnType ?? ''} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete member ${member.name}`} onClick={() => onDelete?.(className, identity)} type="button">Delete</WorkspaceButton></WorkspaceRecord>;
 }
 
 function ClassRelationshipForm({ classes, onDelete, onSave, relationship }: { classes: string[]; onDelete?: () => void; onSave?: (relationship: ClassRelationship) => void; relationship: ClassRelationship }) {
   const [draft, setDraft] = useState(relationship);
-  return <form aria-label={`Class relationship ${relationship.from} ${relationship.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label="Class relationship source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{classes.map((name) => <option key={name}>{name}</option>)}</select><select aria-label="Class relationship type" onChange={(event) => setDraft((current) => ({ ...current, relation: event.target.value as ClassRelationship['relation'] }))} value={draft.relation}>{CLASS_RELATION_OPTIONS.map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Class relationship target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{classes.map((name) => <option key={name}>{name}</option>)}</select><input aria-label="Class relationship label" onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value || undefined }))} placeholder="label" value={draft.label ?? ''} /><button type="submit">{onDelete ? 'Save' : 'Add relationship'}</button>{onDelete ? <button aria-label="Delete class relationship" onClick={onDelete} type="button">Delete</button> : null}</form>;
+  return <WorkspaceRecord aria-label={`Class relationship ${relationship.from} ${relationship.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }}><WorkspaceSelect aria-label="Class relationship source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{classes.map((name) => <option key={name}>{name}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label="Class relationship type" onChange={(event) => setDraft((current) => ({ ...current, relation: event.target.value as ClassRelationship['relation'] }))} value={draft.relation}>{CLASS_RELATION_OPTIONS.map((value) => <option key={value}>{value}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label="Class relationship target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{classes.map((name) => <option key={name}>{name}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="Class relationship label" onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value || undefined }))} placeholder="label" value={draft.label ?? ''} /><WorkspaceButton type="submit">{onDelete ? 'Save' : 'Add relationship'}</WorkspaceButton>{onDelete ? <WorkspaceButton aria-label="Delete class relationship" onClick={onDelete} type="button">Delete</WorkspaceButton> : null}</WorkspaceRecord>;
 }
 
 function StateEditorControls({ bottom, diagram, onAddState, onAddTransition, onDeleteState, onDeleteTransition, onEditState, onEditTransition }: {
@@ -6593,21 +6507,21 @@ function StateEditorControls({ bottom, diagram, onAddState, onAddTransition, onD
 }) {
   const editableStates = diagram.states.filter((state) => state.kind === 'state'); const [name, setName] = useState('State');
   const [transition, setTransition] = useState<StateTransition>({ from: editableStates[0]?.id ?? '[*]', to: editableStates[1]?.id ?? editableStates[0]?.id ?? 'State' });
-  return <aside className="canvas-semantic-editor canvas-state-editor" data-canvas-pan-exclusion="true" data-testid="state-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
-    <form onSubmit={(event) => { event.preventDefault(); onAddState?.(name); setName('State'); }} style={{ display: 'flex', gap: 6 }}><strong style={{ fontSize: 12 }}>States</strong><input aria-label="New state" onChange={(event) => setName(event.target.value)} value={name} /><button aria-label="Add state" type="submit">Add</button></form>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-state-editor" data-canvas-pan-exclusion="true" data-testid="state-editor-controls" style={{ bottom }}>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddState?.(name); setName('State'); }}><strong>States</strong><WorkspaceInput aria-label="New state" onChange={(event) => setName(event.target.value)} value={name} /><WorkspaceButton aria-label="Add state" type="submit">Add</WorkspaceButton></WorkspaceRecord>
     {editableStates.map((state) => <StateNodeForm key={state.id} onDelete={onDeleteState} onSave={onEditState} state={state} />)}
-    <section aria-label="State transitions" style={{ borderTop: '1px solid var(--line-subtle)', marginTop: 10, paddingTop: 8 }}><strong style={{ fontSize: 12 }}>Transitions</strong>{diagram.transitions.map((item, index) => <StateTransitionForm key={`${index}:${item.from}:${item.to}:${item.label ?? ''}`} onDelete={() => onDeleteTransition?.(getStateTransitionIdentity(item, index, diagram.transitions))} onSave={(next) => onEditTransition?.(getStateTransitionIdentity(item, index, diagram.transitions), next)} states={diagram.states} transition={item} />)}<StateTransitionForm onSave={onAddTransition} states={diagram.states} transition={transition} /></section>
+    <section aria-label="State transitions"><strong>Transitions</strong>{diagram.transitions.map((item, index) => <StateTransitionForm key={`${index}:${item.from}:${item.to}:${item.label ?? ''}`} onDelete={() => onDeleteTransition?.(getStateTransitionIdentity(item, index, diagram.transitions))} onSave={(next) => onEditTransition?.(getStateTransitionIdentity(item, index, diagram.transitions), next)} states={diagram.states} transition={item} />)}<StateTransitionForm onSave={onAddTransition} states={diagram.states} transition={transition} /></section>
   </aside>;
 }
 
 function StateNodeForm({ onDelete, onSave, state }: { onDelete?: (id: string) => void; onSave?: (id: string, patch: { id?: string; label?: string }) => void; state: StateDiagramSnapshot['states'][number] }) {
   const [id, setId] = useState(state.id); const [label, setLabel] = useState(state.label ?? state.id);
-  return <form aria-label={`State ${state.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(state.id, { id, label }); }} style={{ display: 'flex', gap: 4, marginTop: 5 }}><input aria-label={`State ${state.id} id`} onChange={(event) => setId(event.target.value)} value={id} /><input aria-label={`State ${state.id} label`} onChange={(event) => setLabel(event.target.value)} value={label} /><button type="submit">Save</button><button aria-label={`Delete state ${state.id}`} onClick={() => onDelete?.(state.id)} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={`State ${state.id}`} onSubmit={(event) => { event.preventDefault(); onSave?.(state.id, { id, label }); }}><WorkspaceInput aria-label={`State ${state.id} id`} onChange={(event) => setId(event.target.value)} value={id} /><WorkspaceInput aria-label={`State ${state.id} label`} onChange={(event) => setLabel(event.target.value)} value={label} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete state ${state.id}`} onClick={() => onDelete?.(state.id)} type="button">Delete</WorkspaceButton></WorkspaceRecord>;
 }
 
 function StateTransitionForm({ onDelete, onSave, states, transition }: { onDelete?: () => void; onSave?: (transition: StateTransition) => void; states: readonly StateDiagramSnapshot['states'][number][]; transition: StateTransition }) {
   const [draft, setDraft] = useState(transition); const endpoints = [...new Set(states.map((state) => state.id))];
-  return <form aria-label={`State transition ${transition.from} ${transition.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label="State transition source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{endpoints.map((id) => <option key={id}>{id}</option>)}</select><span>→</span><select aria-label="State transition target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{endpoints.map((id) => <option key={id}>{id}</option>)}</select><input aria-label="State transition label" onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value || undefined }))} placeholder="label" value={draft.label ?? ''} /><button type="submit">{onDelete ? 'Save' : 'Add transition'}</button>{onDelete ? <button aria-label="Delete state transition" onClick={onDelete} type="button">Delete</button> : null}</form>;
+  return <WorkspaceRecord aria-label={`State transition ${transition.from} ${transition.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }}><WorkspaceSelect aria-label="State transition source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{endpoints.map((id) => <option key={id}>{id}</option>)}</WorkspaceSelect><span>→</span><WorkspaceSelect aria-label="State transition target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{endpoints.map((id) => <option key={id}>{id}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="State transition label" onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value || undefined }))} placeholder="label" value={draft.label ?? ''} /><WorkspaceButton type="submit">{onDelete ? 'Save' : 'Add transition'}</WorkspaceButton>{onDelete ? <WorkspaceButton aria-label="Delete state transition" onClick={onDelete} type="button">Delete</WorkspaceButton> : null}</WorkspaceRecord>;
 }
 
 function RequirementEditorControls({ bottom, diagram, onAddRequirement, onAddRelationship, onDeleteRequirement, onDeleteRelationship, onEditRequirement, onEditRelationship }: {
@@ -6617,21 +6531,21 @@ function RequirementEditorControls({ bottom, diagram, onAddRequirement, onAddRel
   const [name, setName] = useState('req'); const [kind, setKind] = useState<RequirementEntity['kind']>('requirement');
   const [relationship, setRelationship] = useState<RequirementRelationship>({ from: diagram.entities[0]?.name ?? '', kind: 'satisfies', to: diagram.entities[1]?.name ?? diagram.entities[0]?.name ?? '' });
   const nextRequirementId = Math.max(0, ...diagram.entities.map((entity) => Number.parseInt(entity.fields.id ?? '', 10)).filter(Number.isFinite)) + 1;
-  return <aside className="canvas-semantic-editor canvas-requirement-editor" data-canvas-pan-exclusion="true" data-testid="requirement-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
-    <form onSubmit={(event) => { event.preventDefault(); onAddRequirement?.({ kind, name, fields: kind === 'element' ? { type: 'element' } : { id: String(nextRequirementId), text: 'Requirement', risk: 'low', verifyMethod: 'test' } }); setName('req'); }} style={{ display: 'flex', gap: 6 }}><strong style={{ fontSize: 12 }}>Requirements</strong><select aria-label="New requirement type" onChange={(event) => setKind(event.target.value as RequirementEntity['kind'])} value={kind}>{(['requirement', 'functionalRequirement', 'interfaceRequirement', 'performanceRequirement', 'physicalRequirement', 'designConstraint', 'element'] as const).map((value) => <option key={value}>{value}</option>)}</select><input aria-label="New requirement" onChange={(event) => setName(event.target.value)} value={name} /><button aria-label="Add requirement" type="submit">Add</button></form>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-requirement-editor" data-canvas-pan-exclusion="true" data-testid="requirement-editor-controls" style={{ bottom }}>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); onAddRequirement?.({ kind, name, fields: kind === 'element' ? { type: 'element' } : { id: String(nextRequirementId), text: 'Requirement', risk: 'low', verifyMethod: 'test' } }); setName('req'); }}><strong>Requirements</strong><WorkspaceSelect aria-label="New requirement type" onChange={(event) => setKind(event.target.value as RequirementEntity['kind'])} value={kind}>{(['requirement', 'functionalRequirement', 'interfaceRequirement', 'performanceRequirement', 'physicalRequirement', 'designConstraint', 'element'] as const).map((value) => <option key={value}>{value}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="New requirement" onChange={(event) => setName(event.target.value)} value={name} /><WorkspaceButton aria-label="Add requirement" type="submit">Add</WorkspaceButton></WorkspaceRecord>
     {diagram.entities.map((item) => <RequirementEntityForm entity={item} key={item.name} onDelete={onDeleteRequirement} onSave={onEditRequirement} />)}
-    <section aria-label="Requirement relationships" style={{ borderTop: '1px solid var(--line-subtle)', marginTop: 10, paddingTop: 8 }}><strong style={{ fontSize: 12 }}>Relationships</strong>{diagram.relationships.map((item, index) => <RequirementRelationshipForm entities={diagram.entities.map((entry) => entry.name)} key={`${index}:${item.from}:${item.kind}:${item.to}`} onDelete={() => onDeleteRelationship?.(getRequirementRelationshipIdentity(item, index, diagram.relationships))} onSave={(next) => onEditRelationship?.(getRequirementRelationshipIdentity(item, index, diagram.relationships), next)} relationship={item} />)}{diagram.entities.length > 0 ? <RequirementRelationshipForm entities={diagram.entities.map((entry) => entry.name)} onSave={onAddRelationship} relationship={relationship} /> : <small>Add requirements before relating them.</small>}</section>
+    <section aria-label="Requirement relationships"><strong>Relationships</strong>{diagram.relationships.map((item, index) => <RequirementRelationshipForm entities={diagram.entities.map((entry) => entry.name)} key={`${index}:${item.from}:${item.kind}:${item.to}`} onDelete={() => onDeleteRelationship?.(getRequirementRelationshipIdentity(item, index, diagram.relationships))} onSave={(next) => onEditRelationship?.(getRequirementRelationshipIdentity(item, index, diagram.relationships), next)} relationship={item} />)}{diagram.entities.length > 0 ? <RequirementRelationshipForm entities={diagram.entities.map((entry) => entry.name)} onSave={onAddRelationship} relationship={relationship} /> : <small>Add requirements before relating them.</small>}</section>
   </aside>;
 }
 
 function RequirementEntityForm({ entity, onDelete, onSave }: { entity: RequirementEntity; onDelete?: (name: string) => void; onSave?: (name: string, entity: Partial<Pick<RequirementEntity, 'fields' | 'kind'>> & { name?: string }) => void }) {
   const [name, setName] = useState(entity.name); const [fields, setFields] = useState(() => Object.entries(entity.fields).map(([key, value]) => `${key}: ${value}`).join('\n'));
-  return <form aria-label={`${entity.kind} ${entity.name}`} onSubmit={(event) => { event.preventDefault(); const nextFields = Object.fromEntries(fields.split('\n').map((line) => line.split(/:\s*/u, 2)).filter(([key]) => Boolean(key?.trim())).map(([key, value]) => [key.trim(), value?.trim() ?? ''])); onSave?.(entity.name, { name, fields: nextFields }); }} style={{ border: '1px solid var(--line-subtle)', borderRadius: 6, display: 'grid', gap: 4, marginTop: 8, padding: 7 }}><strong>{entity.kind}: {entity.name}</strong><input aria-label={`Requirement ${entity.name} id`} onChange={(event) => setName(event.target.value)} value={name} /><textarea aria-label={`Fields for ${entity.name}`} onChange={(event) => setFields(event.target.value)} value={fields} /><div><button type="submit">Save</button><button aria-label={`Delete requirement ${entity.name}`} onClick={() => onDelete?.(entity.name)} type="button">Delete</button></div></form>;
+  return <WorkspaceRecord aria-label={`${entity.kind} ${entity.name}`} onSubmit={(event) => { event.preventDefault(); const nextFields = Object.fromEntries(fields.split('\n').map((line) => line.split(/:\s*/u, 2)).filter(([key]) => Boolean(key?.trim())).map(([key, value]) => [key.trim(), value?.trim() ?? ''])); onSave?.(entity.name, { name, fields: nextFields }); }}><strong>{entity.kind}: {entity.name}</strong><WorkspaceInput aria-label={`Requirement ${entity.name} id`} onChange={(event) => setName(event.target.value)} value={name} /><WorkspaceTextarea aria-label={`Fields for ${entity.name}`} onChange={(event) => setFields(event.target.value)} value={fields} /><div><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete requirement ${entity.name}`} onClick={() => onDelete?.(entity.name)} type="button">Delete</WorkspaceButton></div></WorkspaceRecord>;
 }
 
 function RequirementRelationshipForm({ entities, onDelete, onSave, relationship }: { entities: string[]; onDelete?: () => void; onSave?: (relationship: RequirementRelationship) => void; relationship: RequirementRelationship }) {
   const [draft, setDraft] = useState(relationship);
-  return <form aria-label={`Requirement relationship ${relationship.from} ${relationship.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label="Requirement relationship source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{entities.map((name) => <option key={name}>{name}</option>)}</select><select aria-label="Requirement relationship type" onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value as RequirementRelationship['kind'] }))} value={draft.kind}>{(['contains', 'copies', 'derives', 'satisfies', 'verifies', 'refines', 'traces'] as const).map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Requirement relationship target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{entities.map((name) => <option key={name}>{name}</option>)}</select><button type="submit">{onDelete ? 'Save' : 'Add relationship'}</button>{onDelete ? <button aria-label="Delete requirement relationship" onClick={onDelete} type="button">Delete</button> : null}</form>;
+  return <WorkspaceRecord aria-label={`Requirement relationship ${relationship.from} ${relationship.to}`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }}><WorkspaceSelect aria-label="Requirement relationship source" onChange={(event) => setDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{entities.map((name) => <option key={name}>{name}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label="Requirement relationship type" onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value as RequirementRelationship['kind'] }))} value={draft.kind}>{(['contains', 'copies', 'derives', 'satisfies', 'verifies', 'refines', 'traces'] as const).map((value) => <option key={value}>{value}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label="Requirement relationship target" onChange={(event) => setDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{entities.map((name) => <option key={name}>{name}</option>)}</WorkspaceSelect><WorkspaceButton type="submit">{onDelete ? 'Save' : 'Add relationship'}</WorkspaceButton>{onDelete ? <WorkspaceButton aria-label="Delete requirement relationship" onClick={onDelete} type="button">Delete</WorkspaceButton> : null}</WorkspaceRecord>;
 }
 
 function useCanonicalDraft<T extends object>(canonical: T) {
@@ -6726,6 +6640,9 @@ function ZenUmlEditorControls({
   onMoveMessage?: (identity: ZenUmlMessageIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
   onMoveParticipant?: (identity: ZenUmlParticipantIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
 }) {
+  const [newParticipantError, setNewParticipantError] = useState<string | null>(null);
+  const [newMessageError, setNewMessageError] = useState<string | null>(null);
+  const [newControlError, setNewControlError] = useState<string | null>(null);
   const aliases = diagram.participants.map((item) => item.alias);
   const firstAlias = aliases[0] ?? 'Client';
   const secondAlias = aliases[1] ?? firstAlias;
@@ -6734,7 +6651,7 @@ function ZenUmlEditorControls({
   const [control, setControl] = useState<ZenUmlControl>({ depth: 0, kind: 'if', label: 'condition' });
   const [messageParentKey, setMessageParentKey] = useState('');
   const [controlParentKey, setControlParentKey] = useState('');
-  const [error, setError] = useState<string | null>(null);
+
   const blockKeys = diagram.blocks.map((block) => zenUmlBlockIdentityKey(block.identity));
   useEffect(() => {
     setMessage((current) => ({
@@ -6747,49 +6664,52 @@ function ZenUmlEditorControls({
     setMessageParentKey((current) => current && !blockKeys.includes(current) ? '' : current);
     setControlParentKey((current) => current && !blockKeys.includes(current) ? '' : current);
   }, [blockKeys.join('\u0000')]);
-  return <aside aria-label="ZenUML editor" className="canvas-semantic-editor canvas-hierarchy-editor canvas-zenuml-editor" data-canvas-pan-exclusion="true" data-testid="zenuml-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+  return <aside data-workspace-panel="semantic" aria-label="ZenUML editor" className="canvas-semantic-editor canvas-hierarchy-editor canvas-zenuml-editor" data-canvas-pan-exclusion="true" data-testid="zenuml-editor-controls" style={{ bottom, maxHeight }}>
     <strong>ZenUML</strong>
-    <form aria-label="Add ZenUML participant" onSubmit={(event) => { event.preventDefault(); runSemanticForm(setError, () => onAddParticipant?.(participant)); }}>
-      <input aria-label="New ZenUML participant alias" onChange={(event) => setParticipant((current) => ({ ...current, alias: event.target.value }))} value={participant.alias} />
-      <input aria-label="New ZenUML participant label" onChange={(event) => setParticipant((current) => ({ ...current, label: event.target.value }))} value={participant.label} />
+    <WorkspaceRecord aria-label="Add ZenUML participant" error={newParticipantError} onSubmit={(event) => { event.preventDefault(); runSemanticForm(setNewParticipantError, () => onAddParticipant?.(participant)); }}>
+      <WorkspaceInput aria-label="New ZenUML participant alias" onChange={(event) => setParticipant((current) => ({ ...current, alias: event.target.value }))} value={participant.alias} />
+      <WorkspaceInput aria-label="New ZenUML participant label" onChange={(event) => setParticipant((current) => ({ ...current, label: event.target.value }))} value={participant.label} />
       <ZenUmlParticipantKindSelect label="New ZenUML participant kind" onChange={(kind) => setParticipant((current) => ({ ...current, kind }))} value={participant.kind} />
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add participant</button>
-    </form>
-    <form aria-label="Add ZenUML message" onSubmit={(event) => { event.preventDefault(); runSemanticForm(setError, () => onAddMessage?.(message, diagram.blocks.find((block) => zenUmlBlockIdentityKey(block.identity) === messageParentKey)?.identity)); }}>
-      <select aria-label="New ZenUML message kind" onChange={(event) => setMessage((current) => ({ ...current, kind: event.target.value as ZenUmlMessage['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={message.kind}><option value="async">async message</option><option value="sync">sync call</option><option value="return">return</option></select>
+      <WorkspaceButton type="submit">Add participant</WorkspaceButton>
+      <NumericEditorError error={newParticipantError} />
+    </WorkspaceRecord>
+    <WorkspaceRecord aria-label="Add ZenUML message" error={newMessageError} onSubmit={(event) => { event.preventDefault(); runSemanticForm(setNewMessageError, () => onAddMessage?.(message, diagram.blocks.find((block) => zenUmlBlockIdentityKey(block.identity) === messageParentKey)?.identity)); }}>
+      <WorkspaceSelect aria-label="New ZenUML message kind" onChange={(event) => setMessage((current) => ({ ...current, kind: event.target.value as ZenUmlMessage['kind'] }))} value={message.kind}><option value="async">async message</option><option value="sync">sync call</option><option value="return">return</option></WorkspaceSelect>
       {message.kind === 'async' ? <ZenUmlAliasSelect aliases={aliases} label="New ZenUML message sender" onChange={(from) => setMessage((current) => ({ ...current, from }))} value={message.from ?? firstAlias} /> : null}
       {message.kind === 'sync' ? <ZenUmlOptionalAliasSelect aliases={aliases} label="New ZenUML call sender" onChange={(from) => setMessage((current) => ({ ...current, from }))} value={message.from} /> : null}
       {message.kind !== 'return' ? <ZenUmlAliasSelect aliases={aliases} label="New ZenUML message recipient" onChange={(to) => setMessage((current) => ({ ...current, to }))} value={message.to ?? secondAlias} /> : null}
-      {message.kind === 'sync' ? <input aria-label="New ZenUML assignment" onChange={(event) => setMessage((current) => ({ ...current, assignment: event.target.value || null }))} placeholder="optional assignment" value={message.assignment ?? ''} /> : null}
-      <input aria-label="New ZenUML message text" onChange={(event) => setMessage((current) => ({ ...current, text: event.target.value }))} value={message.text} />
+      {message.kind === 'sync' ? <WorkspaceInput aria-label="New ZenUML assignment" onChange={(event) => setMessage((current) => ({ ...current, assignment: event.target.value || null }))} placeholder="optional assignment" value={message.assignment ?? ''} /> : null}
+      <WorkspaceInput aria-label="New ZenUML message text" onChange={(event) => setMessage((current) => ({ ...current, text: event.target.value }))} value={message.text} />
       <ZenUmlParentSelect blocks={diagram.blocks} label="New ZenUML message parent" onChange={setMessageParentKey} value={messageParentKey} />
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add message</button>
-    </form>
-    <form aria-label="Add ZenUML control" onSubmit={(event) => { event.preventDefault(); runSemanticForm(setError, () => onAddControl?.(control, diagram.blocks.find((block) => zenUmlBlockIdentityKey(block.identity) === controlParentKey)?.identity)); }}>
+      <WorkspaceButton type="submit">Add message</WorkspaceButton>
+      <NumericEditorError error={newMessageError} />
+    </WorkspaceRecord>
+    <WorkspaceRecord aria-label="Add ZenUML control" error={newControlError} onSubmit={(event) => { event.preventDefault(); runSemanticForm(setNewControlError, () => onAddControl?.(control, diagram.blocks.find((block) => zenUmlBlockIdentityKey(block.identity) === controlParentKey)?.identity)); }}>
       <ZenUmlControlKindSelect label="New ZenUML control kind" onChange={(kind) => setControl((current) => ({ ...current, kind }))} value={control.kind} />
-      <input aria-label="New ZenUML control label" onChange={(event) => setControl((current) => ({ ...current, label: event.target.value }))} placeholder="condition" value={control.label} />
+      <WorkspaceInput aria-label="New ZenUML control label" onChange={(event) => setControl((current) => ({ ...current, label: event.target.value }))} placeholder="condition" value={control.label} />
       <ZenUmlParentSelect blocks={diagram.blocks} label="New ZenUML control parent" onChange={setControlParentKey} value={controlParentKey} />
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add control</button>
-    </form>
-    <NumericEditorError error={error} />
+      <WorkspaceButton type="submit">Add control</WorkspaceButton>
+      <NumericEditorError error={newControlError} />
+    </WorkspaceRecord>
+
     {diagram.participants.map((item) => <ZenUmlParticipantForm cache={participantDraftCache} identity={getZenUmlParticipantIdentity(item, diagram.participants)} key={participantKeys.get(item)} onDelete={onDeleteParticipant} onEdit={onEditParticipant} onMove={onMoveParticipant} renderKey={participantKeys.get(item)!} value={item} />)}
     {diagram.messages.map((item) => <ZenUmlMessageForm aliases={aliases} cache={messageDraftCache} identity={getZenUmlMessageIdentity(item, diagram.messages)} key={messageKeys.get(item)} onDelete={onDeleteMessage} onEdit={onEditMessage} onMove={onMoveMessage} renderKey={messageKeys.get(item)!} value={item} />)}
     {diagram.controls.map((item) => <ZenUmlControlForm cache={controlDraftCache} identity={getZenUmlControlIdentity(item, diagram.controls)} key={controlKeys.get(item)} onDelete={onDeleteControl} onEdit={onEditControl} onMove={onMoveControl} renderKey={controlKeys.get(item)!} value={item} />)}
   </aside>;
 }
 
-function ZenUmlParticipantKindSelect({ label, onChange, value }: { label: string; onChange: (value: ZenUmlParticipantKind) => void; value: ZenUmlParticipantKind }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value as ZenUmlParticipantKind)} style={HIERARCHY_CONTROL_STYLE} value={value}>{ZENUML_PARTICIPANT_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select>; }
-function ZenUmlControlKindSelect({ label, onChange, value }: { label: string; onChange: (value: ZenUmlControl['kind']) => void; value: ZenUmlControl['kind'] }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value as ZenUmlControl['kind'])} style={HIERARCHY_CONTROL_STYLE} value={value}>{ZENUML_CONTROL_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select>; }
-function ZenUmlAliasSelect({ aliases, label, onChange, value }: { aliases: string[]; label: string; onChange: (value: string) => void; value: string }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value)} style={HIERARCHY_CONTROL_STYLE} value={value}>{aliases.map((alias) => <option key={alias}>{alias}</option>)}</select>; }
-function ZenUmlOptionalAliasSelect({ aliases, label, onChange, value }: { aliases: string[]; label: string; onChange: (value: string | null) => void; value: string | null }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value || null)} style={HIERARCHY_CONTROL_STYLE} value={value ?? ''}><option value="">implicit caller</option>{aliases.map((alias) => <option key={alias}>{alias}</option>)}</select>; }
+function ZenUmlParticipantKindSelect({ label, onChange, value }: { label: string; onChange: (value: ZenUmlParticipantKind) => void; value: ZenUmlParticipantKind }) { return <WorkspaceSelect aria-label={label} onChange={(event) => onChange(event.target.value as ZenUmlParticipantKind)} value={value}>{ZENUML_PARTICIPANT_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</WorkspaceSelect>; }
+function ZenUmlControlKindSelect({ label, onChange, value }: { label: string; onChange: (value: ZenUmlControl['kind']) => void; value: ZenUmlControl['kind'] }) { return <WorkspaceSelect aria-label={label} onChange={(event) => onChange(event.target.value as ZenUmlControl['kind'])} value={value}>{ZENUML_CONTROL_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</WorkspaceSelect>; }
+function ZenUmlAliasSelect({ aliases, label, onChange, value }: { aliases: string[]; label: string; onChange: (value: string) => void; value: string }) { return <WorkspaceSelect aria-label={label} onChange={(event) => onChange(event.target.value)} value={value}>{aliases.map((alias) => <option key={alias}>{alias}</option>)}</WorkspaceSelect>; }
+function ZenUmlOptionalAliasSelect({ aliases, label, onChange, value }: { aliases: string[]; label: string; onChange: (value: string | null) => void; value: string | null }) { return <WorkspaceSelect aria-label={label} onChange={(event) => onChange(event.target.value || null)} value={value ?? ''}><option value="">implicit caller</option>{aliases.map((alias) => <option key={alias}>{alias}</option>)}</WorkspaceSelect>; }
 function zenUmlBlockIdentityKey(identity: ZenUmlBlockIdentity): string { return JSON.stringify(identity); }
-function ZenUmlParentSelect({ blocks, label, onChange, value }: { blocks: ZenUmlDiagramSnapshot['blocks']; label: string; onChange: (value: string) => void; value: string }) { return <select aria-label={label} onChange={(event) => onChange(event.target.value)} style={HIERARCHY_CONTROL_STYLE} value={value}><option value="">Top level</option>{blocks.map((block) => { const key = zenUmlBlockIdentityKey(block.identity); return <option key={key} value={key}>{`${'  '.repeat(block.depth + 1)}${block.label}`}</option>; })}</select>; }
+function ZenUmlParentSelect({ blocks, label, onChange, value }: { blocks: ZenUmlDiagramSnapshot['blocks']; label: string; onChange: (value: string) => void; value: string }) { return <WorkspaceSelect aria-label={label} onChange={(event) => onChange(event.target.value)} value={value}><option value="">Top level</option>{blocks.map((block) => { const key = zenUmlBlockIdentityKey(block.identity); return <option key={key} value={key}>{`${'  '.repeat(block.depth + 1)}${block.label}`}</option>; })}</WorkspaceSelect>; }
 
-function ZenUmlParticipantForm({ cache, identity, onDelete, onEdit, onMove, renderKey, value }: { cache: PersistentCanonicalDraftCache<ZenUmlParticipant>; identity: ZenUmlParticipantIdentity; onDelete?: (identity: ZenUmlParticipantIdentity) => SemanticFormActionResult; onEdit?: (identity: ZenUmlParticipantIdentity, value: Partial<ZenUmlParticipant>) => SemanticFormActionResult; onMove?: (identity: ZenUmlParticipantIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string; value: ZenUmlParticipant }) { const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(value, renderKey, cache); const [error, setError] = useState<string | null>(null); return <form aria-label={`ZenUML participant ${value.alias}`} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onEdit?.(identity, draft))) resetDraft(); }}><input aria-label={`ZenUML participant ${value.alias} alias`} onChange={(event) => updateDraft((current) => ({ ...current, alias: event.target.value }))} value={draft.alias} /><input aria-label={`ZenUML participant ${value.alias} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><ZenUmlParticipantKindSelect label={`ZenUML participant ${value.alias} kind`} onChange={(kind) => updateDraft((current) => ({ ...current, kind }))} value={draft.kind} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ZenUML participant ${value.alias} up`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ZenUML participant ${value.alias} down`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ZenUML participant ${value.alias}`} onClick={() => runSemanticForm(setError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button><NumericEditorError error={error} /></form>; }
+function ZenUmlParticipantForm({ cache, identity, onDelete, onEdit, onMove, renderKey, value }: { cache: PersistentCanonicalDraftCache<ZenUmlParticipant>; identity: ZenUmlParticipantIdentity; onDelete?: (identity: ZenUmlParticipantIdentity) => SemanticFormActionResult; onEdit?: (identity: ZenUmlParticipantIdentity, value: Partial<ZenUmlParticipant>) => SemanticFormActionResult; onMove?: (identity: ZenUmlParticipantIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string; value: ZenUmlParticipant }) { const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(value, renderKey, cache); const [error, setError] = useState<string | null>(null); return <WorkspaceRecord error={error} aria-label={`ZenUML participant ${value.alias}`} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onEdit?.(identity, draft))) resetDraft(); }}><WorkspaceInput aria-label={`ZenUML participant ${value.alias} alias`} onChange={(event) => updateDraft((current) => ({ ...current, alias: event.target.value }))} value={draft.alias} /><WorkspaceInput aria-label={`ZenUML participant ${value.alias} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><ZenUmlParticipantKindSelect label={`ZenUML participant ${value.alias} kind`} onChange={(kind) => updateDraft((current) => ({ ...current, kind }))} value={draft.kind} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ZenUML participant ${value.alias} up`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'up'))} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ZenUML participant ${value.alias} down`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'down'))} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ZenUML participant ${value.alias}`} onClick={() => runSemanticForm(setError, () => onDelete?.(identity))} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>; }
 
-function ZenUmlMessageForm({ aliases, cache, identity, onDelete, onEdit, onMove, renderKey, value }: { aliases: string[]; cache: PersistentCanonicalDraftCache<ZenUmlMessage>; identity: ZenUmlMessageIdentity; onDelete?: (identity: ZenUmlMessageIdentity) => SemanticFormActionResult; onEdit?: (identity: ZenUmlMessageIdentity, value: Partial<ZenUmlMessage>) => SemanticFormActionResult; onMove?: (identity: ZenUmlMessageIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string; value: ZenUmlMessage }) { const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(value, renderKey, cache); const [error, setError] = useState<string | null>(null); return <form aria-label={`ZenUML ${value.kind} message ${value.text}`} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onEdit?.(identity, draft))) resetDraft(); }}><input aria-label={`ZenUML message ${value.text} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />{draft.kind === 'async' ? <ZenUmlAliasSelect aliases={aliases} label={`ZenUML message ${value.text} sender`} onChange={(from) => updateDraft((current) => ({ ...current, from }))} value={draft.from ?? ''} /> : null}{draft.kind === 'sync' ? <ZenUmlOptionalAliasSelect aliases={aliases} label={`ZenUML message ${value.text} sender`} onChange={(from) => updateDraft((current) => ({ ...current, from }))} value={draft.from} /> : null}{draft.kind !== 'return' ? <ZenUmlAliasSelect aliases={aliases} label={`ZenUML message ${value.text} recipient`} onChange={(to) => updateDraft((current) => ({ ...current, to }))} value={draft.to ?? ''} /> : null}{draft.kind === 'sync' ? <input aria-label={`ZenUML message ${value.text} assignment`} onChange={(event) => updateDraft((current) => ({ ...current, assignment: event.target.value || null }))} value={draft.assignment ?? ''} /> : null}<button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ZenUML message ${value.text} up`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ZenUML message ${value.text} down`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ZenUML message ${value.text}`} onClick={() => runSemanticForm(setError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button><NumericEditorError error={error} /></form>; }
+function ZenUmlMessageForm({ aliases, cache, identity, onDelete, onEdit, onMove, renderKey, value }: { aliases: string[]; cache: PersistentCanonicalDraftCache<ZenUmlMessage>; identity: ZenUmlMessageIdentity; onDelete?: (identity: ZenUmlMessageIdentity) => SemanticFormActionResult; onEdit?: (identity: ZenUmlMessageIdentity, value: Partial<ZenUmlMessage>) => SemanticFormActionResult; onMove?: (identity: ZenUmlMessageIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string; value: ZenUmlMessage }) { const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(value, renderKey, cache); const [error, setError] = useState<string | null>(null); return <WorkspaceRecord error={error} aria-label={`ZenUML ${value.kind} message ${value.text}`} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onEdit?.(identity, draft))) resetDraft(); }}><WorkspaceInput aria-label={`ZenUML message ${value.text} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} />{draft.kind === 'async' ? <ZenUmlAliasSelect aliases={aliases} label={`ZenUML message ${value.text} sender`} onChange={(from) => updateDraft((current) => ({ ...current, from }))} value={draft.from ?? ''} /> : null}{draft.kind === 'sync' ? <ZenUmlOptionalAliasSelect aliases={aliases} label={`ZenUML message ${value.text} sender`} onChange={(from) => updateDraft((current) => ({ ...current, from }))} value={draft.from} /> : null}{draft.kind !== 'return' ? <ZenUmlAliasSelect aliases={aliases} label={`ZenUML message ${value.text} recipient`} onChange={(to) => updateDraft((current) => ({ ...current, to }))} value={draft.to ?? ''} /> : null}{draft.kind === 'sync' ? <WorkspaceInput aria-label={`ZenUML message ${value.text} assignment`} onChange={(event) => updateDraft((current) => ({ ...current, assignment: event.target.value || null }))} value={draft.assignment ?? ''} /> : null}<WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ZenUML message ${value.text} up`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'up'))} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ZenUML message ${value.text} down`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'down'))} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ZenUML message ${value.text}`} onClick={() => runSemanticForm(setError, () => onDelete?.(identity))} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>; }
 
-function ZenUmlControlForm({ cache, identity, onDelete, onEdit, onMove, renderKey, value }: { cache: PersistentCanonicalDraftCache<ZenUmlControl>; identity: ZenUmlControlIdentity; onDelete?: (identity: ZenUmlControlIdentity) => SemanticFormActionResult; onEdit?: (identity: ZenUmlControlIdentity, value: Partial<ZenUmlControl>) => SemanticFormActionResult; onMove?: (identity: ZenUmlControlIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string; value: ZenUmlControl }) { const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(value, renderKey, cache); const [error, setError] = useState<string | null>(null); return <form aria-label={`ZenUML control ${value.kind} ${value.label}`} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onEdit?.(identity, draft))) resetDraft(); }}><strong>{value.kind}</strong><input aria-label={`ZenUML control ${value.kind} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ZenUML control ${value.kind} up`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'up'))} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ZenUML control ${value.kind} down`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'down'))} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ZenUML control ${value.kind}`} onClick={() => runSemanticForm(setError, () => onDelete?.(identity))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button><NumericEditorError error={error} /></form>; }
+function ZenUmlControlForm({ cache, identity, onDelete, onEdit, onMove, renderKey, value }: { cache: PersistentCanonicalDraftCache<ZenUmlControl>; identity: ZenUmlControlIdentity; onDelete?: (identity: ZenUmlControlIdentity) => SemanticFormActionResult; onEdit?: (identity: ZenUmlControlIdentity, value: Partial<ZenUmlControl>) => SemanticFormActionResult; onMove?: (identity: ZenUmlControlIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string; value: ZenUmlControl }) { const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(value, renderKey, cache); const [error, setError] = useState<string | null>(null); return <WorkspaceRecord error={error} aria-label={`ZenUML control ${value.kind} ${value.label}`} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onEdit?.(identity, draft))) resetDraft(); }}><strong>{value.kind}</strong><WorkspaceInput aria-label={`ZenUML control ${value.kind} label`} onChange={(event) => updateDraft((current) => ({ ...current, label: event.target.value }))} value={draft.label} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ZenUML control ${value.kind} up`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'up'))} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ZenUML control ${value.kind} down`} onClick={() => runSemanticForm(setError, () => onMove?.(identity, 'down'))} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ZenUML control ${value.kind}`} onClick={() => runSemanticForm(setError, () => onDelete?.(identity))} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>; }
 
 function WardleyEditorControls({
   bottom, diagram, evolutionDraftCache, evolutionKeys, linkDraftCache, linkKeys, maxHeight,
@@ -6823,6 +6743,11 @@ function WardleyEditorControls({
   onMoveNote?: (identity: WardleyNoteIdentity, direction: 'up' | 'down') => SemanticFormActionResult;
   onRenameNode?: (identity: WardleyNodeIdentity, name: string) => SemanticFormActionResult;
 }) {
+  const [newNodeError, setNewNodeError] = useState<string | null>(null);
+  const [newPipelineError, setNewPipelineError] = useState<string | null>(null);
+  const [newLinkError, setNewLinkError] = useState<string | null>(null);
+  const [newEvolutionError, setNewEvolutionError] = useState<string | null>(null);
+  const [newNoteError, setNewNoteError] = useState<string | null>(null);
   const topNodes = diagram.nodes.filter((node) => node.kind !== 'pipeline-component');
   const components = diagram.nodes.filter((node) => node.kind === 'component');
   const availablePipelineParents = components.filter((node) => !diagram.pipelines.some((pipeline) => pipeline.parent === node.name));
@@ -6838,52 +6763,65 @@ function WardleyEditorControls({
   });
   const { draft: newNote, resetDraft: resetNewNote, updateDraft: updateNewNote } = useCanonicalDraft({ evolution: '0.5', text: 'Note', visibility: '0.5' });
   const { draft: newPipeline, resetDraft: resetNewPipeline, updateDraft: updateNewPipeline } = useCanonicalDraft({ componentEvolution: '0.5', componentName: 'Pipeline component', parent: availablePipelineParents[0]?.name ?? '' });
-  const [error, setError] = useState<string | null>(null);
-  return <aside aria-label="Wardley editor" className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="wardley-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom, maxHeight }}>
+
+  return <aside data-workspace-panel="semantic" aria-label="Wardley editor" className="canvas-semantic-editor canvas-numeric-editor" data-canvas-pan-exclusion="true" data-testid="wardley-editor-controls" style={{ bottom, maxHeight }}>
     <strong>Wardley</strong>
-    <form aria-label="New Wardley node" onSubmit={(event) => {
+    <WorkspaceRecord aria-label="New Wardley node" error={newNodeError} onSubmit={(event) => {
       event.preventDefault();
-      if (runSemanticForm(setError, () => onAddNode?.({
+      if (runSemanticForm(setNewNodeError, () => onAddNode?.({
         evolution: parseSemanticNumber(newNode.evolution, 'Wardley evolution'), inertia: newNode.inertia,
         kind: newNode.kind, name: newNode.name, pipelineParent: newNode.kind === 'pipeline-component' ? newNode.pipelineParent : null,
         strategy: newNode.kind === 'component' ? newNode.strategy || null : null,
         visibility: newNode.kind === 'pipeline-component' ? null : parseSemanticNumber(newNode.visibility, 'Wardley visibility'),
       }))) resetNewNode();
     }}>
-      <input aria-label="New Wardley node name" onChange={(event) => updateNewNode((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.name} />
-      <select aria-label="New Wardley node kind" onChange={(event) => updateNewNode((current) => ({ ...current, kind: event.target.value as WardleyNode['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.kind}><option value="component">Component</option><option value="anchor">Anchor</option><option value="pipeline-component">Pipeline component</option></select>
-      {newNode.kind === 'pipeline-component' ? <select aria-label="New Wardley node pipeline" onChange={(event) => updateNewNode((current) => ({ ...current, pipelineParent: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.pipelineParent}>{diagram.pipelines.map((pipeline) => <option key={pipeline.parent}>{pipeline.parent}</option>)}</select> : <input aria-label="New Wardley node visibility" inputMode="decimal" onChange={(event) => updateNewNode((current) => ({ ...current, visibility: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.visibility} />}
-      <input aria-label="New Wardley node evolution" inputMode="decimal" onChange={(event) => updateNewNode((current) => ({ ...current, evolution: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.evolution} />
-      {newNode.kind === 'component' ? <><select aria-label="New Wardley node strategy" onChange={(event) => updateNewNode((current) => ({ ...current, strategy: event.target.value as typeof current.strategy }))} style={HIERARCHY_CONTROL_STYLE} value={newNode.strategy}><option value="">No strategy</option>{WARDLEY_STRATEGIES.map((strategy) => <option key={strategy}>{strategy}</option>)}</select><label><input aria-label="New Wardley node inertia" checked={newNode.inertia} onChange={(event) => updateNewNode((current) => ({ ...current, inertia: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Inertia</label></> : null}
-      <button style={HIERARCHY_CONTROL_STYLE} type="submit">Add node</button>
-    </form>
-    {diagram.nodes.map((node, index) => <WardleyNodeForm cache={nodeDraftCache} diagram={diagram} item={node} key={nodeKeys.get(node)} onDelete={onDeleteNode} onEdit={onEditNode} onError={setError} onMove={onMoveNode} onRename={onRenameNode} renderKey={nodeKeys.get(node) ?? `wardley-node:${index}`} />)}
-    <section aria-label="Wardley pipelines"><strong>Pipelines</strong><form aria-label="New Wardley pipeline" onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onAddPipeline?.({ componentEvolution: parseSemanticNumber(newPipeline.componentEvolution, 'Wardley pipeline component evolution'), componentName: newPipeline.componentName, parent: newPipeline.parent }))) resetNewPipeline(); }}><select aria-label="New Wardley pipeline parent" onChange={(event) => updateNewPipeline((current) => ({ ...current, parent: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newPipeline.parent}>{availablePipelineParents.map((node) => <option key={node.name}>{node.name}</option>)}</select><input aria-label="New Wardley pipeline component" onChange={(event) => updateNewPipeline((current) => ({ ...current, componentName: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newPipeline.componentName} /><input aria-label="New Wardley pipeline component evolution" inputMode="decimal" onChange={(event) => updateNewPipeline((current) => ({ ...current, componentEvolution: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newPipeline.componentEvolution} /><button disabled={!availablePipelineParents.length} style={HIERARCHY_CONTROL_STYLE} type="submit">Add pipeline</button></form>{diagram.pipelines.map((pipeline) => <button aria-label={`Delete Wardley pipeline ${pipeline.parent}`} key={pipeline.parent} onClick={() => runSemanticForm(setError, () => onDeletePipeline?.(getWardleyPipelineIdentity(pipeline, diagram.pipelines)))} style={HIERARCHY_CONTROL_STYLE} type="button">Delete pipeline {pipeline.parent}</button>)}</section>
-    <section aria-label="Wardley links"><strong>Links and flows</strong><form aria-label="New Wardley link" onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onAddLink?.(newLink))) resetNewLink(); }}><select aria-label="New Wardley link source" onChange={(event) => updateNewLink((current) => ({ ...current, from: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newLink.from}>{topNodes.map((node) => <option key={node.name}>{node.name}</option>)}</select><select aria-label="New Wardley link kind" onChange={(event) => updateNewLink((current) => ({ ...current, kind: event.target.value as WardleyLink['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={newLink.kind}>{WARDLEY_LINK_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select><select aria-label="New Wardley link target" onChange={(event) => updateNewLink((current) => ({ ...current, to: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newLink.to}>{topNodes.map((node) => <option key={node.name}>{node.name}</option>)}</select><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add link</button></form>{diagram.links.map((link, index) => <WardleyLinkForm cache={linkDraftCache} diagram={diagram} item={link} key={linkKeys.get(link)} onDelete={onDeleteLink} onEdit={onEditLink} onError={setError} onMove={onMoveLink} renderKey={linkKeys.get(link) ?? `wardley-link:${index}`} />)}</section>
-    <section aria-label="Wardley evolutions"><strong>Evolutions</strong><form aria-label="New Wardley evolution" onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onAddEvolution?.({ component: newEvolution.component, target: parseSemanticNumber(newEvolution.target, 'Wardley evolution target') }))) resetNewEvolution(); }}><select aria-label="New Wardley evolution component" onChange={(event) => updateNewEvolution((current) => ({ ...current, component: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newEvolution.component}>{components.filter((node) => !diagram.evolutions.some((item) => item.component === node.name)).map((node) => <option key={node.name}>{node.name}</option>)}</select><input aria-label="New Wardley evolution target" inputMode="decimal" onChange={(event) => updateNewEvolution((current) => ({ ...current, target: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newEvolution.target} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add evolution</button></form>{diagram.evolutions.map((item, index) => <WardleyEvolutionForm cache={evolutionDraftCache} diagram={diagram} item={item} key={evolutionKeys.get(item)} onDelete={onDeleteEvolution} onEdit={onEditEvolution} onError={setError} renderKey={evolutionKeys.get(item) ?? `wardley-evolution:${index}`} />)}</section>
-    <section aria-label="Wardley notes"><strong>Notes</strong><form aria-label="New Wardley note" onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setError, () => onAddNote?.({ evolution: parseSemanticNumber(newNote.evolution, 'Wardley note evolution'), text: newNote.text, visibility: parseSemanticNumber(newNote.visibility, 'Wardley note visibility') }))) resetNewNote(); }}><input aria-label="New Wardley note text" onChange={(event) => updateNewNote((current) => ({ ...current, text: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNote.text} /><input aria-label="New Wardley note visibility" inputMode="decimal" onChange={(event) => updateNewNote((current) => ({ ...current, visibility: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNote.visibility} /><input aria-label="New Wardley note evolution" inputMode="decimal" onChange={(event) => updateNewNote((current) => ({ ...current, evolution: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={newNote.evolution} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Add note</button></form>{diagram.notes.map((item, index) => <WardleyNoteForm cache={noteDraftCache} diagram={diagram} item={item} key={noteKeys.get(item)} onDelete={onDeleteNote} onEdit={onEditNote} onError={setError} onMove={onMoveNote} renderKey={noteKeys.get(item) ?? `wardley-note:${index}`} />)}</section>
-    <NumericEditorError error={error} />
+      <WorkspaceInput aria-label="New Wardley node name" onChange={(event) => updateNewNode((current) => ({ ...current, name: event.target.value }))} value={newNode.name} />
+      <WorkspaceSelect aria-label="New Wardley node kind" onChange={(event) => updateNewNode((current) => ({ ...current, kind: event.target.value as WardleyNode['kind'] }))} value={newNode.kind}><option value="component">Component</option><option value="anchor">Anchor</option><option value="pipeline-component">Pipeline component</option></WorkspaceSelect>
+      {newNode.kind === 'pipeline-component' ? <WorkspaceSelect aria-label="New Wardley node pipeline" onChange={(event) => updateNewNode((current) => ({ ...current, pipelineParent: event.target.value }))} value={newNode.pipelineParent}>{diagram.pipelines.map((pipeline) => <option key={pipeline.parent}>{pipeline.parent}</option>)}</WorkspaceSelect> : <WorkspaceInput aria-label="New Wardley node visibility" inputMode="decimal" onChange={(event) => updateNewNode((current) => ({ ...current, visibility: event.target.value }))} value={newNode.visibility} />}
+      <WorkspaceInput aria-label="New Wardley node evolution" inputMode="decimal" onChange={(event) => updateNewNode((current) => ({ ...current, evolution: event.target.value }))} value={newNode.evolution} />
+      {newNode.kind === 'component' ? <><WorkspaceSelect aria-label="New Wardley node strategy" onChange={(event) => updateNewNode((current) => ({ ...current, strategy: event.target.value as typeof current.strategy }))} value={newNode.strategy}><option value="">No strategy</option>{WARDLEY_STRATEGIES.map((strategy) => <option key={strategy}>{strategy}</option>)}</WorkspaceSelect><label><WorkspaceInput aria-label="New Wardley node inertia" checked={newNode.inertia} onChange={(event) => updateNewNode((current) => ({ ...current, inertia: event.target.checked }))} type="checkbox" />Inertia</label></> : null}
+      <WorkspaceButton type="submit">Add node</WorkspaceButton>
+      <NumericEditorError error={newNodeError} />
+    </WorkspaceRecord>
+    {diagram.nodes.map((node, index) => <WardleyNodeForm cache={nodeDraftCache} diagram={diagram} item={node} key={nodeKeys.get(node)} onDelete={onDeleteNode} onEdit={onEditNode} onMove={onMoveNode} onRename={onRenameNode} renderKey={nodeKeys.get(node) ?? `wardley-node:${index}`} />)}
+    <section aria-label="Wardley pipelines"><strong>Pipelines</strong><WorkspaceRecord aria-label="New Wardley pipeline" error={newPipelineError} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setNewPipelineError, () => onAddPipeline?.({ componentEvolution: parseSemanticNumber(newPipeline.componentEvolution, 'Wardley pipeline component evolution'), componentName: newPipeline.componentName, parent: newPipeline.parent }))) resetNewPipeline(); }}><WorkspaceSelect aria-label="New Wardley pipeline parent" onChange={(event) => updateNewPipeline((current) => ({ ...current, parent: event.target.value }))} value={newPipeline.parent}>{availablePipelineParents.map((node) => <option key={node.name}>{node.name}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="New Wardley pipeline component" onChange={(event) => updateNewPipeline((current) => ({ ...current, componentName: event.target.value }))} value={newPipeline.componentName} /><WorkspaceInput aria-label="New Wardley pipeline component evolution" inputMode="decimal" onChange={(event) => updateNewPipeline((current) => ({ ...current, componentEvolution: event.target.value }))} value={newPipeline.componentEvolution} /><WorkspaceButton disabled={!availablePipelineParents.length} type="submit">Add pipeline</WorkspaceButton><NumericEditorError error={newPipelineError} /></WorkspaceRecord>{diagram.pipelines.map((pipeline) => <WardleyPipelineRecord identity={getWardleyPipelineIdentity(pipeline, diagram.pipelines)} key={pipeline.parent} onDelete={onDeletePipeline} />)}</section>
+    <section aria-label="Wardley links"><strong>Links and flows</strong><WorkspaceRecord aria-label="New Wardley link" error={newLinkError} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setNewLinkError, () => onAddLink?.(newLink))) resetNewLink(); }}><WorkspaceSelect aria-label="New Wardley link source" onChange={(event) => updateNewLink((current) => ({ ...current, from: event.target.value }))} value={newLink.from}>{topNodes.map((node) => <option key={node.name}>{node.name}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label="New Wardley link kind" onChange={(event) => updateNewLink((current) => ({ ...current, kind: event.target.value as WardleyLink['kind'] }))} value={newLink.kind}>{WARDLEY_LINK_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label="New Wardley link target" onChange={(event) => updateNewLink((current) => ({ ...current, to: event.target.value }))} value={newLink.to}>{topNodes.map((node) => <option key={node.name}>{node.name}</option>)}</WorkspaceSelect><WorkspaceButton type="submit">Add link</WorkspaceButton><NumericEditorError error={newLinkError} /></WorkspaceRecord>{diagram.links.map((link, index) => <WardleyLinkForm cache={linkDraftCache} diagram={diagram} item={link} key={linkKeys.get(link)} onDelete={onDeleteLink} onEdit={onEditLink} onMove={onMoveLink} renderKey={linkKeys.get(link) ?? `wardley-link:${index}`} />)}</section>
+    <section aria-label="Wardley evolutions"><strong>Evolutions</strong><WorkspaceRecord aria-label="New Wardley evolution" error={newEvolutionError} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setNewEvolutionError, () => onAddEvolution?.({ component: newEvolution.component, target: parseSemanticNumber(newEvolution.target, 'Wardley evolution target') }))) resetNewEvolution(); }}><WorkspaceSelect aria-label="New Wardley evolution component" onChange={(event) => updateNewEvolution((current) => ({ ...current, component: event.target.value }))} value={newEvolution.component}>{components.filter((node) => !diagram.evolutions.some((item) => item.component === node.name)).map((node) => <option key={node.name}>{node.name}</option>)}</WorkspaceSelect><WorkspaceInput aria-label="New Wardley evolution target" inputMode="decimal" onChange={(event) => updateNewEvolution((current) => ({ ...current, target: event.target.value }))} value={newEvolution.target} /><WorkspaceButton type="submit">Add evolution</WorkspaceButton><NumericEditorError error={newEvolutionError} /></WorkspaceRecord>{diagram.evolutions.map((item, index) => <WardleyEvolutionForm cache={evolutionDraftCache} diagram={diagram} item={item} key={evolutionKeys.get(item)} onDelete={onDeleteEvolution} onEdit={onEditEvolution} renderKey={evolutionKeys.get(item) ?? `wardley-evolution:${index}`} />)}</section>
+    <section aria-label="Wardley notes"><strong>Notes</strong><WorkspaceRecord aria-label="New Wardley note" error={newNoteError} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(setNewNoteError, () => onAddNote?.({ evolution: parseSemanticNumber(newNote.evolution, 'Wardley note evolution'), text: newNote.text, visibility: parseSemanticNumber(newNote.visibility, 'Wardley note visibility') }))) resetNewNote(); }}><WorkspaceInput aria-label="New Wardley note text" onChange={(event) => updateNewNote((current) => ({ ...current, text: event.target.value }))} value={newNote.text} /><WorkspaceInput aria-label="New Wardley note visibility" inputMode="decimal" onChange={(event) => updateNewNote((current) => ({ ...current, visibility: event.target.value }))} value={newNote.visibility} /><WorkspaceInput aria-label="New Wardley note evolution" inputMode="decimal" onChange={(event) => updateNewNote((current) => ({ ...current, evolution: event.target.value }))} value={newNote.evolution} /><WorkspaceButton type="submit">Add note</WorkspaceButton><NumericEditorError error={newNoteError} /></WorkspaceRecord>{diagram.notes.map((item, index) => <WardleyNoteForm cache={noteDraftCache} diagram={diagram} item={item} key={noteKeys.get(item)} onDelete={onDeleteNote} onEdit={onEditNote} onMove={onMoveNote} renderKey={noteKeys.get(item) ?? `wardley-note:${index}`} />)}</section>
+
   </aside>;
 }
 
-function WardleyNodeForm({ cache, diagram, item, onDelete, onEdit, onError, onMove, onRename, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyNodeDraft>; diagram: WardleyDiagramSnapshot; item: WardleyNode; onDelete?: (identity: WardleyNodeIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyNodeIdentity, value: Partial<WardleyNode>) => SemanticFormActionResult; onError: (value: string | null) => void; onMove?: (identity: WardleyNodeIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onRename?: (identity: WardleyNodeIdentity, name: string) => SemanticFormActionResult; renderKey: string }) {
+function WardleyPipelineRecord({ identity, onDelete }: { identity: WardleyPipelineIdentity; onDelete?: (identity: WardleyPipelineIdentity) => SemanticFormActionResult }) {
+  const [error, setError] = useState<string | null>(null);
+  return <WorkspaceRecord aria-label={`Wardley pipeline ${identity.pipeline.parent}`} error={error} onSubmit={(event) => event.preventDefault()}>
+    <WorkspaceButton aria-label={`Delete Wardley pipeline ${identity.pipeline.parent}`} onClick={() => runSemanticForm(setError, () => onDelete?.(identity))} type="button">Delete pipeline {identity.pipeline.parent}</WorkspaceButton>
+    <NumericEditorError error={error} />
+  </WorkspaceRecord>;
+}
+
+function WardleyNodeForm({ cache, diagram, item, onDelete, onEdit, onMove, onRename, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyNodeDraft>; diagram: WardleyDiagramSnapshot; item: WardleyNode; onDelete?: (identity: WardleyNodeIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyNodeIdentity, value: Partial<WardleyNode>) => SemanticFormActionResult; onMove?: (identity: WardleyNodeIdentity, direction: 'up' | 'down') => SemanticFormActionResult; onRename?: (identity: WardleyNodeIdentity, name: string) => SemanticFormActionResult; renderKey: string }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical: WardleyNodeDraft = { ...item, evolution: String(item.evolution), visibility: item.visibility === null ? '' : String(item.visibility) }; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(canonical, renderKey, cache); const identity = getWardleyNodeIdentity(item, diagram.nodes); const label = `Wardley ${item.kind} ${item.name}`; const peers = diagram.nodes.filter((node) => node.kind === item.kind && node.pipelineParent === item.pipelineParent); const peerIndex = peers.indexOf(item);
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, { evolution: parseSemanticNumber(draft.evolution, 'Wardley evolution'), inertia: draft.inertia, strategy: draft.strategy, visibility: item.visibility === null ? null : parseSemanticNumber(draft.visibility, 'Wardley visibility') }))) resetDraft(); }}><input aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.name} />{item.visibility !== null ? <input aria-label={`${label} visibility`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, visibility: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.visibility} /> : null}<input aria-label={`${label} evolution`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, evolution: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.evolution} />{item.kind === 'component' ? <><select aria-label={`${label} strategy`} onChange={(event) => updateDraft((current) => ({ ...current, strategy: event.target.value ? event.target.value as WardleyNode['strategy'] : null }))} style={HIERARCHY_CONTROL_STYLE} value={draft.strategy ?? ''}><option value="">No strategy</option>{WARDLEY_STRATEGIES.map((strategy) => <option key={strategy}>{strategy}</option>)}</select><label><input aria-label={`${label} inertia`} checked={draft.inertia} onChange={(event) => updateDraft((current) => ({ ...current, inertia: event.target.checked }))} style={HIERARCHY_CONTROL_STYLE} type="checkbox" />Inertia</label></> : null}<button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Rename ${label}`} onClick={() => { if (runSemanticForm(onError, () => onRename?.(identity, draft.name))) resetDraft(); }} style={HIERARCHY_CONTROL_STYLE} type="button">Rename</button><button aria-label={`Move ${label} up`} disabled={peerIndex === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={peerIndex === peers.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, { evolution: parseSemanticNumber(draft.evolution, 'Wardley evolution'), inertia: draft.inertia, strategy: draft.strategy, visibility: item.visibility === null ? null : parseSemanticNumber(draft.visibility, 'Wardley visibility') }))) resetDraft(); }}><WorkspaceInput aria-label={`${label} name`} onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))} value={draft.name} />{item.visibility !== null ? <WorkspaceInput aria-label={`${label} visibility`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, visibility: event.target.value }))} value={draft.visibility} /> : null}<WorkspaceInput aria-label={`${label} evolution`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, evolution: event.target.value }))} value={draft.evolution} />{item.kind === 'component' ? <><WorkspaceSelect aria-label={`${label} strategy`} onChange={(event) => updateDraft((current) => ({ ...current, strategy: event.target.value ? event.target.value as WardleyNode['strategy'] : null }))} value={draft.strategy ?? ''}><option value="">No strategy</option>{WARDLEY_STRATEGIES.map((strategy) => <option key={strategy}>{strategy}</option>)}</WorkspaceSelect><label><WorkspaceInput aria-label={`${label} inertia`} checked={draft.inertia} onChange={(event) => updateDraft((current) => ({ ...current, inertia: event.target.checked }))} type="checkbox" />Inertia</label></> : null}<WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Rename ${label}`} onClick={() => { if (runSemanticForm(onError, () => onRename?.(identity, draft.name))) resetDraft(); }} type="button">Rename</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} up`} disabled={peerIndex === 0} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} down`} disabled={peerIndex === peers.length - 1} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>;
 }
 
-function WardleyLinkForm({ cache, diagram, item, onDelete, onEdit, onError, onMove, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyLink>; diagram: WardleyDiagramSnapshot; item: WardleyLink; onDelete?: (identity: WardleyLinkIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyLinkIdentity, value: Partial<WardleyLink>) => SemanticFormActionResult; onError: (value: string | null) => void; onMove?: (identity: WardleyLinkIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string }) {
+function WardleyLinkForm({ cache, diagram, item, onDelete, onEdit, onMove, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyLink>; diagram: WardleyDiagramSnapshot; item: WardleyLink; onDelete?: (identity: WardleyLinkIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyLinkIdentity, value: Partial<WardleyLink>) => SemanticFormActionResult; onMove?: (identity: WardleyLinkIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string }) {
+  const [error, onError] = useState<string | null>(null);
   const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(item, renderKey, cache); const identity = getWardleyLinkIdentity(item, diagram.links); const label = `Wardley link ${item.from} ${item.kind} ${item.to}`; const nodes = diagram.nodes.filter((node) => node.kind !== 'pipeline-component'); const index = diagram.links.indexOf(item);
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, draft))) resetDraft(); }}><select aria-label={`${label} source`} onChange={(event) => updateDraft((current) => ({ ...current, from: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.from}>{nodes.map((node) => <option key={node.name}>{node.name}</option>)}</select><select aria-label={`${label} kind`} onChange={(event) => updateDraft((current) => ({ ...current, kind: event.target.value as WardleyLink['kind'] }))} style={HIERARCHY_CONTROL_STYLE} value={draft.kind}>{WARDLEY_LINK_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</select><select aria-label={`${label} target`} onChange={(event) => updateDraft((current) => ({ ...current, to: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.to}>{nodes.map((node) => <option key={node.name}>{node.name}</option>)}</select><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={index === diagram.links.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, draft))) resetDraft(); }}><WorkspaceSelect aria-label={`${label} source`} onChange={(event) => updateDraft((current) => ({ ...current, from: event.target.value }))} value={draft.from}>{nodes.map((node) => <option key={node.name}>{node.name}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label={`${label} kind`} onChange={(event) => updateDraft((current) => ({ ...current, kind: event.target.value as WardleyLink['kind'] }))} value={draft.kind}>{WARDLEY_LINK_KINDS.map((kind) => <option key={kind}>{kind}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label={`${label} target`} onChange={(event) => updateDraft((current) => ({ ...current, to: event.target.value }))} value={draft.to}>{nodes.map((node) => <option key={node.name}>{node.name}</option>)}</WorkspaceSelect><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} down`} disabled={index === diagram.links.length - 1} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>;
 }
 
-function WardleyEvolutionForm({ cache, diagram, item, onDelete, onEdit, onError, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyEvolutionDraft>; diagram: WardleyDiagramSnapshot; item: WardleyEvolution; onDelete?: (identity: WardleyEvolutionIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyEvolutionIdentity, value: Partial<WardleyEvolution>) => SemanticFormActionResult; onError: (value: string | null) => void; renderKey: string }) {
+function WardleyEvolutionForm({ cache, diagram, item, onDelete, onEdit, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyEvolutionDraft>; diagram: WardleyDiagramSnapshot; item: WardleyEvolution; onDelete?: (identity: WardleyEvolutionIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyEvolutionIdentity, value: Partial<WardleyEvolution>) => SemanticFormActionResult; renderKey: string }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical = { ...item, target: String(item.target) }; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(canonical, renderKey, cache); const identity = getWardleyEvolutionIdentity(item, diagram.evolutions); const label = `Wardley evolution ${item.component}`;
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, { component: draft.component, target: parseSemanticNumber(draft.target, 'Wardley evolution target') }))) resetDraft(); }}><select aria-label={`${label} component`} onChange={(event) => updateDraft((current) => ({ ...current, component: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.component}>{diagram.nodes.filter((node) => node.kind === 'component').map((node) => <option key={node.name}>{node.name}</option>)}</select><input aria-label={`${label} target`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, target: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.target} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, { component: draft.component, target: parseSemanticNumber(draft.target, 'Wardley evolution target') }))) resetDraft(); }}><WorkspaceSelect aria-label={`${label} component`} onChange={(event) => updateDraft((current) => ({ ...current, component: event.target.value }))} value={draft.component}>{diagram.nodes.filter((node) => node.kind === 'component').map((node) => <option key={node.name}>{node.name}</option>)}</WorkspaceSelect><WorkspaceInput aria-label={`${label} target`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, target: event.target.value }))} value={draft.target} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>;
 }
 
-function WardleyNoteForm({ cache, diagram, item, onDelete, onEdit, onError, onMove, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyNoteDraft>; diagram: WardleyDiagramSnapshot; item: WardleyNote; onDelete?: (identity: WardleyNoteIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyNoteIdentity, value: Partial<WardleyNote>) => SemanticFormActionResult; onError: (value: string | null) => void; onMove?: (identity: WardleyNoteIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string }) {
+function WardleyNoteForm({ cache, diagram, item, onDelete, onEdit, onMove, renderKey }: { cache: PersistentCanonicalDraftCache<WardleyNoteDraft>; diagram: WardleyDiagramSnapshot; item: WardleyNote; onDelete?: (identity: WardleyNoteIdentity) => SemanticFormActionResult; onEdit?: (identity: WardleyNoteIdentity, value: Partial<WardleyNote>) => SemanticFormActionResult; onMove?: (identity: WardleyNoteIdentity, direction: 'up' | 'down') => SemanticFormActionResult; renderKey: string }) {
+  const [error, onError] = useState<string | null>(null);
   const canonical = { ...item, evolution: String(item.evolution), visibility: String(item.visibility) }; const { draft, resetDraft, updateDraft } = usePersistentCanonicalDraft(canonical, renderKey, cache); const identity = getWardleyNoteIdentity(item, diagram.notes); const label = `Wardley note ${item.text}`; const index = diagram.notes.indexOf(item);
-  return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, { evolution: parseSemanticNumber(draft.evolution, 'Wardley note evolution'), text: draft.text, visibility: parseSemanticNumber(draft.visibility, 'Wardley note visibility') }))) resetDraft(); }}><input aria-label={`${label} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.text} /><input aria-label={`${label} visibility`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, visibility: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.visibility} /><input aria-label={`${label} evolution`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, evolution: event.target.value }))} style={HIERARCHY_CONTROL_STYLE} value={draft.evolution} /><button style={HIERARCHY_CONTROL_STYLE} type="submit">Save</button><button aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => onMove?.(identity, 'up')} style={HIERARCHY_CONTROL_STYLE} type="button">↑</button><button aria-label={`Move ${label} down`} disabled={index === diagram.notes.length - 1} onClick={() => onMove?.(identity, 'down')} style={HIERARCHY_CONTROL_STYLE} type="button">↓</button><button aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} style={HIERARCHY_CONTROL_STYLE} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={label} error={error} onSubmit={(event) => { event.preventDefault(); if (runSemanticForm(onError, () => onEdit?.(identity, { evolution: parseSemanticNumber(draft.evolution, 'Wardley note evolution'), text: draft.text, visibility: parseSemanticNumber(draft.visibility, 'Wardley note visibility') }))) resetDraft(); }}><WorkspaceInput aria-label={`${label} text`} onChange={(event) => updateDraft((current) => ({ ...current, text: event.target.value }))} value={draft.text} /><WorkspaceInput aria-label={`${label} visibility`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, visibility: event.target.value }))} value={draft.visibility} /><WorkspaceInput aria-label={`${label} evolution`} inputMode="decimal" onChange={(event) => updateDraft((current) => ({ ...current, evolution: event.target.value }))} value={draft.evolution} /><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => onMove?.(identity, 'up')} type="button">↑</WorkspaceButton><WorkspaceButton aria-label={`Move ${label} down`} disabled={index === diagram.notes.length - 1} onClick={() => onMove?.(identity, 'down')} type="button">↓</WorkspaceButton><WorkspaceButton aria-label={`Delete ${label}`} onClick={() => onDelete?.(identity)} type="button">Delete</WorkspaceButton><NumericEditorError error={error} /></WorkspaceRecord>;
 }
 
 function C4EditorControls({
@@ -6933,28 +6871,21 @@ function C4EditorControls({
     label: "Uses",
   });
   return (
-    <aside
+    <aside data-workspace-panel="semantic"
       className="canvas-semantic-editor canvas-c4-editor"
       data-canvas-pan-exclusion="true"
-      data-testid="c4-editor-controls"
-      style={{
-        ...SEMANTIC_PANEL_STYLE,
-        ...placement,
-        bottom: placement?.bottom ?? bottom,
-        right: placement ? "auto" : 12,
-      }}
+      data-testid="c4-editor-controls" style={{ ...placement, bottom: placement?.bottom ?? bottom, left: placement?.left ?? 12, right: 'auto' }}
     >
       <strong>
         C4 <small>experimental safe subset</small>
       </strong>
-      <form
+      <WorkspaceRecord
         onSubmit={(event) => {
           event.preventDefault();
           onAddElement?.(element);
         }}
-        style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}
       >
-        <select
+        <WorkspaceSelect
           aria-label="New C4 element type"
           onChange={(event) =>
             setElement((current) => ({
@@ -6984,31 +6915,30 @@ function C4EditorControls({
           ).map((value) => (
             <option key={value}>{value}</option>
           ))}
-        </select>
-        <input
+        </WorkspaceSelect>
+        <WorkspaceInput
           aria-label="New C4 element id"
           onChange={(event) =>
             setElement((current) => ({ ...current, id: event.target.value }))
           }
           value={element.id}
         />
-        <input
+        <WorkspaceInput
           aria-label="New C4 element label"
           onChange={(event) =>
             setElement((current) => ({ ...current, label: event.target.value }))
           }
           value={element.label}
         />
-        <button type="submit">Add element</button>
-      </form>
-      <form
+        <WorkspaceButton type="submit">Add element</WorkspaceButton>
+      </WorkspaceRecord>
+      <WorkspaceRecord
         onSubmit={(event) => {
           event.preventDefault();
           onAddBoundary?.(boundary);
         }}
-        style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}
       >
-        <select
+        <WorkspaceSelect
           aria-label="New C4 boundary type"
           onChange={(event) =>
             setBoundary((current) => ({
@@ -7028,15 +6958,15 @@ function C4EditorControls({
           ).map((value) => (
             <option key={value}>{value}</option>
           ))}
-        </select>
-        <input
+        </WorkspaceSelect>
+        <WorkspaceInput
           aria-label="New C4 boundary id"
           onChange={(event) =>
             setBoundary((current) => ({ ...current, id: event.target.value }))
           }
           value={boundary.id}
         />
-        <input
+        <WorkspaceInput
           aria-label="New C4 boundary label"
           onChange={(event) =>
             setBoundary((current) => ({
@@ -7046,8 +6976,8 @@ function C4EditorControls({
           }
           value={boundary.label}
         />
-        <button type="submit">Add boundary</button>
-      </form>
+        <WorkspaceButton type="submit">Add boundary</WorkspaceButton>
+      </WorkspaceRecord>
       {diagram.elements.map((item) => (
         <C4ElementForm
           element={item}
@@ -7108,31 +7038,30 @@ function C4ElementForm({
 }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(element);
   return (
-    <form
+    <WorkspaceRecord
       aria-label={`C4 element ${element.id}`}
       onSubmit={(event) => {
         event.preventDefault();
         onSave?.(element.id, draft);
         resetDraft();
       }}
-      style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}
     >
       <span>{element.kind}</span>
-      <input
+      <WorkspaceInput
         aria-label={`C4 element ${element.id} id`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, id: event.target.value }))
         }
         value={draft.id}
       />
-      <input
+      <WorkspaceInput
         aria-label={`C4 element ${element.id} label`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, label: event.target.value }))
         }
         value={draft.label}
       />
-      <input
+      <WorkspaceInput
         aria-label={`C4 element ${element.id} technology`}
         onChange={(event) =>
           updateDraft((current) => ({
@@ -7143,7 +7072,7 @@ function C4ElementForm({
         placeholder="technology"
         value={draft.technology ?? ""}
       />
-      <input
+      <WorkspaceInput
         aria-label={`C4 element ${element.id} description`}
         onChange={(event) =>
           updateDraft((current) => ({
@@ -7154,15 +7083,15 @@ function C4ElementForm({
         placeholder="description"
         value={draft.description ?? ""}
       />
-      <button type="submit">Save</button>
-      <button
+      <WorkspaceButton type="submit">Save</WorkspaceButton>
+      <WorkspaceButton
         aria-label={`Delete C4 element ${element.id}`}
         onClick={() => onDelete?.(element.id)}
         type="button"
       >
         Delete
-      </button>
-    </form>
+      </WorkspaceButton>
+    </WorkspaceRecord>
   );
 }
 function C4BoundaryForm({
@@ -7176,39 +7105,38 @@ function C4BoundaryForm({
 }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(boundary);
   return (
-    <form
+    <WorkspaceRecord
       aria-label={`C4 boundary ${boundary.id}`}
       onSubmit={(event) => {
         event.preventDefault();
         onSave?.(boundary.id, draft);
         resetDraft();
       }}
-      style={{ display: "flex", gap: 4, marginTop: 5 }}
     >
       <span>{boundary.kind}</span>
-      <input
+      <WorkspaceInput
         aria-label={`C4 boundary ${boundary.id} id`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, id: event.target.value }))
         }
         value={draft.id}
       />
-      <input
+      <WorkspaceInput
         aria-label={`C4 boundary ${boundary.id} label`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, label: event.target.value }))
         }
         value={draft.label}
       />
-      <button type="submit">Save</button>
-      <button
+      <WorkspaceButton type="submit">Save</WorkspaceButton>
+      <WorkspaceButton
         aria-label={`Delete C4 boundary ${boundary.id}`}
         onClick={() => onDelete?.(boundary.id)}
         type="button"
       >
         Delete
-      </button>
-    </form>
+      </WorkspaceButton>
+    </WorkspaceRecord>
   );
 }
 function C4RelationshipForm({
@@ -7224,15 +7152,14 @@ function C4RelationshipForm({
 }) {
   const [draft, setDraft] = useState(relationship);
   return (
-    <form
+    <WorkspaceRecord
       aria-label={`C4 relationship ${relationship.from} ${relationship.to}`}
       onSubmit={(event) => {
         event.preventDefault();
         onSave?.(draft);
       }}
-      style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}
     >
-      <select
+      <WorkspaceSelect
         aria-label="C4 relationship source"
         onChange={(event) =>
           setDraft((current) => ({ ...current, from: event.target.value }))
@@ -7242,8 +7169,8 @@ function C4RelationshipForm({
         {ids.map((id) => (
           <option key={id}>{id}</option>
         ))}
-      </select>
-      <select
+      </WorkspaceSelect>
+      <WorkspaceSelect
         aria-label="C4 relationship target"
         onChange={(event) =>
           setDraft((current) => ({ ...current, to: event.target.value }))
@@ -7253,15 +7180,15 @@ function C4RelationshipForm({
         {ids.map((id) => (
           <option key={id}>{id}</option>
         ))}
-      </select>
-      <input
+      </WorkspaceSelect>
+      <WorkspaceInput
         aria-label="C4 relationship label"
         onChange={(event) =>
           setDraft((current) => ({ ...current, label: event.target.value }))
         }
         value={draft.label}
       />
-      <input
+      <WorkspaceInput
         aria-label="C4 relationship technology"
         onChange={(event) =>
           setDraft((current) => ({
@@ -7272,17 +7199,17 @@ function C4RelationshipForm({
         placeholder="technology"
         value={draft.technology ?? ""}
       />
-      <button type="submit">{onDelete ? "Save" : "Add relationship"}</button>
+      <WorkspaceButton type="submit">{onDelete ? "Save" : "Add relationship"}</WorkspaceButton>
       {onDelete ? (
-        <button
+        <WorkspaceButton
           aria-label="Delete C4 relationship"
           onClick={onDelete}
           type="button"
         >
           Delete
-        </button>
+        </WorkspaceButton>
       ) : null}
-    </form>
+    </WorkspaceRecord>
   );
 }
 
@@ -7331,60 +7258,50 @@ function BlockEditorControls({
   });
   const [columns, setColumns] = useState(diagram.columns ?? 1);
   return (
-    <aside
+    <aside data-workspace-panel="semantic"
       className="canvas-semantic-editor canvas-block-editor"
       data-canvas-pan-exclusion="true"
-      data-testid="block-editor-controls"
-      style={{
-        ...SEMANTIC_PANEL_STYLE,
-        ...placement,
-        bottom: placement?.bottom ?? bottom,
-        right: placement ? "auto" : 12,
-      }}
+      data-testid="block-editor-controls" style={{ ...placement, bottom: placement?.bottom ?? bottom, left: placement?.left ?? 12, right: 'auto' }}
     >
       <strong>
         Block <small>beta safe subset</small>
       </strong>
-      <form
+      <WorkspaceRecord
         onSubmit={(event) => {
           event.preventDefault();
           onSetColumns?.(columns);
         }}
       >
-        <label>
-          columns{" "}
-          <input
+        <WorkspaceInput
             aria-label="Block columns"
             min="1"
             onChange={(event) => setColumns(Number(event.target.value))}
             type="number"
             value={columns}
           />
-        </label>
-        <button type="submit">Set</button>
-      </form>
-      <form
+        <WorkspaceButton type="submit">Set</WorkspaceButton>
+      </WorkspaceRecord>
+      <WorkspaceRecord
         onSubmit={(event) => {
           event.preventDefault();
           onAddNode?.(node);
         }}
-        style={{ display: "flex", gap: 4, marginTop: 5 }}
       >
-        <input
+        <WorkspaceInput
           aria-label="New block id"
           onChange={(event) =>
             setNode((current) => ({ ...current, id: event.target.value }))
           }
           value={node.id}
         />
-        <input
+        <WorkspaceInput
           aria-label="New block label"
           onChange={(event) =>
             setNode((current) => ({ ...current, label: event.target.value }))
           }
           value={node.label}
         />
-        <input
+        <WorkspaceInput
           aria-label="New block span"
           min="1"
           onChange={(event) =>
@@ -7396,24 +7313,23 @@ function BlockEditorControls({
           type="number"
           value={node.span}
         />
-        <button type="submit">Add block</button>
-      </form>
-      <form
+        <WorkspaceButton type="submit">Add block</WorkspaceButton>
+      </WorkspaceRecord>
+      <WorkspaceRecord
         onSubmit={(event) => {
           event.preventDefault();
           onAddComposite?.(composite);
         }}
-        style={{ display: "flex", gap: 4, marginTop: 5 }}
       >
-        <input
+        <WorkspaceInput
           aria-label="New block composite id"
           onChange={(event) =>
             setComposite((current) => ({ ...current, id: event.target.value }))
           }
           value={composite.id ?? ""}
         />
-        <button type="submit">Add composite</button>
-      </form>
+        <WorkspaceButton type="submit">Add composite</WorkspaceButton>
+      </WorkspaceRecord>
       {diagram.nodes.map((item) => (
         <BlockNodeForm
           item={item}
@@ -7465,30 +7381,29 @@ function BlockNodeForm({
 }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(item);
   return (
-    <form
+    <WorkspaceRecord
       aria-label={`Block ${item.id}`}
       onSubmit={(event) => {
         event.preventDefault();
         onSave?.(item.id, draft);
         resetDraft();
       }}
-      style={{ display: "flex", gap: 4, marginTop: 5 }}
     >
-      <input
+      <WorkspaceInput
         aria-label={`Block ${item.id} id`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, id: event.target.value }))
         }
         value={draft.id}
       />
-      <input
+      <WorkspaceInput
         aria-label={`Block ${item.id} label`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, label: event.target.value }))
         }
         value={draft.label}
       />
-      <input
+      <WorkspaceInput
         aria-label={`Block ${item.id} span`}
         min="1"
         onChange={(event) =>
@@ -7500,15 +7415,15 @@ function BlockNodeForm({
         type="number"
         value={draft.span}
       />
-      <button type="submit">Save</button>
-      <button
+      <WorkspaceButton type="submit">Save</WorkspaceButton>
+      <WorkspaceButton
         aria-label={`Delete block ${item.id}`}
         onClick={() => onDelete?.(item.id)}
         type="button"
       >
         Delete
-      </button>
-    </form>
+      </WorkspaceButton>
+    </WorkspaceRecord>
   );
 }
 function BlockCompositeForm({
@@ -7522,24 +7437,23 @@ function BlockCompositeForm({
 }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(item);
   return (
-    <form
+    <WorkspaceRecord
       aria-label={`Block composite ${item.id}`}
       onSubmit={(event) => {
         event.preventDefault();
         onSave?.(item.id, draft);
         resetDraft();
       }}
-      style={{ display: "flex", gap: 4, marginTop: 5 }}
     >
       <span>group</span>
-      <input
+      <WorkspaceInput
         aria-label={`Block composite ${item.id} id`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, id: event.target.value }))
         }
         value={draft.id}
       />
-      <input
+      <WorkspaceInput
         aria-label={`Block composite ${item.id} span`}
         min="1"
         onChange={(event) =>
@@ -7551,7 +7465,7 @@ function BlockCompositeForm({
         type="number"
         value={draft.span}
       />
-      <input
+      <WorkspaceInput
         aria-label={`Block composite ${item.id} columns`}
         min="1"
         onChange={(event) =>
@@ -7563,15 +7477,15 @@ function BlockCompositeForm({
         type="number"
         value={draft.columns ?? 1}
       />
-      <button type="submit">Save</button>
-      <button
+      <WorkspaceButton type="submit">Save</WorkspaceButton>
+      <WorkspaceButton
         aria-label={`Delete block composite ${item.id}`}
         onClick={() => onDelete?.(item.id)}
         type="button"
       >
         Delete
-      </button>
-    </form>
+      </WorkspaceButton>
+    </WorkspaceRecord>
   );
 }
 function BlockLinkForm({
@@ -7587,15 +7501,14 @@ function BlockLinkForm({
 }) {
   const [draft, setDraft] = useState(link);
   return (
-    <form
+    <WorkspaceRecord
       aria-label={`Block link ${link.from} ${link.to}`}
       onSubmit={(event) => {
         event.preventDefault();
         onSave?.(draft);
       }}
-      style={{ display: "flex", gap: 4, marginTop: 5 }}
     >
-      <select
+      <WorkspaceSelect
         aria-label="Block link source"
         onChange={(event) =>
           setDraft((current) => ({ ...current, from: event.target.value }))
@@ -7605,8 +7518,8 @@ function BlockLinkForm({
         {ids.map((id) => (
           <option key={id}>{id}</option>
         ))}
-      </select>
-      <select
+      </WorkspaceSelect>
+      <WorkspaceSelect
         aria-label="Block link target"
         onChange={(event) =>
           setDraft((current) => ({ ...current, to: event.target.value }))
@@ -7616,14 +7529,14 @@ function BlockLinkForm({
         {ids.map((id) => (
           <option key={id}>{id}</option>
         ))}
-      </select>
-      <button type="submit">{onDelete ? "Save" : "Add link"}</button>
+      </WorkspaceSelect>
+      <WorkspaceButton type="submit">{onDelete ? "Save" : "Add link"}</WorkspaceButton>
       {onDelete ? (
-        <button aria-label="Delete block link" onClick={onDelete} type="button">
+        <WorkspaceButton aria-label="Delete block link" onClick={onDelete} type="button">
           Delete
-        </button>
+        </WorkspaceButton>
       ) : null}
-    </form>
+    </WorkspaceRecord>
   );
 }
 
@@ -7672,46 +7585,43 @@ function SwimlaneEditorControls({
     to: ids[1] ?? ids[0] ?? "",
   });
   return (
-    <aside
+    <aside data-workspace-panel="semantic"
       className="canvas-semantic-editor canvas-swimlane-editor"
       data-canvas-pan-exclusion="true"
-      data-testid="swimlane-editor-controls"
-      style={{ ...SEMANTIC_PANEL_STYLE, bottom }}
+      data-testid="swimlane-editor-controls" style={{ bottom }}
     >
       <strong>
         Swimlane <small>beta safe subset</small>
       </strong>
-      <form
+      <WorkspaceRecord
         onSubmit={(event) => {
           event.preventDefault();
           onAddLane?.(lane);
         }}
-        style={{ display: "flex", gap: 4, marginTop: 5 }}
       >
-        <input
+        <WorkspaceInput
           aria-label="New swimlane id"
           onChange={(event) =>
             setLane((current) => ({ ...current, id: event.target.value }))
           }
           value={lane.id}
         />
-        <input
+        <WorkspaceInput
           aria-label="New swimlane label"
           onChange={(event) =>
             setLane((current) => ({ ...current, label: event.target.value }))
           }
           value={lane.label}
         />
-        <button type="submit">Add lane</button>
-      </form>
-      <form
+        <WorkspaceButton type="submit">Add lane</WorkspaceButton>
+      </WorkspaceRecord>
+      <WorkspaceRecord
         onSubmit={(event) => {
           event.preventDefault();
           onAddNode?.(node);
         }}
-        style={{ display: "flex", gap: 4, marginTop: 5 }}
       >
-        <select
+        <WorkspaceSelect
           aria-label="New swimlane node lane"
           onChange={(event) =>
             setNode((current) => ({ ...current, laneId: event.target.value }))
@@ -7721,23 +7631,23 @@ function SwimlaneEditorControls({
           {diagram.lanes.map((item) => (
             <option key={item.id}>{item.id}</option>
           ))}
-        </select>
-        <input
+        </WorkspaceSelect>
+        <WorkspaceInput
           aria-label="New swimlane node id"
           onChange={(event) =>
             setNode((current) => ({ ...current, id: event.target.value }))
           }
           value={node.id}
         />
-        <input
+        <WorkspaceInput
           aria-label="New swimlane node label"
           onChange={(event) =>
             setNode((current) => ({ ...current, label: event.target.value }))
           }
           value={node.label}
         />
-        <button type="submit">Add node</button>
-      </form>
+        <WorkspaceButton type="submit">Add node</WorkspaceButton>
+      </WorkspaceRecord>
       {diagram.lanes.map((item) => (
         <SwimlaneForm
           item={item}
@@ -7793,38 +7703,37 @@ function SwimlaneForm({
 }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(item);
   return (
-    <form
+    <WorkspaceRecord
       aria-label={`Swimlane ${item.id}`}
       onSubmit={(event) => {
         event.preventDefault();
         onSave?.(item.id, draft);
         resetDraft();
       }}
-      style={{ display: "flex", gap: 4, marginTop: 5 }}
     >
-      <input
+      <WorkspaceInput
         aria-label={`Swimlane ${item.id} id`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, id: event.target.value }))
         }
         value={draft.id}
       />
-      <input
+      <WorkspaceInput
         aria-label={`Swimlane ${item.id} label`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, label: event.target.value }))
         }
         value={draft.label}
       />
-      <button type="submit">Save</button>
-      <button
+      <WorkspaceButton type="submit">Save</WorkspaceButton>
+      <WorkspaceButton
         aria-label={`Delete swimlane ${item.id}`}
         onClick={() => onDelete?.(item.id)}
         type="button"
       >
         Delete
-      </button>
-    </form>
+      </WorkspaceButton>
+    </WorkspaceRecord>
   );
 }
 function SwimlaneNodeForm({
@@ -7845,30 +7754,29 @@ function SwimlaneNodeForm({
 }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(item);
   return (
-    <form
+    <WorkspaceRecord
       aria-label={`Swimlane node ${item.id}`}
       onSubmit={(event) => {
         event.preventDefault();
         onSave?.(item.id, draft);
         resetDraft();
       }}
-      style={{ display: "flex", gap: 4, marginTop: 5 }}
     >
-      <input
+      <WorkspaceInput
         aria-label={`Swimlane node ${item.id} id`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, id: event.target.value }))
         }
         value={draft.id}
       />
-      <input
+      <WorkspaceInput
         aria-label={`Swimlane node ${item.id} label`}
         onChange={(event) =>
           updateDraft((current) => ({ ...current, label: event.target.value }))
         }
         value={draft.label}
       />
-      <select
+      <WorkspaceSelect
         aria-label={`Swimlane node ${item.id} lane`}
         onChange={(event) => onMove?.(item.id, event.target.value)}
         value={item.laneId}
@@ -7876,16 +7784,16 @@ function SwimlaneNodeForm({
         {lanes.map((id) => (
           <option key={id}>{id}</option>
         ))}
-      </select>
-      <button type="submit">Save</button>
-      <button
+      </WorkspaceSelect>
+      <WorkspaceButton type="submit">Save</WorkspaceButton>
+      <WorkspaceButton
         aria-label={`Delete swimlane node ${item.id}`}
         onClick={() => onDelete?.(item.id)}
         type="button"
       >
         Delete
-      </button>
-    </form>
+      </WorkspaceButton>
+    </WorkspaceRecord>
   );
 }
 function SwimlaneHandoffForm({
@@ -7901,15 +7809,14 @@ function SwimlaneHandoffForm({
 }) {
   const [draft, setDraft] = useState(item);
   return (
-    <form
+    <WorkspaceRecord
       aria-label={`Swimlane handoff ${item.from} ${item.to}`}
       onSubmit={(event) => {
         event.preventDefault();
         onSave?.(draft);
       }}
-      style={{ display: "flex", gap: 4, marginTop: 5 }}
     >
-      <select
+      <WorkspaceSelect
         aria-label="Swimlane handoff source"
         onChange={(event) =>
           setDraft((current) => ({ ...current, from: event.target.value }))
@@ -7919,8 +7826,8 @@ function SwimlaneHandoffForm({
         {ids.map((id) => (
           <option key={id}>{id}</option>
         ))}
-      </select>
-      <select
+      </WorkspaceSelect>
+      <WorkspaceSelect
         aria-label="Swimlane handoff target"
         onChange={(event) =>
           setDraft((current) => ({ ...current, to: event.target.value }))
@@ -7930,8 +7837,8 @@ function SwimlaneHandoffForm({
         {ids.map((id) => (
           <option key={id}>{id}</option>
         ))}
-      </select>
-      <input
+      </WorkspaceSelect>
+      <WorkspaceInput
         aria-label="Swimlane handoff label"
         onChange={(event) =>
           setDraft((current) => ({
@@ -7942,18 +7849,25 @@ function SwimlaneHandoffForm({
         placeholder="label"
         value={draft.label ?? ""}
       />
-      <button type="submit">{onDelete ? "Save" : "Add handoff"}</button>
+      <WorkspaceButton type="submit">{onDelete ? "Save" : "Add handoff"}</WorkspaceButton>
       {onDelete ? (
-        <button
+        <WorkspaceButton
           aria-label="Delete swimlane handoff"
           onClick={onDelete}
           type="button"
         >
           Delete
-        </button>
+        </WorkspaceButton>
       ) : null}
-    </form>
+    </WorkspaceRecord>
   );
+}
+
+function PairedSemanticPanels({ bottom, children, maxHeight, placement }: {
+  bottom: number; children: ReactNode; maxHeight: number; placement: PairedSemanticPanelPlacement | null;
+}) {
+  const stacked = placement?.stacked ?? true;
+  return <div className="canvas-paired-semantic-panels" data-workspace-paired-panels="true" data-stacked={stacked ? 'true' : undefined} data-workspace-panel={stacked ? 'semantic' : undefined} data-canvas-pan-exclusion="true" style={stacked ? { ...placement?.editor, bottom, maxHeight } : undefined}>{children}</div>;
 }
 
 function C4ContainmentControls({
@@ -7972,22 +7886,15 @@ function C4ContainmentControls({
   placement?: PairedSemanticPanelPlacement["containment"];
 }) {
   return (
-    <aside
+    <aside data-workspace-panel="semantic"
       data-canvas-pan-exclusion="true"
-      data-testid="c4-containment-controls"
-      style={{
-        ...SEMANTIC_PANEL_STYLE,
-        ...placement,
-        bottom: placement?.bottom ?? bottom,
-        left: placement?.left ?? 12,
-        right: "auto",
-      }}
+      data-testid="c4-containment-controls" style={{ ...placement, bottom: placement?.bottom ?? bottom, left: placement?.left ?? 12, right: 'auto' }}
     >
       <strong>C4 containment</strong>
       {elements.map((element) => (
-        <label key={element.id}>
-          {element.id}
-          <select
+        <div data-workspace-containment-record="true" key={element.id}>
+          <strong className="workspace-record-heading">{`C4 element ${element.id}`}</strong>
+          <WorkspaceSelect
             aria-label={`C4 element ${element.id} boundary`}
             onChange={(event) =>
               onMoveElement?.(element.id, event.target.value || null)
@@ -7998,13 +7905,13 @@ function C4ContainmentControls({
             {boundaries.map(({ id }) => (
               <option key={id}>{id}</option>
             ))}
-          </select>
-        </label>
+          </WorkspaceSelect>
+        </div>
       ))}
       {boundaries.map((boundary) => (
-        <label key={boundary.id}>
-          {boundary.id}
-          <select
+        <div data-workspace-containment-record="true" key={boundary.id}>
+          <strong className="workspace-record-heading">{`C4 boundary ${boundary.id}`}</strong>
+          <WorkspaceSelect
             aria-label={`C4 boundary ${boundary.id} parent`}
             onChange={(event) =>
               onMoveBoundary?.(boundary.id, event.target.value || null)
@@ -8017,8 +7924,8 @@ function C4ContainmentControls({
               .map(({ id }) => (
                 <option key={id}>{id}</option>
               ))}
-          </select>
-        </label>
+          </WorkspaceSelect>
+        </div>
       ))}
     </aside>
   );
@@ -8032,10 +7939,10 @@ function BlockContainmentControls({ bottom, composites, nodes, onMoveComposite, 
   onMoveNode?: (id: string, parentId: string | null) => void;
   placement?: PairedSemanticPanelPlacement['containment'];
 }) {
-  return <aside data-canvas-pan-exclusion="true" data-testid="block-containment-controls" style={{ ...SEMANTIC_PANEL_STYLE, ...placement, bottom: placement?.bottom ?? bottom, left: placement?.left ?? 12, right: 'auto' }}>
+  return <aside data-workspace-panel="semantic" data-canvas-pan-exclusion="true" data-testid="block-containment-controls" style={{ ...placement, bottom: placement?.bottom ?? bottom, left: placement?.left ?? 12, right: 'auto' }}>
     <strong>Block containment</strong>
-    {nodes.map((node) => <label key={node.id}>{node.id}<select aria-label={`Block ${node.id} composite`} onChange={(event) => onMoveNode?.(node.id, event.target.value || null)} value={node.parentId ?? ''}><option value="">top level</option>{composites.map(({ id }) => <option key={id}>{id}</option>)}</select></label>)}
-    {composites.map((composite) => <label key={composite.id}>{composite.id}<select aria-label={`Block composite ${composite.id} parent`} onChange={(event) => onMoveComposite?.(composite.id, event.target.value || null)} value={composite.parentId ?? ''}><option value="">top level</option>{composites.filter(({ id }) => id !== composite.id).map(({ id }) => <option key={id}>{id}</option>)}</select></label>)}
+    {nodes.map((node) => <div data-workspace-containment-record="true" key={node.id}><strong className="workspace-record-heading">{`Block ${node.id}`}</strong><WorkspaceSelect aria-label={`Block ${node.id} composite`} onChange={(event) => onMoveNode?.(node.id, event.target.value || null)} value={node.parentId ?? ''}><option value="">top level</option>{composites.map(({ id }) => <option key={id}>{id}</option>)}</WorkspaceSelect></div>)}
+    {composites.map((composite) => <div data-workspace-containment-record="true" key={composite.id}><strong className="workspace-record-heading">{`Block composite ${composite.id}`}</strong><WorkspaceSelect aria-label={`Block composite ${composite.id} parent`} onChange={(event) => onMoveComposite?.(composite.id, event.target.value || null)} value={composite.parentId ?? ''}><option value="">top level</option>{composites.filter(({ id }) => id !== composite.id).map(({ id }) => <option key={id}>{id}</option>)}</WorkspaceSelect></div>)}
   </aside>;
 }
 
@@ -8050,8 +7957,8 @@ function ArchitectureEditorControls({ bottom, diagram, onAddAlignment, onAddEdge
   const [edge, setEdge] = useState<ArchitectureEdge>({ from: ids[0] ?? '', fromGroup: diagram.groups.some((item) => item.id === ids[0]), fromInto: false, fromPort: 'R', to: ids[1] ?? ids[0] ?? '', toGroup: diagram.groups.some((item) => item.id === (ids[1] ?? ids[0])), toInto: true, toPort: 'L' });
   const [alignment, setAlignment] = useState<ArchitectureAlignment>({ direction: 'row', members: ids.slice(0, 2) });
   const add = () => { if (kind === 'group') onAddGroup?.({ icon: 'cloud', id, title: id }); else if (kind === 'junction') onAddJunction?.({ id }); else onAddService?.({ icon: 'server', id, title: id }); };
-  return <aside className="canvas-semantic-editor canvas-architecture-editor" data-canvas-pan-exclusion="true" data-testid="architecture-editor-controls" style={{ ...SEMANTIC_PANEL_STYLE, bottom }}>
-    <form onSubmit={(event) => { event.preventDefault(); add(); }}><strong>Architecture</strong><select aria-label="New architecture item type" onChange={(event) => setKind(event.target.value)} value={kind}><option>service</option><option>group</option><option>junction</option></select><input aria-label="New architecture item" onChange={(event) => setId(event.target.value)} value={id} /><button type="submit">Add</button></form>
+  return <aside data-workspace-panel="semantic" className="canvas-semantic-editor canvas-architecture-editor" data-canvas-pan-exclusion="true" data-testid="architecture-editor-controls" style={{ bottom }}>
+    <WorkspaceRecord onSubmit={(event) => { event.preventDefault(); add(); }}><strong>Architecture</strong><WorkspaceSelect aria-label="New architecture item type" onChange={(event) => setKind(event.target.value)} value={kind}><option>service</option><option>group</option><option>junction</option></WorkspaceSelect><WorkspaceInput aria-label="New architecture item" onChange={(event) => setId(event.target.value)} value={id} /><WorkspaceButton type="submit">Add</WorkspaceButton></WorkspaceRecord>
     {diagram.groups.map((item) => <ArchitectureGroupEditor group={item} groups={diagram.groups.map((group) => group.id)} key={item.id} onDelete={onDeleteGroup} onSave={onEditGroup} />)}
     {diagram.services.map((item) => <ArchitectureServiceEditor groups={diagram.groups.map((group) => group.id)} key={item.id} onDelete={onDeleteService} onSave={onEditService} service={item} />)}
     {diagram.junctions.map((item) => <ArchitectureJunctionEditor groups={diagram.groups.map((group) => group.id)} junction={item} key={item.id} onDelete={onDeleteJunction} onSave={onEditJunction} />)}
@@ -8062,30 +7969,30 @@ function ArchitectureEditorControls({ bottom, diagram, onAddAlignment, onAddEdge
 
 function ArchitectureGroupEditor({ group, groups, onDelete, onSave }: { group: ArchitectureGroup; groups: string[]; onDelete?: (id: string) => void; onSave?: (id: string, patch: Partial<ArchitectureGroup> & { id?: string }) => void }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(group);
-  return <form aria-label={`Architecture group ${group.id} editor`} onSubmit={(event) => { event.preventDefault(); onSave?.(group.id, draft); resetDraft(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><span>group</span><input aria-label={`Architecture group ${group.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><input aria-label={`Architecture group ${group.id} title`} onChange={(event) => updateDraft((current) => ({ ...current, title: event.target.value || undefined }))} value={draft.title ?? ''} /><input aria-label={`Architecture group ${group.id} icon`} onChange={(event) => updateDraft((current) => ({ ...current, icon: event.target.value || undefined }))} value={draft.icon ?? ''} /><select aria-label={`Architecture group ${group.id} parent`} onChange={(event) => updateDraft((current) => ({ ...current, parentId: event.target.value || undefined }))} value={draft.parentId ?? ''}><option value="">top level</option>{groups.filter((id) => id !== group.id).map((id) => <option key={id}>{id}</option>)}</select><button type="submit">Save</button><button aria-label={`Delete architecture group ${group.id}`} onClick={() => onDelete?.(group.id)} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={`Architecture group ${group.id} editor`} onSubmit={(event) => { event.preventDefault(); onSave?.(group.id, draft); resetDraft(); }}><span>group</span><WorkspaceInput aria-label={`Architecture group ${group.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><WorkspaceInput aria-label={`Architecture group ${group.id} title`} onChange={(event) => updateDraft((current) => ({ ...current, title: event.target.value || undefined }))} value={draft.title ?? ''} /><WorkspaceInput aria-label={`Architecture group ${group.id} icon`} onChange={(event) => updateDraft((current) => ({ ...current, icon: event.target.value || undefined }))} value={draft.icon ?? ''} /><WorkspaceSelect aria-label={`Architecture group ${group.id} parent`} onChange={(event) => updateDraft((current) => ({ ...current, parentId: event.target.value || undefined }))} value={draft.parentId ?? ''}><option value="">top level</option>{groups.filter((id) => id !== group.id).map((id) => <option key={id}>{id}</option>)}</WorkspaceSelect><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete architecture group ${group.id}`} onClick={() => onDelete?.(group.id)} type="button">Delete</WorkspaceButton></WorkspaceRecord>;
 }
 
 function ArchitectureServiceEditor({ groups, onDelete, onSave, service }: { groups: string[]; onDelete?: (id: string) => void; onSave?: (id: string, patch: Partial<ArchitectureService> & { id?: string }) => void; service: ArchitectureService }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(service);
-  return <form aria-label={`Architecture service ${service.id} editor`} onSubmit={(event) => { event.preventDefault(); onSave?.(service.id, draft); resetDraft(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><span>service</span><input aria-label={`Architecture service ${service.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><input aria-label={`Architecture service ${service.id} title`} onChange={(event) => updateDraft((current) => ({ ...current, title: event.target.value || undefined }))} value={draft.title ?? ''} /><input aria-label={`Architecture service ${service.id} icon`} onChange={(event) => updateDraft((current) => ({ ...current, icon: event.target.value || undefined }))} value={draft.icon ?? ''} /><select aria-label={`Architecture service ${service.id} parent`} onChange={(event) => updateDraft((current) => ({ ...current, parentId: event.target.value || undefined }))} value={draft.parentId ?? ''}><option value="">top level</option>{groups.map((id) => <option key={id}>{id}</option>)}</select><button type="submit">Save</button><button aria-label={`Delete architecture service ${service.id}`} onClick={() => onDelete?.(service.id)} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={`Architecture service ${service.id} editor`} onSubmit={(event) => { event.preventDefault(); onSave?.(service.id, draft); resetDraft(); }}><span>service</span><WorkspaceInput aria-label={`Architecture service ${service.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><WorkspaceInput aria-label={`Architecture service ${service.id} title`} onChange={(event) => updateDraft((current) => ({ ...current, title: event.target.value || undefined }))} value={draft.title ?? ''} /><WorkspaceInput aria-label={`Architecture service ${service.id} icon`} onChange={(event) => updateDraft((current) => ({ ...current, icon: event.target.value || undefined }))} value={draft.icon ?? ''} /><WorkspaceSelect aria-label={`Architecture service ${service.id} parent`} onChange={(event) => updateDraft((current) => ({ ...current, parentId: event.target.value || undefined }))} value={draft.parentId ?? ''}><option value="">top level</option>{groups.map((id) => <option key={id}>{id}</option>)}</WorkspaceSelect><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete architecture service ${service.id}`} onClick={() => onDelete?.(service.id)} type="button">Delete</WorkspaceButton></WorkspaceRecord>;
 }
 
 function ArchitectureJunctionEditor({ groups, junction, onDelete, onSave }: { groups: string[]; junction: ArchitectureJunction; onDelete?: (id: string) => void; onSave?: (id: string, patch: Partial<ArchitectureJunction> & { id?: string }) => void }) {
   const { draft, resetDraft, updateDraft } = useCanonicalDraft(junction);
-  return <form aria-label={`Architecture junction ${junction.id} editor`} onSubmit={(event) => { event.preventDefault(); onSave?.(junction.id, draft); resetDraft(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><span>junction</span><input aria-label={`Architecture junction ${junction.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><select aria-label={`Architecture junction ${junction.id} parent`} onChange={(event) => updateDraft((current) => ({ ...current, parentId: event.target.value || undefined }))} value={draft.parentId ?? ''}><option value="">top level</option>{groups.map((id) => <option key={id}>{id}</option>)}</select><button type="submit">Save</button><button aria-label={`Delete architecture junction ${junction.id}`} onClick={() => onDelete?.(junction.id)} type="button">Delete</button></form>;
+  return <WorkspaceRecord aria-label={`Architecture junction ${junction.id} editor`} onSubmit={(event) => { event.preventDefault(); onSave?.(junction.id, draft); resetDraft(); }}><span>junction</span><WorkspaceInput aria-label={`Architecture junction ${junction.id} id`} onChange={(event) => updateDraft((current) => ({ ...current, id: event.target.value }))} value={draft.id} /><WorkspaceSelect aria-label={`Architecture junction ${junction.id} parent`} onChange={(event) => updateDraft((current) => ({ ...current, parentId: event.target.value || undefined }))} value={draft.parentId ?? ''}><option value="">top level</option>{groups.map((id) => <option key={id}>{id}</option>)}</WorkspaceSelect><WorkspaceButton type="submit">Save</WorkspaceButton><WorkspaceButton aria-label={`Delete architecture junction ${junction.id}`} onClick={() => onDelete?.(junction.id)} type="button">Delete</WorkspaceButton></WorkspaceRecord>;
 }
 
 function ArchitectureEdgeEditor({ edge, groups, ids, onDelete, onSave }: { edge: ArchitectureEdge; groups: ReadonlySet<string>; ids: string[]; onDelete?: () => void; onSave?: (value: ArchitectureEdge) => void }) {
   const [draft, setDraft] = useState(edge);
   const update = (side: 'from' | 'to', id: string) => setDraft((current) => side === 'from' ? { ...current, from: id, fromGroup: groups.has(id) } : { ...current, to: id, toGroup: groups.has(id) });
   const signature = onDelete ? `${edge.from}:${edge.fromPort}:${edge.to}:${edge.toPort}` : 'new';
-  return <form aria-label={`Architecture edge ${signature} editor`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label={`Architecture edge ${signature} source`} onChange={(event) => update('from', event.target.value)} value={draft.from}>{ids.map((id) => <option key={id}>{id}</option>)}</select><select aria-label={`Architecture edge ${signature} source port`} onChange={(event) => setDraft((current) => ({ ...current, fromPort: event.target.value as ArchitecturePort }))} value={draft.fromPort}>{(['L', 'R', 'T', 'B'] as const).map((port) => <option key={port}>{port}</option>)}</select><label><input checked={draft.fromInto} onChange={(event) => setDraft((current) => ({ ...current, fromInto: event.target.checked }))} type="checkbox" />into source</label><label><input checked={draft.toInto} onChange={(event) => setDraft((current) => ({ ...current, toInto: event.target.checked }))} type="checkbox" />into target</label><select aria-label={`Architecture edge ${signature} target port`} onChange={(event) => setDraft((current) => ({ ...current, toPort: event.target.value as ArchitecturePort }))} value={draft.toPort}>{(['L', 'R', 'T', 'B'] as const).map((port) => <option key={port}>{port}</option>)}</select><select aria-label={`Architecture edge ${signature} target`} onChange={(event) => update('to', event.target.value)} value={draft.to}>{ids.map((id) => <option key={id}>{id}</option>)}</select><button type="submit">{onDelete ? 'Save' : 'Add edge'}</button>{onDelete ? <button aria-label={`Delete architecture edge ${signature}`} onClick={onDelete} type="button">Delete</button> : null}</form>;
+  return <WorkspaceRecord aria-label={`Architecture edge ${signature} editor`} onSubmit={(event) => { event.preventDefault(); onSave?.(draft); }}><WorkspaceSelect aria-label={`Architecture edge ${signature} source`} onChange={(event) => update('from', event.target.value)} value={draft.from}>{ids.map((id) => <option key={id}>{id}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label={`Architecture edge ${signature} source port`} onChange={(event) => setDraft((current) => ({ ...current, fromPort: event.target.value as ArchitecturePort }))} value={draft.fromPort}>{(['L', 'R', 'T', 'B'] as const).map((port) => <option key={port}>{port}</option>)}</WorkspaceSelect><label><WorkspaceInput checked={draft.fromInto} onChange={(event) => setDraft((current) => ({ ...current, fromInto: event.target.checked }))} type="checkbox" />into source</label><label><WorkspaceInput checked={draft.toInto} onChange={(event) => setDraft((current) => ({ ...current, toInto: event.target.checked }))} type="checkbox" />into target</label><WorkspaceSelect aria-label={`Architecture edge ${signature} target port`} onChange={(event) => setDraft((current) => ({ ...current, toPort: event.target.value as ArchitecturePort }))} value={draft.toPort}>{(['L', 'R', 'T', 'B'] as const).map((port) => <option key={port}>{port}</option>)}</WorkspaceSelect><WorkspaceSelect aria-label={`Architecture edge ${signature} target`} onChange={(event) => update('to', event.target.value)} value={draft.to}>{ids.map((id) => <option key={id}>{id}</option>)}</WorkspaceSelect><WorkspaceButton type="submit">{onDelete ? 'Save' : 'Add edge'}</WorkspaceButton>{onDelete ? <WorkspaceButton aria-label={`Delete architecture edge ${signature}`} onClick={onDelete} type="button">Delete</WorkspaceButton> : null}</WorkspaceRecord>;
 }
 
 function ArchitectureAlignmentEditor({ alignment, onDelete, onSave }: { alignment: ArchitectureAlignment; onDelete?: () => void; onSave?: (value: ArchitectureAlignment) => void }) {
   const [direction, setDirection] = useState(alignment.direction); const [members, setMembers] = useState(alignment.members.join(', '));
   const signature = onDelete ? `${alignment.direction}:${alignment.members.join(':')}` : 'new';
-  return <form aria-label={`Architecture alignment ${signature} editor`} onSubmit={(event) => { event.preventDefault(); onSave?.({ direction, members: members.split(',').map((value) => value.trim()).filter(Boolean) }); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}><select aria-label={`Architecture alignment ${signature} direction`} onChange={(event) => setDirection(event.target.value as ArchitectureAlignment['direction'])} value={direction}><option value="row">row</option><option value="column">column</option></select><input aria-label={`Architecture alignment ${signature} members`} onChange={(event) => setMembers(event.target.value)} value={members} /><button type="submit">{onDelete ? 'Save' : 'Add alignment'}</button>{onDelete ? <button aria-label={`Delete architecture alignment ${signature}`} onClick={onDelete} type="button">Delete</button> : null}</form>;
+  return <WorkspaceRecord aria-label={`Architecture alignment ${signature} editor`} onSubmit={(event) => { event.preventDefault(); onSave?.({ direction, members: members.split(',').map((value) => value.trim()).filter(Boolean) }); }}><WorkspaceSelect aria-label={`Architecture alignment ${signature} direction`} onChange={(event) => setDirection(event.target.value as ArchitectureAlignment['direction'])} value={direction}><option value="row">row</option><option value="column">column</option></WorkspaceSelect><WorkspaceInput aria-label={`Architecture alignment ${signature} members`} onChange={(event) => setMembers(event.target.value)} value={members} /><WorkspaceButton type="submit">{onDelete ? 'Save' : 'Add alignment'}</WorkspaceButton>{onDelete ? <WorkspaceButton aria-label={`Delete architecture alignment ${signature}`} onClick={onDelete} type="button">Delete</WorkspaceButton> : null}</WorkspaceRecord>;
 }
 
 function ToolbarButton({
@@ -8105,9 +8012,9 @@ function ToolbarButton({
     ? getPlatformShortcutTitle(label, shortcut)
     : shortcut ? `${label} (${shortcut})` : label;
   return (
-    <button aria-label={label} className="canvas-toolbar-button" data-testid={`canvas-action-${toTestId(label)}`} disabled={disabled} onClick={onClick} style={{ ...TOOLBAR_BUTTON_STYLE, opacity: disabled ? 0.45 : 1, position: 'relative' }} title={title} type="button">
+    <WorkspaceButton aria-label={label} className="canvas-toolbar-button" data-testid={`canvas-action-${toTestId(label)}`} disabled={disabled} onClick={onClick} style={{ ...TOOLBAR_BUTTON_STYLE, opacity: disabled ? 0.45 : 1, position: 'relative' }} title={title} type="button">
       {children}
-    </button>
+    </WorkspaceButton>
   );
 }
 

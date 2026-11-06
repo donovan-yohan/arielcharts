@@ -1,3 +1,4 @@
+import { WorkspaceButton } from './workspace-controls';
 import type { StarterTemplate, StarterTemplateId } from '@arielcharts/shared';
 import { Code2, Pencil, X } from 'lucide-react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -12,6 +13,7 @@ interface WorkspaceTabStripProps {
   activeDiagramId: string | null;
   diagramModeLabel: string;
   diagramNameDraft: string;
+  diagramNameError?: string | null;
   diagrams: readonly WorkspaceDiagramTab[];
   onActiveDiagramChange: (diagramId: string) => void;
   onCommitDiagramName: () => void;
@@ -34,6 +36,7 @@ export function WorkspaceTabStrip({
   activeDiagramId,
   diagramModeLabel,
   diagramNameDraft,
+  diagramNameError,
   diagrams,
   onActiveDiagramChange,
   onCommitDiagramName,
@@ -61,20 +64,23 @@ export function WorkspaceTabStrip({
           return (
             <div className={`workspace-diagram-tab${active ? ' is-active' : ''}`} key={diagram.id} role="presentation">
               {renaming ? (
-                <input
+                <div className="workspace-rename-field"><input
+                  aria-invalid={Boolean(diagramNameError)}
+                  aria-describedby={diagramNameError ? 'diagram-name-error' : undefined}
                   aria-label="Diagram name"
                   autoFocus
                   className="workspace-diagram-tab-input"
                   onBlur={onCommitDiagramName}
                   onChange={(event) => { onDiagramNameDraftChange(event.target.value); }}
                   onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) return;
                     if (event.key === 'Enter') onCommitDiagramName();
                     if (event.key === 'Escape') onRenameDismiss();
                   }}
                   value={diagramNameDraft}
-                />
+                />{diagramNameError ? <span id="diagram-name-error" role="alert">{diagramNameError}</span> : null}</div>
               ) : (
-                <button
+                <WorkspaceButton
                   aria-controls="diagram-workspace"
                   aria-selected={active}
                   className="workspace-diagram-tab-button"
@@ -90,19 +96,19 @@ export function WorkspaceTabStrip({
                 >
                   {active ? <span aria-hidden="true" className="workspace-tab-active-dot" /> : null}
                   <span>{diagram.name}</span>
-                </button>
+                </WorkspaceButton>
               )}
               {active && !renaming ? (
-                <button
+                <WorkspaceButton
                   aria-label={`Rename ${diagram.name}`}
                   className="workspace-diagram-tab-action workspace-touch-label"
                   data-touch-label="Rename"
                   onClick={() => { onRenameDiagram(diagram); }}
                   type="button"
-                ><Pencil aria-hidden="true" size={13} /></button>
+                ><Pencil aria-hidden="true" size={13} /></WorkspaceButton>
               ) : null}
               {active && !renaming && diagrams.length > 1 ? (
-                <button aria-label={`Delete ${diagram.name}`} className="workspace-diagram-tab-action workspace-diagram-tab-delete workspace-touch-label" data-touch-label="Delete" onClick={() => { onDeleteDiagram(diagram.id); }} type="button"><X aria-hidden="true" size={14} /></button>
+                <WorkspaceButton aria-label={`Delete ${diagram.name}`} className="workspace-diagram-tab-action workspace-diagram-tab-delete workspace-touch-label" data-touch-label="Delete" onClick={() => { onDeleteDiagram(diagram.id); }} type="button"><X aria-hidden="true" size={14} /></WorkspaceButton>
               ) : null}
             </div>
           );
@@ -111,7 +117,7 @@ export function WorkspaceTabStrip({
       </div>
       <WorkspaceTemplatePicker onCreateDiagram={onCreateDiagram} onOpenChange={onTemplatePickerOpenChange} openRequest={templatePickerOpenRequest} templates={starterTemplates} />
       <div className="workspace-diagram-tab-tools">
-        <button
+        <WorkspaceButton
           aria-controls="source-flyout"
           aria-expanded={sourceOpen}
           aria-label={sourceOpen ? 'Hide source' : 'Show source'}
@@ -121,7 +127,7 @@ export function WorkspaceTabStrip({
           onClick={(event) => { onSourceToggle(event.currentTarget); }}
           title="Mermaid source"
           type="button"
-        ><Code2 aria-hidden="true" size={15} /><span>{sourceOpen ? 'hide source' : 'show source'}</span></button>
+        ><Code2 aria-hidden="true" size={15} /><span>{sourceOpen ? 'Hide source' : 'Show source'}</span></WorkspaceButton>
         <span className="workspace-diagram-mode" data-testid="diagram-mode"><span aria-hidden="true" />{diagramModeLabel}</span>
       </div>
     </nav>

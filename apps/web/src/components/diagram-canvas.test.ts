@@ -43,7 +43,7 @@ describe('canvas pan exclusions', () => {
     expect(CANVAS_PAN_EXCLUSION_SELECTOR).toContain('[data-subgraph-drag-target="true"]');
     expect(canvasSource).toMatch(/handActive[^]*?CANVAS_PAN_EXCLUSION_SELECTOR[^]*?return !target\.closest\(exclusion\);/u);
     expect(canvasSource).toMatch(/className="diagram-canvas-shell"[^]*?<div[^]*?data-testid="diagram-canvas"[^]*?touchAction: 'none'/u);
-    expect(canvasSource).toMatch(/<form className="canvas-sequence-participant-form" data-canvas-pan-exclusion="true"/u);
+    expect(canvasSource).toMatch(/<WorkspaceRecord[^>]*className="canvas-sequence-participant-form" data-canvas-pan-exclusion="true"/u);
   });
 });
 
@@ -159,7 +159,7 @@ describe('new semantic families', () => {
     expect(canvasSource).toMatch(/MindmapNodeForm[^]*?useCanonicalDraft\(node\)/u);
     expect(canvasSource).toMatch(/TreeViewNodeForm[^]*?useCanonicalDraft\(node\)/u);
     expect(canvasSource).toMatch(/IshikawaCauseForm[^]*?useCanonicalDraft\(cause\)/u);
-    expect(canvasSource).toMatch(/const HIERARCHY_CONTROL_STYLE: CSSProperties = \{ minHeight: 44, minWidth: 44 \}/u);
+    expect(canvasSource).toMatch(/WorkspaceInput aria-label="New Mindmap/u);
     expect(canvasSource).toMatch(/export function getMeasuredSemanticPanelPlacement\(canvas: \{ height: number \}, viewport: ViewportRect, requestedBottom: number\)/u);
     expect(canvasSource).toMatch(/const top = Math\.max\(0, viewport\.y\) \+ SEMANTIC_PANEL_TOP_INSET;/u);
     expect(canvasSource).toMatch(/const bottom = Math\.min\(Math\.max\(0, requestedBottom\), Math\.max\(0, canvas\.height - top - 44\)\);/u);
@@ -204,9 +204,9 @@ describe('new semantic families', () => {
     expect(canvasSource).toMatch(/RadarOptionsForm[^]*?graticule: value\.graticule \?\? 'circle'[^]*?showLegend: value\.showLegend \?\? true/u);
     expect(canvasSource).toMatch(/max: draft\.maxPresent \? parseSemanticNumber[^]*?: undefined/u);
     expect(canvasSource).toMatch(/aria-label="Radar set maximum"[^]*?maxPresent: event\.target\.checked/u);
-    expect(canvasSource).toMatch(/aria-label="Pie show data"[^]*?style=\{HIERARCHY_CONTROL_STYLE\}/u);
-    expect(canvasSource).toMatch(/aria-label="Radar show legend"[^]*?style=\{HIERARCHY_CONTROL_STYLE\}/u);
-    expect(canvasSource).toMatch(/NumericEditorError[^]*?role="alert"/u);
+    expect(canvasSource).toMatch(/WorkspaceInput[^]*?aria-label="Pie show data"[^]*?type="checkbox"/u);
+    expect(canvasSource).toMatch(/WorkspaceInput[^]*?aria-label="Radar show legend"[^]*?type="checkbox"/u);
+    expect(canvasSource).toMatch(/NumericEditorError[^]*?WorkspaceRecordError error=\{error\}/u);
     expect(canvasSource).toMatch(/isPie && !readOnly && pieDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
     expect(canvasSource).toMatch(/isRadar && !readOnly && radarDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
     expect(workspaceSource).toMatch(/onAddPieSlice[^]*?mutateCanvasSource/u);
@@ -236,8 +236,8 @@ describe('new semantic families', () => {
     expect(canvasSource).toMatch(/New Packet field label[^]*?New Packet field start[^]*?New Packet field width/u);
     expect(canvasSource).toMatch(/isSankey && !readOnly && sankeyDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
     expect(canvasSource).toMatch(/isPacket && !readOnly && packetDiagram[^]*?bottom=\{semanticPanelPlacement\.bottom\}[^]*?maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
-    expect(canvasSource).toMatch(/SankeyEditorControls[^]*?data-canvas-pan-exclusion="true"[^]*?HIERARCHY_CONTROL_STYLE/u);
-    expect(canvasSource).toMatch(/PacketEditorControls[^]*?data-canvas-pan-exclusion="true"[^]*?HIERARCHY_CONTROL_STYLE/u);
+    expect(canvasSource).toMatch(/SankeyEditorControls[^]*?data-canvas-pan-exclusion="true"[^]*?WorkspaceInput/u);
+    expect(canvasSource).toMatch(/PacketEditorControls[^]*?data-canvas-pan-exclusion="true"[^]*?WorkspaceInput/u);
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'sankey'\)/u);
     expect(workspaceSource).toMatch(/canUseSemanticFamilyControls\(renderedMermaidText, renderedPreview, 'packet'\)/u);
     expect(workspaceSource).toMatch(/onAddSankeyLink[^]*?mutateCanvasSource/u);
@@ -293,7 +293,7 @@ describe('new semantic families', () => {
     expect(canvasSource).toMatch(/aria-label="Cynefin editor"/u);
     expect(canvasSource).toMatch(/CynefinEditorControls[^]*?data-canvas-pan-exclusion="true"[^]*?maxHeight/u);
     expect(canvasSource).toMatch(/diagram\.domains\.map[^]*?<h3>\{formatCynefinDomain\(domain\.name\)\}<\/h3>/u);
-    expect(canvasSource).toMatch(/CYNEFIN_DOMAIN_NAMES\.map[^]*?HIERARCHY_CONTROL_STYLE/u);
+    expect(canvasSource).toMatch(/CYNEFIN_DOMAIN_NAMES\.map[^]*?WorkspaceSelect/u);
     expect(canvasSource).toMatch(/CynefinItemForm[^]*?getCynefinItemIdentity\(item, allItems\)[^]*?const safe = identity\.occurrenceCount === 1[^]*?disabled=\{!safe\}/u);
     expect(canvasSource).toMatch(/CynefinTransitionForm[^]*?getCynefinTransitionIdentity\(transition, transitions\)[^]*?const safe = identity\.occurrenceCount === 1[^]*?disabled=\{!safe\}/u);
     expect(canvasSource).toMatch(/useCanonicalDraft<CynefinItem>[^]*?useCanonicalDraft<CynefinTransition>/u);
@@ -420,7 +420,12 @@ describe('ER editor safe area', () => {
   it('keeps the semantic form above the measured canvas controls toolbar', () => {
     expect(canvasSource).toMatch(/export function getSemanticControlsSafeBottom\(visible: boolean, toolbarBottom: number, toolbarHeight: number, gap: number\): number \{[^]*?return visible \? toolbarBottom \+ toolbarHeight \+ gap : 0;/u);
     expect(canvasSource).toMatch(/const erEditorBottom = semanticControlsSafeBottom;/u);
-    expect(canvasSource).toMatch(/<ErEditorControls\s+bottom=\{erEditorBottom\}/u);
+    expect(canvasSource).toMatch(/const semanticPanelPlacement = getMeasuredSemanticPanelPlacement\(canvasSize, canvasViewport, erEditorBottom\);/u);
+    expect(canvasSource).toMatch(/<ErEditorControls\s+bottom=\{semanticPanelPlacement\.bottom\}\s+maxHeight=\{semanticPanelPlacement\.maxHeight\}/u);
+    const placement = getMeasuredSemanticPanelPlacement({ height: 800 }, { x: 0, y: 0, width: 1440, height: 800 }, 74);
+    expect(placement.bottom).toBe(74);
+    expect(placement.maxHeight).toBeGreaterThanOrEqual(44);
+    expect(placement.maxHeight + placement.bottom + 56).toBeLessThanOrEqual(800);
     expect(canvasSource).toMatch(/function ErEditorControls\(\{\s+bottom,/u);
     expect(canvasSource).toMatch(/canvas-er-editor[^]*?bottom,/u);
   });

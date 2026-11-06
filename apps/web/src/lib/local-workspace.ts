@@ -1,6 +1,7 @@
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { isValidSessionId } from './session';
+import { captureWorkspaceConsentScope, isWorkspaceConsentScopeCurrent } from './workspace-consent';
 import { decodeWorkspaceBundleEnvelope, encodeWorkspaceBundle, snapshotWorkspaceBundle } from './workspace-bundle';
 
 export const LOCAL_WORKSPACE_ID = 'local';
@@ -21,8 +22,8 @@ export function getLocalWorkspaceLoadingCopy(phase: LocalWorkspacePhase): { eyeb
     case 'preparing':
       return {
         eyebrow: 'Your device',
-        title: 'Preparing the canvas…',
-        detail: 'Your workspace is ready to edit locally.',
+        title: 'Preparing your canvas…',
+        detail: 'Nothing has been sent online.',
       };
     case 'storage-error':
       return {
@@ -42,11 +43,17 @@ export function getLocalWorkspaceLoadingCopy(phase: LocalWorkspacePhase): { eyeb
 /** Small Awareness-compatible surface for a strictly single-browser workspace. */
 export class LocalAwareness {
   readonly clientID: number;
+  readonly doc: { clientID: number };
   private readonly handlers = new Set<(...args: unknown[]) => void>();
   private readonly states = new Map<number, unknown>();
 
   constructor(clientID: number) {
     this.clientID = clientID;
+    this.doc = { clientID };
+  }
+
+  getLocalState(): Record<string, unknown> | null {
+    return this.states.get(this.clientID) as Record<string, unknown> | undefined ?? null;
   }
 
   getStates(): Map<number, unknown> {
@@ -62,8 +69,9 @@ export class LocalAwareness {
   }
 
   setLocalState(state: unknown | null): void {
+    const previous = this.states.has(this.clientID);
     if (state === null) this.states.delete(this.clientID); else this.states.set(this.clientID, state);
-    this.emit();
+    this.emit(state === null ? 'removed' : previous ? 'updated' : 'added');
   }
 
   setLocalStateField(field: string, value: unknown): void {
@@ -80,12 +88,14 @@ export class LocalAwareness {
     this.handlers.clear();
   }
 
-  private emit(): void {
-    for (const handler of this.handlers) handler();
+  private emit(kind: 'added' | 'updated' | 'removed' = 'updated'): void {
+    const change = { added: [] as number[], updated: [] as number[], removed: [] as number[] };
+    change[kind].push(this.clientID);
+    for (const handler of this.handlers) handler(change, 'local');
   }
 }
 
-export type LocalWorkspacePersistence = Pick<IndexeddbPersistence, 'clearData' | 'destroy' | 'whenSynced'>;
+export type LocalWorkspacePersistence = Pick<IndexeddbPersistence, 'clearData' | 'destroy' | 'whenSynced' | 'db'>;
 
 export function createLocalWorkspacePersistence(doc: Y.Doc, name = LOCAL_WORKSPACE_DATABASE): LocalWorkspacePersistence {
   return new IndexeddbPersistence(name, doc);
@@ -141,22 +151,17 @@ export type LocalWorkspacePromotionResult<Room> =
   | { status: 'changed-during-request' }
   | { status: 'published'; room: Room };
 
-/**
- * Promotion is deliberately a snapshot handoff, not a CRDT merge. A state
- * vector is checked both before sending and after receiving the room so an
- * editable local document is never silently replaced by an older snapshot.
- */
+/** Promotion fences the complete authored plane, including delete-only edits. */
 export async function publishLocalWorkspace<Room>(
   doc: Y.Doc,
   createRoom: (bundle: Awaited<ReturnType<typeof decodeWorkspaceBundleEnvelope>>) => Promise<Room>,
 ): Promise<LocalWorkspacePromotionResult<Room>> {
-  const snapshotVector = Y.encodeStateVector(doc);
+  const scope = captureWorkspaceConsentScope(doc, LOCAL_WORKSPACE_ID);
   const snapshot = snapshotWorkspaceBundle(doc);
-  const encoded = await encodeWorkspaceBundle(snapshot);
-  const requestVector = Y.encodeStateVector(doc);
-  if (!areYjsStateVectorsEqual(snapshotVector, requestVector)) return { status: 'changed-before-request' };
-  const room = await createRoom(await decodeWorkspaceBundleEnvelope(encoded));
-  if (!areYjsStateVectorsEqual(requestVector, Y.encodeStateVector(doc))) return { status: 'changed-during-request' };
+  const bundle = await decodeWorkspaceBundleEnvelope(await encodeWorkspaceBundle(snapshot));
+  if (!isWorkspaceConsentScopeCurrent(scope, doc, LOCAL_WORKSPACE_ID)) return { status: 'changed-before-request' };
+  const room = await createRoom(bundle);
+  if (!isWorkspaceConsentScopeCurrent(scope, doc, LOCAL_WORKSPACE_ID)) return { status: 'changed-during-request' };
   return { status: 'published', room };
 }
 

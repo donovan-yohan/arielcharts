@@ -1201,9 +1201,12 @@ export class SessionManager {
   }
 
   /** Read the revision for the complete user-authored workspace plane. */
-  async readWorkspaceRevision(sessionId: string): Promise<{ revision: string }> {
+  async readWorkspaceRevision(sessionId: string): Promise<{ revision: string; content: string }> {
     const session = await this.requireSession(sessionId);
-    return { revision: workspaceRevisionFromDoc(session.doc) };
+    return {
+      revision: workspaceRevisionFromDoc(session.doc),
+      content: canonicalWorkspaceJson({ diagrams: diagramsMap(session.doc).toJSON(), order: session.doc.getArray(DIAGRAM_ORDER_KEY).toArray(), overlays: overlaysMap(session.doc).toJSON() }),
+    };
   }
 
   /**

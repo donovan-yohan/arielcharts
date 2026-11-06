@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { screenshotPath } from './e2e/support/browser';
 import { chromium, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import {
   assertNoPageErrors,
@@ -252,7 +253,7 @@ async function assertZenUmlPluginAndControls(page: Page): Promise<void> {
       && document.querySelector('.diagram-canvas-svg svg')?.getAttribute('viewBox')
       && !document.querySelector('[data-testid="zenuml-editor-controls"]');
   }, undefined, { timeout: 15_000 });
-  await page.screenshot({ path: '/tmp/arielcharts-zenuml.png' });
+  await page.screenshot({ path: screenshotPath('arielcharts-zenuml.png') });
 }
 
 async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
@@ -727,7 +728,7 @@ sequenceDiagram; A<<->>B: ping`;
     await page.keyboard.up('Space');
     await page.waitForTimeout(100);
     const afterPanTransform = await transformedLayer.getAttribute('style');
-    await page.screenshot({ path: '/tmp/arielcharts-sequence.png' });
+    await page.screenshot({ path: screenshotPath('arielcharts-sequence.png') });
 
     const tabs = page.getByRole('tab');
     await tabs.nth(0).click();
@@ -752,7 +753,7 @@ sequenceDiagram; A<<->>B: ping`;
     const invalidDoesNotLeak = await page.getByTestId('parse-error-banner').count() === 0
       && await page.getByTestId('source-parse-status').count() === 0;
 
-    await page.screenshot({ path: '/tmp/arielcharts-sequence-isolation.png' });
+    await page.screenshot({ path: screenshotPath('arielcharts-sequence-isolation.png') });
     assertNoPageErrors(diagnostics.pageErrors, 'during the sequence canvas gate');
 
     const zoomChangedTransform = fittedTransform !== afterZoomTransform;

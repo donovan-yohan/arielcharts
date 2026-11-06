@@ -23,9 +23,9 @@ describe('WorkspaceTemplatePicker helpers', () => {
     const groups = getTemplateMenuGroups(CHOOSER_STARTER_TEMPLATES);
     expect(groups.map((group) => group.label)).toEqual([
       'Start',
-      'Form editing · preview',
-      'Form editing · stable',
       'Canvas editing · stable',
+      'Form editing · stable',
+      'Form editing · preview',
     ]);
     expect(groups.flatMap((group) => group.templates).map((template) => template.id).sort())
       .toEqual(getTemplateMenuOrder(CHOOSER_STARTER_TEMPLATES).map((template) => template.id).sort());

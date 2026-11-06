@@ -178,6 +178,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and
 [docs/context-map.md](docs/context-map.md) for the HTTP, WebSocket, Yjs,
 history, and MCP boundaries.
 
+The [user journeys](docs/user-journeys.md) define product acceptance across the
+workspace. The [design system](docs/design-system.md) defines component selection,
+copy, form anatomy, and responsive composition for those journeys.
+
 ## Deployment topology
 
 The configured topology uses a Vercel-hosted web app at

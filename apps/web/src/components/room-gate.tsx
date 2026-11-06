@@ -1,5 +1,7 @@
 'use client';
 
+import { WorkspaceButton } from './workspace-controls';
+
 import React, { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkRoomAccess, clearRoomKeyFragment, exchangeRoomKey, readRoomKeyFragment, RoomAccessApiError } from '../lib/room-access-api';
@@ -59,7 +61,7 @@ export function RoomGateView({
       <section aria-labelledby="room-gate-title" className="room-gate-card">
         <p className="eyebrow">Private room</p>
         <h1 id="room-gate-title">Enter the room key</h1>
-        <p>Paste the key from the shared ArielCharts link. Room access failures look the same for everyone.</p>
+        <p>Paste the room key from your shared link.</p>
         <form className="room-gate-form" onSubmit={onSubmit}>
           <label className="field-label" htmlFor="room-key-input">Room key</label>
           <input
@@ -67,7 +69,7 @@ export function RoomGateView({
             autoCapitalize="none"
             autoComplete="off"
             autoCorrect="off"
-            className="text-input"
+            className="text-input workspace-control-input"
             id="room-key-input"
             name="room-key"
             onChange={(event) => { onRoomKeyChange(event.target.value); }}
@@ -78,11 +80,11 @@ export function RoomGateView({
           {gateState.failed ? (
             <p className="field-help error-text" id="room-key-error" role="alert">Room access could not be verified. Check the key and try again.</p>
           ) : null}
-          <button className="primary-button" disabled={isSubmitting || roomKeyDraft.trim().length === 0} type="submit">
+          <WorkspaceButton className="primary-button" disabled={isSubmitting || roomKeyDraft.trim().length === 0} type="submit">
             {isSubmitting ? 'Checking…' : 'Open room'}
-          </button>
+          </WorkspaceButton>
           {canUseArchivedWorkspace && onUseArchivedWorkspace ? (
-            <button className="secondary-button" type="button" onClick={onUseArchivedWorkspace}>Use archived device workspace</button>
+            <WorkspaceButton className="secondary-button" type="button" onClick={onUseArchivedWorkspace}>Use archived device workspace</WorkspaceButton>
           ) : null}
         </form>
       </section>

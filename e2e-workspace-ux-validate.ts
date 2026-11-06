@@ -987,6 +987,12 @@ async function triggerCanvasFit(page: Page, label: string): Promise<void> {
 async function expectCanvasCameraControlHitTargets(page: Page, label: string): Promise<void> {
   const controls = page.getByTestId('canvas-controls-toolbar');
   await controls.waitFor({ state: 'visible', timeout: 15_000 });
+  await expect.poll(() => controls.evaluate((root) => [...root.querySelectorAll('button')].every((button) => {
+    if (button.disabled) return true;
+    const bounds = button.getBoundingClientRect();
+    const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    return hit !== null && button.contains(hit);
+  })), { message: `${label} did not settle into an unobscured camera lane.`, timeout: 5_000 }).toBe(true);
   for (const actionName of ['Zoom out', 'Zoom in'] as const) {
     const before = await renderedCanvasCameraTransform(page, `${label} ${actionName} baseline`);
     await verifiedClick(page, controls.getByRole('button', { name: actionName, exact: true }), `${label} ${actionName}`);
@@ -7041,12 +7047,13 @@ async function assertMobileErrorBannerScrollability(page: Page, label: string, i
   const banner = page.getByTestId('parse-error-banner');
   await banner.waitFor({ state: 'visible', timeout: 15_000 });
   const behavior = await banner.evaluate((element) => {
-    const style = getComputedStyle(element);
+    const style = getComputedStyle(element.closest('.workspace-feedback-stack') ?? element);
+    const targetStyle = getComputedStyle(element);
     return {
       maxHeight: style.maxHeight,
       overflowY: style.overflowY,
-      pointerEvents: style.pointerEvents,
-      touchAction: style.touchAction,
+      pointerEvents: targetStyle.pointerEvents,
+      touchAction: targetStyle.touchAction,
     };
   });
   assert(behavior.maxHeight !== 'none' && (behavior.overflowY === 'auto' || behavior.overflowY === 'scroll')
@@ -7056,7 +7063,7 @@ async function assertMobileErrorBannerScrollability(page: Page, label: string, i
     const bannerElement = document.querySelector<HTMLElement>('[data-testid="parse-error-banner"]');
     const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
     if (!bannerElement || !canvas) return false;
-    const bannerBounds = bannerElement.getBoundingClientRect();
+    const bannerBounds = (bannerElement.closest('.workspace-feedback-stack') ?? bannerElement).getBoundingClientRect();
     const canvasBounds = canvas.getBoundingClientRect();
     const ratios = [0.04, 0.1, 0.5, 0.9, 0.96];
     for (const yRatio of ratios) {

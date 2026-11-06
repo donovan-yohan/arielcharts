@@ -885,6 +885,11 @@ code {
   color: var(--ink);
 }
 
+.workspace-control-button.workspace-diagram-tab-button {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .workspace-diagram-tab.is-active .workspace-diagram-tab-button > span:not(.workspace-tab-active-dot) {
   color: var(--ink-strong);
 }

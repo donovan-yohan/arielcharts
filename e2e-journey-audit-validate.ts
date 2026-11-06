@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchBrowserHarness } from './e2e/support/browser.ts';
 import { withOwnedServices } from './e2e/support/owned-services.ts';
-import { createDiagramFromTemplate, closeFlyout, replaceSource, canonicalSource, ensureSourceFlyoutOpen } from './e2e/support/workspace.ts';
+import { createDiagramFromTemplate, closeFlyout, replaceSource, canonicalSource, ensureSourceFlyoutOpen, renameActiveDiagram } from './e2e/support/workspace.ts';
+import { assertHitTarget } from './e2e/support/interactions.ts';
 import { MERMAID_DIAGRAM_FAMILIES, EXTERNAL_MERMAID_PLUGIN_FAMILIES } from './packages/shared/src/mermaid-diagram-catalog.ts';
 const out = process.env.AUDIT_OUTPUT ?? join(tmpdir(), 'arielcharts-journey-audit');
 type FamilyEvidence = { family: string; theme: string; width: number; controls: number };
@@ -30,6 +31,30 @@ async function assertNativeAnatomy(page: Page, panelId: string, touch: boolean) 
   }, touch);
   expect(evidence.failures, panelId).toEqual([]); return evidence.controls;
 }
+async function assertTabActions(page: Page) {
+  for (const width of [390, 320, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    await createDiagramFromTemplate(page, 'Blank sheet');
+    await renameActiveDiagram(page, 'Phone scratchpad');
+    const deletion = page.getByRole('button', { name: 'Delete Phone scratchpad', exact: true });
+    const geometry = await deletion.evaluate((button, minimum) => {
+      const row = button.closest('.workspace-diagram-tab')!.getBoundingClientRect();
+      const actions = [...button.parentElement!.querySelectorAll('button')].map((action) => action.getBoundingClientRect());
+      return { contained: actions.every((action) => action.left >= row.left && action.right <= row.right + 1), usable: actions.every((action) => action.width >= minimum && action.height >= minimum) };
+    }, width <= 720 ? 44 : 36);
+    expect(geometry, `tab actions at ${width}px`).toEqual({ contained: true, usable: true });
+    await assertHitTarget(page, deletion, `tab delete at ${width}px`);
+    const before = await page.getByRole('tab').count();
+    await deletion.click();
+    const confirmation = page.getByRole('dialog', { name: /^Delete “Phone scratchpad”/ });
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.getByRole('tab')).toHaveCount(before);
+    await deletion.click();
+    await confirmation.getByRole('button', { name: 'Delete diagram', exact: true }).click();
+    await expect(page.getByRole('tab')).toHaveCount(before - 1);
+  }
+}
 async function localJourney(base: string, serverUrl: string) {
   const harness = await launchBrowserHarness(); const families: FamilyEvidence[] = [];
   try {
@@ -41,6 +66,7 @@ async function localJourney(base: string, serverUrl: string) {
     await expect(page.locator('.workspace-save-status-label')).toBeVisible();
     await expect(page.getByTestId('workspace-onboarding')).toContainText('Start a diagram');
     await page.screenshot({ path: `${out}/engineering-start-mobile-light.png` });
+    await assertTabActions(page);
     for (const [width, height, theme] of [[1440, 1000, 'light'], [1440, 1000, 'dark'], [390, 844, 'dark']] as const) {
       await page.setViewportSize({ width, height }); await page.emulateMedia({ colorScheme: theme });
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);

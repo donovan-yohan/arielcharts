@@ -366,6 +366,12 @@ async function expectUnifiedCanvasHistory(pageA: Page, pageB: Page): Promise<voi
   await waitForReactFlowNodePositionMovement(pageA, nodeId, beforeLocalMove);
   const localMove = await getReactFlowNodePosition(nodeById(pageA, nodeId), 'Stale-history local move was missing.');
   await waitForReactFlowNodePositionMatch(pageB, nodeId, localMove);
+  await pageB.getByRole('button', { name: 'Fit diagram', exact: true }).click();
+  await expect.poll(async () => nodeById(pageB, nodeId).evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const target = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    return target !== null && element.contains(target);
+  }), { timeout: 5_000, message: 'Peer Fit did not expose the node for its history drag.' }).toBe(true);
   await nudgeNode(pageB, nodeById(pageB, nodeId), -72, 31);
   await waitForReactFlowNodePositionMovement(pageB, nodeId, localMove);
   const peerMove = await getReactFlowNodePosition(nodeById(pageB, nodeId), 'Peer stale-history move was missing.');

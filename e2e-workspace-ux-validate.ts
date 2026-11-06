@@ -2043,6 +2043,7 @@ async function expectErSemanticEditor(page: Page): Promise<void> {
   await replaceSource(page, unsupported);
   await waitForSource(page, unsupported);
   await waitForCanvas(page, 'generic');
+  await expect(page.locator('.diagram-canvas-svg > svg .nodeLabel')).toHaveText(['ACCOUNT', 'ORDER']);
   const lastValidSvg = await page.locator('.diagram-canvas-svg > svg').innerHTML();
   await replaceSource(page, 'erDiagram\n  ACCOUNT ||--o{');
   await waitForInvalidPreview(page);
@@ -7647,6 +7648,8 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
     const tabCountBeforeDelete = await page.getByRole('tab').count();
     const deleteTab = page.getByRole('button', { name: 'Delete Phone scratchpad', exact: true });
     await tapTarget(page, deleteTab, `${label} delete tab`);
+    const deletion = page.getByRole('dialog', { name: /^Delete “Phone scratchpad”/ });
+    await deletion.getByRole('button', { name: 'Delete diagram', exact: true }).click();
     await page.waitForFunction((count) => document.querySelectorAll('[role="tab"]').length === count - 1, tabCountBeforeDelete, { timeout: 15_000 });
     await expect(page.getByRole('tab', { name: 'Phone scratchpad', exact: true })).toHaveCount(0);
     await expectTouchLabelStatus(page, 'Delete', `${label} delete tab`);

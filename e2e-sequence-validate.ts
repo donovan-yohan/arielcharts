@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { screenshotPath } from './e2e/support/browser';
-import { chromium, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { chromium, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import {
   assertNoPageErrors,
   assertNoReactFlowError015,
@@ -322,12 +322,13 @@ async function assertSequenceInlineTextEditing(page: Page): Promise<void> {
     await editor.fill(`cancel ${label}`);
     await editor.press('Escape');
     await editor.waitFor({ state: 'detached', timeout: 5_000 });
-    await page.waitForTimeout(32);
+    await expect.poll(async () => page.getByLabel('Interactive diagram canvas', { exact: true }).evaluate((canvas) => canvas === document.activeElement), {
+      timeout: 5_000,
+      message: `${label} did not return focus to the interactive canvas after Escape.`,
+    }).toBe(true);
     if (await readCamera() !== cameraBeforeEdit) {
       throw new Error(`${label} cancel changed the sequence camera.`);
     }
-    const focusReturned = await page.getByLabel('Interactive diagram canvas', { exact: true }).evaluate((canvas) => canvas === document.activeElement);
-    if (!focusReturned) throw new Error(`${label} did not return focus to the interactive canvas after Escape.`);
   };
 
   const commit = async (locator: Locator, label: string, nextText: string): Promise<void> => {
@@ -679,6 +680,7 @@ sequenceDiagram; A<<->>B: ping`;
   Note over A,B: hello`;
     await replaceSource(page, noteOnlySequence);
     await waitForCanvas(page, 'sequence');
+    await closeSourceFlyout(page);
     const noteControl = page.getByLabel('Sequence note', { exact: true });
     const addNote = page.getByRole('button', { name: 'Add sequence note', exact: true });
     await assertHitTarget(page, noteControl, 'Note-only sequence semantic note input');

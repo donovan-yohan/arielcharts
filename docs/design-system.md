@@ -58,10 +58,12 @@ component's presence in source does not prove its consumers use the system.
 | K14 | Settings and access controls | `workspace-settings.tsx`, theme/access owners | Reuse shared fields/actions for name and appearance. Keep local context, key unavailable/known, copy result, and revoke confirmation truthful and scoped. |
 | K15 | Agent setup dialog | Coordinator agent modal and existing prompt builder | Shared bounded dialog/close/scroll treatment, exact technical prompt retained. Membership and connection remain separate; missing-key/copy failure has actionable recovery. |
 | K16 | Presentation and presence | `presenter-controls.tsx`, presenter-follow hook, awareness layers | Styled native actions and consent; Present/Stop/Follow/Leave remain reachable in compact layouts. Following remains voluntary. Participant colors are data-driven, not shell palette drift. |
-| K17 | Feedback and help | Local validation, shared notices, canvas feedback, shortcut dialog | One relevant announcement per action. Distinct errors stack without overlap; detailed diagnostics remain available. Shared modal paint does not impose modal focus policy on popovers. |
+| K17 | Feedback and help | `workspace-feedback-stack.tsx` for global diagnostics; local validation and shortcut owners | One relevant announcement per action. Distinct errors stack without overlap; detailed diagnostics remain available. The global stack owns measured bounds, height capping, and scrolling; notices retain their content and touch behavior. Record errors remain with their target. Shared modal paint does not impose modal focus policy on popovers. |
 
 ### Primitive selection
 
+- `components/workspace-controls.tsx` owns native presentation primitives.
+  Feature owners retain state, actions, geometry, and draft lifetimes.
 - Use native buttons for actions, native inputs/selects/textareas for fields, and
   native checkbox/radio glyphs with associated labels for boolean/choice state.
 - Actions support neutral, primary, danger, and toggle presentation; compact,

@@ -15,6 +15,7 @@ import {
   type BrowserHarness,
 } from './e2e/support/browser.ts';
 import { assert, describeError } from './e2e/support/assert.ts';
+import { runHitTargetRegression } from './e2e/support/hit-target-regression.ts';
 import {
   assertAnchorsStable,
   assertContainedInViewport,
@@ -8692,6 +8693,7 @@ async function validateWorkspaceUx(): Promise<void> {
   await withOwnedServices(async ({ baseUrl, mcpUrl, serverUrl }) => {
     const browser = await launchBrowserHarness();
     try {
+      await runHitTargetRegression(browser.browser);
       await expectLocalFirstWorkspaceEntry(browser, baseUrl, serverUrl);
       record(results, 'root shows state-driven local loading, makes no server request or WebSocket, persists an IndexedDB edit across reload with a saved-on-device status, and starts one protected online promotion containing that edit only after explicit share');
       await expectWorkspaceOnboarding(browser, baseUrl, serverUrl);

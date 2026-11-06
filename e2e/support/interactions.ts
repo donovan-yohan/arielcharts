@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import type { ElementHandle, Locator, Page } from '@playwright/test';
 import { assert } from './assert.ts';
 
 export type Anchor = { bottom: number; height: number; left: number; right: number; top: number; width: number };
@@ -26,37 +26,117 @@ export function assertAnchorsStable(before: AnchorSnapshot, after: AnchorSnapsho
   }
 }
 
-export async function assertHitTarget(page: Page, target: Locator, label: string): Promise<void> {
-  await target.waitFor({ state: 'visible', timeout: 15_000 });
-  assert(await target.isEnabled(), `${label} is disabled.`);
-  // Labeled semantic records intentionally own an internal scroll region. Bring
-  // this source control into that native region before its unchanged point gate.
-  await target.evaluate((element) => {
-    const panel = element.closest<HTMLElement>('[data-workspace-panel="semantic"]');
-    if (!panel || !['auto', 'scroll'].includes(getComputedStyle(panel).overflowY) || panel.scrollHeight <= panel.clientHeight) return;
-    const bounds = element.getBoundingClientRect(); const area = panel.getBoundingClientRect();
-    if (bounds.top < area.top + panel.clientTop || bounds.bottom > area.top + panel.clientTop + panel.clientHeight) {
-      element.scrollIntoView({ block: 'center', inline: 'nearest' }); window.scrollTo(0, 0);
-    }
-  });
-  const box = await target.boundingBox();
-  assert(box && box.width > 0 && box.height > 0, `${label} has no clickable bounds.`);
-  const hit = await target.evaluate((targetElement) => {
-    const rect = targetElement.getBoundingClientRect();
+const HIT_TARGET_TIMEOUT_MS = 15_000;
+type NativeTarget = ElementHandle<HTMLElement | SVGElement>;
+
+function remainingHitTime(deadline: number): number {
+  const remaining = deadline - performance.now();
+  assert(remaining > 0, 'Native hit-target readiness deadline expired.');
+  return remaining;
+}
+
+async function observeHitTarget(target: Locator, original: NativeTarget, deadline: number) {
+  const [visible, enabled] = await Promise.all([
+    original.isVisible(),
+    original.isEnabled().catch(async (error: unknown) => {
+      if (!await original.evaluate((element) => element.isConnected)) return false;
+      throw error;
+    }),
+  ]);
+  const hit = await target.evaluate((current, pinned) => {
+    const rect = pinned.getBoundingClientRect();
     const x = rect.x + (rect.width / 2);
     const y = rect.y + (rect.height / 2);
     const hitElement = document.elementFromPoint(x, y);
     return {
-      target: rect.toJSON(),
-      panel: targetElement.closest('[data-workspace-panel="semantic"]')?.getBoundingClientRect().toJSON() ?? null,
+      identity: current === pinned && pinned.isConnected,
+      target: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      // Playwright positions are relative to the padding box, not the border box.
+      position: {
+        x: rect.width / 2 - (Number.parseFloat(getComputedStyle(pinned).borderLeftWidth) || 0),
+        y: rect.height / 2 - (Number.parseFloat(getComputedStyle(pinned).borderTopWidth) || 0),
+      },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      contained: rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight,
+      panel: pinned.closest('[data-workspace-panel="semantic"]')?.getBoundingClientRect().toJSON() ?? null,
       scrollY: window.scrollY,
-      className: hitElement instanceof HTMLElement || hitElement instanceof SVGElement ? hitElement.getAttribute('class') : null,
-      matches: !!hitElement && (targetElement === hitElement || targetElement.contains(hitElement)),
+      className: hitElement?.getAttribute('class') ?? null,
+      matches: !!hitElement && (pinned === hitElement || pinned.contains(hitElement)),
       tagName: hitElement?.tagName ?? null,
-      testId: hitElement instanceof Element ? hitElement.getAttribute('data-testid') : null,
+      testId: hitElement?.getAttribute('data-testid') ?? null,
     };
-  });
-  assert(hit.matches, `${label} is obscured at its center point by ${JSON.stringify(hit)}.`);
+  }, original, { timeout: remainingHitTime(deadline) });
+  return {
+    ...hit, visible, enabled,
+    ready: hit.identity && visible && enabled && hit.target.width > 0 && hit.target.height > 0 && hit.contained && hit.matches,
+  };
+}
+
+type HitObservation = Awaited<ReturnType<typeof observeHitTarget>>;
+
+async function nextHitFrame(page: Page, deadline: number): Promise<void> {
+  await page.evaluate((remaining) => new Promise<void>((resolve) => {
+    const frame = requestAnimationFrame(() => { clearTimeout(timer); resolve(); });
+    const timer = setTimeout(() => { cancelAnimationFrame(frame); resolve(); }, remaining);
+  }), remainingHitTime(deadline));
+}
+
+async function waitForHitTarget(page: Page, target: Locator, label: string) {
+  // Visibility and layout readiness share the original visibility allowance.
+  const deadline = performance.now() + HIT_TARGET_TIMEOUT_MS;
+  let original: NativeTarget | null = null;
+  let latest: HitObservation | null = null;
+  try {
+    original = await target.elementHandle({ timeout: remainingHitTime(deadline) });
+    assert(original, `${label} is missing.`);
+    let sourceScrollPrepared = false;
+    let previous: HitObservation | null = null;
+    while (true) {
+      remainingHitTime(deadline);
+      // Only a visible source control's existing semantic owner may establish scrolling.
+      if (!sourceScrollPrepared && await original.isVisible()) {
+        await original.evaluate((element) => {
+          const panel = element.closest<HTMLElement>('[data-workspace-panel="semantic"]');
+          if (!panel || !['auto', 'scroll'].includes(getComputedStyle(panel).overflowY) || panel.scrollHeight <= panel.clientHeight) return;
+          const bounds = element.getBoundingClientRect(); const area = panel.getBoundingClientRect();
+          if (bounds.top < area.top + panel.clientTop || bounds.bottom > area.top + panel.clientTop + panel.clientHeight) {
+            element.scrollIntoView({ block: 'center', inline: 'nearest' }); window.scrollTo(0, 0);
+          }
+        });
+        sourceScrollPrepared = true;
+      }
+      latest = await observeHitTarget(target, original, deadline);
+      assert(latest.identity, 'Native hit-target identity changed.');
+      if (latest.ready && previous?.ready && JSON.stringify(latest.target) === JSON.stringify(previous.target)) {
+        return { original, latest, deadline };
+      }
+      previous = latest;
+      await nextHitFrame(page, deadline);
+    }
+  } catch (error) {
+    await original?.dispose();
+    throw new Error(`${label} native hit-target readiness refused: ${JSON.stringify({ allowanceMs: HIT_TARGET_TIMEOUT_MS, latest })}.`, { cause: error });
+  }
+}
+
+async function finalHitTarget(target: Locator, original: NativeTarget, previous: HitObservation, deadline: number, label: string) {
+  let latest: HitObservation | null = null;
+  try {
+    latest = await observeHitTarget(target, original, deadline);
+    assert(latest.ready && JSON.stringify(latest.target) === JSON.stringify(previous.target), 'Current target lost native point admission.');
+    return latest;
+  } catch (error) {
+    throw new Error(`${label} failed fresh native point admission: ${JSON.stringify({ previous, latest })}.`, { cause: error });
+  }
+}
+
+export async function assertHitTarget(page: Page, target: Locator, label: string): Promise<void> {
+  const { original, latest, deadline } = await waitForHitTarget(page, target, label);
+  try {
+    await finalHitTarget(target, original, latest, deadline, label);
+  } finally {
+    await original.dispose();
+  }
 }
 
 /**
@@ -79,9 +159,18 @@ export async function assertTouchTarget(page: Page, target: Locator, label: stri
 }
 
 export async function verifiedClick(page: Page, target: Locator, label: string): Promise<void> {
-  await assertHitTarget(page, target, label);
-  await target.click({ trial: true, timeout: 15_000 });
-  await target.click({ timeout: 15_000 });
+  const { original, latest, deadline } = await waitForHitTarget(page, target, label);
+  try {
+    try {
+      await original.click({ trial: true, position: latest.position, timeout: remainingHitTime(deadline) });
+    } catch (error) {
+      throw new Error(`${label} native pointer trial refused: ${JSON.stringify({ admitted: latest, reason: String(error) })}.`, { cause: error });
+    }
+    const fresh = await finalHitTarget(target, original, latest, deadline, label);
+    await original.click({ position: fresh.position, timeout: 15_000 });
+  } finally {
+    await original.dispose();
+  }
 }
 
 export async function assertContainedInViewport(page: Page, target: Locator, label: string, tolerancePx = 1): Promise<void> {

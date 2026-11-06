@@ -3911,6 +3911,12 @@ body:has(.overlay-toolbar-inspector) :is(.workspace-onboarding, .canvas-empty-ch
 .workspace-save-status-label { display: inline; }
 .overlay-toolbar-section-label { font: 600 12px/1.35 var(--font-sans); letter-spacing: normal; text-transform: none; }
 .overlay-toolbar-inspector { overscroll-behavior: contain; }
+@media (max-width: 720px) {
+  [data-workspace-panel='semantic'] {
+    right: 24px;
+    width: min(400px, calc(100% - 48px));
+  }
+}
 @media (max-width: 720px), (pointer: coarse) {
   :root { --workspace-control-height: 44px; }
   .workspace-control-input, [data-workspace-panel='semantic'] .workspace-control-input { font-size: 16px; }

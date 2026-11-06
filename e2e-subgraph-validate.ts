@@ -204,7 +204,7 @@ async function ensureSourceClosed(page: Page): Promise<void> {
 async function replaceSource(page: Page, source: string): Promise<void> {
   const editor = await ensureSourceOpen(page);
   await editor.click();
-  await page.keyboard.press('Control+A');
+  await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.insertText(source);
 }
 

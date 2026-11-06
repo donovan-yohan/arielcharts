@@ -420,6 +420,11 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     let frameId: number | null = null;
     let observedErrorBanner: HTMLElement | null = null;
     let geometryObserver: ResizeObserver;
+    const clearFeedbackPlacement = () => {
+      if (!observedErrorBanner) return;
+      delete observedErrorBanner.dataset.inspectorLayout;
+      for (const property of ['--inspector-feedback-left', '--inspector-feedback-width', '--inspector-feedback-max-height']) observedErrorBanner.style.removeProperty(property);
+    };
     const refreshErrorBanner = () => {
       const nextErrorBanner = pane?.querySelector<HTMLElement>('.workspace-feedback-stack, .error-banner') ?? null;
       if (observedErrorBanner && observedErrorBanner !== nextErrorBanner) geometryObserver.unobserve(observedErrorBanner);
@@ -431,8 +436,9 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       const canvasBounds = canvas.getBoundingClientRect();
       const header = topbar?.getBoundingClientRect();
       const headerInset = header && header.bottom > canvasBounds.top && header.top < canvasBounds.bottom ? Math.max(0, header.bottom - canvasBounds.top) : 0;
+      clearFeedbackPlacement();
       const errorBanner = pane?.querySelector<HTMLElement>('.workspace-feedback-stack, .error-banner');
-      const errorBounds = errorBanner?.getBoundingClientRect();
+      let errorBounds = errorBanner?.getBoundingClientRect();
       const viewport = resolveOverlayToolbarViewport(props.viewport, canvasBounds.width, canvasBounds.height);
       const viewportX = viewport.x;
       const viewportY = viewport.y;
@@ -441,7 +447,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       const defaultTop = Math.max(minimumTop, Math.min(canvasBounds.top + headerInset, header?.bottom ?? canvasBounds.top) + 12);
       const errorOverlapsTop = errorBounds && defaultTop < errorBounds.bottom
         && defaultTop + OVERLAY_TOOLBAR_COLLAPSED_PILL_HEIGHT > errorBounds.top;
-      const top = errorOverlapsTop ? errorBounds.bottom + 8 : defaultTop;
+      const top = errorOverlapsTop && errorBounds ? errorBounds.bottom + 8 : defaultTop;
       const left = canvasBounds.left + viewportX + (viewportWidth / 2);
       const primaryHeight = primaryToolbarRef.current?.getBoundingClientRect().height || OVERLAY_TOOLBAR_PRIMARY_ROW_HEIGHT;
       const contextHeight = contextToolbarRef.current?.getBoundingClientRect().height ?? 0;
@@ -473,9 +479,25 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       const safeAvailableHeight = Math.max(0, bottomSafeTop - top - OVERLAY_TOOLBAR_AVAILABLE_HEIGHT_BOTTOM_INSET);
       const needsSheet = inspectorMaxHeight < 160;
       const sheetBaseTop = canvasBounds.top + Math.max(headerInset, viewportY, 0) + 8;
+      const sheetWidth = Math.min(400, viewportWidth - 16);
+      const sheetLeft = canvasBounds.left + Math.max(8, viewportX);
+      const feedbackBeside = viewportWidth - sheetWidth - 24 >= 280;
+      if (inspectorOpen && needsSheet && errorBanner?.classList.contains('workspace-feedback-stack') && errorBounds && errorBounds.height > 0) {
+        const capacity = inspectorCapacityPx(sheetBaseTop, bottomSafeTop - 8);
+        const panelReserve = Math.min(160, Math.floor(capacity * 0.76));
+        const feedbackLeft = feedbackBeside ? sheetLeft + sheetWidth + 8 : canvasBounds.left + viewportX + 12;
+        const feedbackWidth = feedbackBeside ? viewportWidth - sheetWidth - 24 : viewportWidth - 24;
+        const feedbackMaxHeight = Math.max(0, Math.floor(bottomSafeTop - 8 - errorBounds.top - (feedbackBeside ? 0 : panelReserve + 8)));
+        errorBanner.dataset.inspectorLayout = feedbackBeside ? 'beside' : 'stacked';
+        errorBanner.style.setProperty('--inspector-feedback-left', `${feedbackLeft - (pane?.getBoundingClientRect().left ?? canvasBounds.left)}px`);
+        errorBanner.style.setProperty('--inspector-feedback-width', `${feedbackWidth}px`);
+        errorBanner.style.setProperty('--inspector-feedback-max-height', `${feedbackMaxHeight}px`);
+        errorBounds = errorBanner.getBoundingClientRect();
+      }
       const sheetTop = errorBounds && errorBounds.height > 0 && errorBounds.bottom > sheetBaseTop
+        && !(inspectorOpen && feedbackBeside && errorBanner?.dataset.inspectorLayout === 'beside')
         ? errorBounds.bottom + 8 : sheetBaseTop;
-      const sheet = needsSheet ? { position: 'fixed' as const, top: sheetTop, left: canvasBounds.left + Math.max(8, viewportX), width: Math.min(400, viewportWidth - 16), maxWidth: viewportWidth - 16, maxHeight: inspectorCapacityPx(sheetTop, bottomSafeTop - 8), zIndex: 50 } : null;
+      const sheet = needsSheet ? { position: 'fixed' as const, top: sheetTop, left: sheetLeft, width: sheetWidth, maxWidth: viewportWidth - 16, maxHeight: inspectorCapacityPx(sheetTop, bottomSafeTop - 8), zIndex: 50 } : null;
       setInspectorSheet((previous) => JSON.stringify(previous) === JSON.stringify(sheet) ? previous : sheet);
       setToolbarPosition((current) => current.availableHeight === availableHeight
         && current.safeAvailableHeight === safeAvailableHeight
@@ -524,6 +546,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     if (canvasStyleHost && canvasStyleHost !== canvas) canvasMutationObserver.observe(canvasStyleHost, { attributes: true, attributeFilter: ['style'] });
     window.addEventListener('resize', update);
     return () => {
+      clearFeedbackPlacement();
       geometryObserver.disconnect();
       mutationObserver?.disconnect();
       canvasMutationObserver.disconnect();
@@ -953,12 +976,12 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
     if (inspectorOpen && !inspectorRef.current?.contains(document.activeElement)) inspectorRef.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
   }, [inspectorOpen, Boolean(inspectorSheet)]);
   const inspectorContent = <aside ref={inspectorRef} onKeyDownCapture={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeInspector(); } else handleOverlayShortcut(event); }} aria-label="Overlay objects and layers" className="overlay-toolbar-inspector" data-sheet={inspectorSheet ? 'true' : undefined} style={inspectorSheet ?? undefined} id={inspectorId}>
-          <WorkspaceButton aria-label="Close objects and layers" onClick={closeInspector}>Close</WorkspaceButton>
-          <p className="overlay-toolbar-description">Canvas objects are not included in Mermaid source.</p>
+          <div className="overlay-inspector-heading"><span className="overlay-toolbar-section-label">Objects and layers</span><WorkspaceButton aria-label="Close objects and layers" onClick={closeInspector}>Close</WorkspaceButton></div>
           <div aria-label="Overlay inspector actions" className="overlay-toolbar-inspector-actions" onFocusCapture={handleToolbarFocus} onKeyDown={handleToolbarKeyDown} role="toolbar">
             <ToolbarIconButton disabled={!writable || !historyAvailable || sceneHistoryPending} label="Restore previous canvas scene…" onClick={() => { void restorePrevious(); }}><RotateCw size={18} /></ToolbarIconButton>
             <ToolbarIconButton disabled={!writable} label="Paste overlay" onClick={props.onPaste}><ClipboardPaste size={18} /></ToolbarIconButton>
           </div>
+          <p className="overlay-toolbar-description">Canvas objects are not included in Mermaid source.</p>
           <aside aria-label="ArielCharts overlay list" className="overlay-scene-list">
             <span className="overlay-toolbar-section-label">Objects</span>
             {objects.length === 0 ? <p>No overlays</p> : <ul>{objects.map((object) => <li key={object.id}><WorkspaceButton aria-current={selectedId === object.id || undefined} onClick={(event) => choose(object.id, event.shiftKey || event.metaKey || event.ctrlKey)} type="button">{object.kind === 'annotation.sticky' ? 'Sticky note' : object.kind === 'annotation.text' ? 'Text' : object.kind}: {(object.body ?? String(object.payload.label ?? '')).slice(0, 40) || 'Empty'}{object.orphaned ? ' (orphaned)' : ''}</WorkspaceButton></li>)}</ul>}

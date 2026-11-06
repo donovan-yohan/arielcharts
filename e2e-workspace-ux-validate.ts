@@ -1978,7 +1978,7 @@ async function expectErSemanticEditor(page: Page): Promise<void> {
   const before = await snapshotAnchors(page, ANCHORS);
   const beforeTransform = await canvasTransform(page);
 
-  const customerName = controls.getByLabel('ER entity CUSTOMER');
+  const customerName = controls.getByRole('textbox', { name: 'ER entity CUSTOMER', exact: true });
   await scrollErControlIntoView(customerName);
   await customerName.fill('ACCOUNT');
   const rename = customerName.locator('xpath=ancestor::form[1]').getByRole('button', { name: 'Rename', exact: true });
@@ -2781,7 +2781,7 @@ async function expectCynefinSemanticEditor(page: Page): Promise<void> {
   await investigate.getByLabel('Cynefin transition Complex to Complicated Investigate target').selectOption('complex');
   await investigate.getByLabel('Cynefin transition Complex to Complicated Investigate label').fill('Dirty investigate');
   await assertAndClickBoardControl(page, investigate.getByRole('button', { name: 'Save', exact: true }), 'Cynefin invalid edit-transition control');
-  const mutationBanner = panel.getByRole('alert');
+  const mutationBanner = page.getByTestId('mutation-error-banner');
   await expect(mutationBanner).toContainText('different domains');
   await expect(investigate.getByLabel('Cynefin transition Complex to Complicated Investigate label')).toHaveValue('Dirty investigate');
   await investigate.getByLabel('Cynefin transition Complex to Complicated Investigate target').selectOption('complicated');
@@ -6501,7 +6501,7 @@ H,I,1`;
     addCynefinTransition,
     `${label} Cynefin self-loop rejection`,
   );
-  const cynefinBanner = cynefinPanel.getByRole("alert");
+  const cynefinBanner = page.getByTestId("mutation-error-banner");
   await cynefinBanner.waitFor({ state: "visible", timeout: 15_000 });
   await assertClosedOverlayToggleBesideError(
     page,

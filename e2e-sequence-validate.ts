@@ -592,11 +592,12 @@ async function validateSequenceCanvas() {
     await onlyFlowchartNode.click();
     await page.getByRole('button', { name: 'Delete selected nodes', exact: true }).click();
     await chooser.waitFor({ state: 'visible', timeout: 15_000 });
-    const zeroNodeSource = await canonicalSource(page);
+    const zeroNodeSource = await readCanonicalSource(page);
     if (!/^flowchart\s+/i.test(zeroNodeSource) || await page.locator('.react-flow__node').count() !== 0) {
       throw new Error(`Deleting the final flowchart node did not return to the source-derived chooser: ${zeroNodeSource}`);
     }
     await chooser.getByRole('button', { name: /Sequence/ }).click();
+    await closeSourceFlyout(page);
     await page.getByTestId('sequence-editor-controls').waitFor({ state: 'visible', timeout: 15_000 });
     await page.getByLabel('New sequence participant', { exact: true }).fill('Browser');
     await page.getByRole('button', { name: 'Add sequence participant', exact: true }).click();
@@ -607,7 +608,7 @@ async function validateSequenceCanvas() {
     await page.getByRole('textbox', { name: 'Sequence message', exact: true }).fill('Request');
     await page.getByRole('button', { name: 'Add sequence message', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.diagram-canvas-svg')?.textContent?.includes('Request'), undefined, { timeout: 15_000 });
-    const editableSequenceSource = await canonicalSource(page);
+    const editableSequenceSource = await readCanonicalSource(page);
     if (!editableSequenceSource.includes('participant Browser as Browser')
       || !editableSequenceSource.includes('Browser->>API: Request')) {
       throw new Error(`Sequence controls did not write ordinary Mermaid source: ${editableSequenceSource}`);
@@ -619,6 +620,7 @@ title: Handshake
 sequenceDiagram; A<<->>B: ping`;
     await replaceSource(page, frontmatterSequence);
     await waitForCanvas(page, 'sequence');
+    await closeSourceFlyout(page);
     const senderOptions = await page.getByLabel('Message sender', { exact: true }).locator('option').allTextContents();
     if (senderOptions.join(',') !== 'A,B') {
       throw new Error(`Bidirectional semicolon participants were not exposed: ${senderOptions.join(',')}`);
@@ -630,7 +632,7 @@ sequenceDiagram; A<<->>B: ping`;
     await page.getByRole('textbox', { name: 'Sequence message', exact: true }).fill('pong; #"<ok>" & done');
     await page.getByRole('button', { name: 'Add sequence message', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('.diagram-canvas-svg')?.textContent?.includes('pong'), undefined, { timeout: 15_000 });
-    const hardenedSequenceSource = await canonicalSource(page);
+    const hardenedSequenceSource = await readCanonicalSource(page);
     const expectedHardenedSequence = `${frontmatterSequence}
   participant OpsTeamLead as Ops； ＃”‹team›” ＆ lead
   A->>B: pong； ＃”‹ok›” ＆ done`;

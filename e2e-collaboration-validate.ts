@@ -566,7 +566,7 @@ async function sourceEditorValue(editor: Locator): Promise<string> {
 async function replaceSource(page: Page, source: string): Promise<void> {
   const editor = await ensureSourceFlyoutOpen(page);
   await editor.click();
-  await page.keyboard.press('Control+A');
+  await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.insertText(source);
 }
 
@@ -663,6 +663,12 @@ async function boxOf(locator: Locator, message: string) {
 
 async function nudgeNode(page: Page, locator: Locator, dx: number, dy: number, hold = false): Promise<void> {
   const box = await boxOf(locator, 'Node has no drag bounds.');
+  const hit = await locator.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const target = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    return { ownsCenter: target !== null && element.contains(target), target: target?.getAttribute('class'), tool: document.querySelector('button[aria-label="Select tool"]')?.getAttribute('aria-pressed') };
+  });
+  assert(hit.ownsCenter && hit.tool === 'true', `Node drag prerequisite failed: ${JSON.stringify(hit)}.`);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 8 });

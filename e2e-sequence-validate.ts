@@ -724,6 +724,7 @@ sequenceDiagram; A<<->>B: ping`;
     const settledRestoredFitTransform = await transformedLayer.getAttribute('style');
     const canvasBox = await canvas.boundingBox();
     if (!canvasBox) throw new Error('Generic canvas has no bounds.');
+    await canvas.focus();
     await page.keyboard.down('Space');
     await page.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
     await page.mouse.down();

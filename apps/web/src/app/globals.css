@@ -3461,7 +3461,6 @@ code {
 .diagram-canvas-shell[data-overlay-toolbar-safe-top='true'] > .canvas-sequence-editor:not(.is-centered) {
   bottom: var(--canvas-controls-toolbar-safe-bottom);
   max-height: calc(100% - var(--overlay-toolbar-safe-top) - var(--canvas-controls-toolbar-safe-bottom));
-  padding-bottom: calc(4px + var(--canvas-controls-toolbar-safe-bottom));
   scroll-padding-bottom: var(--canvas-controls-toolbar-safe-bottom);
   scroll-padding-top: var(--overlay-toolbar-safe-top);
   top: var(--overlay-toolbar-safe-top);
@@ -3873,7 +3872,7 @@ body:has(.overlay-toolbar-inspector) :is(.workspace-onboarding, .canvas-empty-ch
 [data-workspace-panel='semantic'] .workspace-control-field { display: grid; font-size: 12px; flex: 1 1 140px; }
 [data-workspace-panel='semantic'] .workspace-control-input { font: 400 13px/1.4 var(--font-sans); min-height: var(--workspace-control-height); width: 100%; padding: 8px 10px; }
 [data-workspace-panel='semantic'] .workspace-control-input:is([type='checkbox'], [type='radio']) { min-height: 18px; padding: 0; width: 18px; }
-[data-workspace-panel='semantic'] .workspace-control-button { font: 600 13px/1.4 var(--font-sans); min-height: var(--workspace-control-height); width: auto; padding: 8px 12px; }
+[data-workspace-panel='semantic'] .workspace-control-button { font: 600 13px/1.4 var(--font-sans); min-height: var(--workspace-control-height); min-width: var(--workspace-control-height); width: auto; padding: 8px 12px; }
 [data-workspace-panel='semantic'] label:has(> input:is([type='checkbox'], [type='radio'])) { align-items: center; display: inline-flex; gap: 8px; min-height: var(--workspace-control-height); }
 .workspace-record-heading { flex-basis: 100%; }
 .semantic-editor-error { color: var(--status-danger-text); flex-basis: 100%; font: 12px/1.4 var(--font-sans); overflow-wrap: anywhere; }

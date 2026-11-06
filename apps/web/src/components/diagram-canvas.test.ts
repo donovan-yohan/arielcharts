@@ -510,7 +510,11 @@ describe('sequence semantic editor', () => {
     const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
     expect(css).toMatch(/@media \(max-height: 500px\)[^]*?\.diagram-canvas-shell\[data-overlay-toolbar-safe-top='true'\] > \.canvas-sequence-editor:not\(\.is-centered\)[^]*?top: var\(--overlay-toolbar-safe-top\);/u);
     expect(css).toMatch(/canvas-sequence-editor:not\(\.is-centered\)[^]*?bottom: var\(--canvas-controls-toolbar-safe-bottom\);[^]*?max-height: calc\(100% - var\(--overlay-toolbar-safe-top\) - var\(--canvas-controls-toolbar-safe-bottom\)\);/u);
-    expect(css).toMatch(/canvas-sequence-editor:not\(\.is-centered\)[^]*?padding-bottom: calc\(4px \+ var\(--canvas-controls-toolbar-safe-bottom\)\);[^]*?scroll-padding-bottom: var\(--canvas-controls-toolbar-safe-bottom\);/u);
+    const boundedRule = css.match(/\.diagram-canvas-shell\[data-overlay-toolbar-safe-top='true'\] > \.canvas-sequence-editor:not\(\.is-centered\) \{([^}]+)\}/u)?.[1];
+    expect(boundedRule).toBeDefined();
+    expect(boundedRule).toContain('scroll-padding-bottom: var(--canvas-controls-toolbar-safe-bottom);');
+    expect(boundedRule).not.toMatch(/(?:^|\s)padding(?:-[a-z]+)?:/u);
+    expect(css).toMatch(/\[data-workspace-panel='semantic'\] \{[^}]*padding: var\(--workspace-space-4\);/u);
     expect(css).toMatch(/canvas-sequence-editor:not\(\.is-centered\)[^]*?scroll-padding-top: var\(--overlay-toolbar-safe-top\);/u);
   });
 });

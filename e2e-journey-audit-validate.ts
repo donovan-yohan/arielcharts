@@ -19,6 +19,7 @@ async function assertNativeAnatomy(page: Page, panelId: string, touch: boolean) 
         if (el.getBoundingClientRect().height > 22) failures.push('oversized checkbox'); continue;
       }
       const style = getComputedStyle(el); const height = el.getBoundingClientRect().height;
+      if (isTouch && el.tagName === 'BUTTON' && el.getBoundingClientRect().width < 44) failures.push(`narrow action ${el.getAttribute('aria-label') ?? el.textContent}`);
       if (height < (isTouch ? 44 : el.classList.contains('canvas-toolbar-button') ? 32 : 36) - .1) failures.push(`short ${el.getAttribute('aria-label') ?? el.textContent}: ${height}`);
       if (isTouch && el.tagName !== 'BUTTON' && Number.parseFloat(style.fontSize) < 16) failures.push('small touch field');
       if (el.tagName !== 'BUTTON') {

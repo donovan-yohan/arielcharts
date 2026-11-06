@@ -7359,52 +7359,66 @@ async function expectTouchCanvasControls(
     await addNode.click({ trial: true, timeout: 15_000 });
   }
   if (renderer === 'sequence') {
-    const canvas = page.getByTestId('canvas-first-workspace');
     const participantForm = page.locator('form.canvas-sequence-participant-form');
     const messageForm = page.locator('form.canvas-sequence-message-form:has([aria-label="Sequence message"])');
     const participantAdd = page.getByRole('button', { name: 'Add sequence participant', exact: true });
     const messageAdd = page.getByRole('button', { name: 'Add sequence message', exact: true });
-    if (label === 'mobile-landscape') {
-      // This compact editor is intentionally scrollable between fixed top and
-      // bottom canvas lanes. Each action must still become an unobscured 44px
-      // touch target through the normal in-panel scroll route.
-      for (const [target, targetLabel] of [[participantAdd, 'add participant'], [messageAdd, 'add message']] as const) {
-        await centerSequenceEditorTarget(page, target, `${label} sequence ${targetLabel}`);
-        await assertTouchTarget(page, target, `${label} sequence ${targetLabel}`);
-      }
-      await page.getByTestId('sequence-editor-controls').evaluate((element) => { element.scrollTop = 0; });
-    } else {
-      await Promise.all([
-        assertTouchTarget(page, participantAdd, `${label} sequence add participant`),
-        assertTouchTarget(page, messageAdd, `${label} sequence add message`),
-        assertContainedInViewport(page, participantForm, `${label} sequence participant form`),
-        assertContainedInViewport(page, messageForm, `${label} sequence message form`),
-      ]);
+    const editor = page.getByTestId('sequence-editor-controls');
+    await editor.evaluate((element) => { element.scrollTop = 0; });
+    const formsFit = await editor.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return [...element.querySelectorAll('form.canvas-sequence-participant-form, form.canvas-sequence-message-form:has([aria-label="Sequence message"])')]
+        .every((form) => {
+          const rect = form.getBoundingClientRect();
+          return rect.top >= bounds.top + element.clientTop - 0.5
+            && rect.bottom <= bounds.top + element.clientTop + element.clientHeight + 0.5;
+        });
+    });
+    // K09 has one bounded scroll owner, not two always-visible forms. Earlier
+    // field edits can leave it scrolled; reach each action sequentially so one
+    // target's scroll cannot invalidate another target's hit test.
+    for (const [target, targetLabel] of [[participantAdd, 'add participant'], [messageAdd, 'add message']] as const) {
+      if (!formsFit) await centerSequenceEditorTarget(page, target, `${label} sequence ${targetLabel}`);
+      await assertTouchTarget(page, target, `${label} sequence ${targetLabel}`);
+    }
+    await editor.evaluate((element) => { element.scrollTop = 0; });
+    if (formsFit) {
+      await assertContainedInViewport(page, participantForm, `${label} sequence participant form`);
+      await assertContainedInViewport(page, messageForm, `${label} sequence message form`);
     }
     await assertDocumentHasNoHorizontalOverflow(page);
-    const layout = await page.evaluate(() => {
+    await assertContainedInViewport(page, editor, `${label} sequence scroll panel`);
+    const layout = await editor.evaluate((element) => {
       const canvas = document.querySelector<HTMLElement>('[data-testid="canvas-first-workspace"]');
-      const forms = [...document.querySelectorAll<HTMLElement>('form.canvas-sequence-participant-form, form.canvas-sequence-message-form:has([aria-label="Sequence message"])')];
-      if (!canvas || forms.length !== 2) return null;
+      const camera = document.querySelector<HTMLElement>('[data-testid="canvas-controls-toolbar"]');
+      const footer = document.querySelector<HTMLElement>('[data-testid="workspace-footer"]');
+      const forms = [...element.querySelectorAll<HTMLElement>('form.canvas-sequence-participant-form, form.canvas-sequence-message-form:has([aria-label="Sequence message"])')];
+      if (!canvas || !camera || !footer || forms.length !== 2) return null;
       const canvasBounds = canvas.getBoundingClientRect();
-      return forms.map((form) => {
-        const bounds = form.getBoundingClientRect();
-        return {
-          bottom: bounds.bottom,
-          left: bounds.left,
-          right: bounds.right,
-          top: bounds.top,
-          withinCanvas: bounds.top >= canvasBounds.top - 0.5
-            && bounds.bottom <= canvasBounds.bottom + 0.5
-            && bounds.left >= canvasBounds.left - 0.5
-            && bounds.right <= canvasBounds.right + 0.5,
-        };
-      });
+      const panelBounds = element.getBoundingClientRect();
+      const panelLeft = panelBounds.left + element.clientLeft;
+      const panelRight = panelLeft + element.clientWidth;
+      return {
+        panel: panelBounds.toJSON(),
+        withinCanvas: panelBounds.top >= canvasBounds.top - 0.5
+          && panelBounds.bottom <= canvasBounds.bottom + 0.5
+          && panelBounds.left >= canvasBounds.left - 0.5
+          && panelBounds.right <= canvasBounds.right + 0.5,
+        cameraTop: camera.getBoundingClientRect().top,
+        footerTop: footer.getBoundingClientRect().top,
+        forms: forms.map((form) => {
+          const bounds = form.getBoundingClientRect();
+          return { left: bounds.left, right: bounds.right,
+            horizontallyContained: bounds.left >= panelLeft - 0.5 && bounds.right <= panelRight + 0.5 };
+        }),
+      };
     });
-    assert(layout !== null && layout.every((form) => form.withinCanvas),
-      `${label} sequence forms overflowed or overlapped workspace chrome: ${JSON.stringify(layout)}.`);
+    assert(layout !== null && layout.withinCanvas
+      && layout.panel.bottom <= Math.min(layout.cameraTop, layout.footerTop) - 1,
+    `${label} sequence scroll panel overflowed or overlapped workspace chrome: ${JSON.stringify(layout)}.`);
+    assert(layout.forms.every((form) => form.horizontallyContained),
+      `${label} sequence forms escaped their scroll panel horizontally: ${JSON.stringify(layout)}.`);
     if (label === 'mobile-landscape') {
-      const editor = page.getByTestId('sequence-editor-controls');
       let safeLane: { controlsTop: number; editorBottom: number; editorTop: number; footerTop?: number; safeTop: number; scrollPaddingBottom: string; scrollPaddingTop: string } | null = null;
       await expect.poll(async () => {
         safeLane = await page.getByTestId('diagram-canvas').evaluate((canvas) => {
@@ -7444,13 +7458,17 @@ async function expectTouchCanvasControls(
       const bounds = await editor.boundingBox();
       assert(bounds, `${label} sequence editor has no visible touch-scroll surface.`);
       const session = await page.context().newCDPSession(page);
+      // Keep the complete swipe inside the measured owner, even when the
+      // landscape lane is shorter than the former fixed 176px gesture.
       const touch = (y: number) => ({ force: 1, id: 1, radiusX: 1, radiusY: 1, x: bounds.x + (bounds.width / 2), y });
       try {
-        const start = bounds.y + bounds.height - 24;
+        const start = bounds.y + bounds.height - 12;
+        const distance = bounds.height - 24;
+        assert(distance > 0, `${label} sequence editor has no in-panel swipe lane.`);
         await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start)], type: 'touchStart' });
-        await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - 48)], type: 'touchMove' });
-        await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - 112)], type: 'touchMove' });
-        await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - 176)], type: 'touchMove' });
+        for (const progress of [0.3, 0.65, 1]) {
+          await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - (distance * progress))], type: 'touchMove' });
+        }
         await session.send('Input.dispatchTouchEvent', { touchPoints: [], type: 'touchEnd' });
       } finally {
         await session.detach();
@@ -7472,7 +7490,7 @@ async function expectTouchCanvasControls(
         intervals: [50],
       }).toBeGreaterThanOrEqual(3);
       const activation = page.getByRole('button', { name: 'Add sequence activation', exact: true });
-      await activation.scrollIntoViewIfNeeded();
+      await centerSequenceEditorTarget(page, activation, `${label} sequence lower activation control`);
       await tapTarget(page, activation, `${label} sequence lower activation control`);
       await editor.evaluate((element) => { element.scrollTop = 0; });
     }

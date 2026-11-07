@@ -215,13 +215,13 @@ export async function waitForInvalidPreview(page: Page): Promise<void> {
   const unexpectedStatus = sourceOpen ? globalStatus : sourceStatus;
 
   await expectedStatus.waitFor({ state: 'visible', timeout: 15_000 });
-  await expect(expectedStatus).toContainText(/preview kept on last valid diagram/iu);
+  await expect(expectedStatus).toContainText(/showing the last valid preview/iu);
   await expect(unexpectedStatus).toHaveCount(0);
   assert(await page.locator('.diagram-canvas-svg > svg').count() > 0, 'Invalid Mermaid removed the last valid visual preview.');
 }
 
 export async function waitForSyncedSource(page: Page): Promise<void> {
-  await page.getByTestId('connection-status-badge').filter({ hasText: /^synced$/i }).waitFor({ state: 'visible', timeout: 15_000 });
+  await page.getByTestId('connection-status-badge').filter({ hasText: /^Connected$/i }).waitFor({ state: 'visible', timeout: 15_000 });
 }
 
 /**

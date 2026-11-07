@@ -17,7 +17,7 @@ describe('local workspace runtime', () => {
 
   it('uses truthful phased loading copy', () => {
     expect(getLocalWorkspaceLoadingCopy('restoring').title).toContain('Restoring work saved on this device');
-    expect(getLocalWorkspaceLoadingCopy('preparing').title).toContain('Preparing the canvas');
+    expect(getLocalWorkspaceLoadingCopy('preparing').title).toContain('Preparing your canvas');
     expect(getLocalWorkspaceLoadingCopy('storage-error').detail).toContain('cannot be safely saved');
   });
 
@@ -25,7 +25,10 @@ describe('local workspace runtime', () => {
     const awareness = new LocalAwareness(42);
     const changes: number[] = [];
     awareness.on('change', () => { changes.push(1); });
+    awareness.on('change', (change) => { const { added, updated, removed } = change as { added: number[]; updated: number[]; removed: number[] }; expect([...added, ...updated, ...removed]).toEqual([42]); });
+    expect((awareness as unknown as { doc: { clientID: number } }).doc.clientID).toBe(42);
     awareness.setLocalState({ user: { name: 'Human' } });
+    expect((awareness as unknown as { getLocalState(): unknown }).getLocalState()).toEqual({ user: { name: 'Human' } });
     expect(awareness.getStates()).toEqual(new Map([[42, { user: { name: 'Human' } }]]));
     awareness.setLocalStateField('canvas', { diagram_id: 'local' });
     expect(awareness.getStates().get(42)).toEqual({ user: { name: 'Human' }, canvas: { diagram_id: 'local' } });

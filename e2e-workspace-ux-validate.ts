@@ -15,6 +15,7 @@ import {
   type BrowserHarness,
 } from './e2e/support/browser.ts';
 import { assert, describeError } from './e2e/support/assert.ts';
+import { runHitTargetRegression } from './e2e/support/hit-target-regression.ts';
 import {
   assertAnchorsStable,
   assertContainedInViewport,
@@ -987,6 +988,12 @@ async function triggerCanvasFit(page: Page, label: string): Promise<void> {
 async function expectCanvasCameraControlHitTargets(page: Page, label: string): Promise<void> {
   const controls = page.getByTestId('canvas-controls-toolbar');
   await controls.waitFor({ state: 'visible', timeout: 15_000 });
+  await expect.poll(() => controls.evaluate((root) => [...root.querySelectorAll('button')].every((button) => {
+    if (button.disabled) return true;
+    const bounds = button.getBoundingClientRect();
+    const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    return hit !== null && button.contains(hit);
+  })), { message: `${label} did not settle into an unobscured camera lane.`, timeout: 5_000 }).toBe(true);
   for (const actionName of ['Zoom out', 'Zoom in'] as const) {
     const before = await renderedCanvasCameraTransform(page, `${label} ${actionName} baseline`);
     await verifiedClick(page, controls.getByRole('button', { name: actionName, exact: true }), `${label} ${actionName}`);
@@ -1978,10 +1985,10 @@ async function expectErSemanticEditor(page: Page): Promise<void> {
   const before = await snapshotAnchors(page, ANCHORS);
   const beforeTransform = await canvasTransform(page);
 
-  const customerName = controls.getByLabel('ER entity CUSTOMER');
+  const customerName = controls.getByRole('textbox', { name: 'ER entity CUSTOMER', exact: true });
   await scrollErControlIntoView(customerName);
   await customerName.fill('ACCOUNT');
-  const rename = customerName.locator('xpath=..').getByRole('button', { name: 'Rename', exact: true });
+  const rename = customerName.locator('xpath=ancestor::form[1]').getByRole('button', { name: 'Rename', exact: true });
   await scrollErControlIntoView(rename);
   await assertHitTarget(page, rename, 'ER entity rename control');
   await verifiedClick(page, rename, 'ER entity rename control');
@@ -1992,7 +1999,7 @@ async function expectErSemanticEditor(page: Page): Promise<void> {
   const attributeName = controls.getByLabel('New attribute for ACCOUNT');
   await scrollErControlIntoView(attributeName);
   await attributeName.fill('created_at');
-  const addAttribute = attributeName.locator('xpath=..').getByRole('button', { name: 'Add attribute', exact: true });
+  const addAttribute = attributeName.locator('xpath=ancestor::form[1]').getByRole('button', { name: 'Add attribute', exact: true });
   await assertHitTarget(page, addAttribute, 'ER add-attribute control');
   await verifiedClick(page, addAttribute, 'ER add-attribute control');
   const attributeForm = controls.getByRole('form', { name: 'Attribute created_at on ACCOUNT', exact: true });
@@ -2043,6 +2050,7 @@ async function expectErSemanticEditor(page: Page): Promise<void> {
   await replaceSource(page, unsupported);
   await waitForSource(page, unsupported);
   await waitForCanvas(page, 'generic');
+  await expect(page.locator('.diagram-canvas-svg > svg .nodeLabel')).toHaveText(['ACCOUNT', 'ORDER']);
   const lastValidSvg = await page.locator('.diagram-canvas-svg > svg').innerHTML();
   await replaceSource(page, 'erDiagram\n  ACCOUNT ||--o{');
   await waitForInvalidPreview(page);
@@ -2517,7 +2525,7 @@ async function expectNumericSemanticEditors(page: Page): Promise<void> {
   "Docs" : 4.25`;
   await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedPie); await closeFlyout(page, 'source');
   await docsValue.click(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.press('Backspace'); await assertAndClickBoardControl(page, docs.getByRole('button', { name: 'Save', exact: true }), 'Pie empty numeric control'); await expect(pie.getByRole('alert')).toContainText('finite number'); await expect(docsValue).toHaveValue(''); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedPie); await closeFlyout(page, 'source');
-  await pie.getByLabel('New Pie slice label').fill('Invalid'); const invalidPieValue = pie.getByLabel('New Pie slice value'); await invalidPieValue.fill('-1'); await assertAndClickBoardControl(page, addSlice, 'Pie invalid numeric control'); await expect(page.getByTestId('mutation-error-banner')).toContainText('greater than or equal to zero'); await expect(invalidPieValue).toHaveValue('-1'); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedPie); await closeFlyout(page, 'source');
+  await pie.getByLabel('New Pie slice label').fill('Invalid'); const invalidPieValue = pie.getByLabel('New Pie slice value'); await invalidPieValue.fill('-1'); await assertAndClickBoardControl(page, addSlice, 'Pie invalid numeric control'); await expect(invalidPieValue.locator('xpath=ancestor::form[1]').getByRole('alert')).toContainText('greater than or equal to zero'); await expect(page.getByTestId('mutation-error-banner')).toHaveCount(0); await expect(invalidPieValue).toHaveValue('-1'); await ensureSourceFlyoutOpen(page); await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(expectedPie); await closeFlyout(page, 'source');
   const advancedPie = 'pie title Advanced\n  "A" : 1'; await replaceSource(page, advancedPie); await waitForSource(page, advancedPie); await expect.poll(() => page.getByTestId('diagram-mode').textContent(), { timeout: 15_000 }).toBe('Pie · source only'); await closeFlyout(page, 'source'); await expect(pie).toHaveCount(0);
 
   await replaceSource(page, QUADRANT_DIAGRAM_FIXTURE); await waitForSource(page, QUADRANT_DIAGRAM_FIXTURE); await waitForSemanticMode(page, 'Quadrant chart · editable · form'); await closeFlyout(page, 'source');
@@ -2639,7 +2647,7 @@ Target,"Archive, ""deep""",4.25`;
   const headerWidth = header.getByLabel('Packet field Header bits 0-3 width');
   await headerWidth.fill('5');
   await assertAndClickBoardControl(page, header.getByRole('button', { name: 'Save', exact: true }), 'Packet overlap rejection control');
-  await expect(page.getByTestId('mutation-error-banner')).toContainText('contiguous');
+  await expect(header.getByRole('alert')).toContainText('contiguous'); await expect(page.getByTestId('mutation-error-banner')).toHaveCount(0);
   await expect(headerWidth).toHaveValue('5');
   await ensureSourceFlyoutOpen(page);
   await expect.poll(() => canonicalSource(page), { timeout: 15_000 }).toBe(PACKET_DIAGRAM_FIXTURE);
@@ -3087,7 +3095,7 @@ async function expectRemoteTreemapVennDraftReconciliation(
     await scrollErControlIntoView(originalASave);
     await assertAndClickBoardControl(page, originalASave, `${label} rejected Treemap domain mutation`);
     const treemapError = treemap.getByRole('alert');
-    const treemapBanner = page.getByTestId('mutation-error-banner');
+    const treemapBanner = treemapError;
     await expect(treemapError).toHaveText('Treemap values must be finite numbers greater than zero.');
     await expect(treemapBanner).toContainText('Treemap values must be finite numbers greater than zero.');
     await assertClosedOverlayToggleBesideError(page, treemapBanner, `${label} Treemap error and overlay coexistence`);
@@ -3154,7 +3162,7 @@ async function expectRemoteTreemapVennDraftReconciliation(
     await scrollErControlIntoView(deleteSetA);
     await assertAndClickBoardControl(page, deleteSetA, `${label} rejected dependent Venn delete`);
     const vennError = venn.getByRole('alert');
-    const vennBanner = page.getByTestId('mutation-error-banner');
+    const vennBanner = vennError;
     await expect(vennError).toHaveText('A Venn set cannot be deleted while intersections depend on it.');
     await expect(vennBanner).toContainText('A Venn set cannot be deleted while intersections depend on it.');
     await assertClosedOverlayToggleBesideError(page, vennBanner, `${label} Venn error and overlay coexistence`);
@@ -4177,6 +4185,7 @@ async function expectPortableWorkspaceExports(page: Page, peer: Page): Promise<v
   const input = page.getByLabel('Choose editable ArielCharts workspace');
   console.log('E2E #75 workspace export: submitting editable workspace import');
   await input.setInputFiles({ name: 'roundtrip.arielcharts', mimeType: 'application/vnd.arielcharts.workspace+json', buffer: bundle });
+  await page.getByRole('dialog', { name: 'Replace this workspace?', exact: true }).getByRole('button', { name: 'Replace workspace', exact: true }).click();
   try {
     await page.waitForFunction(() => document.querySelector('.workspace-export-status')?.textContent === 'Editable workspace imported.');
   } catch (error) {
@@ -4736,8 +4745,9 @@ async function expectOverlaySceneFoundation(page: Page, diagramName: string): Pr
   await expect(objects).toHaveCount(0);
   await overlayInspector.scrollIntoViewIfNeeded();
   await verifiedClick(page, overlayInspector, 'reopen overlay inspector for history restore');
-  await verifiedClick(page, page.getByRole('button', { name: 'Restore overlay', exact: true }), 'restore prior overlay revision');
-  await expect(page.getByText('overlay restored', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await verifiedClick(page, page.getByRole('button', { name: 'Restore previous canvas scene…', exact: true }), 'review prior canvas scene revision');
+  await page.getByRole('dialog', { name: 'Restore previous canvas scene?', exact: true }).getByRole('button', { name: 'Restore scene', exact: true }).click();
+  await expect(page.getByText('Canvas scene restored.', { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(objects).not.toHaveCount(0);
   const topmostTestId = await objects.last().getAttribute('data-testid');
   assert(topmostTestId?.startsWith('overlay-object-overlay_'), `Restored overlay did not expose a stable topmost id: ${topmostTestId}.`);
@@ -5161,7 +5171,7 @@ async function expectAgentConnectionModal(
   const zeroAgentDetails = zeroAgentModal.getByTestId('agent-connection-details');
   assert(/Session status\s+(Connected|Connecting|Reconnecting|Disconnected)/u.test(await zeroAgentDetails.innerText()),
     `Agent connection modal omitted the session status: ${JSON.stringify(await zeroAgentDetails.innerText())}.`);
-  assert(/Agents\s+0 MCP agents connected/u.test(await zeroAgentDetails.innerText()),
+  assert(/Agents\s+0 MCP agents in this workspace/u.test(await zeroAgentDetails.innerText()),
     `Agent connection modal omitted the zero-agent detail: ${JSON.stringify(await zeroAgentDetails.innerText())}.`);
   const prompt = zeroAgentModal.locator('.modal-prompt-text');
   await saveScreenshot(page, 'issue-28-agent-connection-modal');
@@ -5199,12 +5209,12 @@ async function expectAgentConnectionModal(
   const agent = await connectAgentPresence(mcpUrl, sessionId, roomCookie, new URL(page.url()).origin);
   try {
     const settings = await openWorkspaceSettings(page);
-    await page.waitForFunction(() => document.querySelector('[data-testid="workspace-agent-status"]')?.textContent?.includes('1 MCP agent working') ?? false, undefined, { timeout: 15_000 });
+    await page.waitForFunction(() => document.querySelector('[data-testid="workspace-agent-status"]')?.textContent?.includes('1 MCP agent in this workspace') ?? false, undefined, { timeout: 15_000 });
     await settings.getByRole('button', { name: 'Connection details', exact: true }).waitFor({ state: 'visible', timeout: 5_000 });
     await closeWorkspaceSettings(page);
     const activeAgentModal = await openAgentConnectionModal(page, 'Connection details');
     const activeAgentDetails = activeAgentModal.getByTestId('agent-connection-details');
-    assert(/Agents\s+1 MCP agent connected/u.test(await activeAgentDetails.innerText()),
+    assert(/Agents\s+1 MCP agent in this workspace/u.test(await activeAgentDetails.innerText()),
       `Agent connection modal omitted the active-agent detail: ${JSON.stringify(await activeAgentDetails.innerText())}.`);
     await page.keyboard.press('Escape');
     await activeAgentModal.waitFor({ state: 'detached', timeout: 15_000 });
@@ -5212,7 +5222,7 @@ async function expectAgentConnectionModal(
   } finally {
     agent.destroy();
     const settings = await openWorkspaceSettings(page);
-    await expect(settings.getByTestId('workspace-agent-status')).not.toContainText('MCP agent working', { timeout: 15_000 });
+    await expect(settings.getByTestId('workspace-agent-status')).not.toContainText('MCP agent in this workspace', { timeout: 15_000 });
     await closeWorkspaceSettings(page);
   }
 }
@@ -5262,11 +5272,11 @@ async function expectWorkspaceSettings(page: Page, mcpUrl: string, sessionId: st
   await escapedInput.fill(draftName);
   const draftAgent = await connectAgentPresence(mcpUrl, sessionId, roomCookie, new URL(page.url()).origin);
   try {
-    await expect(reopenedAfterCancel.getByTestId('workspace-agent-status')).toContainText('1 MCP agent working', { timeout: 15_000 });
+    await expect(reopenedAfterCancel.getByTestId('workspace-agent-status')).toContainText('1 MCP agent in this workspace', { timeout: 15_000 });
     assert(await escapedInput.inputValue() === draftName, 'An unrelated collaboration rerender reset the in-progress display-name draft.');
   } finally {
     draftAgent.destroy();
-    await expect(reopenedAfterCancel.getByTestId('workspace-agent-status')).not.toContainText('MCP agent working', { timeout: 15_000 });
+    await expect(reopenedAfterCancel.getByTestId('workspace-agent-status')).not.toContainText('MCP agent in this workspace', { timeout: 15_000 });
   }
   await escapedInput.fill('Discarded by escape');
   await expectWorkspaceSettingsDetached(page, 'escape-display-name', async () => {
@@ -5835,7 +5845,7 @@ async function expectResponsiveControls(page: Page, label: string, diagramName: 
     await verifiedClick(page, inspector, `${label} open bounded objects inspector`);
     const inspectorPanel = page.getByLabel('Overlay objects and layers', { exact: true });
     await assertContainedInViewport(page, inspectorPanel, `${label} bounded objects inspector`);
-    for (const actionName of ['Paste overlay', 'Restore overlay'] as const) {
+    for (const actionName of ['Paste overlay', 'Restore previous canvas scene…'] as const) {
       await assertTouchTarget(page, inspectorPanel.getByRole('button', { name: actionName, exact: true }), `${label} inspector action ${actionName}`);
     }
     const compositeExport = inspectorPanel.getByLabel('Include ink in composite export', { exact: true });
@@ -6254,7 +6264,7 @@ async function expectResponsiveNumericPanel(
     add,
     `${label} invalid Pie mutation control`,
   );
-  const mutationBanner = page.getByTestId("mutation-error-banner");
+  const mutationBanner = panel.getByRole("alert");
   await mutationBanner.waitFor({ state: "visible", timeout: 15_000 });
   await assertClosedOverlayToggleBesideError(
     page,
@@ -6356,7 +6366,7 @@ H,I,1`;
     addSankey,
     `${label} invalid Sankey weight`,
   );
-  const sankeyBanner = page.getByTestId("mutation-error-banner");
+  const sankeyBanner = sankeyPanel.getByRole("alert");
   await sankeyBanner.waitFor({ state: "visible", timeout: 15_000 });
   await assertClosedOverlayToggleBesideError(
     page,
@@ -6419,7 +6429,7 @@ H,I,1`;
     firstPacket.getByRole("button", { name: "Save", exact: true }),
     `${label} Packet overlap rejection`,
   );
-  const packetBanner = page.getByTestId("mutation-error-banner");
+  const packetBanner = firstPacket.getByRole("alert");
   await packetBanner.waitFor({ state: "visible", timeout: 15_000 });
   await assertClosedOverlayToggleBesideError(
     page,
@@ -6605,7 +6615,7 @@ H,I,1`;
     `${label} Treemap invalid numeric no-write`,
   );
   const treemapError = treemapPanel.getByRole("alert");
-  const responsiveTreemapBanner = page.getByTestId("mutation-error-banner");
+  const responsiveTreemapBanner = treemapError;
   await expect(treemapError).toHaveText(
     "Treemap values must be finite numbers greater than zero.",
   );
@@ -6730,7 +6740,7 @@ H,I,1`;
     `${label} Venn invalid numeric no-write`,
   );
   const vennError = vennPanel.getByRole("alert");
-  const responsiveVennBanner = page.getByTestId("mutation-error-banner");
+  const responsiveVennBanner = vennError;
   await expect(vennError).toHaveText(
     "Venn base set values must be finite numbers greater than zero.",
   );
@@ -6807,7 +6817,7 @@ H,I,1`;
   await page.keyboard.type('-1');
   await assertAndClickBoardControl(page, wardleyAdd, `${label} Wardley invalid coordinate no-write`);
   const wardleyError = wardleyPanel.getByRole('alert');
-  const wardleyBanner = page.getByTestId('mutation-error-banner');
+  const wardleyBanner = wardleyError;
   await expect(wardleyError).toContainText('from 0 to 1');
   await expect(wardleyVisibility).toHaveValue('-1');
   await assertClosedOverlayToggleBesideError(page, wardleyBanner, `${label} Wardley mutation-error coexistence`);
@@ -7038,12 +7048,13 @@ async function assertMobileErrorBannerScrollability(page: Page, label: string, i
   const banner = page.getByTestId('parse-error-banner');
   await banner.waitFor({ state: 'visible', timeout: 15_000 });
   const behavior = await banner.evaluate((element) => {
-    const style = getComputedStyle(element);
+    const style = getComputedStyle(element.closest('.workspace-feedback-stack') ?? element);
+    const targetStyle = getComputedStyle(element);
     return {
       maxHeight: style.maxHeight,
       overflowY: style.overflowY,
-      pointerEvents: style.pointerEvents,
-      touchAction: style.touchAction,
+      pointerEvents: targetStyle.pointerEvents,
+      touchAction: targetStyle.touchAction,
     };
   });
   assert(behavior.maxHeight !== 'none' && (behavior.overflowY === 'auto' || behavior.overflowY === 'scroll')
@@ -7053,7 +7064,7 @@ async function assertMobileErrorBannerScrollability(page: Page, label: string, i
     const bannerElement = document.querySelector<HTMLElement>('[data-testid="parse-error-banner"]');
     const canvas = document.querySelector<HTMLElement>('[data-testid="diagram-canvas"]');
     if (!bannerElement || !canvas) return false;
-    const bannerBounds = bannerElement.getBoundingClientRect();
+    const bannerBounds = (bannerElement.closest('.workspace-feedback-stack') ?? bannerElement).getBoundingClientRect();
     const canvasBounds = canvas.getBoundingClientRect();
     const ratios = [0.04, 0.1, 0.5, 0.9, 0.96];
     for (const yRatio of ratios) {
@@ -7141,6 +7152,12 @@ async function assertOpenOverlayInspectorAboveCamera(page: Page, label: string):
 }
 
 async function assertClosedOverlayToggleBesideError(page: Page, banner: Locator, label: string): Promise<void> {
+  await scrollErControlIntoView(banner);
+  const recordError = await banner.evaluate((element) => element.classList.contains('semantic-editor-error'));
+  await expect(banner).toHaveAttribute('role', recordError ? 'alert' : 'status');
+  if (recordError) {
+    await expect(page.getByTestId('mutation-error-banner'), `${label} must not repeat the same local diagnostic globally`).toHaveCount(0);
+  }
   const toggle = page.getByRole('button', { name: 'Select tool', exact: true });
   await toggle.waitFor({ state: 'visible', timeout: 15_000 });
   await toggle.scrollIntoViewIfNeeded();
@@ -7351,52 +7368,66 @@ async function expectTouchCanvasControls(
     await addNode.click({ trial: true, timeout: 15_000 });
   }
   if (renderer === 'sequence') {
-    const canvas = page.getByTestId('canvas-first-workspace');
     const participantForm = page.locator('form.canvas-sequence-participant-form');
     const messageForm = page.locator('form.canvas-sequence-message-form:has([aria-label="Sequence message"])');
     const participantAdd = page.getByRole('button', { name: 'Add sequence participant', exact: true });
     const messageAdd = page.getByRole('button', { name: 'Add sequence message', exact: true });
-    if (label === 'mobile-landscape') {
-      // This compact editor is intentionally scrollable between fixed top and
-      // bottom canvas lanes. Each action must still become an unobscured 44px
-      // touch target through the normal in-panel scroll route.
-      for (const [target, targetLabel] of [[participantAdd, 'add participant'], [messageAdd, 'add message']] as const) {
-        await centerSequenceEditorTarget(page, target, `${label} sequence ${targetLabel}`);
-        await assertTouchTarget(page, target, `${label} sequence ${targetLabel}`);
-      }
-      await page.getByTestId('sequence-editor-controls').evaluate((element) => { element.scrollTop = 0; });
-    } else {
-      await Promise.all([
-        assertTouchTarget(page, participantAdd, `${label} sequence add participant`),
-        assertTouchTarget(page, messageAdd, `${label} sequence add message`),
-        assertContainedInViewport(page, participantForm, `${label} sequence participant form`),
-        assertContainedInViewport(page, messageForm, `${label} sequence message form`),
-      ]);
+    const editor = page.getByTestId('sequence-editor-controls');
+    await editor.evaluate((element) => { element.scrollTop = 0; });
+    const formsFit = await editor.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return [...element.querySelectorAll('form.canvas-sequence-participant-form, form.canvas-sequence-message-form:has([aria-label="Sequence message"])')]
+        .every((form) => {
+          const rect = form.getBoundingClientRect();
+          return rect.top >= bounds.top + element.clientTop - 0.5
+            && rect.bottom <= bounds.top + element.clientTop + element.clientHeight + 0.5;
+        });
+    });
+    // K09 has one bounded scroll owner, not two always-visible forms. Earlier
+    // field edits can leave it scrolled; reach each action sequentially so one
+    // target's scroll cannot invalidate another target's hit test.
+    for (const [target, targetLabel] of [[participantAdd, 'add participant'], [messageAdd, 'add message']] as const) {
+      if (!formsFit) await centerSequenceEditorTarget(page, target, `${label} sequence ${targetLabel}`);
+      await assertTouchTarget(page, target, `${label} sequence ${targetLabel}`);
+    }
+    await editor.evaluate((element) => { element.scrollTop = 0; });
+    if (formsFit) {
+      await assertContainedInViewport(page, participantForm, `${label} sequence participant form`);
+      await assertContainedInViewport(page, messageForm, `${label} sequence message form`);
     }
     await assertDocumentHasNoHorizontalOverflow(page);
-    const layout = await page.evaluate(() => {
+    await assertContainedInViewport(page, editor, `${label} sequence scroll panel`);
+    const layout = await editor.evaluate((element) => {
       const canvas = document.querySelector<HTMLElement>('[data-testid="canvas-first-workspace"]');
-      const forms = [...document.querySelectorAll<HTMLElement>('form.canvas-sequence-participant-form, form.canvas-sequence-message-form:has([aria-label="Sequence message"])')];
-      if (!canvas || forms.length !== 2) return null;
+      const camera = document.querySelector<HTMLElement>('[data-testid="canvas-controls-toolbar"]');
+      const footer = document.querySelector<HTMLElement>('[data-testid="workspace-footer"]');
+      const forms = [...element.querySelectorAll<HTMLElement>('form.canvas-sequence-participant-form, form.canvas-sequence-message-form:has([aria-label="Sequence message"])')];
+      if (!canvas || !camera || !footer || forms.length !== 2) return null;
       const canvasBounds = canvas.getBoundingClientRect();
-      return forms.map((form) => {
-        const bounds = form.getBoundingClientRect();
-        return {
-          bottom: bounds.bottom,
-          left: bounds.left,
-          right: bounds.right,
-          top: bounds.top,
-          withinCanvas: bounds.top >= canvasBounds.top - 0.5
-            && bounds.bottom <= canvasBounds.bottom + 0.5
-            && bounds.left >= canvasBounds.left - 0.5
-            && bounds.right <= canvasBounds.right + 0.5,
-        };
-      });
+      const panelBounds = element.getBoundingClientRect();
+      const panelLeft = panelBounds.left + element.clientLeft;
+      const panelRight = panelLeft + element.clientWidth;
+      return {
+        panel: panelBounds.toJSON(),
+        withinCanvas: panelBounds.top >= canvasBounds.top - 0.5
+          && panelBounds.bottom <= canvasBounds.bottom + 0.5
+          && panelBounds.left >= canvasBounds.left - 0.5
+          && panelBounds.right <= canvasBounds.right + 0.5,
+        cameraTop: camera.getBoundingClientRect().top,
+        footerTop: footer.getBoundingClientRect().top,
+        forms: forms.map((form) => {
+          const bounds = form.getBoundingClientRect();
+          return { left: bounds.left, right: bounds.right,
+            horizontallyContained: bounds.left >= panelLeft - 0.5 && bounds.right <= panelRight + 0.5 };
+        }),
+      };
     });
-    assert(layout !== null && layout.every((form) => form.withinCanvas),
-      `${label} sequence forms overflowed or overlapped workspace chrome: ${JSON.stringify(layout)}.`);
+    assert(layout !== null && layout.withinCanvas
+      && layout.panel.bottom <= Math.min(layout.cameraTop, layout.footerTop) - 1,
+    `${label} sequence scroll panel overflowed or overlapped workspace chrome: ${JSON.stringify(layout)}.`);
+    assert(layout.forms.every((form) => form.horizontallyContained),
+      `${label} sequence forms escaped their scroll panel horizontally: ${JSON.stringify(layout)}.`);
     if (label === 'mobile-landscape') {
-      const editor = page.getByTestId('sequence-editor-controls');
       let safeLane: { controlsTop: number; editorBottom: number; editorTop: number; footerTop?: number; safeTop: number; scrollPaddingBottom: string; scrollPaddingTop: string } | null = null;
       await expect.poll(async () => {
         safeLane = await page.getByTestId('diagram-canvas').evaluate((canvas) => {
@@ -7436,13 +7467,17 @@ async function expectTouchCanvasControls(
       const bounds = await editor.boundingBox();
       assert(bounds, `${label} sequence editor has no visible touch-scroll surface.`);
       const session = await page.context().newCDPSession(page);
+      // Keep the complete swipe inside the measured owner, even when the
+      // landscape lane is shorter than the former fixed 176px gesture.
       const touch = (y: number) => ({ force: 1, id: 1, radiusX: 1, radiusY: 1, x: bounds.x + (bounds.width / 2), y });
       try {
-        const start = bounds.y + bounds.height - 24;
+        const start = bounds.y + bounds.height - 12;
+        const distance = bounds.height - 24;
+        assert(distance > 0, `${label} sequence editor has no in-panel swipe lane.`);
         await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start)], type: 'touchStart' });
-        await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - 48)], type: 'touchMove' });
-        await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - 112)], type: 'touchMove' });
-        await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - 176)], type: 'touchMove' });
+        for (const progress of [0.3, 0.65, 1]) {
+          await session.send('Input.dispatchTouchEvent', { touchPoints: [touch(start - (distance * progress))], type: 'touchMove' });
+        }
         await session.send('Input.dispatchTouchEvent', { touchPoints: [], type: 'touchEnd' });
       } finally {
         await session.detach();
@@ -7464,7 +7499,7 @@ async function expectTouchCanvasControls(
         intervals: [50],
       }).toBeGreaterThanOrEqual(3);
       const activation = page.getByRole('button', { name: 'Add sequence activation', exact: true });
-      await activation.scrollIntoViewIfNeeded();
+      await centerSequenceEditorTarget(page, activation, `${label} sequence lower activation control`);
       await tapTarget(page, activation, `${label} sequence lower activation control`);
       await editor.evaluate((element) => { element.scrollTop = 0; });
     }
@@ -7640,6 +7675,8 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
     const tabCountBeforeDelete = await page.getByRole('tab').count();
     const deleteTab = page.getByRole('button', { name: 'Delete Phone scratchpad', exact: true });
     await tapTarget(page, deleteTab, `${label} delete tab`);
+    const deletion = page.getByRole('dialog', { name: /^Delete “Phone scratchpad”/ });
+    await deletion.getByRole('button', { name: 'Delete diagram', exact: true }).click();
     await page.waitForFunction((count) => document.querySelectorAll('[role="tab"]').length === count - 1, tabCountBeforeDelete, { timeout: 15_000 });
     await expect(page.getByRole('tab', { name: 'Phone scratchpad', exact: true })).toHaveCount(0);
     await expectTouchLabelStatus(page, 'Delete', `${label} delete tab`);
@@ -7701,7 +7738,7 @@ async function expectPhoneLiveCodingWorkspace(page: Page, label: string, diagram
   const sourceFlyout = page.getByTestId('source-flyout');
   const sourceParseStatus = page.getByTestId('source-parse-status');
   await sourceParseStatus.waitFor({ state: 'visible', timeout: 15_000 });
-  await expect(sourceParseStatus).toContainText('Preview kept on last valid diagram');
+  await expect(sourceParseStatus).toContainText('Showing the last valid preview');
   await expect(sourceParseStatus.locator('span')).not.toHaveText('');
   await expect(page.getByTestId('parse-error-banner')).toHaveCount(0);
   await assertContainedInViewport(page, sourceFlyout, `${label} invalid Mermaid source flyout`);
@@ -8509,7 +8546,7 @@ async function expectLocalFirstWorkspaceEntry(browser: BrowserHarness, baseUrl: 
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   const openingLoader = page.locator('[data-testid="local-workspace-handoff-loader"], [data-testid="local-workspace-loader"]');
   await openingLoader.waitFor({ state: 'visible', timeout: 5_000 });
-  await expect(openingLoader).toContainText(/Opening your workspace|Restoring work saved on this device|Preparing the canvas/u);
+  await expect(openingLoader).toContainText(/Opening your workspace|Restoring work saved on this device|Preparing your canvas/u);
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
   await expect(page.getByTestId('live-save-status')).toHaveText(/Saved on this device/u);
   assert(new URL(page.url()).pathname === '/', `Local-first root unexpectedly navigated away: ${page.url()}.`);
@@ -8519,6 +8556,8 @@ async function expectLocalFirstWorkspaceEntry(browser: BrowserHarness, baseUrl: 
 
   await replaceSource(page, localSource);
   await waitForSource(page, localSource);
+  // Await the real IndexedDB commit acknowledgement, not a timing sleep.
+  await expect(page.getByTestId('live-save-status')).toHaveText('Saved on this device');
 
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByTestId('canvas-first-workspace').waitFor({ state: 'visible', timeout: 15_000 });
@@ -8649,12 +8688,13 @@ async function validateWorkspaceUx(): Promise<void> {
   const results: string[] = [];
   const mobilePinchResiduals: string[] = [];
   const slice = process.env.ARIELCHARTS_E2E_SLICE;
-  if (slice !== undefined && slice !== 'history' && slice !== 'cynefin-history' && slice !== 'wheel' && slice !== 'toolbar' && slice !== 'landscape' && slice !== 'mobile-390' && slice !== 'mobile-320') {
+  if (slice !== undefined && slice !== 'history' && slice !== 'cynefin-history' && slice !== 'wheel' && slice !== 'toolbar' && slice !== 'landscape' && slice !== 'mobile-390' && slice !== 'mobile-320' && slice !== 'semantic') {
     throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history", "cynefin-history", "wheel", "toolbar", "landscape", "mobile-390", "mobile-320", or no slice.`);
   }
   await withOwnedServices(async ({ baseUrl, mcpUrl, serverUrl }) => {
     const browser = await launchBrowserHarness();
     try {
+      await runHitTargetRegression(browser.browser);
       await expectLocalFirstWorkspaceEntry(browser, baseUrl, serverUrl);
       record(results, 'root shows state-driven local loading, makes no server request or WebSocket, persists an IndexedDB edit across reload with a saved-on-device status, and starts one protected online promotion containing that edit only after explicit share');
       await expectWorkspaceOnboarding(browser, baseUrl, serverUrl);
@@ -8663,6 +8703,23 @@ async function validateWorkspaceUx(): Promise<void> {
       const roomAccess = await exchangeRoomAccess(serverUrl, baseUrl, room);
       const sessionId = room.sessionId;
       const mcp = new ModernMcpClient(mcpUrl, baseUrl, room);
+      if (slice === 'semantic') {
+        const { page: semanticPage } = await browser.newPage(DESKTOP_VIEWPORT);
+        await visitWorkspace(semanticPage, baseUrl, sessionId, room.roomKey);
+        await expectErSemanticEditor(semanticPage);
+        await expectRelationshipArchitectureEditors(semanticPage);
+        await expectTemporalSemanticEditors(semanticPage);
+        await expectBoardSemanticEditors(semanticPage);
+        await expectHierarchySemanticEditors(semanticPage);
+        await expectRailroadSemanticEditor(semanticPage);
+        await expectNumericSemanticEditors(semanticPage);
+        await expectFlowSemanticEditors(semanticPage);
+        await expectCynefinSemanticEditor(semanticPage);
+        await expectTreemapAndVennSemanticEditors(semanticPage, mcp, mcpUrl, baseUrl, roomAccess, sessionId);
+        await expectWardleySemanticEditor(semanticPage, mcp, mcpUrl, baseUrl, roomAccess, sessionId);
+        record(results, 'all existing semantic-family behavioral journeys with shared labeled records');
+        return;
+      }
       if (slice === 'history') {
         const { page: seedPage } = await browser.newPage(DESKTOP_VIEWPORT);
         await visitWorkspace(seedPage, baseUrl, sessionId, room.roomKey);
@@ -8804,7 +8861,8 @@ async function validateWorkspaceUx(): Promise<void> {
       record(results, 'GitHub Mermaid copy fence, clipboard content, and source preservation');
       const diagramName = await expectTabKeyboardAndRename(page, blankDiagramName);
       record(results, 'blank tab create, rename, and keyboard navigation');
-      await expectOverlaySceneFoundation(page, diagramName);
+      try { await expectOverlaySceneFoundation(page, diagramName); }
+      catch (error) { await saveScreenshot(page, 'journey-overlay-foundation-failure'); throw error; }
       record(results, 'durable overlay create, move, order, clipboard, delete, undo, history restore, tab isolation, and SVG/React Flow camera placement');
       await expectCanvasContextMenu(page, 'desktop');
       record(results, 'canvas right-click menu for empty canvas, overlay objects, and Mermaid nodes with native right-click preserved in the source editor');

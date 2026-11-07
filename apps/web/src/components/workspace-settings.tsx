@@ -1,5 +1,7 @@
 'use client';
 
+import { WorkspaceButton } from './workspace-controls';
+
 import { Settings } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ConnectionState } from '../lib/connection-state';
@@ -36,7 +38,7 @@ export function getSettingsDisplayName(displayName: string): string {
 
 export function getConnectionStatusLabel(connectionState: ConnectionState, agentCount: number): string {
   if (agentCount > 0) {
-    return agentCount === 1 ? '1 MCP agent working' : `${agentCount} MCP agents working`;
+    return agentCount === 1 ? '1 MCP agent in this workspace' : `${agentCount} MCP agents in this workspace`;
   }
 
   switch (connectionState) {
@@ -233,7 +235,7 @@ export function WorkspaceSettings({
 
   return (
     <div className="workspace-settings">
-      <button
+      <WorkspaceButton
         aria-controls="workspace-settings-dialog"
         aria-expanded={isOpen}
         aria-haspopup="dialog"
@@ -249,7 +251,7 @@ export function WorkspaceSettings({
         type="button"
       >
         <Settings aria-hidden="true" size={18} />
-      </button>
+      </WorkspaceButton>
 
       {isOpen ? (
         <div
@@ -263,39 +265,39 @@ export function WorkspaceSettings({
         >
           <div className="workspace-settings-heading">
             <h2 id="workspace-settings-title">Settings</h2>
-            <button className="workspace-settings-close" onClick={() => { close(); }} type="button">Close</button>
+            <WorkspaceButton className="workspace-settings-close" onClick={() => { close(); }} type="button">Close</WorkspaceButton>
           </div>
 
           <form className="workspace-settings-section" onSubmit={handleSubmit}>
             <h3>You</h3>
             <label className="workspace-settings-label" htmlFor="workspace-display-name">Display name</label>
             <input
-              className="workspace-settings-name-input"
+              className="workspace-settings-name-input workspace-control-input"
               id="workspace-display-name"
               onChange={(event) => { setDraftName(event.target.value); }}
               ref={displayNameInputRef}
               value={draftName}
             />
             <div className="workspace-settings-actions">
-              <button onClick={() => { setDraftName(displayName); close(); }} type="button">Cancel</button>
-              <button type="submit">Save name</button>
+              <WorkspaceButton onClick={() => { setDraftName(displayName); close(); }} type="button">Cancel</WorkspaceButton>
+              <WorkspaceButton type="submit">Save name</WorkspaceButton>
             </div>
           </form>
 
           <section aria-labelledby="workspace-agent-connection-heading" className="workspace-settings-section">
             <h3 id="workspace-agent-connection-heading">Agent connection</h3>
-            <p className="workspace-settings-status" data-connection-state={connectionState} data-testid="workspace-agent-status">
+            <p className="workspace-settings-status" data-connection-state={workspaceMode === 'local' ? 'local' : connectionState} data-testid="workspace-agent-status">
               {workspaceMode === 'local' ? 'Available after you go online' : getConnectionStatusLabel(connectionState, agentCount)}
             </p>
-            <button className="workspace-settings-connect" disabled={publishing} onClick={handleConnectAgent} type="button">
-              {workspaceMode === 'local' ? publishing ? 'Publishing…' : 'Go online to connect agent' : getConnectionActionLabel(agentCount)}
-            </button>
+            <WorkspaceButton className="workspace-settings-connect" disabled={publishing} onClick={handleConnectAgent} type="button">
+              {workspaceMode === 'local' ? publishing ? 'Going online…' : 'Go online to connect agent' : getConnectionActionLabel(agentCount)}
+            </WorkspaceButton>
           </section>
 
           {workspaceMode === 'local' ? (
             <section aria-labelledby="workspace-local-storage-heading" className="workspace-settings-section">
               <h3 id="workspace-local-storage-heading">Workspace storage</h3>
-              <p className="workspace-settings-status">Saved on this device. Sharing, presence, revision history, and MCP begin only after you go online.</p>
+              <p className="workspace-settings-status">This workspace uses this device’s storage. Go online to share, use revision history, or connect an MCP agent.</p>
             </section>
           ) : (
           <section aria-labelledby="workspace-room-access-heading" className="workspace-settings-section">
@@ -304,9 +306,9 @@ export function WorkspaceSettings({
               <div className="workspace-room-key">
                 <span>Pasteable room key</span>
                 <code>{roomKey}</code>
-                <button onClick={() => { void handleCopyRoomKey(); }} type="button">
+                <WorkspaceButton onClick={() => { void handleCopyRoomKey(); }} type="button">
                   {keyCopyState === 'copied' ? 'Copied' : keyCopyState === 'error' ? 'Copy failed' : 'Copy key'}
-                </button>
+                </WorkspaceButton>
               </div>
             ) : (
               <p className="workspace-settings-status">The shareable key is not available after a cookie-only reload. Reset it to share this room again.</p>
@@ -315,16 +317,16 @@ export function WorkspaceSettings({
               <div className="workspace-key-reset-confirm" role="alert">
                 <p>Resetting immediately revokes every other browser and MCP agent. They will need the replacement key.</p>
                 <div className="workspace-settings-actions">
-                  <button disabled={keyResetPending} onClick={() => { setConfirmKeyReset(false); }} type="button">Cancel</button>
-                  <button disabled={keyResetPending} onClick={() => { void handleResetRoomKey(); }} type="button">
+                  <WorkspaceButton disabled={keyResetPending} onClick={() => { setConfirmKeyReset(false); }} type="button">Cancel</WorkspaceButton>
+                  <WorkspaceButton disabled={keyResetPending} onClick={() => { void handleResetRoomKey(); }} type="button">
                     {keyResetPending ? 'Resetting…' : 'Reset and revoke'}
-                  </button>
+                  </WorkspaceButton>
                 </div>
               </div>
             ) : (
-              <button className="workspace-settings-reset-key" onClick={() => { setConfirmKeyReset(true); setKeyResetMessage(null); }} type="button">
+              <WorkspaceButton className="workspace-settings-reset-key" onClick={() => { setConfirmKeyReset(true); setKeyResetMessage(null); }} type="button">
                 Reset room key
-              </button>
+              </WorkspaceButton>
             )}
             <p aria-live="polite" className="workspace-settings-status">{keyResetMessage ?? ''}</p>
           </section>
@@ -335,6 +337,7 @@ export function WorkspaceSettings({
             {THEME_OPTIONS.map((option) => (
               <label className="workspace-settings-theme-option" key={option.value}>
                 <input
+                  className="workspace-control-input"
                   checked={preference === option.value}
                   name="workspace-theme-preference"
                   onChange={() => { setPreference(option.value); }}

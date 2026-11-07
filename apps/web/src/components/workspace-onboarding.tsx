@@ -1,3 +1,4 @@
+import { WorkspaceButton } from './workspace-controls';
 import { FileText, Highlighter, Layers3, PenLine, StickyNote, X } from 'lucide-react';
 import React, { useEffect } from 'react';
 import { isHeaderOnlyFlowchartSource } from '../lib/diagram-mutations';
@@ -102,17 +103,17 @@ export function WorkspaceOnboarding({ onAddStickyNote, onBrowseTemplates, onClos
       <div className="workspace-onboarding-heading">
         <div>
           <p>New canvas</p>
-          <h2 id="workspace-onboarding-title">Start with Mermaid, then add collaboration layers.</h2>
+          <h2 id="workspace-onboarding-title">Start a diagram</h2>
         </div>
-        <button aria-label="Close getting started" className="workspace-onboarding-close" onClick={onClose} type="button"><X aria-hidden="true" size={16} /></button>
+        <WorkspaceButton aria-label="Close getting started" className="workspace-onboarding-close" onClick={onClose} type="button"><X aria-hidden="true" size={16} /></WorkspaceButton>
       </div>
       <div className="workspace-onboarding-actions">
-        <button onClick={onStartTemplate} type="button"><FileText aria-hidden="true" size={17} /><span><strong>Use a service flow</strong><small>Start from real Mermaid source.</small></span></button>
-        <button onClick={onAddStickyNote} type="button"><StickyNote aria-hidden="true" size={17} /><span><strong>Add a sticky note</strong><small>Type private canvas context.</small></span></button>
-        <button onClick={onDraw} type="button"><PenLine aria-hidden="true" size={17} /><span><strong>Draw on the canvas</strong><small>Switch to the free-draw pen.</small></span></button>
-        <button onClick={onBrowseTemplates} type="button"><Layers3 aria-hidden="true" size={17} /><span><strong>Browse Mermaid templates</strong><small>Explore every diagram family.</small></span></button>
+        <WorkspaceButton onClick={onStartTemplate} type="button"><FileText aria-hidden="true" size={17} /><span><strong>Use a service flow</strong></span></WorkspaceButton>
+        <WorkspaceButton onClick={onAddStickyNote} type="button"><StickyNote aria-hidden="true" size={17} /><span><strong>Add a sticky note</strong></span></WorkspaceButton>
+        <WorkspaceButton onClick={onDraw} type="button"><PenLine aria-hidden="true" size={17} /><span><strong>Draw on the canvas</strong></span></WorkspaceButton>
+        <WorkspaceButton onClick={onBrowseTemplates} type="button"><Layers3 aria-hidden="true" size={17} /><span><strong>Browse Mermaid templates</strong></span></WorkspaceButton>
       </div>
-      <p className="workspace-onboarding-note"><Highlighter aria-hidden="true" size={14} /> Mermaid stays portable; notes and ink stay with this collaborative workspace.</p>
+      <p className="workspace-onboarding-note"><Highlighter aria-hidden="true" size={14} /> Notes and drawings stay with this workspace.</p>
     </aside>
   );
 }

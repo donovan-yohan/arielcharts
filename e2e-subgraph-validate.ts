@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { screenshotPath } from './e2e/support/browser';
 import { chromium, type CDPSession, type Locator, type Page } from '@playwright/test';
 import { getCameraPerturbationKey } from './e2e/support/canvas-camera';
 import { ModernMcpClient } from './e2e/support/mcp';
@@ -203,7 +204,7 @@ async function ensureSourceClosed(page: Page): Promise<void> {
 async function replaceSource(page: Page, source: string): Promise<void> {
   const editor = await ensureSourceOpen(page);
   await editor.click();
-  await page.keyboard.press('Control+A');
+  await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.insertText(source);
 }
 
@@ -516,7 +517,7 @@ async function validate({ baseUrl, mcpUrl }: E2eEndpoints) {
     assert(Math.abs(historyFitOffset.x) <= 16 && Math.abs(historyFitOffset.y) <= 16,
       `Read-only history Fit centered stale Mermaid cluster geometry: ${JSON.stringify(historyFitOffset)}`);
 
-    await page.screenshot({ path: '/tmp/arielcharts-subgraph-editing.png' });
+    await page.screenshot({ path: screenshotPath('arielcharts-subgraph-editing.png') });
     console.log(`subgraph review gates PASS mouse=${JSON.stringify(deltas)} boundaryTouch=${JSON.stringify(boundaryTouchDeltas)} headerTouch=${JSON.stringify(headerTouchDeltas)} fitOffset=${JSON.stringify(fitOffset)} historyFitOffset=${JSON.stringify(historyFitOffset)} keys=${Object.keys(positions).sort().join(',')}`);
   } finally {
     durableObserver.destroy();

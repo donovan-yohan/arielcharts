@@ -18,6 +18,10 @@ import { useTheme } from './theme-provider';
 import { WorkspaceFlyouts } from './workspace-flyouts';
 import { getCompactCollaboratorOverflowCount, WorkspaceFooter } from './workspace-footer';
 import { WorkspaceSettings } from './workspace-settings';
+import { observeLocalWorkspaceDurability, type LocalWorkspaceSaveState } from '../lib/local-workspace-durability';
+import { captureWorkspaceConsentScope, isWorkspaceConsentScopeCurrent, type WorkspaceConsentScope } from '../lib/workspace-consent';
+import { WorkspaceFeedbackStack } from './workspace-feedback-stack';
+import { WorkspaceButton, WorkspaceConfirmation } from './workspace-controls';
 import { WorkspaceExportMenu } from './workspace-export-menu';
 import { WorkspaceTabStrip, type WorkspaceDiagramTab } from './workspace-tab-strip';
 import {
@@ -417,7 +421,7 @@ function countConnectedAgents(participants: Participant[]): number {
 }
 
 export function getAgentCountLabel(agentCount: number): string {
-  return `${agentCount} MCP agent${agentCount === 1 ? '' : 's'} connected`;
+  return `${agentCount} MCP agent${agentCount === 1 ? '' : 's'} in this workspace`;
 }
 
 export function getModalWrappedFocusIndex(
@@ -455,13 +459,13 @@ function describeActivityCompact(event: ActivityEvent): string {
 function getCompactConnectionLabel(connectionState: ConnectionState): string {
   switch (connectionState) {
     case 'connected':
-      return 'synced';
+      return 'Connected';
     case 'connecting':
-      return 'connecting';
+      return 'Connecting…';
     case 'reconnecting':
-      return 'reconnecting';
+      return 'Reconnecting…';
     case 'disconnected':
-      return 'offline';
+      return 'Offline';
   }
 }
 
@@ -681,6 +685,8 @@ export function SessionWorkspace({
   const [mermaidText, setMermaidText] = useState('');
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [preview, setPreview] = useState<DiagramPreview | null>(null);
+  const [localSaveState, setLocalSaveState] = useState<LocalWorkspaceSaveState>('saving');
+  const [renderPending, setRenderPending] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [shareCopyState, setShareCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
@@ -697,6 +703,8 @@ export function SessionWorkspace({
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
   const [renamingDiagramId, setRenamingDiagramId] = useState<string | null>(null);
   const [diagramNameDraft, setDiagramNameDraft] = useState('');
+  const [diagramNameError, setDiagramNameError] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<{ id: string; name: string; scope: WorkspaceConsentScope } | null>(null);
   const [openFlyout, setOpenFlyout] = useState<WorkspaceFlyout>(null);
   const [sourceFlyoutWidth, setSourceFlyoutWidth] = useState(SOURCE_FLYOUT_DEFAULT_WIDTH);
   const [activityFlyoutView, setActivityFlyoutView] = useState<ActivityFlyoutView>('history');
@@ -1247,6 +1255,7 @@ export function SessionWorkspace({
       return undefined;
     }
     localPersistenceRef.current = persistence;
+    const stopLocalDurability = persistence ? observeLocalWorkspaceDurability(doc, persistence, setLocalSaveState) : () => {};
     const provider = workspaceMode === 'online' ? new WebsocketProvider(getWebsocketServerUrl(), sessionId, doc, {
       maxBackoffTime: 2_500,
       resyncInterval: 10_000,
@@ -1260,6 +1269,7 @@ export function SessionWorkspace({
     let dispose = () => {
       awareness.setLocalState(null);
       provider?.destroy();
+      stopLocalDurability();
       persistence?.destroy();
       if (localPersistenceRef.current === persistence) localPersistenceRef.current = null;
       doc.destroy();
@@ -1392,6 +1402,7 @@ export function SessionWorkspace({
       presenceMap.unobserve(syncParticipants);
       awareness.setLocalState(null);
       provider?.destroy();
+      stopLocalDurability();
       persistence?.destroy();
       if (localPersistenceRef.current === persistence) localPersistenceRef.current = null;
       doc.destroy();
@@ -1609,6 +1620,7 @@ export function SessionWorkspace({
     const source = historyPreview?.mermaid_text ?? mermaidText;
     const renderToken = diagramId ? { diagramId, previewKey, sequence: renderId, source } : null;
     activeRenderRef.current = renderToken;
+    setRenderPending(true);
 
     const isCurrentRender = () => (
       renderToken !== null
@@ -1620,6 +1632,7 @@ export function SessionWorkspace({
 
     const renderPreview = async () => {
       if (!source.trim()) {
+        if (isCurrentRender()) setRenderPending(false);
         if (diagramId && isCurrentRender()) {
           setSelectedNodeIds((current) => reconcileSelectionForAcceptedRender(
             current,
@@ -1704,7 +1717,7 @@ export function SessionWorkspace({
       }
     };
 
-    void renderPreview();
+    void renderPreview().finally(() => { if (isCurrentRender()) setRenderPending(false); });
   }, [activeDiagramId, applySourceLayoutPolicy, historyPreview, mermaidText, resolvedTheme, sessionId]);
 
   useEffect(() => {
@@ -2047,17 +2060,17 @@ export function SessionWorkspace({
   const overflowCollaboratorCount = getCompactCollaboratorOverflowCount(activeParticipantCount);
   const connectedAgentCount = countConnectedAgents(participants);
   const isLocalWorkspace = workspaceMode === 'local';
-  const editorStatusLabel = isLocalWorkspace ? 'saved on device' : getCompactConnectionLabel(connectionState);
+  const editorStatusLabel = isLocalWorkspace ? 'On this device' : getCompactConnectionLabel(connectionState);
   const activityStatusLabel = isLocalWorkspace
     ? 'saved on this device'
     : `${activeParticipantCount} collaborator${activeParticipantCount === 1 ? '' : 's'}`;
   const saveStatusLabel = isLocalWorkspace
-    ? 'Saved on this device'
+    ? localSaveState === 'saved' ? 'Saved on this device' : localSaveState === 'saving' ? 'Saving on this device…' : 'Not saved on this device'
     : connectionState === 'connected'
-    ? 'All changes saved'
+    ? 'Connected'
     : connectionState === 'disconnected'
       ? 'Offline'
-      : 'Saving changes…';
+      : connectionState === 'reconnecting' ? 'Reconnecting…' : 'Connecting…';
   const isFlowchart = canUseFlowchartControls(renderedMermaidText, renderedPreview);
   const isSequence = canUseSequenceControls(renderedMermaidText, renderedPreview);
   useEffect(() => {
@@ -2155,9 +2168,9 @@ export function SessionWorkspace({
       renderedMermaidText,
     );
   const shareButtonLabel = !roomKey
-    ? 'reset key to share'
-    : shareCopyState === 'copied' ? 'copied' : shareCopyState === 'error' ? 'copy failed' : 'share';
-  const promptCopyLabel = promptCopyState === 'copied' ? 'copied' : promptCopyState === 'error' ? 'copy failed' : 'copy';
+    ? 'Reset key to share'
+    : shareCopyState === 'copied' ? 'Copied' : shareCopyState === 'error' ? 'Copy failed' : 'Share';
+  const promptCopyLabel = promptCopyState === 'copied' ? 'Copied' : promptCopyState === 'error' ? 'Copy failed' : 'Copy';
 
   const saveDisplayName = useCallback((displayName: string) => {
     const currentIdentity = currentIdentityRef.current;
@@ -2467,13 +2480,14 @@ export function SessionWorkspace({
   const commitDiagramName = useCallback(() => {
     if (!collaboration || !renamingDiagramId) return;
     const normalizedName = normalizeDiagramName(diagramNameDraft);
-    const current = diagrams.find((diagram) => diagram.id === renamingDiagramId);
-    const isDuplicate = diagrams.some((diagram) => diagram.id !== renamingDiagramId && getDiagramNameKey(diagram.name) === getDiagramNameKey(normalizedName));
-    if (!normalizedName || isDuplicate || !current) {
-      setRenamingDiagramId(null);
-      setDiagramNameDraft('');
+    const currentTabs = readDiagramTabs(collaboration.diagramsMap, collaboration.diagramOrder);
+    const current = currentTabs.find((diagram) => diagram.id === renamingDiagramId);
+    const isDuplicate = currentTabs.some((diagram) => diagram.id !== renamingDiagramId && getDiagramNameKey(diagram.name) === getDiagramNameKey(normalizedName));
+    if (!normalizedName || isDuplicate || !current || normalizedName.length > 120) {
+      setDiagramNameError(!normalizedName ? 'Enter a diagram name.' : isDuplicate ? 'A diagram with this name already exists.' : !current ? 'This diagram no longer exists.' : 'Use 120 characters or fewer.');
       return;
     }
+    setDiagramNameError(null);
     collaboration.doc.transact(() => {
       collaboration.diagramsMap.get(renamingDiagramId)?.set(DIAGRAM_NAME_KEY, normalizedName);
     }, 'tab-rename');
@@ -2492,10 +2506,11 @@ export function SessionWorkspace({
       if (orderIndex >= 0) collaboration.diagramOrder.delete(orderIndex, 1);
     }, 'tab-delete');
     if (activeDiagramId === diagramId) {
-      setActiveDiagramId(diagrams[index + 1]?.id ?? diagrams[index - 1]?.id ?? null);
+      const adjacentId = diagrams[index + 1]?.id ?? diagrams[index - 1]?.id;
+      if (adjacentId) focusDiagramTab(adjacentId);
     }
     if (deleted) addActivityRef.current?.('deleted', `Deleted ${deleted.name}`, diagramId);
-  }, [activeDiagramId, collaboration, diagrams]);
+  }, [activeDiagramId, collaboration, diagrams, focusDiagramTab]);
 
   const handleTouchLabelPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (event.pointerType !== 'touch' || !(event.target instanceof Element)) {
@@ -2557,7 +2572,6 @@ export function SessionWorkspace({
   return (
     <main
       className="workspace-shell"
-      inert={promotionState === 'publishing' ? true : undefined}
       onPointerCancelCapture={handleTouchLabelPointerRelease}
       onPointerDownCapture={handleTouchLabelPointerDown}
       onPointerUpCapture={handleTouchLabelPointerRelease}
@@ -2612,7 +2626,7 @@ export function SessionWorkspace({
               <span aria-label={`${overflowCollaboratorCount} more collaborators`} className="workspace-collaborator-overflow" data-testid="topbar-collaborator-overflow">+{overflowCollaboratorCount}</span>
             ) : null}
           </div>
-          <button
+          <WorkspaceButton
             aria-label={isLocalWorkspace ? 'Go online and share this workspace' : roomKey ? 'Copy private room link' : 'Room key unavailable. Reset it in Settings to share'}
             className="workspace-share-button workspace-touch-label"
             data-touch-label={isLocalWorkspace ? 'Go online & share' : roomKey ? 'Copy link' : 'Room key unavailable'}
@@ -2623,11 +2637,13 @@ export function SessionWorkspace({
             onClick={isLocalWorkspace ? () => { void promoteLocalWorkspace(); } : handleCopyShareUrl}
           >
             {isLocalWorkspace || roomKey ? <Share2 aria-hidden="true" size={15} /> : <KeyRound aria-hidden="true" size={15} />}
-            <span>{isLocalWorkspace ? promotionState === 'publishing' ? 'Publishing…' : 'Go online & share' : shareButtonLabel}</span>
+            <span>{isLocalWorkspace ? promotionState === 'publishing' ? 'Going online…' : 'Go online and share' : shareButtonLabel}</span>
             {shareCopyState === 'copied' ? <Check aria-hidden="true" size={13} /> : null}
-          </button>
+          </WorkspaceButton>
           <WorkspaceExportMenu
             activeDiagramName={getActiveDiagramName(diagrams, activeDiagramId)}
+            canvasExportReady={!renderPending && !historyPreview && !renderError && !zenUmlPresentation.loading && preview?.diagramId === activeDiagramId && preview?.source === mermaidText && Boolean(preview?.svg)}
+            canvasExportReason={historyPreview ? 'Leave history preview to export the canvas.' : renderError ? 'Fix Mermaid errors to export the canvas.' : 'Wait for the preview to finish.'}
             mermaidSource={mermaidText}
             mermaidSvg={historyPreview ? '' : (preview?.svg ?? '')}
             onImported={() => {
@@ -2662,14 +2678,15 @@ export function SessionWorkspace({
         activeDiagramId={activeDiagramId}
         diagramModeLabel={diagramModeLabel}
         diagramNameDraft={diagramNameDraft}
+        diagramNameError={diagramNameError}
         diagrams={diagrams}
         onActiveDiagramChange={(diagramId) => { presenterFollow.stopFollowing(); setActiveDiagramId(diagramId); }}
         onCommitDiagramName={commitDiagramName}
         onCreateDiagram={createDiagramFromTemplate}
-        onDeleteDiagram={deleteActiveDiagram}
+        onDeleteDiagram={(id) => { if (!collaboration) return; const diagram = diagrams.find((item) => item.id === id); if (diagram) setDeleteCandidate({ id, name: diagram.name, scope: captureWorkspaceConsentScope(collaboration.doc, sessionId) }); }}
         onDiagramKeyDown={handleDiagramTabKeyDown}
-        onDiagramNameDraftChange={setDiagramNameDraft}
-        onRenameDiagram={(diagram) => { setRenamingDiagramId(diagram.id); setDiagramNameDraft(diagram.name); }}
+        onDiagramNameDraftChange={(value) => { setDiagramNameDraft(value); setDiagramNameError(null); }}
+        onRenameDiagram={(diagram) => { setDiagramNameError(null); setRenamingDiagramId(diagram.id); setDiagramNameDraft(diagram.name); }}
         onRenameDismiss={() => { setRenamingDiagramId(null); setDiagramNameDraft(''); }}
         onSourceToggle={(origin) => { toggleFlyout('source', origin); }}
         onTemplatePickerOpenChange={setTemplatePickerOpen}
@@ -2685,28 +2702,30 @@ export function SessionWorkspace({
 
       <section aria-labelledby={activeDiagramId ? `diagram-tab-${activeDiagramId}` : undefined} className="workspace-main" data-testid="canvas-first-workspace" id="diagram-workspace" role="tabpanel">
         <article data-testid="preview-root" className="workspace-pane workspace-diagram-pane">
+          {(zenUmlPresentation.loading || renderError || historyPreviewError || mutationError) ? <WorkspaceFeedbackStack mutationError={mutationError}>
           {zenUmlPresentation.loading && openFlyout !== 'source' ? (
             <div data-testid="zenuml-loading-banner" className="error-banner is-loading" role="status">
-              <strong>loading ZenUML renderer</strong>
-              <span>The bundled plugin is loading for this diagram only.</span>
+              <strong>Loading ZenUML…</strong>
+
             </div>
           ) : null}
           {(renderError || historyPreviewError)
             && !zenUmlPresentation.loading
             && openFlyout !== 'source' ? (
             <div data-testid="parse-error-banner" className="error-banner" role="status">
-              <strong>preview kept on last valid diagram</strong>
+              <strong>{historyPreviewError ? 'Historical preview unavailable' : preview?.diagramId === activeDiagramId && preview.svg ? 'Showing the last valid preview' : 'Preview unavailable'}</strong>
               <span>{historyPreviewError ?? renderError}</span>
             </div>
           ) : null}
 
           {mutationError ? (
             <div data-testid="mutation-error-banner" className="error-banner" role="status">
-              <strong>diagram update not applied</strong>
+              <strong>Diagram update not applied</strong>
               <span>{mutationError}</span>
             </div>
           ) : null}
 
+          </WorkspaceFeedbackStack> : null}
           {onboardingVisible ? <WorkspaceOnboarding
             onAddStickyNote={() => { startOnboardingOverlayAction('sticky'); }}
             onBrowseTemplates={browseOnboardingTemplates}
@@ -2783,6 +2802,8 @@ export function SessionWorkspace({
             nodePositions={renderedNodePositions}
             overlay={overlayController && activeDiagramId ? {
               diagramId: activeDiagramId,
+              historyAvailable: !isLocalWorkspace,
+              diagramName: getActiveDiagramName(diagrams, activeDiagramId) ?? undefined,
               sessionId,
               scene: overlayController.scene,
               readOnly: historyPreview !== null,
@@ -3100,49 +3121,49 @@ export function SessionWorkspace({
             onMoveRailroadRule={(identity, direction) => { mutateCanvasSource((source) => moveRailroadRule(source, identity, direction), 'Reordered Railroad rules'); }}
             onEditPieTitle={(title) => { mutateCanvasSource((source) => editPieTitle(source, title), 'Updated the Pie title'); }}
             onSetPieShowData={(showData) => { mutateCanvasSource((source) => setPieShowData(source, showData), 'Updated Pie value labels'); }}
-            onAddPieSlice={(slice) => mutateCanvasSource((source) => addPieSlice(source, slice), 'Added a Pie slice')}
-            onEditPieSlice={(identity, patch) => mutateCanvasSource((source) => editPieSlice(source, identity, patch), 'Edited a Pie slice')}
+            onAddPieSlice={(slice) => mutateCanvasSourceDetailed((source) => addPieSlice(source, slice), 'Added a Pie slice')}
+            onEditPieSlice={(identity, patch) => mutateCanvasSourceDetailed((source) => editPieSlice(source, identity, patch), 'Edited a Pie slice')}
             onDeletePieSlice={(identity) => { mutateCanvasSource((source) => deletePieSlice(source, identity), 'Deleted a Pie slice'); }}
             onMovePieSlice={(identity, direction) => { mutateCanvasSource((source) => movePieSlice(source, identity, direction), 'Reordered Pie slices'); }}
             onEditQuadrantTitle={(title) => { mutateCanvasSource((source) => editQuadrantTitle(source, title), 'Updated the Quadrant title'); }}
             onSetQuadrantAxis={(axis, value) => { mutateCanvasSource((source) => setQuadrantAxis(source, axis, value), 'Updated a Quadrant axis'); }}
             onSetQuadrantLabel={(quadrant, label) => { mutateCanvasSource((source) => setQuadrantLabel(source, quadrant, label), 'Updated a Quadrant label'); }}
-            onAddQuadrantPoint={(point) => mutateCanvasSource((source) => addQuadrantPoint(source, point), 'Added a Quadrant point')}
-            onEditQuadrantPoint={(identity, patch) => mutateCanvasSource((source) => editQuadrantPoint(source, identity, patch), 'Edited a Quadrant point')}
+            onAddQuadrantPoint={(point) => mutateCanvasSourceDetailed((source) => addQuadrantPoint(source, point), 'Added a Quadrant point')}
+            onEditQuadrantPoint={(identity, patch) => mutateCanvasSourceDetailed((source) => editQuadrantPoint(source, identity, patch), 'Edited a Quadrant point')}
             onDeleteQuadrantPoint={(identity) => { mutateCanvasSource((source) => deleteQuadrantPoint(source, identity), 'Deleted a Quadrant point'); }}
             onMoveQuadrantPoint={(identity, direction) => { mutateCanvasSource((source) => moveQuadrantPoint(source, identity, direction), 'Reordered Quadrant points'); }}
             onEditXyTitle={(title) => { mutateCanvasSource((source) => editXyTitle(source, title), 'Updated the XY chart title'); }}
             onSetXyOrientation={(orientation) => { mutateCanvasSource((source) => setXyOrientation(source, orientation), 'Updated the XY chart orientation'); }}
-            onEditXyAxis={(axis, value) => mutateCanvasSource((source) => editXyAxis(source, axis, value), 'Updated an XY chart axis')}
-            onAddXySeries={(series) => mutateCanvasSource((source) => addXySeries(source, series), 'Added an XY chart series')}
-            onEditXySeries={(identity, patch) => mutateCanvasSource((source) => editXySeries(source, identity, patch), 'Edited an XY chart series')}
+            onEditXyAxis={(axis, value) => mutateCanvasSourceDetailed((source) => editXyAxis(source, axis, value), 'Updated an XY chart axis')}
+            onAddXySeries={(series) => mutateCanvasSourceDetailed((source) => addXySeries(source, series), 'Added an XY chart series')}
+            onEditXySeries={(identity, patch) => mutateCanvasSourceDetailed((source) => editXySeries(source, identity, patch), 'Edited an XY chart series')}
             onDeleteXySeries={(identity) => { mutateCanvasSource((source) => deleteXySeries(source, identity), 'Deleted an XY chart series'); }}
             onMoveXySeries={(identity, direction) => { mutateCanvasSource((source) => moveXySeries(source, identity, direction), 'Reordered XY chart series'); }}
             onEditRadarTitle={(title) => { mutateCanvasSource((source) => editRadarTitle(source, title), 'Updated the Radar title'); }}
-            onEditRadarOptions={(patch) => mutateCanvasSource((source) => editRadarOptions(source, patch), 'Updated Radar options')}
-            onAddRadarAxis={(axis, values) => mutateCanvasSource((source) => addRadarAxis(source, axis, values), 'Added a Radar axis')}
+            onEditRadarOptions={(patch) => mutateCanvasSourceDetailed((source) => editRadarOptions(source, patch), 'Updated Radar options')}
+            onAddRadarAxis={(axis, values) => mutateCanvasSourceDetailed((source) => addRadarAxis(source, axis, values), 'Added a Radar axis')}
             onEditRadarAxis={(identity, patch) => { mutateCanvasSource((source) => editRadarAxis(source, identity, patch), 'Edited a Radar axis'); }}
             onDeleteRadarAxis={(identity) => { mutateCanvasSource((source) => deleteRadarAxis(source, identity), 'Deleted a Radar axis'); }}
             onMoveRadarAxis={(identity, direction) => { mutateCanvasSource((source) => moveRadarAxis(source, identity, direction), 'Reordered Radar axes'); }}
-            onAddRadarCurve={(curve) => mutateCanvasSource((source) => addRadarCurve(source, curve), 'Added a Radar curve')}
-            onEditRadarCurve={(identity, patch) => mutateCanvasSource((source) => editRadarCurve(source, identity, patch), 'Edited a Radar curve')}
+            onAddRadarCurve={(curve) => mutateCanvasSourceDetailed((source) => addRadarCurve(source, curve), 'Added a Radar curve')}
+            onEditRadarCurve={(identity, patch) => mutateCanvasSourceDetailed((source) => editRadarCurve(source, identity, patch), 'Edited a Radar curve')}
             onDeleteRadarCurve={(identity) => { mutateCanvasSource((source) => deleteRadarCurve(source, identity), 'Deleted a Radar curve'); }}
             onMoveRadarCurve={(identity, direction) => { mutateCanvasSource((source) => moveRadarCurve(source, identity, direction), 'Reordered Radar curves'); }}
-            onAddSankeyLink={(link) => mutateCanvasSource((source) => addSankeyLink(source, link), 'Added a Sankey link')}
-            onEditSankeyLink={(identity, patch) => mutateCanvasSource((source) => editSankeyLink(source, identity, patch), 'Edited a Sankey link')}
+            onAddSankeyLink={(link) => mutateCanvasSourceDetailed((source) => addSankeyLink(source, link), 'Added a Sankey link')}
+            onEditSankeyLink={(identity, patch) => mutateCanvasSourceDetailed((source) => editSankeyLink(source, identity, patch), 'Edited a Sankey link')}
             onDeleteSankeyLink={(identity) => { mutateCanvasSource((source) => deleteSankeyLink(source, identity), 'Deleted a Sankey link'); }}
             onMoveSankeyLink={(identity, direction) => { mutateCanvasSource((source) => moveSankeyLink(source, identity, direction), 'Reordered Sankey links'); }}
-            onRenameSankeyNode={(identity, label) => mutateCanvasSource((source) => renameSankeyNode(source, identity, label), 'Renamed a Sankey node')}
-            onAddPacketField={(field) => mutateCanvasSource((source) => addPacketField(source, field), 'Added a Packet field')}
-            onEditPacketField={(identity, patch) => mutateCanvasSource((source) => editPacketField(source, identity, patch), 'Edited a Packet field')}
+            onRenameSankeyNode={(identity, label) => mutateCanvasSourceDetailed((source) => renameSankeyNode(source, identity, label), 'Renamed a Sankey node')}
+            onAddPacketField={(field) => mutateCanvasSourceDetailed((source) => addPacketField(source, field), 'Added a Packet field')}
+            onEditPacketField={(identity, patch) => mutateCanvasSourceDetailed((source) => editPacketField(source, identity, patch), 'Edited a Packet field')}
             onDeletePacketField={(identity) => { mutateCanvasSource((source) => deletePacketField(source, identity), 'Deleted a Packet field'); }}
             onMovePacketField={(identity, direction) => { mutateCanvasSource((source) => movePacketField(source, identity, direction), 'Reordered Packet fields'); }}
-            onAddCynefinItem={(item) => mutateCanvasSource((source) => addCynefinItem(source, item), `Added an item to the ${item.domain} Cynefin domain`)}
-            onEditCynefinItem={(identity, patch) => mutateCanvasSource((source) => editCynefinItem(source, identity, patch), 'Edited a Cynefin item')}
+            onAddCynefinItem={(item) => mutateCanvasSourceDetailed((source) => addCynefinItem(source, item), `Added an item to the ${item.domain} Cynefin domain`)}
+            onEditCynefinItem={(identity, patch) => mutateCanvasSourceDetailed((source) => editCynefinItem(source, identity, patch), 'Edited a Cynefin item')}
             onDeleteCynefinItem={(identity) => { mutateCanvasSource((source) => deleteCynefinItem(source, identity), 'Deleted a Cynefin item'); }}
             onMoveCynefinItem={(identity, domain, targetIndex) => { mutateCanvasSource((source) => moveCynefinItem(source, identity, domain, targetIndex), `Moved a Cynefin item to the ${domain} domain`); }}
-            onAddCynefinTransition={(transition) => mutateCanvasSource((source) => addCynefinTransition(source, transition), 'Added a Cynefin transition')}
-            onEditCynefinTransition={(identity, patch) => mutateCanvasSource((source) => editCynefinTransition(source, identity, patch), 'Edited a Cynefin transition')}
+            onAddCynefinTransition={(transition) => mutateCanvasSourceDetailed((source) => addCynefinTransition(source, transition), 'Added a Cynefin transition')}
+            onEditCynefinTransition={(identity, patch) => mutateCanvasSourceDetailed((source) => editCynefinTransition(source, identity, patch), 'Edited a Cynefin transition')}
             onDeleteCynefinTransition={(identity) => { mutateCanvasSource((source) => deleteCynefinTransition(source, identity), 'Deleted a Cynefin transition'); }}
             onMoveCynefinTransition={(identity, direction) => { mutateCanvasSource((source) => moveCynefinTransition(source, identity, direction), 'Reordered Cynefin transitions'); }}
             onAddTreemapNode={(node, parent) => mutateCanvasSourceDetailed((source) => addTreemapNode(source, node, parent), 'Added a Treemap node')}
@@ -3294,6 +3315,7 @@ export function SessionWorkspace({
           restoreError={restoreError}
           restorePending={restorePending}
           restoreConfirmRef={restoreConfirmRef}
+          sourcePreviewLabel={historyPreviewError ? 'Historical preview unavailable' : preview?.diagramId === activeDiagramId && preview.svg ? 'Showing the last valid preview' : 'Preview unavailable'}
           sourceError={historyPreviewError ?? renderError}
           sourceFlyoutWidth={sourceFlyoutWidth}
           sourceGitHubCopyState={sourceGitHubCopyState}
@@ -3330,6 +3352,12 @@ export function SessionWorkspace({
         role="status"
       >{canvasHistoryNotice ?? ''}</div>
 
+      {deleteCandidate ? <WorkspaceConfirmation title={`Delete “${deleteCandidate.name}”?`} confirmLabel="Delete diagram" onCancel={() => setDeleteCandidate(null)} onConfirm={() => {
+        if (!collaboration || diagrams.length <= 1 || !isWorkspaceConsentScopeCurrent(deleteCandidate.scope, collaboration.doc, sessionId)) {
+          setDeleteCandidate(null); setMutationError('Workspace changed. Review the diagram before deleting it.'); return;
+        }
+        deleteActiveDiagram(deleteCandidate.id); setDeleteCandidate(null);
+      }}><p>This removes the diagram’s Mermaid source, layout, canvas notes, drawings, shapes, frames, and layers{isLocalWorkspace ? '.' : ', and associated revision history for everyone in this room.'} This cannot be undone.</p></WorkspaceConfirmation> : null}
       <p aria-live="polite" className="visually-hidden">{roomKeyAnnouncement}</p>
 
       {showConnectModal ? (
@@ -3337,9 +3365,9 @@ export function SessionWorkspace({
           <div className="modal-dialog" ref={connectModalDialogRef} role="dialog" aria-modal="true" aria-labelledby="connect-agent-title" onClick={(event) => { event.stopPropagation(); }}>
             <div className="modal-header">
               <span className="modal-title" id="connect-agent-title">Agent connection</span>
-              <button className="modal-close" ref={connectModalCloseRef} type="button" onClick={closeConnectModal} aria-label="Close">
+              <WorkspaceButton className="modal-close" ref={connectModalCloseRef} type="button" onClick={closeConnectModal} aria-label="Close">
                 &times;
-              </button>
+              </WorkspaceButton>
             </div>
             <div className="modal-body">
               <div className="modal-connection-details" data-testid="agent-connection-details">
@@ -3349,9 +3377,9 @@ export function SessionWorkspace({
               {roomKey ? (
                 <div className="modal-prompt-block">
                   <pre className="modal-prompt-text">{getAgentPrompt()}</pre>
-                  <button className="workspace-copy-button modal-prompt-copy" type="button" onClick={handleCopyAgentPrompt}>
+                  <WorkspaceButton className="workspace-copy-button modal-prompt-copy" type="button" onClick={handleCopyAgentPrompt}>
                     {promptCopyLabel}
-                  </button>
+                  </WorkspaceButton>
                 </div>
               ) : (
                 <p className="modal-key-unavailable" role="status">

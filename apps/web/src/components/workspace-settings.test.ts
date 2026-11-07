@@ -17,8 +17,8 @@ describe('WorkspaceSettings helpers', () => {
   });
 
   it('describes active agents ahead of ordinary connection state', () => {
-    expect(getConnectionStatusLabel('connected', 1)).toBe('1 MCP agent working');
-    expect(getConnectionStatusLabel('connected', 2)).toBe('2 MCP agents working');
+    expect(getConnectionStatusLabel('connected', 1)).toBe('1 MCP agent in this workspace');
+    expect(getConnectionStatusLabel('connected', 2)).toBe('2 MCP agents in this workspace');
     expect(getConnectionStatusLabel('connected', 0)).toBe('Ready for agents');
     expect(getConnectionStatusLabel('reconnecting', 0)).toBe('Reconnecting session');
     expect(getConnectionStatusLabel('disconnected', 0)).toBe('Session offline');

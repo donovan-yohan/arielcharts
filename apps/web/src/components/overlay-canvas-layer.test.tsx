@@ -565,7 +565,9 @@ describe('OverlayCanvasLayer', () => {
     const measuredInspectorMaxHeight = Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10);
     expect(measuredInspectorMaxHeight).toBeGreaterThan(280);
     await act(async () => root.render(<OverlayCanvasLayer {...callbacks} controlsSafeBottom={74} diagramId="main" sessionId="abc123de" readOnly={false} semanticAnchors={new Map()} transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} />));
-    const immediateCap = getImmediateOverlayInspectorCap(Number.parseFloat(toolbar.style.getPropertyValue('--overlay-toolbar-available-height')), 74, false);
+    const canvasAvailableHeight = canvas.getBoundingClientRect().bottom - Number.parseFloat(toolbar.style.top) - 8;
+    expect(Number.parseFloat(toolbar.style.getPropertyValue('--overlay-toolbar-available-height'))).toBe(canvasAvailableHeight - 74);
+    const immediateCap = getImmediateOverlayInspectorCap(canvasAvailableHeight, 74, false);
     expect(immediateCap).not.toBeNull();
     expect(Number.parseInt(toolbar.style.getPropertyValue('--overlay-toolbar-inspector-max-height'), 10)).toBe(Math.min(measuredInspectorMaxHeight, immediateCap!));
     await act(async () => root.render(<OverlayCanvasLayer {...callbacks} controlsSafeBottom={500} diagramId="main" sessionId="abc123de" readOnly={false} semanticAnchors={new Map()} transform={{ x: 0, y: 0, zoom: 1 }} scene={{ version: 1, diagram_id: 'main', objects: [] }} />));

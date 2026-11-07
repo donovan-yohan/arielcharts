@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { screenshotPath } from './e2e/support/browser';
 import { chromium, expect, type Browser, type CDPSession, type Locator, type Page } from '@playwright/test';
 import { WebSocket as NodeWebSocket } from 'ws';
 import {
@@ -365,6 +366,12 @@ async function expectUnifiedCanvasHistory(pageA: Page, pageB: Page): Promise<voi
   await waitForReactFlowNodePositionMovement(pageA, nodeId, beforeLocalMove);
   const localMove = await getReactFlowNodePosition(nodeById(pageA, nodeId), 'Stale-history local move was missing.');
   await waitForReactFlowNodePositionMatch(pageB, nodeId, localMove);
+  await pageB.getByRole('button', { name: 'Fit diagram', exact: true }).click();
+  await expect.poll(async () => nodeById(pageB, nodeId).evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const target = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    return target !== null && element.contains(target);
+  }), { timeout: 5_000, message: 'Peer Fit did not expose the node for its history drag.' }).toBe(true);
   await nudgeNode(pageB, nodeById(pageB, nodeId), -72, 31);
   await waitForReactFlowNodePositionMovement(pageB, nodeId, localMove);
   const peerMove = await getReactFlowNodePosition(nodeById(pageB, nodeId), 'Peer stale-history move was missing.');
@@ -565,7 +572,7 @@ async function sourceEditorValue(editor: Locator): Promise<string> {
 async function replaceSource(page: Page, source: string): Promise<void> {
   const editor = await ensureSourceFlyoutOpen(page);
   await editor.click();
-  await page.keyboard.press('Control+A');
+  await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.insertText(source);
 }
 
@@ -585,7 +592,7 @@ async function waitForFlowchart(page: Page): Promise<void> {
 }
 
 async function waitForSourceFlyoutSync(page: Page): Promise<void> {
-  await page.getByTestId('connection-status-badge').filter({ hasText: /^synced$/i }).waitFor({ state: 'visible', timeout: 15_000 });
+  await page.getByTestId('connection-status-badge').filter({ hasText: /^Connected$/i }).waitFor({ state: 'visible', timeout: 15_000 });
 }
 
 async function waitForMainTabActive(page: Page): Promise<void> {
@@ -662,6 +669,12 @@ async function boxOf(locator: Locator, message: string) {
 
 async function nudgeNode(page: Page, locator: Locator, dx: number, dy: number, hold = false): Promise<void> {
   const box = await boxOf(locator, 'Node has no drag bounds.');
+  const hit = await locator.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const target = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    return { ownsCenter: target !== null && element.contains(target), target: target?.getAttribute('class'), tool: document.querySelector('button[aria-label="Select tool"]')?.getAttribute('aria-pressed') };
+  });
+  assert(hit.ownsCenter && hit.tool === 'true', `Node drag prerequisite failed: ${JSON.stringify(hit)}.`);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 8 });
@@ -845,8 +858,8 @@ async function expectProtectedRoomAccess(browser: Browser, endpoints: E2eEndpoin
       ensureSourceFlyoutOpen(pageB),
     ]);
     await Promise.all([
-      pageA.getByTestId('connection-status-badge').filter({ hasText: /^synced$/i }).waitFor({ state: 'visible', timeout: 15_000 }),
-      pageB.getByTestId('connection-status-badge').filter({ hasText: /^synced$/i }).waitFor({ state: 'visible', timeout: 15_000 }),
+      pageA.getByTestId('connection-status-badge').filter({ hasText: /^Connected$/i }).waitFor({ state: 'visible', timeout: 15_000 }),
+      pageB.getByTestId('connection-status-badge').filter({ hasText: /^Connected$/i }).waitFor({ state: 'visible', timeout: 15_000 }),
     ]);
     assert(await pageA.evaluate(() => window.location.hash === '') && await pageB.evaluate(() => window.location.hash === ''),
       'Successful fragment room-key exchange did not clear the browser URL hash.');
@@ -994,7 +1007,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     const localCameraPreserved = await transformedLayer(pageB).getAttribute('style') === localTransformBeforeRemote;
     assert(activeTabPreserved && sourceFlyoutsPreserved && localConnectModePreserved && localSelectionPreserved && localCameraPreserved,
       `Remote MCP update took over browser-local state: tab=${activeTabPreserved} flyouts=${sourceFlyoutsPreserved} mode=${localConnectModePreserved} selection=${localSelectionPreserved} camera=${localCameraPreserved}`);
-    await pageB.screenshot({ path: '/tmp/arielcharts-collaboration-local-state.png' });
+    await pageB.screenshot({ path: screenshotPath('arielcharts-collaboration-local-state.png') });
 
     await selectTabByName(pageB, 'Main');
     await ensureSourceFlyoutOpen(pageB);
@@ -1019,7 +1032,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await pageB.getByTestId(`remote-node-selection-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
     const remoteSelectionDoesNotTakeLocalSelection = !((await nodeById(pageB, presenceNodeId).getAttribute('class'))?.includes('selected'));
     assert(remoteSelectionDoesNotTakeLocalSelection, 'Remote canvas selection took over the receiving browser selection state.');
-    await pageB.screenshot({ path: '/tmp/arielcharts-canvas-presence.png' });
+    await pageB.screenshot({ path: screenshotPath('arielcharts-canvas-presence.png') });
 
     const laserObserver = await openYjsSessionObserver(mcpUrl, sessionId, { cookie: roomAccess.cookie, origin: baseUrl });
     await pageA.waitForTimeout(1_100);
@@ -1052,7 +1065,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
       return { background: style.backgroundColor, transition: style.transitionDuration };
     });
     assert(accessibleLaserStyle.transition === '0s', 'Reduced-motion laser retained a fade transition.');
-    await pageB.screenshot({ path: '/tmp/arielcharts-collaboration-laser.png' });
+    await pageB.screenshot({ path: screenshotPath('arielcharts-collaboration-laser.png') });
     await pageB.emulateMedia({ forcedColors: 'none', reducedMotion: 'no-preference' });
     await pageA.keyboard.press('Escape');
     await pageA.mouse.up();
@@ -1326,7 +1339,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     await nodeLabelInput.waitFor({ state: 'visible', timeout: 15_000 });
     await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'visible', timeout: 15_000 });
     await pageARemoteCursor.locator('span').waitFor({ state: 'detached', timeout: 15_000 });
-    await pageB.screenshot({ path: '/tmp/arielcharts-node-editing-awareness.png' });
+    await pageB.screenshot({ path: screenshotPath('arielcharts-node-editing-awareness.png') });
     await nodeLabelInput.fill('Browser draft should not sync');
     await pageA.evaluate(() => { window.dispatchEvent(new Event('blur')); });
     await pageB.getByTestId(`remote-node-editing-${presenceNodeId}`).waitFor({ state: 'detached', timeout: 15_000 });
@@ -1587,7 +1600,7 @@ async function validateCollaboration({ baseUrl, mcpUrl, serverUrl }: E2eEndpoint
     assertNoPageErrors(diagnosticsB.pageErrors, 'in collaboration browser B');
     assertNoReactFlowError015(diagnosticsA.reactFlowError015, 'during the collaboration gate');
     assertNoReactFlowError015(diagnosticsB.reactFlowError015, 'during the collaboration gate');
-    await pageA.screenshot({ path: '/tmp/arielcharts-collaboration.png' });
+    await pageA.screenshot({ path: screenshotPath('arielcharts-collaboration.png') });
 
     console.log(`modern MCP stale write rejected=${staleRejected}`);
     console.log(`browser/MCP merged source converged=${merged.mermaidText.includes(HUMAN_EDGE.trim()) && merged.mermaidText.includes(AGENT_EDGE.trim())}`);

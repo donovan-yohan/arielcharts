@@ -34,3 +34,8 @@ describe('workspace import API', () => {
     await expect(readWorkspaceRevision('abc123de')).rejects.toBeInstanceOf(WorkspaceImportApiError);
   });
 });
+
+it('refuses revision-only servers when admission is tied to reviewed content', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ revision: 'unreviewed-head' })));
+  await expect(readWorkspaceRevision('abc123de', '{"diagrams":{},"order":[],"overlays":{}}')).rejects.toMatchObject({ status: 409 });
+});

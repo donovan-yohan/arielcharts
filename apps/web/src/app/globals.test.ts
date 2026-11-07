@@ -50,7 +50,7 @@ describe('mobile workspace CSS contracts', () => {
     expect(css).toMatch(/\.overlay-toolbar-annotate-actions,\s*\.overlay-toolbar-secondary-actions\s*\{[^}]*box-sizing:\s*border-box;[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;[^}]*touch-action:\s*pan-x;[^}]*width:\s*100%;/u);
     expect(css).not.toMatch(/\.overlay-toolbar-divider\s*\{[^}]*pointer-events:\s*auto;/u);
     expect(css).toMatch(/\.overlay-toolbar-secondary\s*\{[^}]*gap:\s*0;[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;[^}]*overflow:\s*clip;[^}]*pointer-events:\s*none;[^}]*grid-template-rows:\s*54px 54px minmax\(0, 1fr\);[^}]*visibility:\s*hidden;/u);
-    expect(css).toMatch(/\.overlay-toolbar-secondary\.is-expanded\s*\{[^}]*height:\s*auto;[^}]*max-height:\s*calc\(var\(--overlay-toolbar-available-height, 100vh\) - 54px\);[^}]*visibility:\s*visible;/u);
+    expect(css).toMatch(/\.overlay-toolbar-secondary\.is-expanded\s*\{[^}]*height:\s*auto;[^}]*max-height:\s*max\(0px, calc\(var\(--overlay-toolbar-available-height, 100vh\) - 54px\)\);[^}]*overflow-y:\s*auto;[^}]*overscroll-behavior:\s*contain;[^}]*visibility:\s*visible;/u);
     expect(css).not.toMatch(/--overlay-toolbar-rail-height/u);
     expect(css).toMatch(/\.overlay-toolbar-inspector\s*\{[^}]*box-sizing:\s*border-box;[^}]*max-height:\s*118px;[^}]*overflow:\s*auto;[^}]*pointer-events:\s*auto;/u);
     expect(css).toMatch(/@media \(pointer: coarse\), \(max-width: 420px\)[^]*?\.overlay-toolbar-button\s*\{[^}]*height:\s*44px;[^}]*width:\s*44px;/u);
@@ -61,7 +61,7 @@ describe('mobile workspace CSS contracts', () => {
   });
 
   it('keeps the primary row stable in short landscape while the rail remains inline', () => {
-    const landscapeCss = css.slice(css.indexOf('@media (min-width: 421px) and (max-height: 500px)'));
+    const landscapeCss = css.slice(css.indexOf('@media (min-width: 421px) and (max-height: 500px)'), css.indexOf('@media (forced-colors: active)', css.indexOf('@media (min-width: 421px) and (max-height: 500px)')));
     expect(landscapeCss).toMatch(/\.overlay-icon-toolbar\s*\{[^}]*grid-template-rows:\s*54px;[^}]*justify-items:\s*stretch;/u);
     expect(landscapeCss).toMatch(/\.overlay-icon-toolbar\[data-tools-expanded='true'\]\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\);[^}]*width:\s*min\(calc\(100% - 24px\), var\(--overlay-toolbar-available-width, 100vw\)\);/u);
     // Collapsed, the second column is empty, so the chrome moves onto the
@@ -81,7 +81,7 @@ describe('mobile workspace CSS contracts', () => {
 
   it('puts desktop and tablet semantic panels below the measured active toolbar lane', () => {
     expect(css).toMatch(/\.diagram-canvas-shell\[data-overlay-toolbar-safe-top='true'\] > \.canvas-sequence-editor:not\(\.is-centered\)\s*\{[^}]*top:\s*var\(--overlay-toolbar-safe-top\);/u);
-    expect(css).toMatch(/\.diagram-canvas-shell\[data-overlay-toolbar-safe-top='true'\] > \.canvas-semantic-editor\s*\{[^}]*--canvas-semantic-editor-top:\s*max\(72px, var\(--overlay-toolbar-safe-top, 0px\)\);[^}]*top:\s*var\(--canvas-semantic-editor-top\) !important;/u);
+    expect(css).toMatch(/\.diagram-canvas-shell\[data-overlay-toolbar-safe-top='true'\] > \.canvas-semantic-editor\s*\{[^}]*--canvas-semantic-editor-top:\s*max\(72px, var\(--overlay-toolbar-safe-top, 0px\)\);[^}]*top:\s*var\(--canvas-semantic-editor-top\);/u);
   });
 
   it('keeps selected transform controls outside clipped objects with touch-safe hit areas', () => {
@@ -177,9 +177,12 @@ describe('narrow sequence controls', () => {
 
 describe('narrow hierarchy controls', () => {
   it('keeps only Treemap and Venn source-form panels bounded, scrollable, and touch-sized', () => {
-    expect(css).toMatch(/@media \(max-width: 420px\), \(max-height: 500px\)\s*\{\s*\.canvas-semantic-editor\s*\{[^}]*--canvas-semantic-editor-top:\s*max\(72px, var\(--overlay-toolbar-safe-top, 0px\)\);[^}]*top:\s*var\(--canvas-semantic-editor-top\) !important;/u);
-    expect(narrowCanvasCss).toMatch(/\.canvas-semantic-editor\s*\{[^}]*--canvas-semantic-editor-top:\s*max\(72px, var\(--overlay-toolbar-safe-top, 0px\)\);[^}]*top:\s*var\(--canvas-semantic-editor-top\) !important;/u);
-    expect(narrowCanvasCss).toMatch(/\.canvas-treemap-venn-editor\s*\{[^}]*left:\s*8px !important;[^}]*max-height:\s*calc\(100% - var\(--canvas-semantic-editor-top\) - 12px\) !important;[^}]*overflow-y:\s*auto !important;[^}]*overscroll-behavior:\s*contain;[^}]*touch-action:\s*pan-y;/u);
+    expect(css).toMatch(/@media \(max-width: 420px\), \(max-height: 500px\)\s*\{\s*\.canvas-semantic-editor\s*\{[^}]*--canvas-semantic-editor-top:\s*max\(72px, var\(--overlay-toolbar-safe-top, 0px\)\);[^}]*top:\s*var\(--canvas-semantic-editor-top\);/u);
+    expect(narrowCanvasCss).toMatch(/\.canvas-semantic-editor\s*\{[^}]*--canvas-semantic-editor-top:\s*max\(72px, var\(--overlay-toolbar-safe-top, 0px\)\);[^}]*top:\s*var\(--canvas-semantic-editor-top\);/u);
+    expect(narrowCanvasCss).toMatch(/\.canvas-treemap-venn-editor\s*\{[^}]*max-height:\s*calc\(100% - var\(--canvas-semantic-editor-top\) - 12px\) !important;[^}]*overflow-y:\s*auto !important;[^}]*overscroll-behavior:\s*contain;[^}]*touch-action:\s*pan-y;/u);
+    const hierarchyRule = narrowCanvasCss.match(/\.canvas-treemap-venn-editor\s*\{([^}]+)\}/u)?.[1];
+    expect(hierarchyRule).toBeDefined();
+    expect(hierarchyRule).not.toMatch(/(?:^|\s)(?:left|right|width):/u);
     expect(narrowCanvasCss).toMatch(/\.canvas-treemap-venn-editor input,[^}]*\.canvas-treemap-venn-editor select,[^}]*\.canvas-treemap-venn-editor button\s*\{[^}]*min-height:\s*44px;[^}]*min-width:\s*44px;/u);
     expect(narrowCanvasCss).not.toMatch(/\.canvas-hierarchy-editor\s*\{/u);
   });

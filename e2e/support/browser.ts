@@ -58,8 +58,12 @@ export async function launchBrowserHarness(): Promise<BrowserHarness> {
   };
 }
 
+export function screenshotPath(name: string): string {
+  return join(process.env.AUDIT_OUTPUT ?? tmpdir(), name);
+}
+
 export async function saveScreenshot(page: Page, name: string): Promise<string> {
-  const path = join(tmpdir(), `arielcharts-${name}.png`);
+  const path = screenshotPath(`arielcharts-${name}.png`);
   await page.screenshot({ path, fullPage: true });
   return path;
 }
@@ -78,7 +82,7 @@ export function pngDimensions(png: Buffer): ScreenshotDimensions {
  * deviceScaleFactor 1, instead of accidentally accepting a wider page capture.
  */
 export async function saveViewportScreenshot(page: Page, name: string): Promise<ViewportScreenshot> {
-  const path = join(tmpdir(), `arielcharts-${name}.png`);
+  const path = screenshotPath(`arielcharts-${name}.png`);
   const png = await page.screenshot({ path });
   return { path, ...pngDimensions(png) };
 }

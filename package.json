@@ -24,6 +24,7 @@
     "test:e2e-subgraphs": "tsx e2e-subgraph-validate.ts",
     "test:e2e-collaboration": "tsx e2e-collaboration-validate.ts",
     "test:e2e-workspace-ux": "tsx e2e-workspace-ux-validate.ts",
+    "test:e2e-journey-audit": "tsx e2e-journey-audit-validate.ts",
     "test:e2e-production-smoke": "tsx e2e-production-smoke.ts"
   },
   "devDependencies": {

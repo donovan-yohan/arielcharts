@@ -5,6 +5,8 @@ browser client, a Node/Yjs/MCP server, and shared TypeScript contracts.
 
 ## Start here
 
+- `docs/user-journeys.md` and `docs/design-system.md` — product acceptance,
+  component selection, copy, and responsive composition contracts.
 - `docs/context-map.md` — state ownership, request/data flows, scaling seams,
   and the evidence map. Update it when a durable schema, public contract, or
   cross-package ownership boundary changes.

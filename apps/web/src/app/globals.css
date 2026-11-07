@@ -3608,13 +3608,10 @@ code {
   }
 
   .canvas-treemap-venn-editor {
-    left: 8px !important;
     max-height: calc(100% - var(--canvas-semantic-editor-top) - 12px) !important;
     overflow-y: auto !important;
     overscroll-behavior: contain;
-    right: 8px !important;
     touch-action: pan-y;
-    width: auto !important;
   }
 
   .canvas-treemap-venn-editor form {
@@ -3915,6 +3912,10 @@ body:has(.overlay-toolbar-inspector) :is(.workspace-onboarding, .canvas-empty-ch
   [data-workspace-panel='semantic'] {
     right: 24px;
     width: min(400px, calc(100% - 48px));
+  }
+  .diagram-canvas-shell > [data-workspace-panel='semantic'],
+  .canvas-paired-semantic-panels[data-stacked='true'] {
+    max-height: min(58vh, 480px, max(44px, calc(100% - var(--overlay-toolbar-safe-top, 56px) - var(--canvas-controls-toolbar-safe-bottom, 0px)))) !important;
   }
 }
 @media (max-width: 720px), (pointer: coarse) {

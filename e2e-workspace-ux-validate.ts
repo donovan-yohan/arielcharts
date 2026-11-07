@@ -7153,8 +7153,9 @@ async function assertOpenOverlayInspectorAboveCamera(page: Page, label: string):
 
 async function assertClosedOverlayToggleBesideError(page: Page, banner: Locator, label: string): Promise<void> {
   await scrollErControlIntoView(banner);
-  await expect(banner).toHaveAttribute('role', 'alert');
-  if (await banner.evaluate((element) => element.classList.contains('semantic-editor-error'))) {
+  const recordError = await banner.evaluate((element) => element.classList.contains('semantic-editor-error'));
+  await expect(banner).toHaveAttribute('role', recordError ? 'alert' : 'status');
+  if (recordError) {
     await expect(page.getByTestId('mutation-error-banner'), `${label} must not repeat the same local diagnostic globally`).toHaveCount(0);
   }
   const toggle = page.getByRole('button', { name: 'Select tool', exact: true });

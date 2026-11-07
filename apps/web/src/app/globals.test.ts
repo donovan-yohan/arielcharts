@@ -179,7 +179,10 @@ describe('narrow hierarchy controls', () => {
   it('keeps only Treemap and Venn source-form panels bounded, scrollable, and touch-sized', () => {
     expect(css).toMatch(/@media \(max-width: 420px\), \(max-height: 500px\)\s*\{\s*\.canvas-semantic-editor\s*\{[^}]*--canvas-semantic-editor-top:\s*max\(72px, var\(--overlay-toolbar-safe-top, 0px\)\);[^}]*top:\s*var\(--canvas-semantic-editor-top\);/u);
     expect(narrowCanvasCss).toMatch(/\.canvas-semantic-editor\s*\{[^}]*--canvas-semantic-editor-top:\s*max\(72px, var\(--overlay-toolbar-safe-top, 0px\)\);[^}]*top:\s*var\(--canvas-semantic-editor-top\);/u);
-    expect(narrowCanvasCss).toMatch(/\.canvas-treemap-venn-editor\s*\{[^}]*left:\s*8px !important;[^}]*max-height:\s*calc\(100% - var\(--canvas-semantic-editor-top\) - 12px\) !important;[^}]*overflow-y:\s*auto !important;[^}]*overscroll-behavior:\s*contain;[^}]*touch-action:\s*pan-y;/u);
+    expect(narrowCanvasCss).toMatch(/\.canvas-treemap-venn-editor\s*\{[^}]*max-height:\s*calc\(100% - var\(--canvas-semantic-editor-top\) - 12px\) !important;[^}]*overflow-y:\s*auto !important;[^}]*overscroll-behavior:\s*contain;[^}]*touch-action:\s*pan-y;/u);
+    const hierarchyRule = narrowCanvasCss.match(/\.canvas-treemap-venn-editor\s*\{([^}]+)\}/u)?.[1];
+    expect(hierarchyRule).toBeDefined();
+    expect(hierarchyRule).not.toMatch(/(?:^|\s)(?:left|right|width):/u);
     expect(narrowCanvasCss).toMatch(/\.canvas-treemap-venn-editor input,[^}]*\.canvas-treemap-venn-editor select,[^}]*\.canvas-treemap-venn-editor button\s*\{[^}]*min-height:\s*44px;[^}]*min-width:\s*44px;/u);
     expect(narrowCanvasCss).not.toMatch(/\.canvas-hierarchy-editor\s*\{/u);
   });

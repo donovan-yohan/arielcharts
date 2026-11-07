@@ -37,6 +37,23 @@ describe('paired semantic panel placement', () => {
     });
   });
 
+  it('keeps dense Treemap and Venn scroll behavior without overriding shared outer placement', () => {
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+    const rule = css.match(/\.canvas-treemap-venn-editor \{([^}]+)\}/u)?.[1];
+    expect(rule).toBeDefined();
+    expect(rule).not.toMatch(/(?:^|\s)(?:left|right|width):/u);
+    expect(rule).toContain('overflow-y: auto !important;');
+    expect(rule).toContain('max-height: calc(100% - var(--canvas-semantic-editor-top) - 12px) !important;');
+    expect(rule).toContain('touch-action: pan-y;');
+  });
+
+  it('caps narrow scroll owners between the measured expanded toolbar and camera lanes', () => {
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+    const rule = css.match(/\.diagram-canvas-shell > \[data-workspace-panel='semantic'\],\s*\.canvas-paired-semantic-panels\[data-stacked='true'\] \{([^}]+)\}/u)?.[1];
+    expect(rule).toBeDefined();
+    expect(rule).toContain('max-height: min(58vh, 480px, max(44px, calc(100% - var(--overlay-toolbar-safe-top, 56px) - var(--canvas-controls-toolbar-safe-bottom, 0px)))) !important;');
+  });
+
   it('uses the unobscured viewport origin and bottom rather than the full canvas', () => {
     expect(getPairedSemanticPanelPlacement({ height: 800 }, { height: 500, width: 520, x: 40, y: 100 }, 40)).toEqual({
       stacked: true,

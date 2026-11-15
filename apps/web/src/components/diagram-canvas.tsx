@@ -4000,6 +4000,7 @@ export function DiagramCanvas({
               autoPanOnConnect
               autoPanOnNodeDrag
               connectOnClick={false}
+              deleteKeyCode={null}
               connectionLineStyle={{ stroke: 'var(--selection)', strokeWidth: 2 }}
               connectionLineType={ConnectionLineType.SmoothStep}
               edges={flowEdges}

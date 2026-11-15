@@ -16,6 +16,7 @@ import {
 } from './e2e/support/browser.ts';
 import { assert, describeError } from './e2e/support/assert.ts';
 import { runHitTargetRegression } from './e2e/support/hit-target-regression.ts';
+import { runCanvasKeyboardDeleteRegression } from './e2e/support/canvas-keyboard-delete.ts';
 import {
   assertAnchorsStable,
   assertContainedInViewport,
@@ -8688,12 +8689,17 @@ async function validateWorkspaceUx(): Promise<void> {
   const results: string[] = [];
   const mobilePinchResiduals: string[] = [];
   const slice = process.env.ARIELCHARTS_E2E_SLICE;
-  if (slice !== undefined && slice !== 'history' && slice !== 'cynefin-history' && slice !== 'wheel' && slice !== 'toolbar' && slice !== 'landscape' && slice !== 'mobile-390' && slice !== 'mobile-320' && slice !== 'semantic') {
-    throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history", "cynefin-history", "wheel", "toolbar", "landscape", "mobile-390", "mobile-320", or no slice.`);
+  if (slice !== undefined && slice !== 'history' && slice !== 'cynefin-history' && slice !== 'wheel' && slice !== 'toolbar' && slice !== 'landscape' && slice !== 'mobile-390' && slice !== 'mobile-320' && slice !== 'semantic' && slice !== 'keyboard-delete') {
+    throw new Error(`Unsupported ARIELCHARTS_E2E_SLICE=${JSON.stringify(slice)}. Expected "history", "cynefin-history", "wheel", "toolbar", "landscape", "mobile-390", "mobile-320", "keyboard-delete", or no slice.`);
   }
   await withOwnedServices(async ({ baseUrl, mcpUrl, serverUrl }) => {
     const browser = await launchBrowserHarness();
     try {
+      if (slice === undefined || slice === 'keyboard-delete') {
+        await runCanvasKeyboardDeleteRegression(browser, baseUrl);
+        record(results, 'local canvas native Delete/Backspace, incident edges, multi-selection Undo, text ownership, and overlays');
+        if (slice === 'keyboard-delete') return;
+      }
       await runHitTargetRegression(browser.browser);
       await expectLocalFirstWorkspaceEntry(browser, baseUrl, serverUrl);
       record(results, 'root shows state-driven local loading, makes no server request or WebSocket, persists an IndexedDB edit across reload with a saved-on-device status, and starts one protected online promotion containing that edit only after explicit share');

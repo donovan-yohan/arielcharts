@@ -749,6 +749,7 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
       : undefined;
     if (target === 'rotate' && !centerScreen) return;
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
+    canvasOwnerRef.current?.querySelector<HTMLElement>(`[data-testid="overlay-object-${CSS.escape(object.id)}"]`)?.focus({ preventScroll: true });
     const geometry = effectiveOverlayGeometry(object);
     const draft = beginOverlayTransformDraft(object.id, geometry, startScreen);
     transformDraftRef.current = { draft, expectedGeometry: object.geometry, pointerId: event.pointerId, target, geometry, centerScreen };
@@ -1058,7 +1059,8 @@ export function OverlayCanvasLayer(props: OverlayCanvasLayerProps) {
           onPointerMove={moveObject}
           onPointerUp={endMove}
           onKeyDown={(event) => {
-            if (!writable || tool !== 'select' || event.target instanceof HTMLTextAreaElement) return;
+            if (event.defaultPrevented || event.nativeEvent.isComposing || event.key === 'Process' || !writable || tool !== 'select') return;
+            if (event.target instanceof Element && event.target.closest('textarea, input, select, [contenteditable="true"]')) return;
             const step = event.shiftKey ? 10 : 1;
             if (event.key === 'Delete' || event.key === 'Backspace') { props.onDelete(selectedObjectIds.length ? selectedObjectIds : [object.id]); event.preventDefault(); }
             else if (event.key === 'Enter' && (object.kind.startsWith('annotation.') || object.kind.startsWith('shape.'))) { setEditingId(object.id); event.preventDefault(); }

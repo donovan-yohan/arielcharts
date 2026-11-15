@@ -3226,10 +3226,8 @@ export function SessionWorkspace({
               }
             }}
             onDeleteNodes={(ids) => {
-              for (const id of ids) {
-                const queue = mutationQueueRef.current;
-                if (queue) runVisualSourceMutation(queue.removeNode(id));
-              }
+              const queue = mutationQueueRef.current;
+              if (queue) runVisualSourceMutation(queue.removeNodes(ids));
             }}
             onDeleteEdge={(edge) => {
               const queue = mutationQueueRef.current;

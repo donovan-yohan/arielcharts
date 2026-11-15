@@ -38,6 +38,30 @@ function setText(yText: Y.Text, text: string) {
   yText.insert(0, text);
 }
 
+describe('selected node deletion', () => {
+  it('deletes a deduplicated selection in one Yjs transaction and restores it with one Undo', async () => {
+    const doc = new Y.Doc();
+    const yText = doc.getText('mermaid');
+    const source = 'flowchart LR\n  A[Alpha] --> B[Beta]\n  B --> C[Gamma]\n';
+    setText(yText, source);
+    const origin = Symbol('local visual');
+    const undo = new Y.UndoManager(yText, { trackedOrigins: new Set([origin]), captureTimeout: 0 });
+    const updates: string[] = [];
+    yText.observe(() => updates.push(yText.toString()));
+    const queue = new MutationQueue(yText, { transactionOrigin: origin });
+    const result = await queue.removeNodes(['A', 'B', 'A']);
+    expect(result.previousText).toBe(source);
+    expect(result.snapshot.nodeIds).toEqual(['C']);
+    expect(result.snapshot.links).toEqual([]);
+    expect(updates).toHaveLength(1);
+    expect(undo.undoStack).toHaveLength(1);
+    undo.undo();
+    expect(yText.toString()).toBe(source);
+    undo.destroy();
+    doc.destroy();
+  });
+});
+
 describe('collaborative edge mutations', () => {
   it.each([
     ['a|b', 'A -->|"a|b"| B'],

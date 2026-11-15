@@ -362,8 +362,13 @@ export class MutationQueue {
   }
 
   async removeNode(nodeId: string): Promise<MutationResult> {
+    return this.removeNodes([nodeId]);
+  }
+
+  async removeNodes(nodeIds: readonly string[]): Promise<MutationResult> {
+    const ids = [...new Set(nodeIds)];
     return this.enqueueFlowchartMutation((chart) => {
-      chart.removeNode(nodeId, { reconnect: true });
+      for (const id of ids) chart.removeNode(id, { reconnect: true });
     });
   }
 
